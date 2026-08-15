@@ -1,0 +1,285 @@
+{
+  "profile_version": "R10-PROJECT-AGENT-1",
+  "runtime_version": "V16.3-148-R10-StableRuntime",
+  "workflow_revision": "R10-PG1",
+  "change_operations": [
+    "add",
+    "modify",
+    "delete",
+    "replace",
+    "merge",
+    "split",
+    "move"
+  ],
+  "capabilities": [
+    {
+      "operation": "project_intake",
+      "group": "项目管理",
+      "status": "supported",
+      "output": "项目范围、目标、输入清单、缺口与执行顺序",
+      "approval_policy": "read_only"
+    },
+    {
+      "operation": "source_lock",
+      "group": "项目管理",
+      "status": "supported",
+      "output": "唯一原文、修改剧情、最新版文件、保护范围与版本锁",
+      "approval_policy": "read_only"
+    },
+    {
+      "operation": "novel_analysis",
+      "group": "剧情策划",
+      "status": "supported",
+      "output": "题材、主题、人物、冲突、爽点、悬念、风险与改编价值",
+      "approval_policy": "read_only"
+    },
+    {
+      "operation": "story_diagnosis",
+      "group": "剧情策划",
+      "status": "supported",
+      "output": "逻辑、动机、节奏、认知、情绪、信息密度与观众理解问题",
+      "approval_policy": "read_only"
+    },
+    {
+      "operation": "hook_design",
+      "group": "剧情策划",
+      "status": "supported",
+      "output": "开篇钩子、倒叙方案、高潮前置与多方案比较",
+      "approval_policy": "plan_first"
+    },
+    {
+      "operation": "adaptation_plan",
+      "group": "剧情策划",
+      "status": "supported",
+      "output": "小说转短剧策略、取舍原则、集数时长和主线结构",
+      "approval_policy": "plan_first"
+    },
+    {
+      "operation": "episode_plan",
+      "group": "剧情策划",
+      "status": "supported",
+      "output": "分集边界、每集钩子、节拍、高潮、结尾悬念与时长预算",
+      "approval_policy": "plan_first"
+    },
+    {
+      "operation": "character_arc",
+      "group": "剧情策划",
+      "status": "supported",
+      "output": "人物认知、关系阶段、情绪进阶、动机与禁提前表达项",
+      "approval_policy": "plan_first"
+    },
+    {
+      "operation": "scene_plan",
+      "group": "剧情策划",
+      "status": "supported",
+      "output": "场次顺序、时空关系、场景状态、转场与视觉承载方案",
+      "approval_policy": "plan_first"
+    },
+    {
+      "operation": "rewrite_plan",
+      "group": "剧本工作流",
+      "status": "supported",
+      "output": "改写目标、方案A/B/C、影响范围、保留删除项和推荐方案",
+      "approval_policy": "plan_only_until_execute_request"
+    },
+    {
+      "operation": "script_create",
+      "group": "剧本工作流",
+      "status": "supported",
+      "output": "新短剧剧本、场次、动作、对白、情绪与钩子",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "script_rewrite",
+      "group": "剧本工作流",
+      "status": "supported",
+      "output": "完整改写剧本及修改说明",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "script_change",
+      "group": "剧本工作流",
+      "status": "supported",
+      "output": "新增、修改、删除、替换、合并、拆分或移动后的剧本版本",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "dialogue_rewrite",
+      "group": "剧本工作流",
+      "status": "supported",
+      "output": "对白补齐、压缩、人物归属、语气与标点表演设计",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "change_impact",
+      "group": "变更管理",
+      "status": "supported",
+      "output": "原文、节拍、认知、场景状态、镜头、Seedance、声音和统计影响矩阵",
+      "approval_policy": "required_before_mutation"
+    },
+    {
+      "operation": "storyboard_plan",
+      "group": "分镜工作流",
+      "status": "supported",
+      "output": "镜头节拍、景别机位、时长、转场和镜头功能方案",
+      "approval_policy": "plan_first"
+    },
+    {
+      "operation": "storyboard_create",
+      "group": "分镜工作流",
+      "status": "supported",
+      "output": "R10正式分镜、原文映射和独立Seedance批次",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "storyboard_regenerate",
+      "group": "分镜工作流",
+      "status": "supported",
+      "output": "根据最新版剧本重建全量或受影响范围分镜",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "storyboard_change",
+      "group": "分镜工作流",
+      "status": "supported",
+      "output": "镜头新增、修改、删除、替换、合并、拆分或移动及连锁更新",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "storyboard_audit",
+      "group": "审计闭环",
+      "status": "supported",
+      "output": "八层全表审计、问题证据和简洁结论",
+      "approval_policy": "read_only"
+    },
+    {
+      "operation": "storyboard_repair",
+      "group": "审计闭环",
+      "status": "supported",
+      "output": "统一修正、影响回归、残留和新增问题闭合版本",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "seedance_create",
+      "group": "视频生产",
+      "status": "supported",
+      "output": "脱离GPT上下文可独立执行的Seedance/i2v提示词与批次",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "anchor_management",
+      "group": "视觉生产",
+      "status": "supported",
+      "output": "人物、场景、道具、服装、站位和光线锚点清单",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "keyframe_prompt",
+      "group": "视觉生产",
+      "status": "supported",
+      "output": "关键帧、场景图、人物视图和反向限制提示词",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "keyframe_image",
+      "group": "视觉生产",
+      "status": "conditional",
+      "condition": "需要可用图像生成工具及必要参考图",
+      "output": "单张关键帧、场景图、角色图或修正图",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "audio_bgm",
+      "group": "声音生产",
+      "status": "supported",
+      "output": "整场情绪基调、分段BGM、转场音效、对白让位与听觉画面方案",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "voice_design",
+      "group": "声音生产",
+      "status": "supported",
+      "output": "六维音色、语速、呼吸、停顿、重音、尾音和心理音轨方案",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "format_convert",
+      "group": "交付生产",
+      "status": "conditional",
+      "condition": "取决于输入格式和当前文件处理工具",
+      "output": "Excel、JSON、Markdown或Word等目标格式文件",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "production_batch",
+      "group": "交付生产",
+      "status": "supported",
+      "output": "生成批次、镜头包、关键帧包、i2v包和声音Cue清单",
+      "approval_policy": "explicit_execute"
+    },
+    {
+      "operation": "version_management",
+      "group": "项目管理",
+      "status": "supported",
+      "output": "版本锁、变更单、修改说明、影响范围和最新版指针",
+      "approval_policy": "automatic_recording"
+    },
+    {
+      "operation": "statistics",
+      "group": "项目管理",
+      "status": "supported",
+      "output": "镜头、时长、对白、问题、闭环率、残留率和副作用统计",
+      "approval_policy": "read_only"
+    },
+    {
+      "operation": "issue_learning",
+      "group": "系统改进",
+      "status": "supported",
+      "output": "跨窗口问题归档、去重、复发升级和趋势分析",
+      "approval_policy": "automatic_recording"
+    },
+    {
+      "operation": "rule_improvement",
+      "group": "系统改进",
+      "status": "guarded",
+      "output": "规则候选、验证器候选和黄金测试候选",
+      "approval_policy": "tests_plus_human_approval"
+    },
+    {
+      "operation": "archive",
+      "group": "项目管理",
+      "status": "guarded",
+      "output": "确认后的正式版本、交付清单与归档记录",
+      "approval_policy": "human_signoff"
+    },
+    {
+      "operation": "capability_gap",
+      "group": "系统改进",
+      "status": "supported",
+      "output": "缺失能力、所需输入工具、风险、实现方案和测试门禁",
+      "approval_policy": "proposal_only"
+    }
+  ],
+  "known_limits": [
+    {
+      "id": "no_dormant_chat_monitoring",
+      "description": "不能在未触发任务时后台扫描休眠聊天窗口；只在Agent任务运行并成功写回共享中枢时形成精确记录。"
+    },
+    {
+      "id": "no_unavailable_history_inference",
+      "description": "不能把不可访问的历史聊天推断成精确事件；只能标记为未量化历史模式。"
+    },
+    {
+      "id": "tool_and_permission_bound",
+      "description": "图像、文件、音频或外部服务操作受当前工具、素材和权限限制；缺少条件时必须登记能力缺口。"
+    },
+    {
+      "id": "no_unapproved_rule_activation",
+      "description": "不能未经验证和人工确认自动激活正式规则。"
+    },
+    {
+      "id": "no_silent_destructive_overwrite",
+      "description": "不能静默覆盖唯一原件、删除未授权范围或跨越用户锁定的剧情边界。"
+    }
+  ]
+}

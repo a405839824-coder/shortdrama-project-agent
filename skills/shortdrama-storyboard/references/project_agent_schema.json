@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openai.local/schemas/r10-project-agent-1.json",
+  "title": "R10 full-project storyboard Agent hub",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_id",
+    "project_name",
+    "runtime_version",
+    "workflow_revision",
+    "agent_mode",
+    "created_at",
+    "updated_at",
+    "linked_shared_files",
+    "policy",
+    "capability_registry",
+    "project_state",
+    "work_orders",
+    "change_requests",
+    "deliverables",
+    "decision_log",
+    "capability_gaps",
+    "version_history",
+    "human_signoffs",
+    "counters"
+  ],
+  "properties": {
+    "schema_version": {"const": "R10-PROJECT-AGENT-1"},
+    "project_id": {"type": "string", "minLength": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "runtime_version": {"const": "V16.3-148-R10-StableRuntime"},
+    "workflow_revision": {"const": "R10-PG1"},
+    "agent_mode": {"const": "full_safe"},
+    "created_at": {"type": "string", "minLength": 1},
+    "updated_at": {"type": "string", "minLength": 1},
+    "linked_shared_files": {
+      "type": "object",
+      "required": ["issue_ledger_title", "project_hub_title"]
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "plan_only_never_mutates",
+        "preserve_previous_version",
+        "explicit_scope_required_for_destructive_change",
+        "max_internal_repair_rounds",
+        "impact_regression_required",
+        "human_signoff_required_for_archive",
+        "formal_rule_auto_mutation"
+      ],
+      "properties": {
+        "plan_only_never_mutates": {"const": true},
+        "preserve_previous_version": {"const": true},
+        "explicit_scope_required_for_destructive_change": {"const": true},
+        "max_internal_repair_rounds": {"const": 3},
+        "impact_regression_required": {"const": true},
+        "human_signoff_required_for_archive": {"const": true},
+        "formal_rule_auto_mutation": {"const": false}
+      }
+    },
+    "capability_registry": {"type": "object"},
+    "project_state": {"type": "object"},
+    "work_orders": {"type": "array", "items": {"$ref": "#/$defs/work_order"}},
+    "change_requests": {"type": "array", "items": {"$ref": "#/$defs/change_request"}},
+    "deliverables": {"type": "array"},
+    "decision_log": {"type": "array"},
+    "capability_gaps": {"type": "array"},
+    "version_history": {"type": "array"},
+    "human_signoffs": {"type": "array"},
+    "counters": {"type": "object"}
+  },
+  "$defs": {
+    "work_order": {
+      "type": "object",
+      "required": [
+        "work_order_id",
+        "timestamp",
+        "window_key",
+        "request_text",
+        "operation",
+        "mode",
+        "targets",
+        "source_lock",
+        "protected_scope",
+        "expected_outputs",
+        "authorization",
+        "status",
+        "internal_round",
+        "validation",
+        "deliverable_ids"
+      ]
+    },
+    "change_operation": {
+      "type": "object",
+      "required": [
+        "operation",
+        "target_ids",
+        "instruction",
+        "authoritative_basis",
+        "protected_scope"
+      ],
+      "properties": {
+        "operation": {"enum": ["add", "modify", "delete", "replace", "merge", "split", "move"]}
+      }
+    },
+    "change_request": {
+      "type": "object",
+      "required": [
+        "change_id",
+        "work_order_id",
+        "timestamp",
+        "target_type",
+        "target_file",
+        "source_version",
+        "operations",
+        "required_downstream_updates",
+        "authorization",
+        "status"
+      ],
+      "properties": {
+        "target_type": {"enum": ["script", "storyboard", "script_and_storyboard"]},
+        "operations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/change_operation"}}
+      }
+    }
+  }
+}

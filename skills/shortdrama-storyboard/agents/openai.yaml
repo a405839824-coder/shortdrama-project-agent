@@ -1,0 +1,13 @@
+interface:
+  display_name: 短剧分镜全流程 Agent
+  short_description: 覆盖剧情策划、剧本改写、分镜生成、生产审计与系统进化
+  default_prompt: 使用 $shortdrama-storyboard 启动全流程安全 Agent，读取项目中枢与问题台账，按我的任务完成策划、改写、增删改、分镜生成、生产、审计和版本闭环。
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

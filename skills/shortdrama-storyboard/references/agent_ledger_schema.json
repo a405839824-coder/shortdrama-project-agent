@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openai.local/schemas/r10-agent-safe-1.json",
+  "title": "R10 safe storyboard project Agent ledger",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_id",
+    "project_name",
+    "runtime_version",
+    "workflow_revision",
+    "agent_mode",
+    "created_at",
+    "updated_at",
+    "policy",
+    "counters",
+    "scope_states",
+    "events",
+    "issues",
+    "rule_candidates",
+    "promotion_history",
+    "human_signoffs",
+    "historical_patterns"
+  ],
+  "properties": {
+    "schema_version": {"const": "R10-AGENT-SAFE-1"},
+    "project_id": {"type": "string", "minLength": 1},
+    "project_name": {"type": "string", "minLength": 1},
+    "runtime_version": {"const": "V16.3-148-R10-StableRuntime"},
+    "workflow_revision": {"const": "R10-PG1"},
+    "agent_mode": {"const": "safe"},
+    "created_at": {"type": "string", "minLength": 1},
+    "updated_at": {"type": "string", "minLength": 1},
+    "policy": {
+      "type": "object",
+      "required": [
+        "preferred_auto_repair_rounds",
+        "max_auto_repair_rounds",
+        "fail_current_blocks_next_episode",
+        "human_approval_required_for_rule_activation",
+        "human_signoff_required_for_archive",
+        "formal_rule_auto_mutation"
+      ],
+      "properties": {
+        "preferred_auto_repair_rounds": {"const": 2},
+        "max_auto_repair_rounds": {"const": 3},
+        "fail_current_blocks_next_episode": {"const": true},
+        "human_approval_required_for_rule_activation": {"const": true},
+        "human_signoff_required_for_archive": {"const": true},
+        "formal_rule_auto_mutation": {"const": false}
+      }
+    },
+    "counters": {"type": "object"},
+    "scope_states": {"type": "array", "items": {"$ref": "#/$defs/scope_state"}},
+    "events": {"type": "array", "items": {"$ref": "#/$defs/audit_event"}},
+    "issues": {"type": "array", "items": {"$ref": "#/$defs/issue_record"}},
+    "rule_candidates": {"type": "array", "items": {"$ref": "#/$defs/rule_candidate"}},
+    "promotion_history": {"type": "array"},
+    "human_signoffs": {"type": "array"},
+    "historical_patterns": {"type": "array"}
+  },
+  "$defs": {
+    "event_issue": {
+      "type": "object",
+      "required": [
+        "error_code",
+        "category",
+        "severity",
+        "shot_ids",
+        "field",
+        "evidence",
+        "source_sentence",
+        "repair_action",
+        "status"
+      ],
+      "properties": {
+        "error_code": {"type": "string", "minLength": 1},
+        "category": {
+          "enum": [
+            "源文对白",
+            "机位可见性",
+            "空间连续",
+            "表演链",
+            "镜头节奏",
+            "Seedance独立执行",
+            "禁项与声音",
+            "统计闭合"
+          ]
+        },
+        "severity": {"enum": ["fail", "warn", "info", "blocking", "error"]},
+        "blocking": {"type": "boolean"},
+        "shot_ids": {"type": "array", "items": {"type": "string"}},
+        "field": {"type": "string", "minLength": 1},
+        "issue_type": {"type": "string"},
+        "problem_key": {"type": "string"},
+        "evidence": {"type": "string", "minLength": 1},
+        "source_sentence": {"type": "string", "minLength": 1},
+        "root_cause": {"type": "string"},
+        "repair_action": {"type": "string", "minLength": 1},
+        "impact_scope": {"type": "array", "items": {"type": "string"}},
+        "status": {"enum": ["initial", "residual", "introduced"]}
+      }
+    },
+    "audit_event": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "timestamp",
+        "episode_id",
+        "file_name",
+        "file_fingerprint",
+        "source_version",
+        "audit_cycle_id",
+        "task_type",
+        "audit_round",
+        "result",
+        "checked_shot_count",
+        "issues"
+      ],
+      "properties": {
+        "event_id": {"type": "string", "minLength": 1},
+        "timestamp": {"type": "string", "minLength": 1},
+        "window_key": {"type": "string"},
+        "episode_id": {"type": "string", "minLength": 1},
+        "file_name": {"type": "string", "minLength": 1},
+        "file_fingerprint": {"type": "string", "minLength": 1},
+        "source_version": {"type": "string", "minLength": 1},
+        "audit_cycle_id": {"type": "string", "minLength": 1},
+        "task_type": {"enum": ["generation_audit", "audit", "audit_repair", "repair_regression", "bootstrap_import"]},
+        "audit_round": {"type": "integer", "minimum": 1, "maximum": 3},
+        "result": {"enum": ["pass", "fail_current", "blocked"]},
+        "checked_shot_count": {"type": "integer", "minimum": 0},
+        "blockers": {"type": "array", "items": {"type": "string"}},
+        "counts": {"type": "object"},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/event_issue"}}
+      }
+    },
+    "issue_record": {
+      "type": "object",
+      "required": [
+        "issue_id",
+        "dedup_key",
+        "error_code",
+        "category",
+        "status",
+        "open_scope_keys",
+        "occurrence_count",
+        "consecutive_rounds",
+        "max_consecutive_rounds",
+        "history"
+      ]
+    },
+    "scope_state": {
+      "type": "object",
+      "required": [
+        "scope_key",
+        "episode_id",
+        "file_name",
+        "audit_cycle_id",
+        "open_issue_ids",
+        "closure_state",
+        "can_advance"
+      ]
+    },
+    "rule_candidate": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "trigger_issue_ids",
+        "target_artifact",
+        "proposed_change",
+        "validation",
+        "human_decision",
+        "status"
+      ]
+    }
+  }
+}

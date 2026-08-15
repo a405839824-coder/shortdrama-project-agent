@@ -1,0 +1,466 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:shortdrama-storyboard:r10",
+  "title": "R10 Chinese Short Drama Storyboard",
+  "type": "object",
+  "required": [
+    "project_version",
+    "schema_version",
+    "workflow_profile",
+    "prevention_evidence",
+    "field_order",
+    "source_lock",
+    "shots",
+    "batches",
+    "total_duration"
+  ],
+  "properties": {
+    "project_version": {
+      "const": "V16.3-148-R10-StableRuntime"
+    },
+    "schema_version": {
+      "const": "R10.0"
+    },
+    "workflow_profile": {
+      "const": "R10-PG1"
+    },
+    "prevention_evidence": {
+      "type": "object",
+      "required": [
+        "scope_lock",
+        "source_ledger",
+        "change_lock",
+        "cognition_matrix",
+        "scene_state_ledger",
+        "shot_plan",
+        "performance_chains",
+        "audio_workflow",
+        "audit_layers",
+        "repair_history"
+      ],
+      "properties": {
+        "scope_lock": {
+          "type": "object"
+        },
+        "source_ledger": {
+          "type": "array",
+          "minItems": 1
+        },
+        "change_lock": {
+          "type": "object"
+        },
+        "cognition_matrix": {
+          "type": "array",
+          "minItems": 1
+        },
+        "scene_state_ledger": {
+          "type": "array",
+          "minItems": 1
+        },
+        "shot_plan": {
+          "type": "array",
+          "minItems": 1
+        },
+        "performance_chains": {
+          "type": "array"
+        },
+        "audio_workflow": {
+          "type": "object"
+        },
+        "audit_layers": {
+          "type": "array",
+          "minItems": 8
+        },
+        "repair_history": {
+          "type": "array"
+        }
+      },
+      "additionalProperties": true
+    },
+    "field_order": {
+      "const": [
+        "镜头编号",
+        "时长",
+        "累计时长",
+        "功能类型",
+        "场景连续性ID",
+        "镜头类型",
+        "可见主体",
+        "机位",
+        "运镜方式",
+        "运镜主体",
+        "运镜功能",
+        "人物调度",
+        "画面内容",
+        "动作与表演",
+        "台词",
+        "音色",
+        "发声方式",
+        "标点语气",
+        "心理音轨",
+        "心理音轨属性",
+        "环境音效",
+        "环境动态",
+        "光影",
+        "光源来源",
+        "光源方向",
+        "色温倾向",
+        "生成限制",
+        "转场类型",
+        "切镜/转场提示词",
+        "参考图锚定",
+        "覆盖原文",
+        "原文依据类型",
+        "原文支撑句",
+        "生成批次"
+      ]
+    },
+    "source_lock": {
+      "type": "object"
+    },
+    "shots": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "镜头编号",
+          "时长",
+          "累计时长",
+          "功能类型",
+          "场景连续性ID",
+          "镜头类型",
+          "可见主体",
+          "机位",
+          "运镜方式",
+          "运镜主体",
+          "运镜功能",
+          "人物调度",
+          "画面内容",
+          "动作与表演",
+          "台词",
+          "音色",
+          "发声方式",
+          "标点语气",
+          "心理音轨",
+          "心理音轨属性",
+          "环境音效",
+          "环境动态",
+          "光影",
+          "光源来源",
+          "光源方向",
+          "色温倾向",
+          "生成限制",
+          "转场类型",
+          "切镜/转场提示词",
+          "参考图锚定",
+          "覆盖原文",
+          "原文依据类型",
+          "原文支撑句",
+          "生成批次"
+        ],
+        "properties": {
+          "镜头编号": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "时长": {
+            "type": "number",
+            "minimum": 0
+          },
+          "累计时长": {
+            "type": "number",
+            "minimum": 0
+          },
+          "功能类型": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "场景连续性ID": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "镜头类型": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "可见主体": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "机位": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "运镜方式": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "运镜主体": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "运镜功能": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "人物调度": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "画面内容": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "动作与表演": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "台词": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "音色": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "发声方式": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "标点语气": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "心理音轨": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "心理音轨属性": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "环境音效": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "环境动态": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "光影": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "光源来源": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "光源方向": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "色温倾向": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "生成限制": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "转场类型": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "切镜/转场提示词": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "参考图锚定": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "覆盖原文": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "原文依据类型": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "原文支撑句": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "生成批次": {
+            "type": [
+              "string",
+              "number"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "batches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "批次编号",
+          "覆盖镜头",
+          "时长",
+          "主运镜",
+          "生成限制",
+          "起始画面",
+          "起始表演状态",
+          "动作过程",
+          "听话反应",
+          "结束状态",
+          "摄影机",
+          "声音",
+          "环境动态",
+          "光影",
+          "独立执行提示词"
+        ],
+        "properties": {
+          "批次编号": {
+            "type": "string"
+          },
+          "覆盖镜头": {
+            "type": [
+              "array",
+              "string"
+            ]
+          },
+          "时长": {
+            "type": "number",
+            "minimum": 0
+          },
+          "主运镜": {
+            "type": "string"
+          },
+          "生成限制": {
+            "type": "string"
+          },
+          "起始画面": {
+            "type": "string",
+            "minLength": 1
+          },
+          "起始表演状态": {
+            "type": "string",
+            "minLength": 1
+          },
+          "动作过程": {
+            "type": "string",
+            "minLength": 1
+          },
+          "听话反应": {
+            "type": "string",
+            "minLength": 1
+          },
+          "结束状态": {
+            "type": "string",
+            "minLength": 1
+          },
+          "摄影机": {
+            "type": "string",
+            "minLength": 1
+          },
+          "声音": {
+            "type": "string",
+            "minLength": 1
+          },
+          "环境动态": {
+            "type": "string",
+            "minLength": 1
+          },
+          "光影": {
+            "type": "string",
+            "minLength": 1
+          },
+          "独立执行提示词": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "total_duration": {
+      "type": "number",
+      "minimum": 0
+    }
+  },
+  "x-field-aliases": {
+    "镜头": "镜头类型",
+    "拍摄方式": "机位",
+    "切镜": "切镜/转场提示词",
+    "参考锚定": "参考图锚定",
+    "原文依据": "原文支撑句"
+  },
+  "x-version": "V16.3-148-R10-StableRuntime"
+  ,
+  "x-workflow-revision": "R10-PG1"
+}

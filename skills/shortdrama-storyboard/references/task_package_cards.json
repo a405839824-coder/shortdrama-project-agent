@@ -1,0 +1,1660 @@
+[
+  {
+    "task_package_id": "TP-STORYBOARD-GEN",
+    "task_name": "分镜生成",
+    "trigger_user_phrases": [
+      "分镜",
+      "生成分镜"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "SOURCE",
+      "BOUNDARY",
+      "TEMPLATE",
+      "VISIBILITY",
+      "EXPRESSION",
+      "MOTION",
+      "CINEMATIC",
+      "VOICE",
+      "DIALOGUE",
+      "PSYCH",
+      "BATCH",
+      "STAT",
+      "SCOPE_LOCK",
+      "CHANGE_LOCK",
+      "COGNITION",
+      "SCENE_STATE",
+      "SHOT_GRANULARITY",
+      "PERFORMANCE_CHAIN",
+      "I2V_INDEPENDENCE",
+      "LAYERED_AUDIT",
+      "QUALITY_METRICS"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_storyboard_gen_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-STORYBOARD-AUDIT",
+    "task_name": "分镜审计",
+    "trigger_user_phrases": [
+      "审计分镜",
+      "检查分镜"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "ALL_RUNTIME_MODULES",
+      "FUNCTIONAL_TEST",
+      "PREVENTIVE_GATES",
+      "LAYERED_AUDIT",
+      "QUALITY_METRICS"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_storyboard_audit_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-STORYBOARD-REPAIR",
+    "task_name": "分镜修复",
+    "trigger_user_phrases": [
+      "修复分镜"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "ERROR_TARGET_MODULE",
+      "REGRESSION",
+      "CHANGE_LOCK",
+      "IMPACT_ANALYSIS",
+      "SYSTEMIC_ESCALATION",
+      "QUALITY_METRICS"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_storyboard_repair_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-SHOT-INSERT",
+    "task_name": "分镜局部插入",
+    "trigger_user_phrases": [
+      "插入镜头"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "SOURCE",
+      "TEMPLATE",
+      "SHOTGRAPH",
+      "STAT",
+      "CHANGE_LOCK",
+      "SCENE_STATE",
+      "SHOT_GRANULARITY",
+      "IMPACT_ANALYSIS",
+      "REGRESSION"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_shot_insert_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-SHOT-REPLACE",
+    "task_name": "分镜局部替换",
+    "trigger_user_phrases": [
+      "替换镜头"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "SOURCE",
+      "TEMPLATE",
+      "SHOTGRAPH",
+      "REGRESSION",
+      "CHANGE_LOCK",
+      "SCENE_STATE",
+      "SHOT_GRANULARITY",
+      "IMPACT_ANALYSIS"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_shot_replace_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-SEGMENT-REPAIR",
+    "task_name": "分段修复",
+    "trigger_user_phrases": [
+      "只修这一段"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "SCOPE_LOCK",
+      "ERROR_TARGET_MODULE",
+      "REGRESSION",
+      "CHANGE_LOCK",
+      "SCENE_STATE",
+      "IMPACT_ANALYSIS",
+      "SYSTEMIC_ESCALATION",
+      "QUALITY_METRICS"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_segment_repair_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-FULL-RECUT",
+    "task_name": "全表重切",
+    "trigger_user_phrases": [
+      "全表重切"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "SOURCE",
+      "BOUNDARY",
+      "BEAT",
+      "TEMPLATE",
+      "ALL_RUNTIME_MODULES",
+      "CHANGE_LOCK",
+      "COGNITION",
+      "SCENE_STATE",
+      "SHOT_GRANULARITY",
+      "PERFORMANCE_CHAIN",
+      "I2V_INDEPENDENCE",
+      "LAYERED_AUDIT",
+      "QUALITY_METRICS"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_full_recut_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-DIALOGUE-CHECK",
+    "task_name": "台词专项检查",
+    "trigger_user_phrases": [
+      "检查台词"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "DIALOGUE",
+      "VOICE",
+      "PUNCT",
+      "SOURCE",
+      "COGNITION",
+      "PERFORMANCE_CHAIN"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_dialogue_check_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-PUNCT-CHECK",
+    "task_name": "标点专项检查",
+    "trigger_user_phrases": [
+      "检查标点"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "PUNCT",
+      "VOICE",
+      "DIALOGUE"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_punct_check_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-PSYCH-CHECK",
+    "task_name": "心理音轨专项检查",
+    "trigger_user_phrases": [
+      "检查心理音轨"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "PSYCH",
+      "VISIBILITY",
+      "DIALOGUE"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_psych_check_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-VIS-CHECK",
+    "task_name": "书页特写/可见性检查",
+    "trigger_user_phrases": [
+      "检查可见性",
+      "书页特写"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "VISIBILITY",
+      "EXPRESSION",
+      "SHOTGRAPH"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_vis_check_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-CAMERA-CHECK",
+    "task_name": "机位检查",
+    "trigger_user_phrases": [
+      "检查机位"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "CAMERA",
+      "VISIBILITY",
+      "SHOTGRAPH"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_camera_check_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-MOTION-CHECK",
+    "task_name": "运镜方式与功能检查",
+    "trigger_user_phrases": [
+      "检查运镜"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "MOTION",
+      "BATCH",
+      "ACTIONUNIT"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_motion_check_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-LIGHT-CHECK",
+    "task_name": "景别光影连续检查",
+    "trigger_user_phrases": [
+      "检查光影"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "CINEMATIC",
+      "SHOTGRAPH"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_light_check_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-REF-CHECK",
+    "task_name": "参考图锚定与污染检查",
+    "trigger_user_phrases": [
+      "检查参考图"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "REFERENCE",
+      "STYLE"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_ref_check_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-BATCH-SPLIT",
+    "task_name": "生成批次拆分",
+    "trigger_user_phrases": [
+      "拆分批次"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "BATCH",
+      "MOTION",
+      "ACTIONUNIT",
+      "SHOTGRAPH",
+      "I2V_INDEPENDENCE",
+      "AUDIO_WORKFLOW"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_batch_split_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-BATCH-AUDIT",
+    "task_name": "生成批次审计",
+    "trigger_user_phrases": [
+      "审计批次"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "BATCH",
+      "REFERENCE",
+      "MOTION",
+      "CONTINUITY",
+      "I2V_INDEPENDENCE",
+      "AUDIO_WORKFLOW",
+      "SCENE_STATE"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_batch_audit_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-I2V-PROMPT",
+    "task_name": "i2v提示词整理",
+    "trigger_user_phrases": [
+      "i2v提示词"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "BATCH",
+      "MOTION",
+      "EXPRESSION",
+      "CINEMATIC",
+      "REFERENCE",
+      "PSYCH",
+      "I2V_INDEPENDENCE",
+      "AUDIO_WORKFLOW",
+      "SCENE_STATE"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_i2v_prompt_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-JIMENG-SHORT",
+    "task_name": "即梦精简提示词",
+    "trigger_user_phrases": [
+      "即梦精简"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "I2V_CORE",
+      "NEGATIVE_PROMPT",
+      "PSYCH"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_jimeng_short_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-TABLE-CONVERT",
+    "task_name": "表格转换",
+    "trigger_user_phrases": [
+      "转换表格"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "SCHEMA",
+      "FIELD_ORDER",
+      "SOURCE"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_table_convert_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-EXCEL-EXPORT",
+    "task_name": "Excel导出",
+    "trigger_user_phrases": [
+      "导出Excel"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "SCHEMA",
+      "FIELD_ORDER",
+      "FILE_QA"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_excel_export_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-JSON-ARCHIVE",
+    "task_name": "JSON归档",
+    "trigger_user_phrases": [
+      "JSON归档"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "SCHEMA",
+      "STAT",
+      "VERSION"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_json_archive_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-PATCH-ABSORB",
+    "task_name": "母版补丁吸收",
+    "trigger_user_phrases": [
+      "吸收补丁",
+      "记入母版"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "CONFLICT",
+      "DEPRECATED",
+      "MIRROR_SYNC",
+      "FUNCTIONAL_TEST"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_patch_absorb_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-MOTHER-AUDIT",
+    "task_name": "母版完整度审计",
+    "trigger_user_phrases": [
+      "检查完整度",
+      "审核母版"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "INTEGRATION",
+      "MIRROR_SYNC",
+      "FUNCTIONAL_TEST"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_mother_audit_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-DOCX-MERGE",
+    "task_name": "母版DOCX合并",
+    "trigger_user_phrases": [
+      "合并docx",
+      "写入本体"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "DOCX",
+      "CONFLICT",
+      "MIRROR_SYNC",
+      "RENDER_QA"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_docx_merge_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-NEW-WINDOW",
+    "task_name": "新窗口接续",
+    "trigger_user_phrases": [
+      "新窗口接续",
+      "继续项目"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "VERSION",
+      "SCHEMA",
+      "CONFLICT",
+      "SELF_TEST",
+      "PREVENTIVE_GATES"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_new_window_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-CONFLICT",
+    "task_name": "规则冲突裁决",
+    "trigger_user_phrases": [
+      "冲突规则"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "GLOBAL_PRIORITY",
+      "CONFLICT",
+      "DEPRECATED"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_conflict_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-VALIDATOR-REPORT",
+    "task_name": "代码校验报告解读",
+    "trigger_user_phrases": [
+      "校验报告"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "VALIDATOR",
+      "ERROR_CATALOG",
+      "REPAIR"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_validator_report_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-FINAL-ARCHIVE",
+    "task_name": "最终归档",
+    "trigger_user_phrases": [
+      "归档",
+      "最终版本"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "ALL_RUNTIME_MODULES",
+      "FUNCTIONAL_TEST",
+      "HUMAN_SIGNOFF",
+      "PREVENTIVE_GATES",
+      "LAYERED_AUDIT",
+      "QUALITY_METRICS",
+      "SYSTEMIC_ESCALATION"
+    ],
+    "forbidden_skip_items": [
+      "R10版本锁",
+      "当前任务范围",
+      "具体证据",
+      "错误码/通过证据",
+      "重跑结论",
+      "R10-PG1十道门禁证据"
+    ],
+    "minimum_input_required": [
+      "用户任务范围",
+      "输入文件或文本",
+      "边界/目标/约束"
+    ],
+    "minimum_output_required": [
+      "执行版本",
+      "触发模块",
+      "证据",
+      "问题与修复",
+      "最终状态"
+    ],
+    "blocking_conditions": [
+      "版本不一致",
+      "硬规则fail",
+      "输入缺失却假pass",
+      "越界修改"
+    ],
+    "rerun_conditions": [
+      "用户指出遗漏",
+      "功能校验fail",
+      "字段或统计不闭合",
+      "规则版本变化"
+    ],
+    "final_status_field": "tp_final_archive_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  }
+]

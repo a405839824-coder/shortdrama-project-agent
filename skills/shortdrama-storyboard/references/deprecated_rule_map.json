@@ -1,0 +1,50 @@
+{
+  "version": "V16.3-148-R10-StableRuntime",
+  "items": [
+    {
+      "deprecated": "旧总优先级（缺安全合规/可见性）",
+      "replacement": "R10.GLOBAL_PRIORITY",
+      "reason": "第116章裁决已升级为唯一优先级"
+    },
+    {
+      "deprecated": "普通台词默认3.5字/秒",
+      "replacement": "R10.DIALOGUE_RATE_2_8",
+      "reason": "统一按2.8字/秒保守计算；3.5仅作非贴线参考"
+    },
+    {
+      "deprecated": "4秒说话镜2-3次眨眼",
+      "replacement": "R10.BLINK_NATURAL",
+      "reason": "更新为3-5秒0-1次、6-10秒1-2次"
+    },
+    {
+      "deprecated": "每镜强制写眨眼",
+      "replacement": "R10.BLINK_VISIBILITY",
+      "reason": "只有眼睛可见且需要防呆滞时才写"
+    },
+    {
+      "deprecated": "镜头/拍摄方式/切镜旧字段名",
+      "replacement": "R10.CANONICAL_SHOT_FIELDS",
+      "reason": "统一机位、镜头类型、切镜/转场提示词并保留只读别名"
+    },
+    {
+      "deprecated": "Golden Tests仅检查schema",
+      "replacement": "R10.FUNCTIONAL_GOLDEN_TESTS",
+      "reason": "测试必须实际调用分镜校验器"
+    },
+    {
+      "deprecated": "4167条同构关键词校验器",
+      "replacement": "R10.EXECUTABLE_VALIDATORS",
+      "reason": "改为按模块执行的确定性检查"
+    },
+    {
+      "deprecated": "分镜完成后再集中检查102项",
+      "replacement": "R10-PG1.PREVENTIVE_GATES",
+      "reason": "把高频问题前移到十道门禁，上一门禁未通过不得进入下一层"
+    },
+    {
+      "deprecated": "同一问题无限局部补丁",
+      "replacement": "R10-PG1.SYSTEMIC_ESCALATION",
+      "reason": "第2轮根因修复，第3轮及以后回退对应上游产物重建"
+    }
+  ]
+}

@@ -1,0 +1,2146 @@
+{
+  "version": "V16.3-148-R10-StableRuntime",
+  "schema_version": "R10.0",
+  "workflow_revision": "R10-PG1",
+  "inject_pg1_fixture_evidence": true,
+  "fixtures": {
+    "valid_base": {
+      "project_version": "V16.3-148-R10-StableRuntime",
+      "schema_version": "R10.0",
+      "field_order": [
+        "镜头编号",
+        "时长",
+        "累计时长",
+        "功能类型",
+        "场景连续性ID",
+        "镜头类型",
+        "可见主体",
+        "机位",
+        "运镜方式",
+        "运镜主体",
+        "运镜功能",
+        "人物调度",
+        "画面内容",
+        "动作与表演",
+        "台词",
+        "音色",
+        "发声方式",
+        "标点语气",
+        "心理音轨",
+        "心理音轨属性",
+        "环境音效",
+        "环境动态",
+        "光影",
+        "光源来源",
+        "光源方向",
+        "色温倾向",
+        "生成限制",
+        "转场类型",
+        "切镜/转场提示词",
+        "参考图锚定",
+        "覆盖原文",
+        "原文依据类型",
+        "原文支撑句",
+        "生成批次"
+      ],
+      "source_lock": {
+        "上集终点": "上一集结束于她走到门前。",
+        "本集起点": "她推门进屋。",
+        "本集计划终点": "她看见桌上的信。",
+        "下一集起点": "她伸手拿起信。",
+        "禁止重复": "不重复上一集走到门前的过程。",
+        "禁止提前": "不提前展示信中内容。"
+      },
+      "shots": [
+        {
+          "镜头编号": "S001",
+          "时长": 4.0,
+          "累计时长": 4.0,
+          "功能类型": "动作推进",
+          "场景连续性ID": "SC01",
+          "镜头类型": "中景",
+          "可见主体": "女主上半身、面部与双手可见",
+          "机位": "平视中机位，人物正侧45度",
+          "运镜方式": "推镜头",
+          "运镜主体": "女主",
+          "运镜功能": "聚焦注意力",
+          "人物调度": "女主从门边进入画面并停在桌前",
+          "画面内容": "女主推门后看向桌上的信件",
+          "动作与表演": "嘴角自然放松，目光看向桌面，右手扶住门框，肩膀缓慢落下",
+          "台词": "无",
+          "音色": "不适用：无台词",
+          "发声方式": "不适用：无台词",
+          "标点语气": "不适用：无台词",
+          "心理音轨": "无",
+          "心理音轨属性": "不适用：无心理音轨",
+          "环境音效": "木门轻响、室内细微风声",
+          "环境动态": "窗纱轻动，桌面纸角微颤",
+          "光影": "窗侧暖光勾勒人物与门框，氛围平静",
+          "光源来源": "窗纸透入的日光",
+          "光源方向": "画面左侧至右侧",
+          "色温倾向": "暖中性",
+          "生成限制": "禁止字幕、BGM、现代物件与额外角色；保持人物脸和服装一致",
+          "转场类型": "动作切",
+          "切镜/转场提示词": "手停在门框时切到桌面信件",
+          "参考图锚定": "人物特写图锁脸，场景图锁空间；排除分镜图风格污染",
+          "覆盖原文": "她推门进屋，看见桌上的信。",
+          "原文依据类型": "直接动作+道具信息",
+          "原文支撑句": "她推门进屋，看见桌上的信。",
+          "生成批次": "B01"
+        }
+      ],
+      "batches": [
+        {
+          "批次编号": "B01",
+          "覆盖镜头": [
+            "S001"
+          ],
+          "时长": 4.0,
+          "主运镜": "推镜头",
+          "生成限制": "一个主运镜；保持角色和光线连续"
+        }
+      ],
+      "total_duration": 4.0
+    },
+    "valid_dialogue": {
+      "project_version": "V16.3-148-R10-StableRuntime",
+      "schema_version": "R10.0",
+      "field_order": [
+        "镜头编号",
+        "时长",
+        "累计时长",
+        "功能类型",
+        "场景连续性ID",
+        "镜头类型",
+        "可见主体",
+        "机位",
+        "运镜方式",
+        "运镜主体",
+        "运镜功能",
+        "人物调度",
+        "画面内容",
+        "动作与表演",
+        "台词",
+        "音色",
+        "发声方式",
+        "标点语气",
+        "心理音轨",
+        "心理音轨属性",
+        "环境音效",
+        "环境动态",
+        "光影",
+        "光源来源",
+        "光源方向",
+        "色温倾向",
+        "生成限制",
+        "转场类型",
+        "切镜/转场提示词",
+        "参考图锚定",
+        "覆盖原文",
+        "原文依据类型",
+        "原文支撑句",
+        "生成批次"
+      ],
+      "source_lock": {
+        "上集终点": "上一集结束于她走到门前。",
+        "本集起点": "她推门进屋。",
+        "本集计划终点": "她看见桌上的信。",
+        "下一集起点": "她伸手拿起信。",
+        "禁止重复": "不重复上一集走到门前的过程。",
+        "禁止提前": "不提前展示信中内容。"
+      },
+      "shots": [
+        {
+          "镜头编号": "S001",
+          "时长": 5.0,
+          "累计时长": 5.0,
+          "功能类型": "关系情绪",
+          "场景连续性ID": "SC01",
+          "镜头类型": "中景",
+          "可见主体": "女主上半身、面部与双手可见",
+          "机位": "平视中机位，人物正侧45度",
+          "运镜方式": "推镜头",
+          "运镜主体": "女主",
+          "运镜功能": "聚焦注意力",
+          "人物调度": "女主从门边进入画面并停在桌前",
+          "画面内容": "女主推门后看向桌上的信件",
+          "动作与表演": "嘴角轻抿，眼神锁住对方，右手攥紧袖口，肩颈微微收紧，视线短暂停住",
+          "台词": "你终于来了？",
+          "音色": "清冷偏柔的青年女声",
+          "发声方式": "声音压低一点，语速放慢，呼吸克制，在‘终于’前停顿，‘来了’加重，尾音微微上扬",
+          "标点语气": "问号表现试探，尾音微微上扬",
+          "心理音轨": "无",
+          "心理音轨属性": "不适用：无心理音轨",
+          "环境音效": "木门轻响、室内细微风声",
+          "环境动态": "窗纱轻动，桌面纸角微颤",
+          "光影": "窗侧暖光勾勒人物与门框，氛围平静",
+          "光源来源": "窗纸透入的日光",
+          "光源方向": "画面左侧至右侧",
+          "色温倾向": "暖中性",
+          "生成限制": "禁止字幕、BGM、现代物件与额外角色；保持人物脸和服装一致",
+          "转场类型": "动作切",
+          "切镜/转场提示词": "手停在门框时切到桌面信件",
+          "参考图锚定": "人物特写图锁脸，场景图锁空间；排除分镜图风格污染",
+          "覆盖原文": "她推门进屋，看见桌上的信。",
+          "原文依据类型": "直接动作+道具信息",
+          "原文支撑句": "她推门进屋，看见桌上的信。",
+          "生成批次": "B01"
+        }
+      ],
+      "batches": [
+        {
+          "批次编号": "B01",
+          "覆盖镜头": [
+            "S001"
+          ],
+          "时长": 5.0,
+          "主运镜": "推镜头",
+          "生成限制": "一个主运镜；保持角色和光线连续"
+        }
+      ],
+      "total_duration": 5.0
+    },
+    "valid_psych": {
+      "project_version": "V16.3-148-R10-StableRuntime",
+      "schema_version": "R10.0",
+      "field_order": [
+        "镜头编号",
+        "时长",
+        "累计时长",
+        "功能类型",
+        "场景连续性ID",
+        "镜头类型",
+        "可见主体",
+        "机位",
+        "运镜方式",
+        "运镜主体",
+        "运镜功能",
+        "人物调度",
+        "画面内容",
+        "动作与表演",
+        "台词",
+        "音色",
+        "发声方式",
+        "标点语气",
+        "心理音轨",
+        "心理音轨属性",
+        "环境音效",
+        "环境动态",
+        "光影",
+        "光源来源",
+        "光源方向",
+        "色温倾向",
+        "生成限制",
+        "转场类型",
+        "切镜/转场提示词",
+        "参考图锚定",
+        "覆盖原文",
+        "原文依据类型",
+        "原文支撑句",
+        "生成批次"
+      ],
+      "source_lock": {
+        "上集终点": "上一集结束于她走到门前。",
+        "本集起点": "她推门进屋。",
+        "本集计划终点": "她看见桌上的信。",
+        "下一集起点": "她伸手拿起信。",
+        "禁止重复": "不重复上一集走到门前的过程。",
+        "禁止提前": "不提前展示信中内容。"
+      },
+      "shots": [
+        {
+          "镜头编号": "S001",
+          "时长": 4.0,
+          "累计时长": 4.0,
+          "功能类型": "动作推进",
+          "场景连续性ID": "SC01",
+          "镜头类型": "中景",
+          "可见主体": "女主上半身、面部与双手可见",
+          "机位": "平视中机位，人物正侧45度",
+          "运镜方式": "推镜头",
+          "运镜主体": "女主",
+          "运镜功能": "聚焦注意力",
+          "人物调度": "女主从门边进入画面并停在桌前",
+          "画面内容": "女主推门后看向桌上的信件",
+          "动作与表演": "嘴角自然放松，目光看向桌面，右手扶住门框，肩膀缓慢落下",
+          "台词": "无",
+          "音色": "不适用：无台词",
+          "发声方式": "不适用：无台词",
+          "标点语气": "不适用：无台词",
+          "心理音轨": "她意识到这封信可能改变一切。",
+          "心理音轨属性": "后期旁白；人物不张嘴；不驱动口型；不生成字幕；不计入角色对白",
+          "环境音效": "木门轻响、室内细微风声",
+          "环境动态": "窗纱轻动，桌面纸角微颤",
+          "光影": "窗侧暖光勾勒人物与门框，氛围平静",
+          "光源来源": "窗纸透入的日光",
+          "光源方向": "画面左侧至右侧",
+          "色温倾向": "暖中性",
+          "生成限制": "禁止字幕、BGM、现代物件与额外角色；保持人物脸和服装一致；心理音轨只作后期声音",
+          "转场类型": "动作切",
+          "切镜/转场提示词": "手停在门框时切到桌面信件",
+          "参考图锚定": "人物特写图锁脸，场景图锁空间；排除分镜图风格污染",
+          "覆盖原文": "她推门进屋，看见桌上的信。",
+          "原文依据类型": "直接动作+道具信息",
+          "原文支撑句": "她推门进屋，看见桌上的信。",
+          "生成批次": "B01"
+        }
+      ],
+      "batches": [
+        {
+          "批次编号": "B01",
+          "覆盖镜头": [
+            "S001"
+          ],
+          "时长": 4.0,
+          "主运镜": "推镜头",
+          "生成限制": "一个主运镜；保持角色和光线连续"
+        }
+      ],
+      "total_duration": 4.0
+    },
+    "valid_two_shot": {
+      "project_version": "V16.3-148-R10-StableRuntime",
+      "schema_version": "R10.0",
+      "field_order": [
+        "镜头编号",
+        "时长",
+        "累计时长",
+        "功能类型",
+        "场景连续性ID",
+        "镜头类型",
+        "可见主体",
+        "机位",
+        "运镜方式",
+        "运镜主体",
+        "运镜功能",
+        "人物调度",
+        "画面内容",
+        "动作与表演",
+        "台词",
+        "音色",
+        "发声方式",
+        "标点语气",
+        "心理音轨",
+        "心理音轨属性",
+        "环境音效",
+        "环境动态",
+        "光影",
+        "光源来源",
+        "光源方向",
+        "色温倾向",
+        "生成限制",
+        "转场类型",
+        "切镜/转场提示词",
+        "参考图锚定",
+        "覆盖原文",
+        "原文依据类型",
+        "原文支撑句",
+        "生成批次"
+      ],
+      "source_lock": {
+        "上集终点": "上一集结束于她走到门前。",
+        "本集起点": "她推门进屋。",
+        "本集计划终点": "她看见桌上的信。",
+        "下一集起点": "她伸手拿起信。",
+        "禁止重复": "不重复上一集走到门前的过程。",
+        "禁止提前": "不提前展示信中内容。"
+      },
+      "shots": [
+        {
+          "镜头编号": "S001",
+          "时长": 4.0,
+          "累计时长": 4.0,
+          "功能类型": "动作推进",
+          "场景连续性ID": "SC01",
+          "镜头类型": "中景",
+          "可见主体": "女主上半身、面部与双手可见",
+          "机位": "平视中机位，人物正侧45度",
+          "运镜方式": "推镜头",
+          "运镜主体": "女主",
+          "运镜功能": "聚焦注意力",
+          "人物调度": "女主从门边进入画面并停在桌前",
+          "画面内容": "女主推门后看向桌上的信件",
+          "动作与表演": "嘴角自然放松，目光看向桌面，右手扶住门框，肩膀缓慢落下",
+          "台词": "无",
+          "音色": "不适用：无台词",
+          "发声方式": "不适用：无台词",
+          "标点语气": "不适用：无台词",
+          "心理音轨": "无",
+          "心理音轨属性": "不适用：无心理音轨",
+          "环境音效": "木门轻响、室内细微风声",
+          "环境动态": "窗纱轻动，桌面纸角微颤",
+          "光影": "窗侧暖光勾勒人物与门框，氛围平静",
+          "光源来源": "窗纸透入的日光",
+          "光源方向": "画面左侧至右侧",
+          "色温倾向": "暖中性",
+          "生成限制": "禁止字幕、BGM、现代物件与额外角色；保持人物脸和服装一致",
+          "转场类型": "动作切",
+          "切镜/转场提示词": "手停在门框时切到桌面信件",
+          "参考图锚定": "人物特写图锁脸，场景图锁空间；排除分镜图风格污染",
+          "覆盖原文": "她推门进屋，看见桌上的信。",
+          "原文依据类型": "直接动作+道具信息",
+          "原文支撑句": "她推门进屋，看见桌上的信。",
+          "生成批次": "B01"
+        },
+        {
+          "镜头编号": "S002",
+          "时长": 4.0,
+          "累计时长": 8.0,
+          "功能类型": "动作推进",
+          "场景连续性ID": "SC01",
+          "镜头类型": "中景",
+          "可见主体": "女主上半身、面部与双手可见",
+          "机位": "平视中机位，人物正侧45度",
+          "运镜方式": "推镜头",
+          "运镜主体": "女主",
+          "运镜功能": "聚焦注意力",
+          "人物调度": "女主从门边进入画面并停在桌前",
+          "画面内容": "女主走近桌面，信件进入前景",
+          "动作与表演": "嘴角收住，目光落到信封，右手伸向桌面，身体轻微前倾",
+          "台词": "无",
+          "音色": "不适用：无台词",
+          "发声方式": "不适用：无台词",
+          "标点语气": "不适用：无台词",
+          "心理音轨": "无",
+          "心理音轨属性": "不适用：无心理音轨",
+          "环境音效": "木门轻响、室内细微风声",
+          "环境动态": "窗纱轻动，桌面纸角微颤",
+          "光影": "窗侧暖光勾勒人物与门框，氛围平静",
+          "光源来源": "窗纸透入的日光",
+          "光源方向": "画面左侧至右侧",
+          "色温倾向": "暖中性",
+          "生成限制": "禁止字幕、BGM、现代物件与额外角色；保持人物脸和服装一致",
+          "转场类型": "动作切",
+          "切镜/转场提示词": "手停在门框时切到桌面信件",
+          "参考图锚定": "人物特写图锁脸，场景图锁空间；排除分镜图风格污染",
+          "覆盖原文": "她走近桌子。",
+          "原文依据类型": "直接动作",
+          "原文支撑句": "她走近桌子。",
+          "生成批次": "B01"
+        }
+      ],
+      "batches": [
+        {
+          "批次编号": "B01",
+          "覆盖镜头": [
+            "S001",
+            "S002"
+          ],
+          "时长": 8.0,
+          "主运镜": "推镜头",
+          "生成限制": "一个主运镜；保持角色和光线连续"
+        }
+      ],
+      "total_duration": 8.0
+    },
+    "valid_book_split": {
+      "project_version": "V16.3-148-R10-StableRuntime",
+      "schema_version": "R10.0",
+      "field_order": [
+        "镜头编号",
+        "时长",
+        "累计时长",
+        "功能类型",
+        "场景连续性ID",
+        "镜头类型",
+        "可见主体",
+        "机位",
+        "运镜方式",
+        "运镜主体",
+        "运镜功能",
+        "人物调度",
+        "画面内容",
+        "动作与表演",
+        "台词",
+        "音色",
+        "发声方式",
+        "标点语气",
+        "心理音轨",
+        "心理音轨属性",
+        "环境音效",
+        "环境动态",
+        "光影",
+        "光源来源",
+        "光源方向",
+        "色温倾向",
+        "生成限制",
+        "转场类型",
+        "切镜/转场提示词",
+        "参考图锚定",
+        "覆盖原文",
+        "原文依据类型",
+        "原文支撑句",
+        "生成批次"
+      ],
+      "source_lock": {
+        "上集终点": "上一集结束于她走到门前。",
+        "本集起点": "她推门进屋。",
+        "本集计划终点": "她看见桌上的信。",
+        "下一集起点": "她伸手拿起信。",
+        "禁止重复": "不重复上一集走到门前的过程。",
+        "禁止提前": "不提前展示信中内容。"
+      },
+      "shots": [
+        {
+          "镜头编号": "S001",
+          "时长": 4.0,
+          "累计时长": 4.0,
+          "功能类型": "动作推进",
+          "场景连续性ID": "SC01",
+          "镜头类型": "书页特写",
+          "可见主体": "书页、墨字与右手食指可见",
+          "机位": "平视中机位，人物正侧45度",
+          "运镜方式": "固定镜头",
+          "运镜主体": "书页墨字",
+          "运镜功能": "稳定展示信息",
+          "人物调度": "右手食指停在墨字旁",
+          "画面内容": "信纸墨字占满画面，右手食指进入画面",
+          "动作与表演": "右手食指停在墨字旁，纸页轻微颤动",
+          "台词": "无",
+          "音色": "不适用：无台词",
+          "发声方式": "不适用：无台词",
+          "标点语气": "不适用：无台词",
+          "心理音轨": "无",
+          "心理音轨属性": "不适用：无心理音轨",
+          "环境音效": "木门轻响、室内细微风声",
+          "环境动态": "窗纱轻动，桌面纸角微颤",
+          "光影": "窗侧暖光勾勒人物与门框，氛围平静",
+          "光源来源": "窗纸透入的日光",
+          "光源方向": "画面左侧至右侧",
+          "色温倾向": "暖中性",
+          "生成限制": "禁止字幕、BGM、现代物件与额外角色；保持人物脸和服装一致",
+          "转场类型": "反应切",
+          "切镜/转场提示词": "墨字停留后切人物反应近景",
+          "参考图锚定": "人物特写图锁脸，场景图锁空间；排除分镜图风格污染",
+          "覆盖原文": "她推门进屋，看见桌上的信。",
+          "原文依据类型": "直接动作+道具信息",
+          "原文支撑句": "她推门进屋，看见桌上的信。",
+          "生成批次": "B01"
+        },
+        {
+          "镜头编号": "S002",
+          "时长": 4.0,
+          "累计时长": 8.0,
+          "功能类型": "情绪反应",
+          "场景连续性ID": "SC01",
+          "镜头类型": "人物反应近景",
+          "可见主体": "女主面部、肩颈与右手可见",
+          "机位": "平视中机位，人物正侧45度",
+          "运镜方式": "推镜头",
+          "运镜主体": "女主面部",
+          "运镜功能": "强化情绪",
+          "人物调度": "女主从门边进入画面并停在桌前",
+          "画面内容": "女主走近桌面，信件进入前景",
+          "动作与表演": "嘴角短暂停住，眼神从信纸移开，右手攥住纸角，肩颈收紧，视线落向门外",
+          "台词": "无",
+          "音色": "不适用：无台词",
+          "发声方式": "不适用：无台词",
+          "标点语气": "不适用：无台词",
+          "心理音轨": "无",
+          "心理音轨属性": "不适用：无心理音轨",
+          "环境音效": "木门轻响、室内细微风声",
+          "环境动态": "窗纱轻动，桌面纸角微颤",
+          "光影": "窗侧暖光勾勒人物与门框，氛围平静",
+          "光源来源": "窗纸透入的日光",
+          "光源方向": "画面左侧至右侧",
+          "色温倾向": "暖中性",
+          "生成限制": "禁止字幕、BGM、现代物件与额外角色；保持人物脸和服装一致",
+          "转场类型": "动作切",
+          "切镜/转场提示词": "手停在门框时切到桌面信件",
+          "参考图锚定": "人物特写图锁脸，场景图锁空间；排除分镜图风格污染",
+          "覆盖原文": "她走近桌子。",
+          "原文依据类型": "直接动作",
+          "原文支撑句": "她走近桌子。",
+          "生成批次": "B01"
+        }
+      ],
+      "batches": [
+        {
+          "批次编号": "B01",
+          "覆盖镜头": [
+            "S001",
+            "S002"
+          ],
+          "时长": 8.0,
+          "主运镜": "推镜头",
+          "生成限制": "一个主运镜；保持角色和光线连续"
+        }
+      ],
+      "total_duration": 8.0
+    },
+    "valid_archive": {
+      "project_version": "V16.3-148-R10-StableRuntime",
+      "schema_version": "R10.0",
+      "field_order": [
+        "镜头编号",
+        "时长",
+        "累计时长",
+        "功能类型",
+        "场景连续性ID",
+        "镜头类型",
+        "可见主体",
+        "机位",
+        "运镜方式",
+        "运镜主体",
+        "运镜功能",
+        "人物调度",
+        "画面内容",
+        "动作与表演",
+        "台词",
+        "音色",
+        "发声方式",
+        "标点语气",
+        "心理音轨",
+        "心理音轨属性",
+        "环境音效",
+        "环境动态",
+        "光影",
+        "光源来源",
+        "光源方向",
+        "色温倾向",
+        "生成限制",
+        "转场类型",
+        "切镜/转场提示词",
+        "参考图锚定",
+        "覆盖原文",
+        "原文依据类型",
+        "原文支撑句",
+        "生成批次"
+      ],
+      "source_lock": {
+        "上集终点": "上一集结束于她走到门前。",
+        "本集起点": "她推门进屋。",
+        "本集计划终点": "她看见桌上的信。",
+        "下一集起点": "她伸手拿起信。",
+        "禁止重复": "不重复上一集走到门前的过程。",
+        "禁止提前": "不提前展示信中内容。"
+      },
+      "shots": [
+        {
+          "镜头编号": "S001",
+          "时长": 4.0,
+          "累计时长": 4.0,
+          "功能类型": "动作推进",
+          "场景连续性ID": "SC01",
+          "镜头类型": "中景",
+          "可见主体": "女主上半身、面部与双手可见",
+          "机位": "平视中机位，人物正侧45度",
+          "运镜方式": "推镜头",
+          "运镜主体": "女主",
+          "运镜功能": "聚焦注意力",
+          "人物调度": "女主从门边进入画面并停在桌前",
+          "画面内容": "女主推门后看向桌上的信件",
+          "动作与表演": "嘴角自然放松，目光看向桌面，右手扶住门框，肩膀缓慢落下",
+          "台词": "无",
+          "音色": "不适用：无台词",
+          "发声方式": "不适用：无台词",
+          "标点语气": "不适用：无台词",
+          "心理音轨": "无",
+          "心理音轨属性": "不适用：无心理音轨",
+          "环境音效": "木门轻响、室内细微风声",
+          "环境动态": "窗纱轻动，桌面纸角微颤",
+          "光影": "窗侧暖光勾勒人物与门框，氛围平静",
+          "光源来源": "窗纸透入的日光",
+          "光源方向": "画面左侧至右侧",
+          "色温倾向": "暖中性",
+          "生成限制": "禁止字幕、BGM、现代物件与额外角色；保持人物脸和服装一致",
+          "转场类型": "动作切",
+          "切镜/转场提示词": "手停在门框时切到桌面信件",
+          "参考图锚定": "人物特写图锁脸，场景图锁空间；排除分镜图风格污染",
+          "覆盖原文": "她推门进屋，看见桌上的信。",
+          "原文依据类型": "直接动作+道具信息",
+          "原文支撑句": "她推门进屋，看见桌上的信。",
+          "生成批次": "B01"
+        }
+      ],
+      "batches": [
+        {
+          "批次编号": "B01",
+          "覆盖镜头": [
+            "S001"
+          ],
+          "时长": 4.0,
+          "主运镜": "推镜头",
+          "生成限制": "一个主运镜；保持角色和光线连续"
+        }
+      ],
+      "total_duration": 4.0,
+      "stage_evidence": {
+        "STAGE-A": {
+          "status": "pass",
+          "evidence": "STAGE-A test evidence"
+        },
+        "STAGE-B": {
+          "status": "pass",
+          "evidence": "STAGE-B test evidence"
+        },
+        "STAGE-C": {
+          "status": "pass",
+          "evidence": "STAGE-C test evidence"
+        },
+        "STAGE-D": {
+          "status": "pass",
+          "evidence": "STAGE-D test evidence"
+        }
+      },
+      "human_review": {
+        "最终归档": "approved",
+        "签名": "TEST-SIGNATURE"
+      }
+    }
+  },
+  "tests": [
+    {
+      "test_id": "G-R10-BASE-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-FINAL-999"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-01-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "推镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "强化情绪"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "推镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-02-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "拉镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "孤独感"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "拉镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-03-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "后跟镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "代入感"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "后跟镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-04-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "侧跟镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "展示动作"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "侧跟镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-05-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "前跟镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "情绪冲击"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "前跟镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-06-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "360°环绕镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "主角感"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "360°环绕镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-07-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "升镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "宏伟"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "升镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-08-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "降镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "渺小感"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "降镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-09-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "摇镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "信息展示"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "摇镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-10-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "斜俯镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "不安"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "斜俯镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-11-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "平移镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "空间流动"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "平移镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-12-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "希区柯克变焦"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "恐惧"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "希区柯克变焦"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-13-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "轨道镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "稳定推进"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "轨道镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-14-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "手持镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "真实感"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "手持镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-15-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "肩扛镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "纪实感"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "肩扛镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-MOTION-16-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "旋转镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "女主"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.运镜功能",
+          "value": "眩晕"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "旋转镜头"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-MOTION-001",
+        "E-MOTION-002",
+        "E-MOTION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-EXPR-ABSTRACT",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.功能类型",
+          "value": "情绪反应"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.动作与表演",
+          "value": "她很伤心"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-EXPRESSION-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-EXPR-INSUFFICIENT",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.功能类型",
+          "value": "情绪反应"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.动作与表演",
+          "value": "嘴角轻压，眼神低垂"
+        }
+      ],
+      "expected_status": "warning",
+      "expected_error_codes": [
+        "E-EXPRESSION-002"
+      ],
+      "forbidden_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-VIS-BOOK-FACE",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.镜头类型",
+          "value": "书页特写"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.可见主体",
+          "value": "书页和手指可见"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.动作与表演",
+          "value": "她眼睛睁大，嘴角僵住"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-VIS-005"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-BLINK-4S-EXCESS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.功能类型",
+          "value": "情绪反应"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.动作与表演",
+          "value": "嘴角轻抿，眼神停住，右手攥袖口，肩颈收紧，说话过程中2-3次自然眨眼"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-EXPRESSION-003"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-BLINK-4S-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.动作与表演",
+          "value": "嘴角自然，眼神停在信封，右手扶门框，肩膀放松，说话过程中1次自然眨眼"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-EXPRESSION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-BLINK-SYNC",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.可见主体",
+          "value": "两人面部与双手可见"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.动作与表演",
+          "value": "两人同时眨眼，嘴角收住，目光相对，双手停下，肩颈僵住"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-EXPRESSION-003"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-MOTION-VAGUE",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜方式",
+          "value": "高级电影感运镜"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-MOTION-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-MOTION-NO-SUBJECT",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.运镜主体",
+          "value": "无"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-MOTION-002"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-LIGHT-VAGUE",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.光影",
+          "value": "电影感"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.光源来源",
+          "value": "无"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.光源方向",
+          "value": "无"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.色温倾向",
+          "value": "无"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-LIGHT-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-LIGHT-CONTINUITY",
+      "fixture_id": "valid_two_shot",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.1.光源方向",
+          "value": "画面右侧至左侧"
+        }
+      ],
+      "expected_status": "warning",
+      "expected_error_codes": [
+        "E-LIGHT-002"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-LIGHT-UNDER-ROMANCE",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.功能类型",
+          "value": "浪漫关系戏"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.光影",
+          "value": "有源底光照亮人物面部"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.光源来源",
+          "value": "烛火从下方照脸"
+        }
+      ],
+      "expected_status": "warning",
+      "expected_error_codes": [
+        "E-LIGHT-002"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-VOICE-PASS",
+      "fixture_id": "valid_dialogue",
+      "mode": "audit",
+      "mutations": [],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-VOICE-001",
+        "E-PUNCT-004",
+        "E-DIALOGUE-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-VOICE-MISSING-DIMS",
+      "fixture_id": "valid_dialogue",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.发声方式",
+          "value": "温柔地说"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-VOICE-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PUNCT-MISSING",
+      "fixture_id": "valid_dialogue",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.标点语气",
+          "value": "无"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-PUNCT-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-DIALOGUE-CAPACITY",
+      "fixture_id": "valid_dialogue",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.时长",
+          "value": 1.0
+        },
+        {
+          "op": "set",
+          "path": "shots.0.累计时长",
+          "value": 1.0
+        },
+        {
+          "op": "set",
+          "path": "batches.0.时长",
+          "value": 4.0
+        },
+        {
+          "op": "set",
+          "path": "total_duration",
+          "value": 1.0
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-DIALOGUE-003"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PSYCH-PASS",
+      "fixture_id": "valid_psych",
+      "mode": "audit",
+      "mutations": [],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-PSYCH-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-PSYCH-UNSAFE",
+      "fixture_id": "valid_psych",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.心理音轨属性",
+          "value": "后期旁白"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-PSYCH-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-BATCH-SHORT",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "batches.0.时长",
+          "value": 3.5
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-BATCH-002"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-BATCH-WARN-LONG",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "batches.0.时长",
+          "value": 13.0
+        }
+      ],
+      "expected_status": "warning",
+      "expected_error_codes": [
+        "E-BATCH-003"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-BATCH-FAIL-LONG",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "batches.0.时长",
+          "value": 16.0
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-BATCH-004"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-BATCH-MULTI-MOTION",
+      "fixture_id": "valid_two_shot",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.1.运镜方式",
+          "value": "拉镜头"
+        },
+        {
+          "op": "set",
+          "path": "shots.1.运镜功能",
+          "value": "信息揭示"
+        },
+        {
+          "op": "set",
+          "path": "batches.0.主运镜",
+          "value": "推镜头+拉镜头"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-BATCH-004"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-FIELD-MISSING",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "delete",
+          "path": "shots.0.原文依据类型"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-TEMPLATE-008"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-FIELD-ORDER",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "field_order",
+          "value": [
+            "生成批次",
+            "原文支撑句",
+            "原文依据类型",
+            "覆盖原文",
+            "参考图锚定",
+            "切镜/转场提示词",
+            "转场类型",
+            "生成限制",
+            "色温倾向",
+            "光源方向",
+            "光源来源",
+            "光影",
+            "环境动态",
+            "环境音效",
+            "心理音轨属性",
+            "心理音轨",
+            "标点语气",
+            "发声方式",
+            "音色",
+            "台词",
+            "动作与表演",
+            "画面内容",
+            "人物调度",
+            "运镜功能",
+            "运镜主体",
+            "运镜方式",
+            "机位",
+            "可见主体",
+            "镜头类型",
+            "场景连续性ID",
+            "功能类型",
+            "累计时长",
+            "时长",
+            "镜头编号"
+          ]
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-FIELDORDER-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-SOURCE-LOCK",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "delete",
+          "path": "source_lock.下一集起点"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-SOURCE-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-BOOK-SPLIT-PASS",
+      "fixture_id": "valid_book_split",
+      "mode": "audit",
+      "mutations": [],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-VIS-005",
+        "E-EXPRESSION-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-ARCHIVE-NO-SIGNOFF",
+      "fixture_id": "valid_base",
+      "mode": "archive",
+      "mutations": [],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-BOOTSTRAP-001",
+        "E-ARCHIVE-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-ARCHIVE-PASS",
+      "fixture_id": "valid_archive",
+      "mode": "archive",
+      "mutations": [],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-ARCHIVE-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-PG1-PROFILE-MISSING",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "delete",
+          "path": "workflow_profile"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-GATE-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-SCOPE-REVISION",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "prevention_evidence.scope_lock.active_rule_revision",
+          "value": "R10-OLD"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-GATE-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-SOURCE-TARGET-MISSING",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "prevention_evidence.source_ledger.0.target_shots",
+          "value": []
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-SOURCE-005"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-MUST-INCLUDE-MISSING",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "append",
+          "path": "prevention_evidence.change_lock.must_include",
+          "value": "未进入分镜的关键对白"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-SOURCE-005"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-OLD-CONTENT-RESIDUE",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "append",
+          "path": "prevention_evidence.change_lock.must_exclude",
+          "value": "看向桌上的信件"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-CHANGELOCK-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-COGNITION-INCOMPLETE",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "delete",
+          "path": "prevention_evidence.cognition_matrix.0.does_not_know"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-COGNITION-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-CONTINUITY-MISMATCH",
+      "fixture_id": "valid_two_shot",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "prevention_evidence.scene_state_ledger.1.start_state.人物位置",
+          "value": "院外另一处"
+        },
+        {
+          "op": "set",
+          "path": "prevention_evidence.scene_state_ledger.1.transition_explanation",
+          "value": "无"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-CONTINUITY-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-MULTI-VIEWPOINT",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "prevention_evidence.shot_plan.0.viewpoint_count",
+          "value": 2
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-SHOTLOAD-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-NONFUNCTIONAL-CLOSEUP",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "prevention_evidence.shot_plan.0.is_detail_shot",
+          "value": true
+        },
+        {
+          "op": "set",
+          "path": "prevention_evidence.shot_plan.0.detail_shot_function",
+          "value": "无"
+        }
+      ],
+      "expected_status": "warning",
+      "expected_error_codes": [
+        "E-SHOTFRAG-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-PERFORMANCE-CHAIN-MISSING",
+      "fixture_id": "valid_dialogue",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "delete",
+          "path": "prevention_evidence.performance_chains.0.stimulus"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-PERFORMANCE-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-I2V-CONTEXT-DEPENDENCY",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "batches.0.独立执行提示词",
+          "value": "承接上一镜，保持关键帧中的人物站位继续原动作。"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-I2V-INDEP-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-I2V-FIELD-MISSING",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "delete",
+          "path": "batches.0.结束状态"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-I2V-INDEP-002"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-BGM-IN-I2V",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "batches.0.独立执行提示词",
+          "value": "人物走向桌面，同时加入BGM并让背景音乐渐入。"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-AUDIO-STAGE-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-REPAIR-CLEAN-PASS",
+      "fixture_id": "valid_base",
+      "mode": "repair",
+      "mutations": [
+        {
+          "op": "append",
+          "path": "prevention_evidence.repair_history",
+          "value": {
+            "round": 1,
+            "initial_issue_count": 10,
+            "residual_issue_count": 0,
+            "introduced_issue_count": 0,
+            "repeat_rounds": 1,
+            "action": "local_fix_and_neighbor_regression"
+          }
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-REGRESSION-001",
+        "E-REGRESSION-002",
+        "E-SYSTEMIC-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-PG1-REPAIR-RESIDUAL",
+      "fixture_id": "valid_base",
+      "mode": "repair",
+      "mutations": [
+        {
+          "op": "append",
+          "path": "prevention_evidence.repair_history",
+          "value": {
+            "round": 1,
+            "initial_issue_count": 10,
+            "residual_issue_count": 1,
+            "introduced_issue_count": 0,
+            "repeat_rounds": 1,
+            "action": "local_fix_and_neighbor_regression"
+          }
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-REGRESSION-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-REPAIR-SIDE-EFFECT",
+      "fixture_id": "valid_base",
+      "mode": "repair",
+      "mutations": [
+        {
+          "op": "append",
+          "path": "prevention_evidence.repair_history",
+          "value": {
+            "round": 1,
+            "initial_issue_count": 10,
+            "residual_issue_count": 0,
+            "introduced_issue_count": 1,
+            "repeat_rounds": 1,
+            "action": "local_fix_and_neighbor_regression"
+          }
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-REGRESSION-002"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-SECOND-ROUND-ESCALATION",
+      "fixture_id": "valid_base",
+      "mode": "repair",
+      "mutations": [
+        {
+          "op": "append",
+          "path": "prevention_evidence.repair_history",
+          "value": {
+            "round": 2,
+            "initial_issue_count": 10,
+            "residual_issue_count": 0,
+            "introduced_issue_count": 0,
+            "repeat_rounds": 2,
+            "action": "local_fix_and_neighbor_regression"
+          }
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-SYSTEMIC-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-THIRD-ROUND-REBUILD",
+      "fixture_id": "valid_base",
+      "mode": "repair",
+      "mutations": [
+        {
+          "op": "append",
+          "path": "prevention_evidence.repair_history",
+          "value": {
+            "round": 3,
+            "initial_issue_count": 10,
+            "residual_issue_count": 0,
+            "introduced_issue_count": 0,
+            "repeat_rounds": 3,
+            "action": "root_cause_repair"
+          }
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-SYSTEMIC-001"
+      ],
+      "forbidden_error_codes": []
+    }
+  ]
+}
