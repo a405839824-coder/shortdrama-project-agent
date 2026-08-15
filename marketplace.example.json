@@ -1,0 +1,21 @@
+{
+  "name": "shortdrama-local-plugins",
+  "interface": {
+    "displayName": "本地分镜插件"
+  },
+  "plugins": [
+    {
+      "name": "shortdrama-project-agent",
+      "source": {
+        "source": "local",
+        "path": "./plugins/shortdrama-project-agent"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
+

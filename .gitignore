@@ -1,0 +1,10 @@
+.venv/
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+.app.json
+.env.cloud
+.railway.env
+.railway/

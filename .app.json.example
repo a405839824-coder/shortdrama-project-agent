@@ -1,0 +1,9 @@
+{
+  "apps": {
+    "shortdrama-project-agent": {
+      "id": "plugin_asdk_app_REPLACE_AFTER_CHATGPT_CONNECTION_CREATION",
+      "required": true
+    }
+  }
+}
+
