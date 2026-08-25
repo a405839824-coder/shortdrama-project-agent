@@ -34,6 +34,13 @@
       "approval_policy": "read_only"
     },
     {
+      "operation": "chapter_intake",
+      "group": "剧情策划",
+      "status": "supported",
+      "output": "完整读取证明、章节边界、剧情事件与因果地图、人物状态认知、源文取舍、对白保护、时长预算和节拍计划",
+      "approval_policy": "read_only"
+    },
+    {
       "operation": "story_diagnosis",
       "group": "剧情策划",
       "status": "supported",
@@ -128,7 +135,7 @@
       "operation": "storyboard_create",
       "group": "分镜工作流",
       "status": "supported",
-      "output": "R10正式分镜、原文映射和独立Seedance批次",
+      "output": "R10正式分镜、章节/原文映射和Seedance 2.5独立正式执行分镜",
       "approval_policy": "explicit_execute"
     },
     {
@@ -163,7 +170,7 @@
       "operation": "seedance_create",
       "group": "视频生产",
       "status": "supported",
-      "output": "脱离GPT上下文可独立执行的Seedance/i2v提示词与批次",
+      "output": "脱离GPT上下文可独立执行的Seedance 2.5正式提示词与批次",
       "approval_policy": "explicit_execute"
     },
     {
