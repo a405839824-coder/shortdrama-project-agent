@@ -4,12 +4,18 @@
     "task_name": "分镜生成",
     "trigger_user_phrases": [
       "分镜",
-      "生成分镜"
+      "生成分镜",
+      "小说转分镜",
+      "章节转分镜"
     ],
     "must_call_modules": [
       "BOOTSTRAP",
       "SOURCE",
       "BOUNDARY",
+      "CHAPTER_INTAKE_IF_NOVEL",
+      "SOURCE_SELECTION_IF_NOVEL",
+      "ADAPTATION_BUDGET_IF_NOVEL",
+      "CHAPTER_COVERAGE_AUDIT_IF_NOVEL",
       "TEMPLATE",
       "VISIBILITY",
       "EXPRESSION",
@@ -1052,11 +1058,16 @@
     "task_package_id": "TP-JIMENG-SHORT",
     "task_name": "即梦精简提示词",
     "trigger_user_phrases": [
-      "即梦精简"
+      "即梦精简",
+      "即梦提示词",
+      "即梦时间码",
+      "画面内容里的时间描述",
+      "时间描述对即梦是否有作用"
     ],
     "must_call_modules": [
       "BOOTSTRAP",
       "I2V_CORE",
+      "JIMENG_TIMING",
       "NEGATIVE_PROMPT",
       "PSYCH"
     ],
@@ -1075,6 +1086,8 @@
     "minimum_output_required": [
       "执行版本",
       "触发模块",
+      "目标模型与版本",
+      "时间描述路由结论",
       "证据",
       "问题与修复",
       "最终状态"
@@ -1647,6 +1660,81 @@
       "规则版本变化"
     ],
     "final_status_field": "tp_final_archive_status",
+    "allowed_final_status": [
+      "pass",
+      "pass_with_note",
+      "warning",
+      "fail_current",
+      "unable_to_check"
+    ],
+    "version": "V16.3-148-R10-StableRuntime",
+    "workflow_profile_required": "R10-PG1"
+  },
+  {
+    "task_package_id": "TP-NOVEL-TO-STORYBOARD",
+    "task_name": "小说章节到分镜",
+    "trigger_user_phrases": [
+      "小说转分镜",
+      "章节转分镜",
+      "原著改编分镜",
+      "小说内容选取"
+    ],
+    "must_call_modules": [
+      "BOOTSTRAP",
+      "CHAPTER_INTAKE",
+      "CHAPTER_MAP",
+      "SOURCE_SELECTION",
+      "DIALOGUE_PROTECTION",
+      "CHARACTER_STATE",
+      "COGNITION",
+      "ADAPTATION_BUDGET",
+      "BEAT_PLAN",
+      "SOURCE_EXPANSION",
+      "SOURCE",
+      "BOUNDARY",
+      "SHOT_GRANULARITY",
+      "TEMPLATE",
+      "I2V_INDEPENDENCE",
+      "CHAPTER_COVERAGE_AUDIT",
+      "LAYERED_AUDIT",
+      "QUALITY_METRICS"
+    ],
+    "forbidden_skip_items": [
+      "完整章节读取证明",
+      "上一章与下一章边界",
+      "核心事件和因果链",
+      "每个源文单元的保留合并压缩移动删除去向",
+      "关键对白与人物状态认知变化",
+      "时长和镜头数预算",
+      "章节生成前与生成后覆盖审计",
+      "Seedance 2.5独立正式执行分镜"
+    ],
+    "minimum_input_required": [
+      "授权章节完整文本或全部分块",
+      "章节/分集目标与目标时长",
+      "可获得的前后章节边界"
+    ],
+    "minimum_output_required": [
+      "source_ingestion完整证据",
+      "章节剧情地图与无损取舍台账",
+      "节拍计划和正式R10分镜",
+      "Seedance 2.5独立正式执行分镜",
+      "章节覆盖审计和镜头级审计结论"
+    ],
+    "blocking_conditions": [
+      "章节未完整读取",
+      "源文歧义未解决",
+      "任一核心覆盖率不足100%",
+      "无证据删除或新增原文外剧情",
+      "最低对白动作转场时长超过目标预算"
+    ],
+    "rerun_conditions": [
+      "章节或边界文本变化",
+      "取舍、对白或人物认知变化",
+      "节拍或镜头结构变化",
+      "规则或目标模型版本变化"
+    ],
+    "final_status_field": "tp_novel_to_storyboard_status",
     "allowed_final_status": [
       "pass",
       "pass_with_note",
