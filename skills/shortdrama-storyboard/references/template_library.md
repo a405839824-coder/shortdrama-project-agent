@@ -338,11 +338,12 @@
 - 失败标准：多视角、隐形切镜、站桩对白、只动嘴、动作只写结果即fail；无功能特写warning。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
-## TPL-R10-43 Seedance独立执行批次模板
+## TPL-R10-43 Seedance 2.5独立正式执行分镜模板
 
-- 触发条件：生成任何Seedance/i2v正式批次
+- 触发条件：生成任何Seedance 2.5/i2v正式批次或10列正式母版
 - 字段顺序：批次编号｜覆盖镜头｜时长｜起始画面｜起始表演状态｜动作过程｜听话反应｜结束状态｜摄影机｜声音｜环境动态｜光影｜独立执行提示词｜主运镜｜生成限制
-- 必填规则：每格可脱离历史上下文独立执行；4–15秒；单批一个主运镜；Seedance阶段禁止BGM。
+- 对外列名：`Seedance 2.5独立正式执行分镜`
+- 必填规则：每格可脱离历史上下文独立执行；默认4–15秒；单批一个主运镜；Seedance阶段禁止BGM；时间戳只进入模型专用提示词。
 - 失败标准：出现承接上一镜、保持关键帧、同上、延续之前等代指，或独立十字段缺失即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
@@ -352,4 +353,28 @@
 - 字段顺序：round｜problem_group｜initial_issue_count｜residual_issue_count｜introduced_issue_count｜repeat_rounds｜root_cause｜allowed_change_scope｜protected_scope｜action｜regression_scope｜result
 - 必填规则：第1轮局部修正并查相邻；第2轮root_cause_repair；第3轮及以后rebuild_upstream。
 - 失败标准：原问题残留、修正新增问题、越界修改、连续多轮仍打局部补丁即fail。
+- 输出状态：pass / warning / fail_current / unable_to_check
+
+## TPL-R10-45 章节整体读取与剧情地图模板
+
+- 触发条件：小说章节或连续叙事直接转剧本、节拍或分镜
+- 字段顺序：chapter_id｜complete_read｜chunk_count｜chunks_read｜previous_end｜current_start｜current_end｜next_start｜chapter_goal｜events｜causal_links｜uncertainty_status
+- 必填规则：可分块读取但必须全部读完并合并；事件有稳定ID和源文单元；歧义未解决不得进入生成。
+- 失败标准：边读边生成、章节边界缺失、核心事件或因果链为空、未解决歧义仍继续即fail。
+- 输出状态：pass / warning / fail_current / unable_to_check
+
+## TPL-R10-46 源文取舍、对白与人物变化模板
+
+- 触发条件：章节整体解析完成后进行内容取舍
+- 字段顺序：source_unit_id｜source_type｜source_text｜value_axes｜value_grade｜cinematic_function｜treatment｜target_beats｜reason｜authorization｜redundancy_evidence｜retained_function_in｜protected_dialogue_functions｜character_start_state｜trigger_event_ids｜character_end_state｜cognition_before｜cognition_after｜forbidden_knowledge
+- 必填规则：S/A/B/C仅为多轴评估后的等级；C级不得自动删除；删除必须有授权或冗余证据；关键对白、人物状态和认知变化必须映射节拍。
+- 失败标准：源文单元未处理、关键对白无去向、人物提前知情、无证据删除或电影功能丢失即fail。
+- 输出状态：pass / warning / fail_current / unable_to_check
+
+## TPL-R10-47 改编预算、节拍与章节覆盖模板
+
+- 触发条件：源文取舍完成、正式拆镜之前及生成之后
+- 字段顺序：target_duration_seconds｜dialogue_seconds｜action_seconds｜transition_seconds｜shot_count_min｜shot_count_max｜beat_id｜core_stage｜event_ids｜source_unit_ids｜entry_state｜exit_state｜target_duration_seconds｜shot_count_range｜function｜core_event_coverage_percent｜causal_link_coverage_percent｜character_state_change_coverage_percent｜protected_dialogue_coverage_percent｜source_treatment_percent
+- 必填规则：先预算后镜头；保护对白按2.8汉字/秒加停顿计算；所有覆盖指标必须100%；单镜一个核心阶段但允许同阶段连续动作链。
+- 失败标准：最低时长超预算、事件未进节拍、固定镜头数挤压高潮或任一覆盖率不足100%即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check
