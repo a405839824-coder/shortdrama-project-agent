@@ -444,6 +444,18 @@
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
+    "validator_rule_id": "V-R10-PG1-039",
+    "module": "JIMENG_TIMING",
+    "handler": "check_formal_visual_timecodes",
+    "severity": "warning",
+    "error_code": "E-JIMENG-TIMING-001",
+    "applies_when": "正式镜头画面内容或10列母版D列由该字段导出",
+    "pass_condition": "正式画面内容无硬时间码；数字制作时间仅留在动作与表演或已验证模型的独立提示词",
+    "repair_action": "将硬时间码改写为起始、随后、动作完成时、镜尾等自然阶段",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
     "validator_rule_id": "V-R10-PG1-038",
     "module": "SYSTEMIC_ESCALATION",
     "handler": "check_repeat_round_escalation",
@@ -452,6 +464,66 @@
     "applies_when": "同一问题连续出现2轮以上",
     "pass_condition": "第2轮根因修复；第3轮及以后回退上游重建",
     "repair_action": "停止重复局部补丁并执行升级动作",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-040",
+    "module": "CHAPTER_INTAKE",
+    "handler": "check_complete_chapter_intake",
+    "severity": "fail",
+    "error_code": "E-CHAPTER-INTAKE-001",
+    "applies_when": "source_ingestion.mode=chapter_to_storyboard",
+    "pass_condition": "整章分块全部读完，前后边界、章节目标、事件因果、人物状态和歧义状态完整",
+    "repair_action": "停止生成并重建章节读取与剧情地图证据",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-041",
+    "module": "SOURCE_SELECTION",
+    "handler": "check_source_treatment_and_dialogue_protection",
+    "severity": "fail",
+    "error_code": "E-SOURCE-SELECT-001",
+    "applies_when": "章节取舍台账存在",
+    "pass_condition": "每个源文单元有多轴等级与去向；删除证据成立；保护对白和非删除内容映射有效节拍",
+    "repair_action": "重建无损取舍台账和对白节拍映射",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-042",
+    "module": "ADAPTATION_BUDGET",
+    "handler": "check_adaptation_budget_and_beat_map",
+    "severity": "fail",
+    "error_code": "E-CHAPTER-BUDGET-001",
+    "applies_when": "source_ingestion.mode=chapter_to_storyboard",
+    "pass_condition": "最低对白动作转场时长可行、镜头数范围有效、全部事件进入节拍",
+    "repair_action": "重新取舍、调时长或重排节拍后再生成",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-043",
+    "module": "SOURCE_EXPANSION",
+    "handler": "check_visualization_license_and_no_new_plot",
+    "severity": "fail",
+    "error_code": "E-SOURCE-EXPANSION-001",
+    "applies_when": "小说内容被视觉化",
+    "pass_condition": "new_plot_events为空；条件外化有源文映射且plot_change=false",
+    "repair_action": "移除新增剧情并改用不改变剧情的可见细节",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-044",
+    "module": "I2V_INDEPENDENCE",
+    "handler": "check_seedance_25_formal_execution_column",
+    "severity": "fail",
+    "error_code": "E-SEEDANCE-VERSION-001",
+    "applies_when": "mother_template_columns存在",
+    "pass_condition": "正式母版包含Seedance 2.5独立正式执行分镜列且不沿用2.0列名",
+    "repair_action": "迁移列名并按Seedance 2.5路由生成独立提示词",
     "implementation": "scripts/validate_storyboard.py",
     "version": "V16.3-148-R10-StableRuntime"
   }
