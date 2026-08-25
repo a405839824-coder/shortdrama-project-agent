@@ -135,6 +135,8 @@ def verify_bundled(self_test: bool) -> dict:
         refs / "full_agent_runtime.md",
         refs / "project_agent_capabilities.json",
         refs / "project_agent_schema.json",
+        refs / "jimeng_timing_policy.md",
+        refs / "novel_to_storyboard_intake.md",
         root / "scripts" / "validate_storyboard.py",
         root / "scripts" / "run_golden_tests.py",
         root / "scripts" / "storyboard_agent.py",
@@ -182,13 +184,13 @@ def verify_bundled(self_test: bool) -> dict:
         "golden_tests": len(read_json(refs / "golden_tests.json").get("tests", [])),
     }
     expected_structural = {
-        "conflicts": 26,
-        "task_cards": 29,
-        "validators": 38,
-        "error_codes": 52,
-        "atomic_rules": 137,
-        "templates": 44,
-        "golden_tests": 62,
+        "conflicts": 29,
+        "task_cards": 30,
+        "validators": 44,
+        "error_codes": 58,
+        "atomic_rules": 149,
+        "templates": 47,
+        "golden_tests": 73,
     }
     policy = runtime.get("preventive_gate_policy", {})
     preventive_counts = {
@@ -200,7 +202,7 @@ def verify_bundled(self_test: bool) -> dict:
         "audit_layers": len(policy.get("audit_layer_order", [])),
     }
     expected_preventive = {
-        "ordered_gates": 11,
+        "ordered_gates": 14,
         "required_evidence_blocks": 10,
         "state_vector_fields": 7,
         "performance_chain_fields": 7,
