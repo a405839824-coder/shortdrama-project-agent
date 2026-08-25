@@ -35,6 +35,7 @@ STORYBOARD_OPERATIONS = {
 }
 
 PLAN_ARTIFACT_TYPES = {
+    "chapter_intake",
     "novel_analysis",
     "story_diagnosis",
     "hook_plan",
@@ -81,7 +82,9 @@ def _find_work_order(hub: dict[str, Any], work_order_id: str) -> dict[str, Any]:
 
 def _issue_category(error_code: str) -> str:
     code = error_code.upper()
-    if any(term in code for term in ("SOURCE", "DIALOGUE", "COGNITION", "CHANGELOCK")):
+    if "CHAPTER-BUDGET" in code:
+        return "镜头节奏"
+    if any(term in code for term in ("SOURCE", "DIALOGUE", "COGNITION", "CHANGELOCK", "CHAPTER-INTAKE")):
         return "源文对白"
     if any(term in code for term in ("CAMERA", "VISIBLE", "VISIBILITY")):
         return "机位可见性"

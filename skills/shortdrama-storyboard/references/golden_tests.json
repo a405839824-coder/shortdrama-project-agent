@@ -2141,6 +2141,204 @@
         "E-SYSTEMIC-001"
       ],
       "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-JIMENG-TIMECODE-IN-VISUAL",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.画面内容",
+          "value": "0—2秒女主推门；2—4秒女主看向桌上的信。"
+        }
+      ],
+      "expected_status": "warning",
+      "expected_error_codes": [
+        "E-JIMENG-TIMING-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-JIMENG-INTERNAL-TIMELINE-ALLOWED",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.动作与表演",
+          "value": "0—2秒右手推门；2—4秒手停在门框，视线转向信件。"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-JIMENG-TIMING-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-PG1-JIMENG-NATURAL-PHASES-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.画面内容",
+          "value": "起始时女主推门；随后视线转向桌上的信；镜尾手停在门框。"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-JIMENG-TIMING-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-PG1-CHAPTER-INTAKE-PASS",
+      "fixture_id": "valid_base",
+      "inject_chapter_intake": true,
+      "mode": "audit",
+      "mutations": [],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-CHAPTER-INTAKE-001",
+        "E-SOURCE-SELECT-001",
+        "E-CHAPTER-BUDGET-001",
+        "E-SOURCE-EXPANSION-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-PG1-CHAPTER-INCOMPLETE-READ",
+      "fixture_id": "valid_base",
+      "inject_chapter_intake": true,
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "source_ingestion.chunks_read",
+          "value": 1
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-CHAPTER-INTAKE-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-SOURCE-UNAUTHORIZED-DELETE",
+      "fixture_id": "valid_base",
+      "inject_chapter_intake": true,
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "source_ingestion.source_treatment_ledger.0.treatment",
+          "value": "删除"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-SOURCE-SELECT-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-PROTECTED-DIALOGUE-COVERAGE",
+      "fixture_id": "valid_base",
+      "inject_chapter_intake": true,
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "source_ingestion.coverage_metrics.protected_dialogue_coverage_percent",
+          "value": 80
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-SOURCE-SELECT-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-CHAPTER-BUDGET-OVERLOAD",
+      "fixture_id": "valid_base",
+      "inject_chapter_intake": true,
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "source_ingestion.adaptation_budget.target_duration_seconds",
+          "value": 8
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-CHAPTER-BUDGET-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-SOURCE-EXPANSION-FORBIDDEN",
+      "fixture_id": "valid_base",
+      "inject_chapter_intake": true,
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "append",
+          "path": "source_ingestion.new_plot_events",
+          "value": "女主无原文依据地摔倒并打翻油灯"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-SOURCE-EXPANSION-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-PG1-SEEDANCE25-COLUMN-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "mother_template_columns",
+          "value": [
+            "时间码",
+            "画面内容",
+            "Seedance 2.5独立正式执行分镜"
+          ]
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-SEEDANCE-VERSION-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-PG1-SEEDANCE20-COLUMN-FAIL",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "mother_template_columns",
+          "value": [
+            "时间码",
+            "画面内容",
+            "Seedance 2.0独立正式执行分镜"
+          ]
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-SEEDANCE-VERSION-001"
+      ],
+      "forbidden_error_codes": []
     }
   ]
 }

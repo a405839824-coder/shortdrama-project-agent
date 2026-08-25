@@ -95,7 +95,7 @@ def download_openai_file(file: OpenAIFile, settings: Settings) -> tuple[bytes, s
     validate_download_url(file.download_url, settings)
     request = urllib.request.Request(
         file.download_url,
-        headers={"User-Agent": "shortdrama-project-agent/0.1"},
+        headers={"User-Agent": "shortdrama-project-agent/0.2"},
         method="GET",
     )
     opener = urllib.request.build_opener(_SafeRedirectHandler(settings), urllib.request.HTTPSHandler(context=ssl.create_default_context()))

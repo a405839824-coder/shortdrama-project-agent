@@ -83,9 +83,17 @@ Support novel analysis, story diagnosis, hooks, adaptation strategy, episode pla
 
 Do not edit the source artifact in `plan_only` mode.
 
+### Novel or chapter intake
+
+Before a novel chapter becomes a script, beat plan, or storyboard, load `novel_to_storyboard_intake.md` and complete its conditional `source_ingestion` gate. Read the full authorized chapter before generation; long chapters may be extracted in chunks, but no beat or shot may be produced until all chunks are synthesized into one chapter map. Lock previous/current/next boundaries, event topology, causal links, character start-change-end states, cognition limits, protected dialogue, source treatment, adaptation budget, and beat plan.
+
+Use S/A/B/C only as the final value tier after multi-axis judgment. C-grade prose is a deletion candidate, not an automatic deletion: time, space, mood, foreshadowing, transition, and character ecology are valid cinematic functions. Require explicit authorization or redundancy evidence for deletion, preserve any cinematic function elsewhere, and stop on unresolved source ambiguity.
+
+Transform through `source unit → event/beat → shot`; never use one sentence as an automatic one-shot unit. Require a 100% chapter preflight for core events, causal links, character state changes, protected dialogue, and source treatment before formal shot generation, then repeat the coverage audit after generation.
+
 ### Script creation
 
-Create a complete short-drama script from the locked source and episode boundary. Preserve key events and dialogue unless compression, adaptation, or deletion is explicitly authorized. Make motivations visible, track cognition, build emotional progression, and close each episode with a hook or deliberate resolution.
+Create a complete short-drama script from the locked source and episode boundary. For novel input, use the approved chapter map and beat plan rather than converting paragraphs directly. Preserve key events and dialogue unless compression, adaptation, or deletion is explicitly authorized. Make motivations visible, track cognition, build emotional progression, and close each episode with a hook or deliberate resolution.
 
 ### Script rewrite
 
@@ -133,6 +141,8 @@ Any approved story or script change must evaluate these downstream consumers:
 11. Voice, psychological audio, ambience, BGM cues, and transitions.
 12. Audit statistics, change notes, and production batches.
 
+When the authoritative input is a novel chapter, also propagate and validate the complete-read proof, chapter event map, causal graph, character state changes, protected-dialogue mappings, source treatment ledger, adaptation budget, beat plan, and previous/next boundary context. Any upstream change that alters an event, causal link, cognition transition, or protected line invalidates the dependent beats and shots.
+
 Regenerate only the affected units plus boundary neighbors when the upstream structure remains valid. Regenerate the whole episode or scene when episode boundaries, character cognition, scene topology, or the core shot plan changes. Never patch only visible wording when the causal source is upstream.
 
 ### Addition
@@ -158,8 +168,9 @@ Recalculate dialogue capacity, shot load, rhythm, source coverage, continuity, n
 ## Produce visual, video, audio, and delivery assets
 
 - Build character, scene, costume, prop, position, and light anchors before image or video generation.
+- Build a separate visual-texture lock before keyframe, scene-frame, or i2v prompting. For every ancient-costume live-action prompt, load `songyun_humanist_cinematography.md` as the mandatory visual master and apply its real-camera texture, sourced-light method, restrained color logic, lens/depth selection, humanist composition, prompt order, and negative restrictions. For every night or low-light ancient-costume prompt, additionally load `ancient_night_cinematography.md` and apply its motivated practical/ambient sources, distance falloff, half-lit readable faces, transparent shadows, restrained warm/cool color, night-specific lens/depth selection, low-light film texture, continuity, and negative restrictions. Adapt concrete values to the era, time, weather, place, mood, and real light sources. Project aspect ratio, sourced light, visibility, continuity, and reference anchors always override any example value.
 - Generate keyframe prompts with the established real short-drama screenshot style and negative restrictions. Use an image-generation tool when the user requests images and the required references are available.
-- Keep each Seedance batch independent from GPT history and other batches.
+- Keep each Seedance 2.5 batch independent from GPT history and other batches. Export the 10-column mother-template field as `Seedance 2.5独立正式执行分镜`. Keep the stable production range at 4–15 seconds; an explicit long-scene mode may use the officially supported upper limit only after a separate load, timestamp, and continuity review.
 - Design BGM after picture lock from the whole-scene emotional key, narrative function, time motion, frequency space, and audible scene image. Keep BGM out of Seedance prompts.
 - Design dialogue delivery with sound strength, rhythm, breath, pause, emphasis, and ending tone.
 - Convert or export files through the appropriate document or spreadsheet workflow while preserving the canonical field order and formulas.

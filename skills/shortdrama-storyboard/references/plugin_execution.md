@@ -7,6 +7,8 @@
 - A generated or changed deliverable exists only after a commit tool returns an `artifact_id`. State the returned ID and download link briefly.
 - A task passes only after `commit_storyboard` returns `pass`, or `complete_task_validation` returns `pass` for non-storyboard artifacts. Human archive requires an explicit user decision followed by `signoff_task`.
 - If a tool call fails or tools are absent, report the exact blocker. Never replace an execution result with a confident narrative.
+- For novel/chapter input, no formal shot may be generated until the full authorized chapter has been synthesized into one chapter map with source treatment, protected dialogue, character state/cognition, adaptation budget, beat plan, and 100% preflight coverage.
+- The formal 10-column mother-template execution field must be named exactly `Seedance 2.5独立正式执行分镜`; legacy Seedance 2.0 labels are compatibility input only.
 
 ## Standard route
 
@@ -14,12 +16,13 @@
 2. `create_project(project_name)` only when no matching project exists
 3. `begin_project_task(...)` for every request
 4. `import_source_file(...)` and `read_project_artifact(...)` for every required source file
-5. `plan_change_request(...)` before script/storyboard add, modify, delete, replace, merge, split, or move
-6. Generate or rewrite within the locked scope
-7. `commit_project_artifact(...)` for plans, scripts, dialogue, anchors, keyframes, Seedance batches, BGM, voice, statistics, conversion, or production packages
-8. `complete_task_validation(...)` for every non-storyboard deliverable
-9. `commit_storyboard(...)` for a formal storyboard; it also saves JSON/XLSX, runs the eight-layer audit, impact regression, and cross-chat ledger update
-10. `signoff_task(...)` only after the user explicitly approves or asks to reopen
+5. For novel/chapter conversion, finish complete reading and build the conditional `source_ingestion` evidence before planning shots
+6. `plan_change_request(...)` before script/storyboard add, modify, delete, replace, merge, split, or move
+7. Generate or rewrite within the locked scope
+8. `commit_project_artifact(...)` for plans, scripts, dialogue, anchors, keyframes, Seedance 2.5 batches, BGM, voice, statistics, conversion, or production packages
+9. `complete_task_validation(...)` for every non-storyboard deliverable
+10. `commit_storyboard(...)` for a formal storyboard; it also saves JSON/XLSX, runs chapter coverage when triggered, the eight-layer audit, impact regression, and cross-chat ledger update
+11. `signoff_task(...)` only after the user explicitly approves or asks to reopen
 
 ## Audit and repair route
 

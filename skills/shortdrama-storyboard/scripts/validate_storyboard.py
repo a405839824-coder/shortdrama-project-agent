@@ -41,6 +41,9 @@ FACE_TERMS = ["眼睛", "眼神", "目光", "眉", "嘴唇", "嘴角", "瞳孔",
 FACE_VISIBLE_TERMS = ["面部可见", "眼睛可见", "侧脸可见", "人物反应", "过肩同框", "OTS同框"]
 VAGUE_TERMS = ["电影感", "高级感", "氛围感", "自然移动", "高级运镜", "电影感运镜"]
 STATIC_MOTIONS = ["无运镜", "固定镜头", "静态镜头", "固定机位"]
+HARD_TIMECODE_RE = re.compile(
+    r"(?:\d+(?:\.\d+)?\s*(?:-|–|—|~|～|至|到)\s*\d+(?:\.\d+)?\s*秒|第\s*\d+(?:\.\d+)?\s*秒|\d+(?:\.\d+)?\s*秒(?:时|后|内|左右))"
+)
 
 VOICE_DIMENSION_PATTERNS = {
     "声音强弱": re.compile(r"声音|音量|放轻|压低|变亮|变稳|抬高"),
@@ -182,6 +185,318 @@ def _as_number(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _validate_chapter_intake(
+    obj: dict[str, Any],
+    rules: dict[str, Any],
+    catalog: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Validate the conditional novel/chapter-to-storyboard planning gate."""
+    issues: list[dict[str, Any]] = []
+    metrics: dict[str, Any] = {
+        "chapter_intake_active": False,
+        "chapter_complete_read": None,
+        "chapter_core_event_coverage_percent": None,
+        "chapter_causal_link_coverage_percent": None,
+        "chapter_character_state_change_coverage_percent": None,
+        "chapter_protected_dialogue_coverage_percent": None,
+        "chapter_source_treatment_percent": None,
+    }
+    intake = obj.get("source_ingestion")
+    if not isinstance(intake, dict) or intake.get("mode") != "chapter_to_storyboard":
+        return issues, metrics
+
+    metrics["chapter_intake_active"] = True
+    policy = rules.get("modules", {}).get("CHAPTER_INTAKE", {})
+    required_fields = policy.get("required_fields", [])
+    missing = [field for field in required_fields if field not in intake]
+    if missing:
+        issues.append(_issue(
+            catalog,
+            "E-CHAPTER-INTAKE-001",
+            "source_ingestion",
+            f"章节前置规划缺字段：{missing}",
+        ))
+
+    chunk_count = int(_as_number(intake.get("chunk_count"), 0))
+    chunks_read = int(_as_number(intake.get("chunks_read"), 0))
+    complete_read = intake.get("complete_read") is True
+    metrics["chapter_complete_read"] = complete_read and chunk_count >= 1 and chunks_read == chunk_count
+    if not metrics["chapter_complete_read"]:
+        issues.append(_issue(
+            catalog,
+            "E-CHAPTER-INTAKE-001",
+            "source_ingestion.complete_read",
+            f"complete_read={intake.get('complete_read')!r}; chunk_count={chunk_count}; chunks_read={chunks_read}",
+        ))
+
+    boundary = intake.get("boundary_context")
+    boundary_missing = _missing_fields(boundary, policy.get("boundary_fields", []))
+    if boundary_missing:
+        issues.append(_issue(
+            catalog,
+            "E-CHAPTER-INTAKE-001",
+            "source_ingestion.boundary_context",
+            f"章节边界缺字段：{boundary_missing}",
+        ))
+    if is_empty(intake.get("chapter_id")) or is_empty(intake.get("chapter_goal")):
+        issues.append(_issue(
+            catalog,
+            "E-CHAPTER-INTAKE-001",
+            "source_ingestion.chapter_id/chapter_goal",
+            "chapter_id或chapter_goal为空。",
+        ))
+    if intake.get("uncertainty_status") not in {"clear", "resolved"}:
+        issues.append(_issue(
+            catalog,
+            "E-CHAPTER-INTAKE-001",
+            "source_ingestion.uncertainty_status",
+            f"仍有未解决歧义：{intake.get('uncertainty_status')!r}",
+        ))
+
+    events = intake.get("events")
+    event_ids: set[str] = set()
+    event_source_unit_ids: set[str] = set()
+    if not isinstance(events, list) or not events:
+        issues.append(_issue(catalog, "E-CHAPTER-INTAKE-001", "source_ingestion.events", "章节核心事件为空。"))
+        events = []
+    for index, event in enumerate(events, 1):
+        location = f"source_ingestion.events[{index}]"
+        if not isinstance(event, dict):
+            issues.append(_issue(catalog, "E-CHAPTER-INTAKE-001", location, "事件不是对象。"))
+            continue
+        event_missing = _missing_fields(event, ["event_id", "source_unit_ids", "value_grade", "causal_role", "target_beats"])
+        if event_missing or not isinstance(event.get("source_unit_ids"), list) or not isinstance(event.get("target_beats"), list):
+            issues.append(_issue(catalog, "E-CHAPTER-INTAKE-001", location, f"事件字段缺失或类型错误：{event_missing}"))
+            continue
+        event_id = str(event.get("event_id"))
+        if event_id in event_ids:
+            issues.append(_issue(catalog, "E-CHAPTER-INTAKE-001", location, f"重复event_id：{event_id}"))
+        event_ids.add(event_id)
+        event_source_unit_ids.update(str(x) for x in event.get("source_unit_ids", []))
+
+    causal_links = intake.get("causal_links")
+    if not isinstance(causal_links, list) or not causal_links:
+        issues.append(_issue(catalog, "E-CHAPTER-INTAKE-001", "source_ingestion.causal_links", "章节因果链为空。"))
+        causal_links = []
+    for index, link in enumerate(causal_links, 1):
+        missing_link = _missing_fields(link, ["from_event_id", "to_event_id", "relation"])
+        unknown = [
+            str(link.get(field))
+            for field in ("from_event_id", "to_event_id")
+            if not is_empty(link.get(field)) and str(link.get(field)) not in event_ids
+        ] if isinstance(link, dict) else []
+        if missing_link or unknown:
+            issues.append(_issue(
+                catalog,
+                "E-CHAPTER-INTAKE-001",
+                f"source_ingestion.causal_links[{index}]",
+                f"因果字段缺失={missing_link}; 未知事件={unknown}",
+            ))
+
+    state_changes = intake.get("character_state_changes")
+    state_required = [
+        "character", "start_state", "trigger_event_ids", "end_state",
+        "cognition_before", "cognition_after", "forbidden_knowledge",
+    ]
+    if not isinstance(state_changes, list) or not state_changes:
+        issues.append(_issue(catalog, "E-CHAPTER-INTAKE-001", "source_ingestion.character_state_changes", "人物状态变化为空。"))
+        state_changes = []
+    for index, row in enumerate(state_changes, 1):
+        row_missing = _missing_fields(row, state_required)
+        triggers = row.get("trigger_event_ids") if isinstance(row, dict) else None
+        unknown = [str(x) for x in triggers or [] if str(x) not in event_ids] if isinstance(triggers, list) else []
+        if row_missing or not isinstance(triggers, list) or not triggers or unknown:
+            issues.append(_issue(
+                catalog,
+                "E-CHAPTER-INTAKE-001",
+                f"source_ingestion.character_state_changes[{index}]",
+                f"人物变化缺字段={row_missing}; 未知触发事件={unknown}",
+            ))
+
+    beat_plan = intake.get("beat_plan")
+    beat_policy = rules.get("modules", {}).get("ADAPTATION_BUDGET", {})
+    beat_required = beat_policy.get("beat_required_fields", [])
+    beat_ids: set[str] = set()
+    covered_events: set[str] = set()
+    beat_source_unit_ids: set[str] = set()
+    if not isinstance(beat_plan, list) or not beat_plan:
+        issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", "source_ingestion.beat_plan", "节拍计划为空。"))
+        beat_plan = []
+    for index, beat in enumerate(beat_plan, 1):
+        location = f"source_ingestion.beat_plan[{index}]"
+        if not isinstance(beat, dict):
+            issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", location, "节拍不是对象。"))
+            continue
+        beat_missing = _missing_fields(beat, beat_required)
+        if beat_missing:
+            issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", location, f"节拍缺字段：{beat_missing}"))
+            continue
+        beat_id = str(beat.get("beat_id"))
+        beat_ids.add(beat_id)
+        beat_events = beat.get("event_ids")
+        source_units = beat.get("source_unit_ids")
+        shot_range = beat.get("shot_count_range")
+        if not isinstance(beat_events, list) or not beat_events or not isinstance(source_units, list) or not source_units:
+            issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", location, "节拍必须映射事件和源文单元。"))
+        else:
+            unknown = [str(x) for x in beat_events if str(x) not in event_ids]
+            if unknown:
+                issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", location, f"节拍引用未知事件：{unknown}"))
+            covered_events.update(str(x) for x in beat_events if str(x) in event_ids)
+            beat_source_unit_ids.update(str(x) for x in source_units)
+        if (
+            not isinstance(shot_range, list)
+            or len(shot_range) != 2
+            or _as_number(shot_range[0], 0) < 1
+            or _as_number(shot_range[1], 0) < _as_number(shot_range[0], 0)
+        ):
+            issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", location, f"shot_count_range非法：{shot_range!r}"))
+        if _as_number(beat.get("target_duration_seconds"), 0) <= 0:
+            issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", location, "节拍目标时长必须大于0。"))
+    missing_event_beats = sorted(event_ids - covered_events)
+    if missing_event_beats:
+        issues.append(_issue(
+            catalog,
+            "E-CHAPTER-BUDGET-001",
+            "source_ingestion.beat_plan",
+            f"核心事件未进入节拍：{missing_event_beats}",
+        ))
+    for index, event in enumerate(events, 1):
+        if not isinstance(event, dict):
+            continue
+        unknown_beats = [str(x) for x in event.get("target_beats", []) if str(x) not in beat_ids]
+        if unknown_beats:
+            issues.append(_issue(
+                catalog,
+                "E-CHAPTER-BUDGET-001",
+                f"source_ingestion.events[{index}].target_beats",
+                f"事件目标节拍不存在：{unknown_beats}",
+            ))
+
+    selection = rules.get("modules", {}).get("SOURCE_SELECTION", {})
+    value_axes = selection.get("value_axes", [])
+    allowed_grades = set(selection.get("allowed_grades", []))
+    allowed_treatments = set(selection.get("allowed_treatments", []))
+    treatment_rows = intake.get("source_treatment_ledger")
+    treatment_unit_ids: set[str] = set()
+    if not isinstance(treatment_rows, list) or not treatment_rows:
+        issues.append(_issue(catalog, "E-SOURCE-SELECT-001", "source_ingestion.source_treatment_ledger", "源文取舍台账为空。"))
+        treatment_rows = []
+    for index, row in enumerate(treatment_rows, 1):
+        location = f"source_ingestion.source_treatment_ledger[{index}]"
+        if not isinstance(row, dict):
+            issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, "取舍台账行不是对象。"))
+            continue
+        row_missing = _missing_fields(row, [
+            "source_unit_id", "source_type", "source_text", "value_axes",
+            "value_grade", "cinematic_function", "treatment", "reason",
+        ])
+        if row_missing:
+            issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, f"取舍台账缺字段：{row_missing}"))
+            continue
+        unit_id = str(row.get("source_unit_id"))
+        if unit_id in treatment_unit_ids:
+            issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, f"重复source_unit_id：{unit_id}"))
+        treatment_unit_ids.add(unit_id)
+        axes = row.get("value_axes")
+        missing_axes = [axis for axis in value_axes if not isinstance(axes, dict) or axis not in axes]
+        if missing_axes:
+            issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, f"多轴价值判断缺失：{missing_axes}"))
+        grade = str(row.get("value_grade"))
+        treatment = str(row.get("treatment"))
+        if grade not in allowed_grades or treatment not in allowed_treatments:
+            issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, f"非法等级/处理：{grade!r}/{treatment!r}"))
+        targets = row.get("target_beats")
+        if treatment == "删除":
+            has_authorization = not is_none_value(row.get("authorization"))
+            has_redundancy = not is_none_value(row.get("redundancy_evidence"))
+            if not (has_authorization or has_redundancy):
+                issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, "删除缺授权或冗余证据。"))
+            if not is_none_value(row.get("cinematic_function")) and is_none_value(row.get("retained_function_in")):
+                issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, "删除内容承担电影功能但未说明由哪个节拍承接。"))
+        elif not isinstance(targets, list) or not targets:
+            issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, f"处理方式{treatment!r}缺目标节拍。"))
+        else:
+            unknown = [str(x) for x in targets if str(x) not in beat_ids]
+            if unknown:
+                issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, f"目标节拍不存在：{unknown}"))
+    missing_treatment_units = sorted((event_source_unit_ids | beat_source_unit_ids) - treatment_unit_ids)
+    if missing_treatment_units:
+        issues.append(_issue(
+            catalog,
+            "E-SOURCE-SELECT-001",
+            "source_ingestion.source_treatment_ledger",
+            f"事件或节拍引用的源文单元未进入取舍台账：{missing_treatment_units}",
+        ))
+
+    protected = intake.get("protected_dialogue")
+    if not isinstance(protected, list):
+        issues.append(_issue(catalog, "E-SOURCE-SELECT-001", "source_ingestion.protected_dialogue", "protected_dialogue必须是数组。"))
+        protected = []
+    protected_required_seconds = 0.0
+    for index, row in enumerate(protected, 1):
+        location = f"source_ingestion.protected_dialogue[{index}]"
+        row_missing = _missing_fields(row, ["source_unit_id", "speaker", "text", "functions", "target_beats"])
+        targets = row.get("target_beats") if isinstance(row, dict) else None
+        functions = row.get("functions") if isinstance(row, dict) else None
+        unknown = [str(x) for x in targets or [] if str(x) not in beat_ids] if isinstance(targets, list) else []
+        if row_missing or not isinstance(functions, list) or not functions or not isinstance(targets, list) or not targets or unknown:
+            issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, f"对白保护字段缺失={row_missing}; 未知节拍={unknown}"))
+            continue
+        if str(row.get("source_unit_id")) not in treatment_unit_ids:
+            issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, f"保护对白源文单元未进入取舍台账：{row.get('source_unit_id')!r}"))
+        dialogue_text = str(row.get("text"))
+        protected_required_seconds += cjk_len(dialogue_text) / 2.8 + _pause_budget(dialogue_text)
+
+    budget = intake.get("adaptation_budget")
+    budget_required = beat_policy.get("required_budget_fields", [])
+    budget_missing = _missing_fields(budget, budget_required)
+    if budget_missing:
+        issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", "source_ingestion.adaptation_budget", f"改编预算缺字段：{budget_missing}"))
+    else:
+        target = _as_number(budget.get("target_duration_seconds"), 0)
+        dialogue_seconds = _as_number(budget.get("dialogue_seconds"), -1)
+        action_seconds = _as_number(budget.get("action_seconds"), -1)
+        transition_seconds = _as_number(budget.get("transition_seconds"), -1)
+        shot_min = int(_as_number(budget.get("shot_count_min"), 0))
+        shot_max = int(_as_number(budget.get("shot_count_max"), 0))
+        component_sum = dialogue_seconds + action_seconds + transition_seconds
+        if target <= 0 or min(dialogue_seconds, action_seconds, transition_seconds) < 0 or component_sum > target + 1e-9:
+            issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", "source_ingestion.adaptation_budget", f"目标={target:g}s，最低组成={component_sum:g}s，不可行。"))
+        if dialogue_seconds + 1e-9 < protected_required_seconds:
+            issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", "source_ingestion.adaptation_budget.dialogue_seconds", f"保护对白至少需{protected_required_seconds:.2f}s，预算仅{dialogue_seconds:.2f}s。"))
+        if shot_min < 1 or shot_max < shot_min:
+            issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", "source_ingestion.adaptation_budget", f"镜头数范围非法：{shot_min}-{shot_max}"))
+
+    visual_license = intake.get("visualization_license")
+    if not isinstance(visual_license, list):
+        issues.append(_issue(catalog, "E-SOURCE-EXPANSION-001", "source_ingestion.visualization_license", "visualization_license必须是数组。"))
+        visual_license = []
+    for index, row in enumerate(visual_license, 1):
+        location = f"source_ingestion.visualization_license[{index}]"
+        if not isinstance(row, dict):
+            issues.append(_issue(catalog, "E-SOURCE-EXPANSION-001", location, "视觉化许可行不是对象。"))
+            continue
+        row_missing = _missing_fields(row, ["description", "source_unit_ids", "category", "plot_change"])
+        if row_missing or not isinstance(row.get("source_unit_ids"), list) or not row.get("source_unit_ids") or row.get("category") not in {"allowed", "conditional"} or row.get("plot_change") is not False:
+            issues.append(_issue(catalog, "E-SOURCE-EXPANSION-001", location, f"视觉化许可不合规：missing={row_missing}, row={row!r}"))
+    new_plot_events = intake.get("new_plot_events")
+    if not isinstance(new_plot_events, list) or new_plot_events:
+        issues.append(_issue(catalog, "E-SOURCE-EXPANSION-001", "source_ingestion.new_plot_events", f"新增原文外剧情：{new_plot_events!r}"))
+
+    coverage = intake.get("coverage_metrics")
+    coverage_fields = policy.get("coverage_fields", [])
+    threshold = _as_number(policy.get("coverage_required_percent"), 100)
+    for field in coverage_fields:
+        value = _as_number(coverage.get(field), -1) if isinstance(coverage, dict) else -1
+        metrics[f"chapter_{field}"] = value
+        if value != threshold:
+            code = "E-SOURCE-SELECT-001" if field in {"protected_dialogue_coverage_percent", "source_treatment_percent"} else "E-CHAPTER-INTAKE-001"
+            issues.append(_issue(catalog, code, f"source_ingestion.coverage_metrics.{field}", f"覆盖率必须为{threshold:g}%，当前{value:g}%。"))
+
+    return issues, metrics
 
 
 def _validate_preventive_gates(
@@ -429,6 +744,19 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
     if declared_order != required_fields:
         issues.append(_issue(catalog, "E-FIELDORDER-001", "field_order", "顶层field_order缺失或与R10字段顺序不一致。"))
 
+    mother_columns = obj.get("mother_template_columns")
+    if mother_columns is not None:
+        formal_execution_column = rules.get("modules", {}).get("JIMENG_TIMING", {}).get(
+            "formal_execution_column", "Seedance 2.5独立正式执行分镜"
+        )
+        if not isinstance(mother_columns, list) or formal_execution_column not in mother_columns:
+            issues.append(_issue(
+                catalog,
+                "E-SEEDANCE-VERSION-001",
+                "mother_template_columns",
+                f"正式执行列必须包含{formal_execution_column!r}；当前={mother_columns!r}",
+            ))
+
     source_lock = obj.get("source_lock")
     source_lock_fields = ["上集终点", "本集起点", "本集计划终点", "下一集起点", "禁止重复", "禁止提前"]
     if not isinstance(source_lock, dict) or any(is_empty(source_lock.get(f)) for f in source_lock_fields):
@@ -478,6 +806,15 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         action = str(shot.get("动作与表演", ""))
         image_content = str(shot.get("画面内容", ""))
         combined_performance = f"{action} {image_content}"
+        image_timecodes = sorted(set(HARD_TIMECODE_RE.findall(image_content)))
+        if image_timecodes:
+            issues.append(_issue(
+                catalog,
+                "E-JIMENG-TIMING-001",
+                f"{location}.画面内容",
+                f"正式画面描述混入硬时间码：{image_timecodes}",
+                severity="warning",
+            ))
         invisible_context = _has_any(f"{shot_type} {visible}", INVISIBLE_SHOT_TERMS) and not _has_any(visible, FACE_VISIBLE_TERMS)
         if invisible_context:
             bad = [term for term in FACE_TERMS if term in combined_performance]
@@ -633,6 +970,9 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         catalog,
     )
     issues.extend(gate_issues)
+    chapter_issues, chapter_metrics = _validate_chapter_intake(obj, rules, catalog)
+    issues.extend(chapter_issues)
+    gate_metrics.update(chapter_metrics)
 
     if mode == "archive":
         stage_evidence = obj.get("stage_evidence")

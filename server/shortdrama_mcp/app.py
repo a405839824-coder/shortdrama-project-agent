@@ -8,6 +8,7 @@ from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
 
+from . import __version__
 from .auth import JwtTokenVerifier, request_namespace, security_schemes
 from .config import Settings
 from .models import ChangeOperationInput, OpenAIFile, ToolResponse
@@ -37,11 +38,13 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     server = MCPServer(
         name="shortdrama-project-agent",
         title="分镜项目 Agent",
-        description="R10-PG1 Chinese short-drama project execution service",
-        version="0.1.0",
+        description="R10-PG1 Chinese short-drama project service with chapter intake and Seedance 2.5 execution",
+        version=__version__,
         instructions=(
             "先调用get_agent_status，再创建或确认项目并调用begin_project_task。"
+            "小说章节转分镜必须先完整读取并建立章节地图、取舍台账、人物认知、对白保护、时长预算和节拍计划，未完成不得生成。"
             "生成内容后必须调用提交工具；分镜必须经commit_storyboard全表校验。"
+            "正式母版执行列固定为Seedance 2.5独立正式执行分镜。"
             "若失败，应一次修复报告中的全部问题并重提，最多三轮；零残留、零新增才可称通过。"
             "同一文件不要重复制造审计轮次。正式归档必须调用signoff_task取得人工签核。"
         ),
@@ -86,7 +89,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     @server.tool(
         name="begin_project_task",
         title="建立执行工单",
-        description="任何策划、生成、改写、增删改、审计修复或生产任务开始时调用；锁定来源、范围、授权和预期交付。",
+        description="任何章节解析、策划、生成、改写、增删改、审计修复或生产任务开始时调用；锁定来源、范围、授权和预期交付。",
         annotations=_annotations(read_only=False),
         meta=meta("正在锁定任务范围…", "执行工单已建立"),
         structured_output=True,
@@ -197,7 +200,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     @server.tool(
         name="commit_project_artifact",
         title="提交剧本、方案或生产文件",
-        description="ChatGPT完成剧情方案、剧本、改写、对白、锚点、关键帧提示词、Seedance、BGM、配音或生产包后调用；保存新版本且不覆盖旧版。",
+        description="ChatGPT完成章节解析、剧情方案、剧本、改写、对白、锚点、关键帧提示词、Seedance 2.5、BGM、配音或生产包后调用；保存新版本且不覆盖旧版。",
         annotations=_annotations(read_only=False),
         meta=meta("正在生成交付文件…", "交付文件已保存"),
         structured_output=True,
@@ -229,7 +232,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     @server.tool(
         name="commit_storyboard",
         title="提交并全表审计分镜",
-        description="生成、重建或修复完整R10分镜后调用；保存JSON与Excel，自动全表审计、影响回归并写入跨窗口台账。不要只提交局部问题。",
+        description="生成、重建或修复完整R10分镜后调用；对小说输入同时校验章节前置规划与100%覆盖，保存JSON与Excel，自动全表审计、影响回归并写入跨窗口台账。正式执行列使用Seedance 2.5。不要只提交局部问题。",
         annotations=_annotations(read_only=False),
         meta=meta("正在保存并全表审计…", "分镜审计已完成"),
         structured_output=True,
@@ -352,7 +355,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             {
                 "status": service.bootstrap.get("status"),
                 "service": "shortdrama-project-agent",
-                "version": "0.1.0",
+                "version": __version__,
                 "mcp": "/mcp",
             }
         )
@@ -375,7 +378,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         return JSONResponse(
             {
                 "name": "分镜项目 Agent",
-                "version": "0.1.0",
+                "version": __version__,
                 "mcp_endpoint": f"{settings.public_base_url}/mcp",
                 "health": f"{settings.public_base_url}/health",
                 "authentication": settings.auth_mode,

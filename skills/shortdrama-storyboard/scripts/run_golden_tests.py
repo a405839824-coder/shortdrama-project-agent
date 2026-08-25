@@ -164,6 +164,153 @@ def inject_pg1_fixture_evidence(obj: dict[str, Any]) -> None:
         batch.setdefault("独立执行提示词", "从明确起始状态开始，按顺序完成动作并停在明确结束状态；禁止BGM与字幕")
 
 
+def inject_chapter_intake_evidence(obj: dict[str, Any]) -> None:
+    """Attach one valid novel-to-storyboard intake package for conditional tests."""
+    value_axes = {
+        "causal_necessity": 5,
+        "information_value": 5,
+        "character_or_relationship_change": 4,
+        "conflict_reversal_payoff": 3,
+        "emotional_setup_or_payoff": 4,
+        "hook_value": 3,
+        "cinematic_function": 4,
+        "redundancy": 1,
+        "production_feasibility": 5,
+    }
+    obj["source_ingestion"] = {
+        "mode": "chapter_to_storyboard",
+        "chapter_id": "CH-GOLDEN-001",
+        "complete_read": True,
+        "chunk_count": 2,
+        "chunks_read": 2,
+        "boundary_context": {
+            "previous_end": "上一章女主已察觉异样",
+            "current_start": "女主推门进入房间",
+            "current_end": "女主确认有人跟踪并决定离开",
+            "next_start": "下一章女主开始转移",
+        },
+        "chapter_goal": "让观众理解女主发现跟踪并决定离开的完整因果。",
+        "events": [
+            {
+                "event_id": "EV-001",
+                "source_unit_ids": ["SU-001"],
+                "value_grade": "A",
+                "causal_role": "原因：发现异常线索",
+                "target_beats": ["BEAT-001"],
+            },
+            {
+                "event_id": "EV-002",
+                "source_unit_ids": ["SU-002"],
+                "value_grade": "S",
+                "causal_role": "行动与结果：确认跟踪并决定离开",
+                "target_beats": ["BEAT-002"],
+            },
+        ],
+        "causal_links": [
+            {"from_event_id": "EV-001", "to_event_id": "EV-002", "relation": "线索导致决定"}
+        ],
+        "character_state_changes": [
+            {
+                "character": "女主",
+                "start_state": "怀疑但不确定危险来源",
+                "trigger_event_ids": ["EV-001", "EV-002"],
+                "end_state": "确认被跟踪并决定离开",
+                "cognition_before": "不知道跟踪是否真实",
+                "cognition_after": "知道有人正在跟踪",
+                "forbidden_knowledge": ["不知道跟踪者真实身份"],
+            }
+        ],
+        "source_treatment_ledger": [
+            {
+                "source_unit_id": "SU-001",
+                "source_type": "关键事件",
+                "source_text": "她在门缝里发现新鲜泥印。",
+                "value_axes": copy.deepcopy(value_axes),
+                "value_grade": "A",
+                "cinematic_function": "建立异常线索和空间方向",
+                "treatment": "保留",
+                "target_beats": ["BEAT-001"],
+                "reason": "是后续决定的原因",
+                "authorization": "不适用：未删除",
+                "redundancy_evidence": "不适用：不重复",
+                "retained_function_in": "不适用：未删除",
+            },
+            {
+                "source_unit_id": "SU-002",
+                "source_type": "关键对白与决定",
+                "source_text": "有人跟着我，我得马上离开。",
+                "value_axes": copy.deepcopy(value_axes),
+                "value_grade": "S",
+                "cinematic_function": "完成认知变化并给出决定",
+                "treatment": "保留",
+                "target_beats": ["BEAT-002"],
+                "reason": "保护因果、信息与人物决定",
+                "authorization": "不适用：未删除",
+                "redundancy_evidence": "不适用：不重复",
+                "retained_function_in": "不适用：未删除",
+            },
+        ],
+        "protected_dialogue": [
+            {
+                "source_unit_id": "SU-002",
+                "speaker": "女主",
+                "text": "有人跟着我，我得马上离开。",
+                "functions": ["信息", "认知变化", "决定", "因果桥"],
+                "target_beats": ["BEAT-002"],
+            }
+        ],
+        "adaptation_budget": {
+            "target_duration_seconds": 12,
+            "dialogue_seconds": 5,
+            "action_seconds": 5,
+            "transition_seconds": 2,
+            "shot_count_min": 2,
+            "shot_count_max": 4,
+        },
+        "beat_plan": [
+            {
+                "beat_id": "BEAT-001",
+                "core_stage": "发现异常线索",
+                "event_ids": ["EV-001"],
+                "source_unit_ids": ["SU-001"],
+                "entry_state": "尚未确认危险",
+                "exit_state": "怀疑升级",
+                "target_duration_seconds": 5,
+                "shot_count_range": [1, 2],
+                "function": "原因与悬念",
+            },
+            {
+                "beat_id": "BEAT-002",
+                "core_stage": "确认危险并作出决定",
+                "event_ids": ["EV-002"],
+                "source_unit_ids": ["SU-002"],
+                "entry_state": "怀疑升级",
+                "exit_state": "决定离开",
+                "target_duration_seconds": 7,
+                "shot_count_range": [1, 2],
+                "function": "认知变化、决定和章节结果",
+            },
+        ],
+        "visualization_license": [
+            {
+                "description": "女主看到泥印后呼吸短暂停住，手指停在门框",
+                "source_unit_ids": ["SU-001"],
+                "category": "allowed",
+                "plot_change": False,
+            }
+        ],
+        "new_plot_events": [],
+        "uncertainty_status": "clear",
+        "coverage_metrics": {
+            "core_event_coverage_percent": 100,
+            "causal_link_coverage_percent": 100,
+            "character_state_change_coverage_percent": 100,
+            "protected_dialogue_coverage_percent": 100,
+            "source_treatment_percent": 100,
+        },
+    }
+
+
 def main() -> int:
     root = project_root()
     parser = argparse.ArgumentParser()
@@ -180,6 +327,8 @@ def main() -> int:
         obj = copy.deepcopy(fixtures[fixture_id])
         if suite.get("inject_pg1_fixture_evidence"):
             inject_pg1_fixture_evidence(obj)
+        if test.get("inject_chapter_intake"):
+            inject_chapter_intake_evidence(obj)
         for mutation in test.get("mutations", []):
             apply_mutation(obj, mutation)
         report = validator.validate_project(obj, mode=test.get("mode", "audit"), rules_path=args.rules)
