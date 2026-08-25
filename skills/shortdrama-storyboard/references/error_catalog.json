@@ -495,6 +495,17 @@
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
+    "error_code": "E-JIMENG-TIMING-001",
+    "module": "JIMENG_TIMING",
+    "severity": "warning",
+    "blocking": false,
+    "trigger_condition": "正式镜头画面内容出现0—2秒、第4秒等硬时间码",
+    "required_evidence": "shot_id、画面内容字段及命中的时间码",
+    "repair_action": "数字时间保留到内部动作与表演；正式画面内容改为起始、随后、动作完成时和镜尾等自然阶段。",
+    "final_status_if_unfixed": "warning",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
     "error_code": "E-I2V-INDEP-001",
     "module": "I2V_INDEPENDENCE",
     "severity": "fail",
@@ -557,6 +568,61 @@
     "trigger_condition": "连续两轮仍局部补丁，或连续三轮仍未回退上游重建",
     "required_evidence": "问题类别、连续轮数和实际修复动作",
     "repair_action": "第二轮执行根因修复；第三轮停止补丁并重建对应上游产物",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "error_code": "E-CHAPTER-INTAKE-001",
+    "module": "CHAPTER_INTAKE",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "章节未完整读取、边界/剧情地图/因果/人物状态缺失，或歧义未解决仍进入分镜生成",
+    "required_evidence": "chapter_id、chunk_count、chunks_read、boundary_context、events、causal_links、character_state_changes和uncertainty_status",
+    "repair_action": "停止生成，补齐全部章节分块与边界，重建章节剧情地图后重跑。",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "error_code": "E-SOURCE-SELECT-001",
+    "module": "SOURCE_SELECTION",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "源文单元无处理去向、C级自动删除、删除无授权/冗余证据、电影功能丢失或保护对白映射不足100%",
+    "required_evidence": "source_unit_id、value_axes、value_grade、treatment、target_beats、authorization/redundancy_evidence及protected_dialogue映射",
+    "repair_action": "重建多轴价值与无损取舍台账，恢复或重新映射缺失内容。",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "error_code": "E-CHAPTER-BUDGET-001",
+    "module": "ADAPTATION_BUDGET",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "保护对白/动作/转场最低时长超过目标、镜头数范围非法或核心事件未进入节拍",
+    "required_evidence": "target_duration_seconds、dialogue_seconds、action_seconds、transition_seconds、shot_count_min/max、beat_id和event_ids",
+    "repair_action": "重新取舍、调整目标时长或重排节拍，不得把过量内容塞入镜头。",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "error_code": "E-SOURCE-EXPANSION-001",
+    "module": "SOURCE_EXPANSION",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "为视觉效果新增原文不存在的事件、冲突、行为、决定、动机、信息或结果",
+    "required_evidence": "new_plot_events或visualization_license中的source_unit_ids、category和plot_change",
+    "repair_action": "删除新增剧情，用有源依据且不改变剧情的可见微动作、摄影或环境表达替代。",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "error_code": "E-SEEDANCE-VERSION-001",
+    "module": "I2V_INDEPENDENCE",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "正式母版导出列仍使用Seedance 2.0或未使用Seedance 2.5独立正式执行分镜",
+    "required_evidence": "mother_template_columns及命中的执行列名",
+    "repair_action": "将正式执行列迁移为Seedance 2.5独立正式执行分镜，并按2.5模型路由重写提示词。",
     "final_status_if_unfixed": "fail_current",
     "version": "V16.3-148-R10-StableRuntime"
   },
