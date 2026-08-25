@@ -77,6 +77,145 @@
       },
       "additionalProperties": true
     },
+    "source_ingestion": {
+      "type": "object",
+      "description": "仅在小说章节或连续叙事直接转分镜时使用的前置规划证据。",
+      "required": [
+        "mode",
+        "chapter_id",
+        "complete_read",
+        "chunk_count",
+        "chunks_read",
+        "boundary_context",
+        "chapter_goal",
+        "events",
+        "causal_links",
+        "character_state_changes",
+        "source_treatment_ledger",
+        "protected_dialogue",
+        "adaptation_budget",
+        "beat_plan",
+        "visualization_license",
+        "new_plot_events",
+        "uncertainty_status",
+        "coverage_metrics"
+      ],
+      "properties": {
+        "mode": {
+          "const": "chapter_to_storyboard"
+        },
+        "chapter_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "complete_read": {
+          "const": true
+        },
+        "chunk_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "chunks_read": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "boundary_context": {
+          "type": "object",
+          "required": [
+            "previous_end",
+            "current_start",
+            "current_end",
+            "next_start"
+          ]
+        },
+        "chapter_goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1
+        },
+        "causal_links": {
+          "type": "array",
+          "minItems": 1
+        },
+        "character_state_changes": {
+          "type": "array",
+          "minItems": 1
+        },
+        "source_treatment_ledger": {
+          "type": "array",
+          "minItems": 1
+        },
+        "protected_dialogue": {
+          "type": "array"
+        },
+        "adaptation_budget": {
+          "type": "object",
+          "required": [
+            "target_duration_seconds",
+            "dialogue_seconds",
+            "action_seconds",
+            "transition_seconds",
+            "shot_count_min",
+            "shot_count_max"
+          ]
+        },
+        "beat_plan": {
+          "type": "array",
+          "minItems": 1
+        },
+        "visualization_license": {
+          "type": "array"
+        },
+        "new_plot_events": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "uncertainty_status": {
+          "enum": [
+            "clear",
+            "resolved"
+          ]
+        },
+        "coverage_metrics": {
+          "type": "object",
+          "required": [
+            "core_event_coverage_percent",
+            "causal_link_coverage_percent",
+            "character_state_change_coverage_percent",
+            "protected_dialogue_coverage_percent",
+            "source_treatment_percent"
+          ],
+          "properties": {
+            "core_event_coverage_percent": {
+              "const": 100
+            },
+            "causal_link_coverage_percent": {
+              "const": 100
+            },
+            "character_state_change_coverage_percent": {
+              "const": 100
+            },
+            "protected_dialogue_coverage_percent": {
+              "const": 100
+            },
+            "source_treatment_percent": {
+              "const": 100
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "mother_template_columns": {
+      "type": "array",
+      "description": "仅在导出10列正式母版时填写；正式执行列必须使用Seedance 2.5名称。",
+      "contains": {
+        "const": "Seedance 2.5独立正式执行分镜"
+      }
+    },
     "field_order": {
       "const": [
         "镜头编号",
