@@ -5,17 +5,9 @@ description: "Operate a full-lifecycle Chinese short-drama project Agent with th
 
 # Short-drama storyboard R10
 
-## Execute through the plugin MCP
-
-1. In ChatGPT plugin mode, read `references/plugin_execution.md` and call `get_agent_status` before any project answer in a new conversation. This MCP check replaces a direct shell bootstrap in ChatGPT.
-2. Do not say “已执行、已修改、已生成、已审计、已同步” unless the corresponding MCP tool succeeded and returned a `project_id`, `work_order_id`, or `artifact_id` as applicable. A prose-only answer is a plan, not execution.
-3. Create or resume the project, call `begin_project_task`, import/read all required sources, then use the matching commit and validation tools. Keep the same `project_id` across chats so the project hub and issue ledger remain continuous.
-4. For `audit_and_repair`, fix every reported issue internally and recommit the complete affected storyboard before replying. Do not require the user to trigger repeated audits. Never create a new audit round for an unchanged artifact fingerprint.
-5. If the MCP tools are unavailable, say `插件未连接，当前未执行` and give one connection action. Do not silently fall back to claiming model-only execution.
-
 ## Lock the runtime first
 
-1. In ChatGPT plugin mode, call `get_agent_status`; set `full_self_test=true` after a server version change. Outside plugin mode, run `python scripts/r10_bootstrap.py --self-test` from this skill directory at the start of every new conversation or after a version change.
+1. Run `python scripts/r10_bootstrap.py --self-test` from this skill directory at the start of every new conversation or after a version change.
 2. If it reports a project root, read that project's `R10_BOOTSTRAP.md`, runtime, schema, conflict crosswalk, and task cards in their declared load order.
 3. Otherwise, use the bundled references in this skill. Require `workflow_revision=R10-PG1`; state that the bundled reference runtime is active and do not claim that an external project passed integration.
 4. Stop with `E-BOOTSTRAP-001` if the bootstrap or self-test fails. Never replace a machine failure with model self-assessment.
@@ -48,19 +40,21 @@ The only active version is `V16.3-148-R10-StableRuntime`. Treat R1–R9 rules as
 ## Execute the gated workflow
 
 1. Lock one authoritative input, task scope, protected scope, and `R10-PG1`. Build must-include and must-exclude lists before editing.
-2. Lock the source range and episode boundary. Build Source Lock, Beat list, Source Ledger, Borrow/Delete/Merge/Compress ledger, and a character cognition matrix. Map every formal shot and every key line to source evidence.
-3. Build the seven-field scene-state ledger: character position, body direction, gaze target, held prop, door/window state, action progress, and light direction. Require each same-scene end state to equal the next start state unless an on-screen transition explains the change.
-4. Plan one core narrative/emotional stage and one viewpoint per shot. Require a story/information/emotion function for every detail close-up.
-5. Select a matching task package from `references/task_package_cards.json` or the project's authoritative copy.
-6. Set camera and visibility before performance. For dialogue and important emotion shots, build the complete stimulus → listen/observe reaction → gaze path → micro-expression → ecological action → body/breath → end-state chain.
-7. Generate formal shots in the exact canonical field order from `references/storyboard_schema.json` and apply the four learned modules only when triggered.
-8. Keep formal shots and i2v batches separate. Every batch must contain the ten independent execution fields and pass a blank-context test. Reject phrases such as “承接上一镜”, “保持关键帧”, and “同上”. Keep BGM out of Seedance prompts; design music cues only after picture lock.
-9. Audit in the fixed order: source/dialogue → camera/visibility → spatial continuity → performance chain → shot rhythm → Seedance independence → prohibitions/audio → statistics.
-10. Validate JSON with `python scripts/validate_storyboard.py INPUT.json --mode audit`; use `--mode repair` after corrections. Regress the defined impact scope. A second consecutive recurrence requires root-cause repair; a third requires upstream rebuild.
-11. After any rule or validator change, run `python scripts/run_golden_tests.py`; require every bundled functional test to pass.
-12. In Agent mode, also run `python scripts/run_agent_tests.py`; require every safety and lifecycle test to pass.
-13. In full-project Agent mode, run `python scripts/run_project_agent_tests.py`; require every work-order, change-propagation, and sign-off test to pass.
-14. Archive only after statistics close, residual and introduced issues equal zero, all machine checks pass, both shared files are synchronized, and a real human signs off.
+2. For any novel, chapter, or continuous prose input that will become a storyboard, first load `references/novel_to_storyboard_intake.md`. Finish the complete authorized chapter read before planning: chunked reading is allowed only for extraction, and generation must wait until every chunk is synthesized into one chapter map. Build boundary context, event/causal map, character start-change-end states, cognition limits, multi-axis source treatment ledger, protected-dialogue list, adaptation budget, and beat plan. Require 100% coverage in the chapter preflight; stop on unresolved ambiguity or incomplete reading.
+3. Lock the source range and episode boundary. Build Source Lock, Beat list, Source Ledger, Borrow/Delete/Merge/Compress ledger, and a character cognition matrix. Map every formal shot and every key line to source evidence. Never treat C-grade prose as automatically deletable; deletion requires explicit authorization or redundancy evidence, and any time/space/mood/foreshadowing function must be retained elsewhere.
+4. Build the seven-field scene-state ledger: character position, body direction, gaze target, held prop, door/window state, action progress, and light direction. Require each same-scene end state to equal the next start state unless an on-screen transition explains the change.
+5. Plan one core narrative/emotional stage and one viewpoint per shot. Allow a causal continuous action chain inside that stage; split only when a second independent turn, viewpoint, location, or time jump appears. Require a story/information/emotion function for every detail close-up.
+6. Select a matching task package from `references/task_package_cards.json` or the project's authoritative copy.
+7. Set camera and visibility before performance. For dialogue and important emotion shots, build the complete stimulus → listen/observe reaction → gaze path → micro-expression → ecological action → body/breath → end-state chain.
+8. Before every ancient-costume live-action keyframe, scene-frame, or i2v prompt, load `references/songyun_humanist_cinematography.md` as the mandatory visual master and lock visual texture separately from story content. Apply its real-camera texture, sourced-light decision, restrained color, lens/depth selection, humanist composition, prompt order, and negative restrictions to every ancient-costume prompt. For night, post-sunset, pre-dawn, candlelit, moonlit, firelit, rainy-night, snowy-night, or otherwise low-light scenes, also load and apply `references/ancient_night_cinematography.md`. Adapt the exact palette and exposure to the scene's era, time, weather, location, mood, and real light sources. Reject letterboxing, direct camera gaze, fixed warm daylight, fixed red-candle lighting, and fixed lens parameters when they conflict with the project.
+9. Generate formal shots in the exact canonical field order from `references/storyboard_schema.json` and apply the learned modules only when triggered.
+10. Keep formal shots and i2v batches separate. Name the 10-column mother-template execution field exactly `Seedance 2.5独立正式执行分镜`. Every batch must contain the ten independent execution fields and pass a blank-context test. Reject phrases such as “承接上一镜”, “保持关键帧”, and “同上”. Keep BGM out of Seedance prompts; design music cues only after picture lock. For 即梦/Dreamina/Seedance output, load `references/jimeng_timing_policy.md`: keep numeric production timing in internal `动作与表演`, remove hard timecodes from formal `画面内容` and the merged 10-column D field, and use Seedance 2.5 timestamp syntax only inside the model-specific independent prompt. Keep the stable production batch range at 4–15 seconds; use the officially supported 30-second ability only in an explicitly requested long-scene mode with its own continuity and load review.
+11. Run the chapter coverage audit before the shot-level audit when `source_ingestion.mode=chapter_to_storyboard`. Audit source/dialogue → camera/visibility → spatial continuity → performance chain → shot rhythm → Seedance independence → prohibitions/audio → statistics.
+12. Validate JSON with `python scripts/validate_storyboard.py INPUT.json --mode audit`; use `--mode repair` after corrections. Regress the defined impact scope. A second consecutive recurrence requires root-cause repair; a third requires upstream rebuild.
+13. After any rule or validator change, run `python scripts/run_golden_tests.py`; require every bundled functional test to pass.
+14. In Agent mode, also run `python scripts/run_agent_tests.py`; require every safety and lifecycle test to pass.
+15. In full-project Agent mode, run `python scripts/run_project_agent_tests.py`; require every work-order, change-propagation, and sign-off test to pass.
+16. Archive only after statistics close, residual and introduced issues equal zero, all machine checks pass, both shared files are synchronized, and a real human signs off.
 
 ## Close internally and report briefly
 
@@ -90,6 +84,10 @@ Always enforce these resolved rules:
 ## Load references selectively
 
 - Read `references/four_source_methods.md` for expression, 16 movements, shot-size/light design, punctuation, and voice templates.
+- Read `references/songyun_humanist_cinematography.md` before every ancient-costume live-action visual prompt. Treat it as the mandatory visual master for real-camera texture, sourced-light decisions, restrained color, optical depth, lens selection, candid humanist composition, prompt structure, and negative restrictions. Adapt its concrete palette to the scene facts; do not omit the master because the scene is night, interior, dangerous, rainy, or non-Song.
+- Read `references/ancient_night_cinematography.md` in addition to the global master for every ancient-costume night or low-light prompt. Use it to lock motivated practical and ambient sources, distance falloff, half-lit readable faces, transparent shadows, restrained warm/cool color, night-specific lens/depth choices, low-light film texture, continuity, and night prohibitions.
+- Read `references/jimeng_timing_policy.md` for every 即梦、Dreamina or Seedance prompt, any request about seconds/timecodes in `画面内容`, and every 10-column mother-template export that may be copied into a generation model. Keep formal visual description, internal production timing, and model-specific execution syntax separate.
+- Read `references/novel_to_storyboard_intake.md` before converting any novel chapter or continuous prose into a script, beat plan, formal storyboard, or production batch. Require complete-read proof, lossless source treatment, protected dialogue, state/cognition transitions, adaptation budget, beat planning, and pre/post coverage audits.
 - Read `references/storyboard_runtime_rules.json` for executable policy, catalogs, priorities, and error definitions.
 - Read `references/storyboard_schema.json` before creating or converting storyboard JSON.
 - Read `references/conflict_crosswalk.json` when old and new rules disagree.
@@ -100,6 +98,5 @@ Always enforce these resolved rules:
 - Read `references/golden_tests.json` only when changing or diagnosing the validator.
 - Read `references/agent_runtime.md` and `references/agent_ledger_schema.json` when operating or diagnosing the project Agent.
 - Read `references/full_agent_runtime.md`, `references/project_agent_capabilities.json`, and `references/project_agent_schema.json` for full-lifecycle routing, script/storyboard changes, project state, production tasks, or missing-capability handling.
-- Read `references/plugin_execution.md` whenever the ChatGPT plugin MCP is available or plugin execution is being diagnosed.
 
 Keep evidence concrete: include shot ID, field, source sentence, computed duration, batch ID, or file/version status with every warning or failure.
