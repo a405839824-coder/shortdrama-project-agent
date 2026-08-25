@@ -390,5 +390,51 @@
       "E-AUDIO-STAGE-001"
     ],
     "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "conflict_id": "C-027",
+    "conflict_pair": "整章必须完整读取 vs 长章节允许分块",
+    "higher_priority_rule": "完整理解后再生成",
+    "decision": "允许分块读取与提取，但必须全部分块读完并合并为唯一章节地图后，才能规划节拍或生成镜头",
+    "reason": "完整读取是生成门禁，不等于必须把整章塞进一次模型输入；分块不能演变为边读边生成。",
+    "exception_allowed": false,
+    "exception_condition": "缺块、缺页或未解决歧义时停止生成。",
+    "user_authorization_required": false,
+    "output_status_if_violated": "fail_current",
+    "linked_error_codes": [
+      "E-CHAPTER-INTAKE-001"
+    ],
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "conflict_id": "C-028",
+    "conflict_pair": "单镜只能一个动作/信息/情绪 vs 连续动作链",
+    "higher_priority_rule": "单镜一个核心叙事或情绪阶段",
+    "decision": "单镜保持一个视角、一个摄影机位置和一个核心阶段；允许该阶段内相互依赖的动作、信息与情绪连续发生，第二个独立转折或时空跳跃必须拆镜",
+    "reason": "机械限制为一个动作会制造碎片化，而多核心阶段会造成信息过载。",
+    "exception_allowed": false,
+    "exception_condition": "不可用隐形切镜、多机位或跨时空跳跃伪装为连续动作。",
+    "user_authorization_required": false,
+    "output_status_if_violated": "fail_current",
+    "linked_error_codes": [
+      "E-SHOTLOAD-001",
+      "E-SHOTFRAG-001"
+    ],
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "conflict_id": "C-029",
+    "conflict_pair": "C级内容自动删除 vs 环境描写的电影功能",
+    "higher_priority_rule": "源文忠实与功能保留",
+    "decision": "C级仅是压缩或删除候选；删除必须有明确授权或冗余证据，时间、空间、情绪、伏笔、转场和人物生态功能必须由其他节拍承接",
+    "reason": "低剧情等级不等于无电影功能，自动删除会造成时空不清、情绪断层或伏笔丢失。",
+    "exception_allowed": false,
+    "exception_condition": "只有客观重复且全部功能已迁移时可无用户逐条授权删除。",
+    "user_authorization_required": false,
+    "output_status_if_violated": "fail_current",
+    "linked_error_codes": [
+      "E-SOURCE-SELECT-001"
+    ],
+    "version": "V16.3-148-R10-StableRuntime"
   }
 ]
