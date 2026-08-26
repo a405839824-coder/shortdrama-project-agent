@@ -9,6 +9,7 @@
 - If a tool call fails or tools are absent, report the exact blocker. Never replace an execution result with a confident narrative.
 - For novel/chapter input, no formal shot may be generated until the full authorized chapter has been synthesized into one chapter map with source treatment, protected dialogue, character state/cognition, adaptation budget, beat plan, and 100% preflight coverage.
 - The formal 10-column mother-template execution field must be named exactly `Seedance 2.5独立正式执行分镜`; legacy Seedance 2.0 labels are compatibility input only.
+- For any public-flow scene, formal generation must load `public_scene_ecology.md` and include ordinary-person density, location roles, staggered actions, spatial layers, concrete near/mid/far ambience, dialogue ducking, audiovisual source evidence, and the same ecology in the independent Seedance batch. An empty public scene requires both a visible empty-state description and a plot-grounded reason.
 
 ## Standard route
 
@@ -21,7 +22,7 @@
 7. Generate or rewrite within the locked scope
 8. `commit_project_artifact(...)` for plans, scripts, dialogue, anchors, keyframes, Seedance 2.5 batches, BGM, voice, statistics, conversion, or production packages
 9. `complete_task_validation(...)` for every non-storyboard deliverable
-10. `commit_storyboard(...)` for a formal storyboard; it also saves JSON/XLSX, runs chapter coverage when triggered, the eight-layer audit, impact regression, and cross-chat ledger update
+10. `commit_storyboard(...)` for a formal storyboard; it also saves JSON/XLSX, runs chapter coverage when triggered, public-scene people/audio ecology checks, the eight-layer audit, impact regression, and cross-chat ledger update
 11. `signoff_task(...)` only after the user explicitly approves or asks to reopen
 
 ## Audit and repair route

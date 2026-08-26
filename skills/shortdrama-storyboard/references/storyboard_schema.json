@@ -416,12 +416,14 @@
             ]
           },
           "环境音效": {
+            "description": "具体可追溯声源。公共场景按景别写两至三类近中远声源；带对白时写明环境底声避让，禁止只填环境声或街道嘈杂声。",
             "type": [
               "string",
               "number"
             ]
           },
           "环境动态": {
+            "description": "场景内可见动态。公共场景必须含普通人物密度、地点角色、错峰动作和空间层次，或同时给出空场状态及剧情原因。",
             "type": [
               "string",
               "number"
@@ -570,11 +572,13 @@
           },
           "声音": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Seedance独立声音层。公共场景必须复现正式镜头的具体声源、声场层次与对白避让；禁止BGM。"
           },
           "环境动态": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Seedance独立环境动态。公共场景必须从零写明普通人物角色、错峰动作和空间分布。"
           },
           "光影": {
             "type": "string",

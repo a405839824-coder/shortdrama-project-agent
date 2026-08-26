@@ -378,3 +378,11 @@
 - 必填规则：先预算后镜头；保护对白按2.8汉字/秒加停顿计算；所有覆盖指标必须100%；单镜一个核心阶段但允许同阶段连续动作链。
 - 失败标准：最低时长超预算、事件未进节拍、固定镜头数挤压高潮或任一覆盖率不足100%即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check
+
+## TPL-R10-48 公共场景人物与环境音生态模板
+
+- 触发条件：街道、闹市、市集、商街、巷道、城门、码头、驿站、公共餐饮、寺院、店铺公共区等公共流动场景
+- 字段顺序：shot_id｜scene_id｜location_type｜empty_scene_state｜empty_scene_reason｜crowd_density｜ordinary_roles｜foreground_actions｜midground_actions｜background_actions｜near_audio_sources｜mid_audio_sources｜far_audio_sources｜dialogue_ducking｜visible_audio_sources｜offscreen_audio_sources｜seedance_people_match｜seedance_audio_match｜continuity_transition｜status
+- 必填规则：非豁免场景必须填密度、地点角色、错峰动作和空间层次；建立/全/远景至少三类三层声源，其余至少两类两层；对白镜必须避让；Seedance独立复现。空场必须同时填状态和剧情原因。
+- 失败标准：只写人群、路人、环境声或街道嘈杂声；匿名群演清晰说话；时代错位声源；声画无源；批次未复现；同场生态无过渡跳变即fail。
+- 输出状态：pass / warning / fail_current / unable_to_check

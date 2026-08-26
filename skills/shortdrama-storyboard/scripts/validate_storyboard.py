@@ -54,6 +54,64 @@ VOICE_DIMENSION_PATTERNS = {
     "尾音变化": re.compile(r"尾音|上扬|下压|发虚|放柔|拉长|落下|收住"),
 }
 
+PUBLIC_SCENE_RE = re.compile(
+    r"街道|街市|闹市|市集|集市|市场|商街|商业街|长街|巷口|巷道|城门|码头|渡口|"
+    r"车站|驿站|驿道|茶馆|酒楼|饭馆|餐馆|客栈大堂|客栈前厅|庙会|寺院前庭|山门|"
+    r"店铺|药铺|医馆|衙门前|衙门外|宫门|宫道|广场"
+)
+PUBLIC_EMPTY_RE = re.compile(r"空街|空巷|无人街|街上无人|人迹罕至|闭市|清场|人群已撤离|店门紧闭")
+PUBLIC_EXEMPTION_CAUSE_RE = re.compile(
+    r"宵禁|闭市|封锁|疏散|清场|戒严|灾后|深夜|黎明前|停业|剧情要求|危险预警|追捕"
+)
+PUBLIC_DENSITY_RE = re.compile(
+    r"稀疏|低密度|少量|两三|三五|零散|中等密度|中等人流|适中人流|密集|高密度|拥挤|人潮|"
+    r"(?:约)?[一二三四五六七八九十百\d]+(?:至|到|-|—)?[一二三四五六七八九十百\d]*名(?:行人|路人|百姓|顾客|摊贩|脚夫|守卫|香客|食客|茶客)"
+)
+PUBLIC_ROLE_RE = re.compile(
+    r"行人|路人|百姓|摊贩|商贩|小贩|顾客|食客|茶客|脚夫|挑夫|车夫|骑手|伙计|小二|"
+    r"掌柜|守卫|兵丁|差役|僧人|香客|船工|纤夫|搬运工|店家|货郎|孩童|老人"
+)
+PUBLIC_ACTION_RE = re.compile(
+    r"行走|穿行|挑选|交谈|驻足|避让|叫卖|吆喝|搬运|装卸|推车|赶车|牵马|端菜|收拾|"
+    r"排队|巡逻|查验|上香|进出|开门|收摊|交易|付钱|张望|擦肩|落座|饮茶|吃饭|挑担|招呼"
+)
+PUBLIC_VISUAL_LAYER_PATTERNS = {
+    "near": re.compile(r"前景|近处|身侧|画面左侧|画面右侧"),
+    "mid": re.compile(r"中景|中层|街面|周围"),
+    "far": re.compile(r"远景|远处|背景|后景|街口|巷口|城门方向"),
+}
+PUBLIC_AUDIO_LAYER_PATTERNS = {
+    "near": re.compile(r"近处|脚边|身侧|贴近|前景"),
+    "mid": re.compile(r"中层|中景|街面|周围|身后"),
+    "far": re.compile(r"远处|远景|画外|街口|巷口|城门方向|门外"),
+}
+PUBLIC_AUDIO_FAMILY_PATTERNS = {
+    "movement": re.compile(r"脚步|鞋底|踩水|踩雪|衣料|衣摆|木屐|马蹄|车轮|车辙|轿杆|推车|担子|扁担"),
+    "crowd": re.compile(r"人声底噪|低声交谈|交谈声|含混人声|人群低语|模糊人声|远处人声|客声|食客低语"),
+    "commerce": re.compile(r"叫卖|吆喝|铜钱|算盘|货物|瓷碗|碗筷|杯盏|盘碟|柜台|案板|秤砣"),
+    "weather_nature": re.compile(r"风声|雨声|雨滴|滴水|溅水|踏雪|雪地|浪声|水声|橹声|钟声|鸟鸣|虫鸣|檐铃|门轴|木门"),
+    "work": re.compile(r"搬运|装卸|锤打|切菜|炉火|油锅|劈柴|扫地"),
+    "official": re.compile(r"守卫口令|查验声|城门|木栓|甲片|兵器|号角"),
+}
+PUBLIC_DIALOGUE_DUCK_RE = re.compile(r"退至底层|压至底层|压低|不遮盖(?:对白|台词)|对白清晰|台词清晰|对白优先|为对白让位")
+PUBLIC_MODERN_AUDIO_RE = re.compile(r"汽车喇叭|手机铃声|电子提示音|广播|扩音器|警笛|发动机|地铁|电车")
+PUBLIC_ANONYMOUS_CLEAR_SPEECH_RE = re.compile(
+    r"(?:路人|人群|百姓|食客|茶客|摊贩|商贩|小贩|顾客|客人)(?:甲|乙|丙)?"
+    r"(?:说|喊|道|台词)[：:]?\s*[“‘「『\"]"
+)
+PUBLIC_FORBIDDEN_EXTRAS_RE = re.compile(
+    r"禁止(?:出现|添加|生成|加入)?(?:任何|所有|全部)?(?:额外角色|路人|人群|群众|行人)(?:出现|入镜|进入)?"
+)
+PUBLIC_TRANSITION_RE = re.compile(r"涌入|散开|疏散|离开|聚集|人流变化|逐渐(?:变得)?(?:稀疏|密集)|由(?:稀疏|密集)变")
+PUBLIC_WIDE_RE = re.compile(r"大全景|全景|远景|建立")
+PUBLIC_SOURCE_PAIRS = [
+    (re.compile(r"马蹄|马嘶"), re.compile(r"马|马车|骑手|车夫")),
+    (re.compile(r"车轮|木轮|车辙"), re.compile(r"车|马车|板车|推车|轿")),
+    (re.compile(r"碗筷|杯盏|盘碟"), re.compile(r"食客|茶客|客人|伙计|小二|饭桌|茶桌|摊位")),
+    (re.compile(r"叫卖|吆喝"), re.compile(r"摊贩|商贩|小贩|货郎|摊位|店家")),
+    (re.compile(r"钟声|木鱼"), re.compile(r"寺|庙|钟楼|僧人|香客")),
+]
+
 
 def _candidate_rule_paths(explicit: str | None = None) -> list[Path]:
     here = Path(__file__).resolve().parent
@@ -185,6 +243,197 @@ def _as_number(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _matched_pattern_names(text: str, patterns: dict[str, re.Pattern[str]]) -> set[str]:
+    return {name for name, pattern in patterns.items() if pattern.search(text)}
+
+
+def _public_density_class(text: str) -> str | None:
+    if re.search(r"稀疏|低密度|少量|两三|三五|零散", text):
+        return "low"
+    if re.search(r"中等密度|中等人流|适中人流", text):
+        return "medium"
+    if re.search(r"密集|高密度|拥挤|人潮", text):
+        return "high"
+    return None
+
+
+def _validate_public_scene_ecology(
+    shots: list[dict[str, Any]],
+    batch_by_id: dict[str, dict[str, Any]],
+    catalog: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Validate ordinary-person and ambience ecology in public locations.
+
+    The checks intentionally operate on concrete source, layer, action and
+    continuity evidence.  A generic ``人群`` or ``环境声`` placeholder cannot
+    pass, while an explicitly motivated empty public space can be exempted.
+    """
+    issues: list[dict[str, Any]] = []
+    metrics = {
+        "public_scene_shot_count": 0,
+        "public_scene_exemption_count": 0,
+        "public_scene_visual_pass_count": 0,
+        "public_scene_audio_pass_count": 0,
+        "public_scene_batch_pass_count": 0,
+    }
+    scene_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    for index, shot in enumerate(shots, 1):
+        location = f"shots[{index}]"
+        batch_id = str(shot.get("生成批次", ""))
+        batch = batch_by_id.get(batch_id, {})
+        visual_text = " ".join(str(shot.get(field, "")) for field in (
+            "可见主体", "人物调度", "画面内容", "环境动态", "生成限制"
+        ))
+        scene_text = f"{visual_text} {batch.get('场景', '')} {batch.get('起始画面', '')}"
+        if not PUBLIC_SCENE_RE.search(scene_text):
+            continue
+
+        metrics["public_scene_shot_count"] += 1
+        empty_declared = bool(PUBLIC_EMPTY_RE.search(scene_text))
+        has_empty_cause = bool(PUBLIC_EXEMPTION_CAUSE_RE.search(scene_text))
+        exempt = empty_declared and has_empty_cause
+        if exempt:
+            metrics["public_scene_exemption_count"] += 1
+            continue
+        if empty_declared and not has_empty_cause:
+            issues.append(_issue(
+                catalog,
+                "E-PUBLIC-ECOLOGY-001",
+                f"{location}.画面内容/环境动态",
+                "公共场景声明为空场，但没有宵禁、闭市、封锁、疏散、剧情要求等可核验原因。",
+            ))
+
+        density_ok = bool(PUBLIC_DENSITY_RE.search(visual_text))
+        role_ok = bool(PUBLIC_ROLE_RE.search(visual_text))
+        action_ok = bool(PUBLIC_ACTION_RE.search(visual_text))
+        visual_layers = _matched_pattern_names(visual_text, PUBLIC_VISUAL_LAYER_PATTERNS)
+        wide = bool(PUBLIC_WIDE_RE.search(f"{shot.get('镜头类型', '')} {shot.get('功能类型', '')}"))
+        required_visual_layers = 2 if wide else 1
+        forbidden_extras = PUBLIC_FORBIDDEN_EXTRAS_RE.search(str(shot.get("生成限制", "")))
+
+        if not role_ok or forbidden_extras:
+            evidence = []
+            if not role_ok:
+                evidence.append("没有与地点/时代匹配的普通人物角色")
+            if forbidden_extras:
+                evidence.append(f"生成限制排除了公共人物：{forbidden_extras.group(0)!r}")
+            issues.append(_issue(
+                catalog,
+                "E-PUBLIC-ECOLOGY-001",
+                f"{location}.画面内容/环境动态/生成限制",
+                "；".join(evidence),
+            ))
+
+        missing_visual = []
+        if not density_ok:
+            missing_visual.append("人流密度")
+        if not action_ok:
+            missing_visual.append("错峰生活动作")
+        if len(visual_layers) < required_visual_layers:
+            missing_visual.append(f"空间层次（需{required_visual_layers}层，现有{sorted(visual_layers)}）")
+        if missing_visual:
+            issues.append(_issue(
+                catalog,
+                "E-PUBLIC-CROWD-001",
+                f"{location}.人物调度/画面内容/环境动态",
+                f"公共人物生态缺少：{missing_visual}；当前={visual_text!r}",
+            ))
+        elif role_ok and not forbidden_extras:
+            metrics["public_scene_visual_pass_count"] += 1
+
+        audio_text = str(shot.get("环境音效", ""))
+        audio_families = _matched_pattern_names(audio_text, PUBLIC_AUDIO_FAMILY_PATTERNS)
+        audio_layers = _matched_pattern_names(audio_text, PUBLIC_AUDIO_LAYER_PATTERNS)
+        required_audio_count = 3 if wide else 2
+        dialogue = str(shot.get("台词", ""))
+        audio_missing = []
+        if is_none_value(audio_text):
+            audio_missing.append("可听环境声")
+        if len(audio_families) < required_audio_count:
+            audio_missing.append(f"声源族（需{required_audio_count}类，现有{sorted(audio_families)}）")
+        if len(audio_layers) < required_audio_count:
+            audio_missing.append(f"声场层次（需{required_audio_count}层，现有{sorted(audio_layers)}）")
+        if not is_none_value(dialogue) and not PUBLIC_DIALOGUE_DUCK_RE.search(f"{audio_text} {shot.get('生成限制', '')}"):
+            audio_missing.append("对白避让/ducking")
+        if audio_missing:
+            issues.append(_issue(
+                catalog,
+                "E-PUBLIC-AUDIO-001",
+                f"{location}.环境音效",
+                f"公共场景环境音缺少：{audio_missing}；当前={audio_text!r}",
+            ))
+        else:
+            metrics["public_scene_audio_pass_count"] += 1
+
+        av_faults = []
+        modern = PUBLIC_MODERN_AUDIO_RE.search(audio_text)
+        if modern:
+            av_faults.append(f"古装/非现代公共场景出现现代声源{modern.group(0)!r}")
+        anonymous_line = PUBLIC_ANONYMOUS_CLEAR_SPEECH_RE.search(audio_text)
+        if anonymous_line:
+            av_faults.append(f"匿名群演被分配清晰完整台词{anonymous_line.group(0)!r}")
+        offscreen_cue = bool(re.search(r"画外|远处|门外|街另一端|巷口|城门方向", audio_text))
+        for sound_pattern, source_pattern in PUBLIC_SOURCE_PAIRS:
+            sound_hit = sound_pattern.search(audio_text)
+            if sound_hit and not source_pattern.search(visual_text) and not offscreen_cue:
+                av_faults.append(f"声源{sound_hit.group(0)!r}在画内不可见，也未标为可信画外声")
+
+        batch_sound = str(batch.get("声音", ""))
+        batch_environment = " ".join(str(batch.get(field, "")) for field in (
+            "起始画面", "动作过程", "结束状态", "环境动态", "独立执行提示词"
+        ))
+        batch_families = _matched_pattern_names(batch_sound, PUBLIC_AUDIO_FAMILY_PATTERNS)
+        batch_layers = _matched_pattern_names(batch_sound, PUBLIC_AUDIO_LAYER_PATTERNS)
+        batch_visual_ok = bool(PUBLIC_ROLE_RE.search(batch_environment) and PUBLIC_ACTION_RE.search(batch_environment))
+        batch_audio_ok = (
+            len(batch_families) >= required_audio_count
+            and len(batch_layers) >= required_audio_count
+            and bool(audio_families & batch_families)
+        )
+        if not batch_visual_ok:
+            av_faults.append("Seedance批次环境动态未独立写明公共人物角色及动作")
+        if not batch_audio_ok:
+            av_faults.append(
+                f"Seedance批次声音未复现镜头声源/层次：镜头={sorted(audio_families)}，批次={sorted(batch_families)}，批次层次={sorted(batch_layers)}"
+            )
+        if av_faults:
+            issues.append(_issue(
+                catalog,
+                "E-PUBLIC-AVSYNC-001",
+                f"{location}/batch:{batch_id}",
+                "；".join(av_faults),
+            ))
+        else:
+            metrics["public_scene_batch_pass_count"] += 1
+
+        scene_id = str(shot.get("场景连续性ID", ""))
+        if scene_id:
+            scene_rows[scene_id].append({
+                "index": index,
+                "shot_id": str(shot.get("镜头编号", "")),
+                "density": _public_density_class(visual_text),
+                "text": f"{visual_text} {audio_text}",
+            })
+
+    for scene_id, rows in scene_rows.items():
+        for previous, current in zip(rows, rows[1:]):
+            if (
+                previous["density"]
+                and current["density"]
+                and previous["density"] != current["density"]
+                and not PUBLIC_TRANSITION_RE.search(f"{previous['text']} {current['text']}")
+            ):
+                issues.append(_issue(
+                    catalog,
+                    "E-PUBLIC-CONT-001",
+                    f"scene:{scene_id}:{previous['shot_id']}->{current['shot_id']}",
+                    f"同场连续镜人流密度从{previous['density']}跳到{current['density']}，无涌入、散开、疏散或离开等画面过渡。",
+                ))
+
+    return issues, metrics
 
 
 def _validate_chapter_intake(
@@ -961,6 +1210,13 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         except (TypeError, ValueError):
             issues.append(_issue(catalog, "E-STAT-001", "total_duration", "总时长不是数字。"))
 
+    public_issues, public_metrics = _validate_public_scene_ecology(
+        normalized_shots,
+        batch_by_id,
+        catalog,
+    )
+    issues.extend(public_issues)
+
     gate_issues, gate_metrics = _validate_preventive_gates(
         obj,
         normalized_shots,
@@ -970,6 +1226,7 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         catalog,
     )
     issues.extend(gate_issues)
+    gate_metrics.update(public_metrics)
     chapter_issues, chapter_metrics = _validate_chapter_intake(obj, rules, catalog)
     issues.extend(chapter_issues)
     gate_metrics.update(chapter_metrics)

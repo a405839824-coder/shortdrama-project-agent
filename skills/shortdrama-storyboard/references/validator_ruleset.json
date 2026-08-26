@@ -526,5 +526,65 @@
     "repair_action": "迁移列名并按Seedance 2.5路由生成独立提示词",
     "implementation": "scripts/validate_storyboard.py",
     "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-045",
+    "module": "PUBLIC_SCENE_ECOLOGY",
+    "handler": "check_public_scene_people_or_exemption",
+    "severity": "fail",
+    "error_code": "E-PUBLIC-ECOLOGY-001",
+    "applies_when": "镜头或关联批次命中公共流动场景",
+    "pass_condition": "地点匹配普通人物可见，且生成限制未排除；或空场状态和剧情原因同时存在",
+    "repair_action": "补公共人物生态，或补齐有因空场证据",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-046",
+    "module": "PUBLIC_SCENE_ECOLOGY",
+    "handler": "check_public_crowd_density_role_action_layers",
+    "severity": "fail",
+    "error_code": "E-PUBLIC-CROWD-001",
+    "applies_when": "非豁免公共场景",
+    "pass_condition": "人流密度、地点角色、错峰动作和景别对应空间层次齐全",
+    "repair_action": "把泛称人群改为可执行的密度、角色、动作和空间分布",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-047",
+    "module": "PUBLIC_SCENE_ECOLOGY",
+    "handler": "check_public_environmental_audio_layers_and_ducking",
+    "severity": "fail",
+    "error_code": "E-PUBLIC-AUDIO-001",
+    "applies_when": "非豁免公共场景",
+    "pass_condition": "按景别具备两至三类具体声源与声场层次；对白镜明确环境声避让",
+    "repair_action": "补具体近中远声源并写明对白优先",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-048",
+    "module": "PUBLIC_SCENE_ECOLOGY",
+    "handler": "check_public_av_sources_and_seedance_propagation",
+    "severity": "fail",
+    "error_code": "E-PUBLIC-AVSYNC-001",
+    "applies_when": "非豁免公共场景及其Seedance批次",
+    "pass_condition": "声源有画内/可信画外依据，无匿名群演完整台词或时代错位声音，批次独立复现生态",
+    "repair_action": "对齐声画并重写批次声音与环境动态",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-049",
+    "module": "PUBLIC_SCENE_ECOLOGY",
+    "handler": "check_public_scene_continuity",
+    "severity": "fail",
+    "error_code": "E-PUBLIC-CONT-001",
+    "applies_when": "同一公共场景有两个及以上连续镜",
+    "pass_condition": "人流密度连续，或变化由涌入、散开、疏散、离开、时间推进等画面事实解释",
+    "repair_action": "统一相邻镜生态或补可见过渡",
+    "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
   }
 ]

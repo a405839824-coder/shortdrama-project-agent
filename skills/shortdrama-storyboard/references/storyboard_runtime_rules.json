@@ -1265,6 +1265,57 @@
         "新结果"
       ]
     },
+    "PUBLIC_SCENE_ECOLOGY": {
+      "reference": "public_scene_ecology.md",
+      "trigger_locations": [
+        "街道",
+        "闹市",
+        "市集",
+        "商街",
+        "巷道",
+        "城门",
+        "码头",
+        "驿站",
+        "茶馆",
+        "酒楼",
+        "餐馆",
+        "客栈大堂",
+        "庙会",
+        "店铺公共区",
+        "衙门外",
+        "宫门"
+      ],
+      "visual_requirements": [
+        "场景事实决定的人流密度或明确人数",
+        "地点和时代匹配的普通人物角色",
+        "彼此错峰且不抢主角的生活动作",
+        "建立/全景/远景至少两层空间分布，其他景别至少一层可读公共活动",
+        "同场连续镜的人流密度、方向、出入口和关键背景角色连续"
+      ],
+      "audio_requirements": {
+        "wide_shot": "至少三类具体声源与近中远三层声场",
+        "other_shot": "至少两类具体声源与两层声场",
+        "dialogue": "环境底声必须压低、退至底层或明确不遮盖对白",
+        "source_match": "可识别声音必须有可见声源或可信画外来源",
+        "seedance": "批次声音和环境动态必须独立复现正式镜头生态"
+      },
+      "empty_scene_exception": "必须同时写出可见空场状态与宵禁、闭市、封锁、疏散、戒严、灾后、停业、危险或用户明确要求等原因。",
+      "forbidden": [
+        "只有人群/路人/环境声/街道嘈杂声占位",
+        "同步或复制群演",
+        "匿名群演清晰完整对白",
+        "时代错位声源",
+        "公共人物遮挡关键动作或眼神",
+        "同场密度或声床无过渡跳变"
+      ],
+      "error_codes": [
+        "E-PUBLIC-ECOLOGY-001",
+        "E-PUBLIC-CROWD-001",
+        "E-PUBLIC-AUDIO-001",
+        "E-PUBLIC-AVSYNC-001",
+        "E-PUBLIC-CONT-001"
+      ]
+    },
     "JIMENG_TIMING": {
       "formal_visual_description": "画面内容及10列正式母版D列不得写0—2秒、第4秒等硬时间码；改用起始、随后、动作完成时、镜尾等自然阶段。",
       "internal_production_timeline": "动作与表演可保留数字时间段，供制作与时长审计使用。",
@@ -1957,6 +2008,61 @@
       "trigger_condition": "正式母版导出列仍使用Seedance 2.0或未使用Seedance 2.5独立正式执行分镜",
       "required_evidence": "mother_template_columns及命中的执行列名",
       "repair_action": "将正式执行列迁移为Seedance 2.5独立正式执行分镜，并按2.5模型路由重写提示词。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUBLIC-ECOLOGY-001",
+      "module": "PUBLIC_SCENE_ECOLOGY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "公共流动场景没有与地点/时代匹配的普通人物生态，生成限制排除必要普通人物，或空场缺可核验原因",
+      "required_evidence": "镜头编号、场景词、人物角色、空场描述、豁免原因及生成限制命中内容",
+      "repair_action": "按地点补齐普通人物角色与可见活动；若剧情要求空场，同时写明空场状态和宵禁/闭市/封锁/疏散等原因。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUBLIC-CROWD-001",
+      "module": "PUBLIC_SCENE_ECOLOGY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "公共场景只写人群/路人泛称，缺密度、地点角色、错峰动作或空间层次",
+      "required_evidence": "镜头编号及人物调度、画面内容、环境动态中的缺失项",
+      "repair_action": "补齐人流密度、地点角色、彼此独立的生活动作和与景别匹配的前中后景分布。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUBLIC-AUDIO-001",
+      "module": "PUBLIC_SCENE_ECOLOGY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "公共场景环境音缺具体声源或声场层次，只有泛称环境声，或对白镜未做环境声避让",
+      "required_evidence": "镜头编号、景别、环境音效、具体声源族、近中远声场和对白避让描述",
+      "repair_action": "按景别补齐至少两至三类具体声源和两至三层声场；对白出现时写明环境底声压低且不遮盖台词。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUBLIC-AVSYNC-001",
+      "module": "PUBLIC_SCENE_ECOLOGY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "公共场景可识别声音无画内/可信画外声源，匿名群演说清晰完整对白，出现时代错位声源，或Seedance批次未复现人物与声音生态",
+      "required_evidence": "镜头编号、批次编号、声源词、可见来源、批次声音和环境动态",
+      "repair_action": "对齐画内/画外声源，删除匿名群演完整台词和时代错位声音，并在Seedance声音与环境动态中独立复现。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUBLIC-CONT-001",
+      "module": "PUBLIC_SCENE_ECOLOGY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "同一公共场景连续镜的人流密度、流向或环境声床无画面原因跳变",
+      "required_evidence": "场景连续性ID、相邻镜头编号、前后密度/声源和缺失的过渡",
+      "repair_action": "统一相邻镜的公共人物和环境声状态，或用涌入、散开、疏散、离开、时间推进等可见过渡解释变化。",
       "final_status_if_unfixed": "fail_current",
       "version": "V16.3-148-R10-StableRuntime"
     },

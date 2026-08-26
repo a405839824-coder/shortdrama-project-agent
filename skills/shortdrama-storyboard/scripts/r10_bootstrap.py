@@ -102,10 +102,15 @@ def run_project(project: Path, self_test: bool) -> dict:
         report["status"] = "fail"
         report.setdefault("error_code", "E-BOOTSTRAP-001")
     if self_test:
+        public_scene_tests = run_test_script(skill_root(), "test_public_scene_ecology.py")
         agent_tests = run_test_script(skill_root(), "run_agent_tests.py")
         project_agent_tests = run_test_script(skill_root(), "run_project_agent_tests.py")
+        report["public_scene_tests"] = public_scene_tests
         report["agent_tests"] = agent_tests
         report["project_agent_tests"] = project_agent_tests
+        if public_scene_tests.get("status") != "pass" or public_scene_tests.get("exit_code") != 0:
+            report["status"] = "fail"
+            report.setdefault("error_code", "E-BOOTSTRAP-001")
         if agent_tests.get("status") != "pass" or agent_tests.get("exit_code") != 0:
             report["status"] = "fail"
             report.setdefault("error_code", "E-BOOTSTRAP-001")
@@ -137,8 +142,10 @@ def verify_bundled(self_test: bool) -> dict:
         refs / "project_agent_schema.json",
         refs / "jimeng_timing_policy.md",
         refs / "novel_to_storyboard_intake.md",
+        refs / "public_scene_ecology.md",
         root / "scripts" / "validate_storyboard.py",
         root / "scripts" / "run_golden_tests.py",
+        root / "scripts" / "test_public_scene_ecology.py",
         root / "scripts" / "storyboard_agent.py",
         root / "scripts" / "run_agent_tests.py",
         root / "scripts" / "project_agent.py",
@@ -184,12 +191,12 @@ def verify_bundled(self_test: bool) -> dict:
         "golden_tests": len(read_json(refs / "golden_tests.json").get("tests", [])),
     }
     expected_structural = {
-        "conflicts": 29,
+        "conflicts": 30,
         "task_cards": 30,
-        "validators": 44,
-        "error_codes": 58,
-        "atomic_rules": 149,
-        "templates": 47,
+        "validators": 49,
+        "error_codes": 63,
+        "atomic_rules": 154,
+        "templates": 48,
         "golden_tests": 73,
     }
     policy = runtime.get("preventive_gate_policy", {})
@@ -227,14 +234,18 @@ def verify_bundled(self_test: bool) -> dict:
         errors.append(f"preventive counts={preventive_counts!r}")
 
     golden = None
+    public_scene_tests = None
     agent_tests = None
     project_agent_tests = None
     if self_test and not errors:
         golden = run_test_script(root, "run_golden_tests.py")
+        public_scene_tests = run_test_script(root, "test_public_scene_ecology.py")
         agent_tests = run_test_script(root, "run_agent_tests.py")
         project_agent_tests = run_test_script(root, "run_project_agent_tests.py")
         if golden.get("exit_code") != 0 or golden.get("status") != "pass":
             errors.append("functional golden tests failed")
+        if public_scene_tests.get("exit_code") != 0 or public_scene_tests.get("status") != "pass":
+            errors.append("public-scene ecology tests failed")
         if agent_tests.get("exit_code") != 0 or agent_tests.get("status") != "pass":
             errors.append("Agent safety tests failed")
         if project_agent_tests.get("exit_code") != 0 or project_agent_tests.get("status") != "pass":
@@ -254,6 +265,8 @@ def verify_bundled(self_test: bool) -> dict:
     }
     if golden is not None:
         output["golden_tests"] = golden
+    if public_scene_tests is not None:
+        output["public_scene_tests"] = public_scene_tests
     if agent_tests is not None:
         output["agent_tests"] = agent_tests
     if project_agent_tests is not None:

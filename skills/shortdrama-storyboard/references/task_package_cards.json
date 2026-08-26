@@ -1694,6 +1694,7 @@
       "BOUNDARY",
       "SHOT_GRANULARITY",
       "TEMPLATE",
+      "PUBLIC_SCENE_ECOLOGY",
       "I2V_INDEPENDENCE",
       "CHAPTER_COVERAGE_AUDIT",
       "LAYERED_AUDIT",
@@ -1707,6 +1708,7 @@
       "关键对白与人物状态认知变化",
       "时长和镜头数预算",
       "章节生成前与生成后覆盖审计",
+      "公共场景普通人物与环境音生态",
       "Seedance 2.5独立正式执行分镜"
     ],
     "minimum_input_required": [
@@ -1726,6 +1728,7 @@
       "源文歧义未解决",
       "任一核心覆盖率不足100%",
       "无证据删除或新增原文外剧情",
+      "公共场景缺普通人物、具体环境声或Seedance声画复现",
       "最低对白动作转场时长超过目标预算"
     ],
     "rerun_conditions": [

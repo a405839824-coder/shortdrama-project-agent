@@ -82,6 +82,10 @@ def _find_work_order(hub: dict[str, Any], work_order_id: str) -> dict[str, Any]:
 
 def _issue_category(error_code: str) -> str:
     code = error_code.upper()
+    if "PUBLIC-CONT" in code:
+        return "空间连续"
+    if "PUBLIC" in code:
+        return "禁项与声音"
     if "CHAPTER-BUDGET" in code:
         return "镜头节奏"
     if any(term in code for term in ("SOURCE", "DIALOGUE", "COGNITION", "CHANGELOCK", "CHAPTER-INTAKE")):
