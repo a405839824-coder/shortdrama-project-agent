@@ -135,7 +135,7 @@
       "operation": "storyboard_create",
       "group": "分镜工作流",
       "status": "supported",
-      "output": "R10正式分镜、章节/原文映射和Seedance 2.5独立正式执行分镜",
+      "output": "R10正式分镜、章节/原文映射、公共场景人物与环境音生态和Seedance 2.5独立正式执行分镜",
       "approval_policy": "explicit_execute"
     },
     {
@@ -156,7 +156,7 @@
       "operation": "storyboard_audit",
       "group": "审计闭环",
       "status": "supported",
-      "output": "八层全表审计、问题证据和简洁结论",
+      "output": "源文至统计全表审计（含公共场景人物/环境音生态）、问题证据和简洁结论",
       "approval_policy": "read_only"
     },
     {
@@ -170,7 +170,7 @@
       "operation": "seedance_create",
       "group": "视频生产",
       "status": "supported",
-      "output": "脱离GPT上下文可独立执行的Seedance 2.5正式提示词与批次",
+      "output": "脱离GPT上下文可独立执行且复现公共人物/环境声生态的Seedance 2.5正式提示词与批次",
       "approval_policy": "explicit_execute"
     },
     {
@@ -199,7 +199,7 @@
       "operation": "audio_bgm",
       "group": "声音生产",
       "status": "supported",
-      "output": "整场情绪基调、分段BGM、转场音效、对白让位与听觉画面方案",
+      "output": "整场情绪基调、分段BGM、公共场景近中远环境声、转场音效、对白让位与听觉画面方案",
       "approval_policy": "explicit_execute"
     },
     {

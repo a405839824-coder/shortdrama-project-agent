@@ -627,6 +627,61 @@
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
+    "error_code": "E-PUBLIC-ECOLOGY-001",
+    "module": "PUBLIC_SCENE_ECOLOGY",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "公共流动场景没有与地点/时代匹配的普通人物生态，生成限制排除必要普通人物，或空场缺可核验原因",
+    "required_evidence": "镜头编号、场景词、人物角色、空场描述、豁免原因及生成限制命中内容",
+    "repair_action": "按地点补齐普通人物角色与可见活动；若剧情要求空场，同时写明空场状态和宵禁/闭市/封锁/疏散等原因。",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "error_code": "E-PUBLIC-CROWD-001",
+    "module": "PUBLIC_SCENE_ECOLOGY",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "公共场景只写人群/路人泛称，缺密度、地点角色、错峰动作或空间层次",
+    "required_evidence": "镜头编号及人物调度、画面内容、环境动态中的缺失项",
+    "repair_action": "补齐人流密度、地点角色、彼此独立的生活动作和与景别匹配的前中后景分布。",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "error_code": "E-PUBLIC-AUDIO-001",
+    "module": "PUBLIC_SCENE_ECOLOGY",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "公共场景环境音缺具体声源或声场层次，只有泛称环境声，或对白镜未做环境声避让",
+    "required_evidence": "镜头编号、景别、环境音效、具体声源族、近中远声场和对白避让描述",
+    "repair_action": "按景别补齐至少两至三类具体声源和两至三层声场；对白出现时写明环境底声压低且不遮盖台词。",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "error_code": "E-PUBLIC-AVSYNC-001",
+    "module": "PUBLIC_SCENE_ECOLOGY",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "公共场景可识别声音无画内/可信画外声源，匿名群演说清晰完整对白，出现时代错位声源，或Seedance批次未复现人物与声音生态",
+    "required_evidence": "镜头编号、批次编号、声源词、可见来源、批次声音和环境动态",
+    "repair_action": "对齐画内/画外声源，删除匿名群演完整台词和时代错位声音，并在Seedance声音与环境动态中独立复现。",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "error_code": "E-PUBLIC-CONT-001",
+    "module": "PUBLIC_SCENE_ECOLOGY",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "同一公共场景连续镜的人流密度、流向或环境声床无画面原因跳变",
+    "required_evidence": "场景连续性ID、相邻镜头编号、前后密度/声源和缺失的过渡",
+    "repair_action": "统一相邻镜的公共人物和环境声状态，或用涌入、散开、疏散、离开、时间推进等可见过渡解释变化。",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
     "error_code": "E-FINAL-999",
     "module": "FINAL",
     "severity": "fail",

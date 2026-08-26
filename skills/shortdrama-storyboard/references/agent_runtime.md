@@ -31,6 +31,8 @@ Use this fixed audit category order:
 7. 禁项与声音
 8. 统计闭合
 
+公共场景人物密度、地点角色、错峰动作、空间层次、具体环境声、对白避让、声画来源和Seedance复现均归入第7类“禁项与声音”；同场人流跳变同时在第3类“空间连续”记录。
+
 The Agent computes the issue key from project, episode, logical file, error code, shot IDs, field, and issue type. Do not use mutable evidence text or content version as the only identity; the same defect must remain traceable after a repair changes the file.
 
 ## Close within two or three internal rounds

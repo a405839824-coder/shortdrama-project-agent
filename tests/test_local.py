@@ -22,6 +22,7 @@ import sys
 
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 from run_golden_tests import inject_pg1_fixture_evidence  # noqa: E402
+from test_public_scene_ecology import public_fixture  # noqa: E402
 
 
 def valid_storyboard() -> dict:
@@ -189,6 +190,57 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status["data"]["state_valid"])
         self.assertEqual(status["data"]["issues"]["event_count"], 2)
         self.assertEqual(status["data"]["issues"]["open_issue_count"], 0)
+
+    async def test_public_scene_people_audio_gate_and_repair(self) -> None:
+        project_id = await self.create_project("公共场景生态测试")
+        task = await self.call(
+            "begin_project_task",
+            {
+                "project_id": project_id,
+                "operation": "storyboard_create",
+                "mode": "audit_and_repair",
+                "authorization": "explicit_execute",
+                "request_text": "检查古代市集普通人物和环境音并修正",
+                "targets": ["市集场景"],
+                "authoritative_source": "测试源文",
+                "latest_version": "v1",
+                "target_boundary": "市集场景",
+                "must_keep": ["主角动作"],
+                "must_remove": ["泛称环境声"],
+                "protected_scope": [],
+                "expected_outputs": ["正式分镜", "Seedance批次"],
+                "window_key": "test-public-ecology",
+            },
+        )
+        work_order_id = task["work_order_id"]
+        broken = public_fixture()
+        broken["shots"][0]["环境音效"] = "街道嘈杂声"
+        first = await self.call(
+            "commit_storyboard",
+            {
+                "project_id": project_id,
+                "work_order_id": work_order_id,
+                "storyboard": broken,
+                "file_name": "市集分镜_错误版.xlsx",
+            },
+        )
+        self.assertEqual(first["status"], "fail_current")
+        codes = {item["error_code"] for item in first["data"]["report"]["issues"]}
+        self.assertIn("E-PUBLIC-AUDIO-001", codes)
+        self.assertIn("prohibitions_audio", first["data"]["validation"]["failed_gates"])
+
+        repaired = await self.call(
+            "commit_storyboard",
+            {
+                "project_id": project_id,
+                "work_order_id": work_order_id,
+                "storyboard": public_fixture(),
+                "file_name": "市集分镜_修复版.xlsx",
+                "source_artifact_id": first["artifact_id"],
+            },
+        )
+        self.assertEqual(repaired["status"], "pass")
+        self.assertEqual(repaired["data"]["report"]["issues"], [])
 
     async def test_file_import_and_workbook_roundtrip(self) -> None:
         project_id = await self.create_project("文件导入测试")

@@ -38,12 +38,14 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     server = MCPServer(
         name="shortdrama-project-agent",
         title="分镜项目 Agent",
-        description="R10-PG1 Chinese short-drama project service with chapter intake and Seedance 2.5 execution",
+        description="R10-PG1 Chinese short-drama service with chapter intake, public-scene people/ambience ecology, and Seedance 2.5 execution",
         version=__version__,
         instructions=(
             "先调用get_agent_status，再创建或确认项目并调用begin_project_task。"
             "小说章节转分镜必须先完整读取并建立章节地图、取舍台账、人物认知、对白保护、时长预算和节拍计划，未完成不得生成。"
             "生成内容后必须调用提交工具；分镜必须经commit_storyboard全表校验。"
+            "街道、市集、酒楼、城门等公共场景必须写普通人物密度、地点角色、错峰动作和空间层次，并写具体近中远环境声、对白避让和声画来源；有因空场除外。"
+            "正式分镜与Seedance批次必须复现同一组公共人物和环境声生态。"
             "正式母版执行列固定为Seedance 2.5独立正式执行分镜。"
             "若失败，应一次修复报告中的全部问题并重提，最多三轮；零残留、零新增才可称通过。"
             "同一文件不要重复制造审计轮次。正式归档必须调用signoff_task取得人工签核。"
@@ -232,7 +234,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     @server.tool(
         name="commit_storyboard",
         title="提交并全表审计分镜",
-        description="生成、重建或修复完整R10分镜后调用；对小说输入同时校验章节前置规划与100%覆盖，保存JSON与Excel，自动全表审计、影响回归并写入跨窗口台账。正式执行列使用Seedance 2.5。不要只提交局部问题。",
+        description="生成、重建或修复完整R10分镜后调用；同时校验章节规划/覆盖、公共场景人物与环境音生态、Seedance声画复现，保存JSON与Excel并写入跨窗口台账。正式执行列使用Seedance 2.5。不要只提交局部问题。",
         annotations=_annotations(read_only=False),
         meta=meta("正在保存并全表审计…", "分镜审计已完成"),
         structured_output=True,
@@ -256,7 +258,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     @server.tool(
         name="audit_storyboard",
         title="审计并记录分镜",
-        description="审计已存在的分镜文件时调用；执行八层全表检查并记录问题。同一指纹重复审计会复用结果，不增加轮次。",
+        description="审计已存在的分镜文件时调用；执行全表检查（含公共人物、环境音、声画来源和Seedance复现）并记录问题。同一指纹重复审计会复用结果，不增加轮次。",
         annotations=_annotations(read_only=False),
         meta=meta("正在全表审计…", "审计结果已记录"),
         structured_output=True,

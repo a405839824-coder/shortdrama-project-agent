@@ -436,5 +436,21 @@
       "E-SOURCE-SELECT-001"
     ],
     "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "conflict_id": "C-030",
+    "conflict_pair": "公共场景需要普通人物生态 vs 通用生成限制禁止额外角色",
+    "higher_priority_rule": "公共场景事实、源文忠实和可执行性",
+    "decision": "公共场景必须保留已规划的地点匹配普通人物；把禁止额外角色改写为禁止未列明角色、复制人群、重复脸、同步动作和抢主角的群演，不得一刀切删除公共人物",
+    "reason": "通用负面词若直接禁止所有额外角色，会把街道、市场、酒楼等公共空间生成成不合剧情的空场。",
+    "exception_allowed": true,
+    "exception_condition": "剧情明确要求空场，且镜头同时写明可见空场状态和宵禁、闭市、封锁、疏散等原因。",
+    "user_authorization_required": false,
+    "output_status_if_violated": "fail_current",
+    "linked_error_codes": [
+      "E-PUBLIC-ECOLOGY-001",
+      "E-PUBLIC-CROWD-001"
+    ],
+    "version": "V16.3-148-R10-StableRuntime"
   }
 ]
