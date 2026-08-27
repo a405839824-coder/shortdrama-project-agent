@@ -251,6 +251,186 @@
       "S11": "为视觉效果新增原文外剧情"
     }
   },
+  "windowed_execution_policy": {
+    "principle": "生产与独立审计保持分窗；复用经指纹验证的客观事实，不复用生产结论；任何提速不得减少G0-G13、八层审计或质量阈值。",
+    "window_roles": {
+      "production": "创建或修复新版本，只能签发production_preflight和handoff，不能签发最终审计通过。",
+      "independent_audit": "只读源文与产物，独立重算质量结论，独占最终pass/fail签发权。",
+      "repair": "依据结构化修复包生成新版本，必须返回independent_audit。"
+    },
+    "audit_types": {
+      "production_preflight": {
+        "may_mutate_artifact": true,
+        "may_issue_release_verdict": false,
+        "purpose": "在交接前发现结构、字段、覆盖、连续性、批次和统计问题。"
+      },
+      "independent_audit": {
+        "may_mutate_artifact": false,
+        "may_issue_release_verdict": true,
+        "must_recompute_all_quality_conclusions": true
+      }
+    },
+    "canonical_policy": {
+      "single_structured_truth_per_artifact_version": true,
+      "derived_consumers": [
+        "正式镜头",
+        "10列母版",
+        "Seedance批次",
+        "覆盖映射",
+        "统计"
+      ],
+      "required_fingerprints": [
+        "source_bytes",
+        "normalized_source",
+        "episode_boundary",
+        "artifact_raw",
+        "artifact_semantic",
+        "canonical",
+        "parser",
+        "schema",
+        "runtime",
+        "rules",
+        "validator",
+        "project_anchors",
+        "target_model_contract"
+      ],
+      "reject_competing_or_stale_canonical": true
+    },
+    "handoff_policy": {
+      "types": [
+        "production_to_audit",
+        "audit_to_repair",
+        "repair_to_audit",
+        "audit_intake"
+      ],
+      "required_blocks": [
+        "identity_and_scope",
+        "fingerprints",
+        "objective_evidence",
+        "producer_claims",
+        "cache_manifest",
+        "stage_trace",
+        "cycle_ids"
+      ],
+      "receiver_must_verify_fingerprints": true,
+      "missing_or_mismatch": "cache_miss_or_block",
+      "forbid_silent_stale_fallback": true
+    },
+    "cross_window_fact_reuse_whitelist": [
+      "exact_source_text_and_chunk_manifest",
+      "deterministic_workbook_cells_formulas_and_inventory",
+      "canonical_serialization_verified_against_artifact",
+      "approved_human_decisions_boundaries_and_project_anchors",
+      "deterministic_file_statistics",
+      "unchanged_runtime_full_test_certificate"
+    ],
+    "producer_claims_requiring_independent_recalculation": [
+      "chapter_and_causal_maps",
+      "source_treatment_and_deletion_authority",
+      "protected_dialogue",
+      "cognition_matrix",
+      "seven_field_scene_state",
+      "shot_plan_and_performance_chain",
+      "public_scene_people_and_audio_ecology",
+      "Seedance_independence",
+      "coverage_metrics",
+      "residual_and_introduced_issues",
+      "final_verdict"
+    ],
+    "cache_policy": {
+      "content_addressed_only": true,
+      "base_key_fields": [
+        "source",
+        "boundary",
+        "artifact_raw",
+        "artifact_semantic",
+        "canonical",
+        "parser",
+        "schema",
+        "runtime",
+        "rules",
+        "validator",
+        "scripts",
+        "dependencies_environment",
+        "project_anchors",
+        "target_model_contract",
+        "scope"
+      ],
+      "explicit_fresh_audit": "reuse_extraction_and_parsing_only_then_recompute_semantic_verdict",
+      "invalidation": {
+        "dialogue_or_story": "beat_source_mapping_protected_dialogue_cognition",
+        "action_or_gaze": "current_shot_neighbors_visibility",
+        "position_direction_prop_door_window_action_progress_light": "continuous_scene",
+        "shot_insert_or_delete": "downstream_numbering_duration_transition_batch_mapping",
+        "time_or_lighting": "continuous_scene",
+        "Seedance": "complete_batch",
+        "episode_boundary_cognition_scene_topology_core_shot_plan": "affected_scene_or_episode",
+        "runtime_rules_schema_validator_scripts_dependencies_parser_or_model_contract": "all_dependent_certificates_and_full_regression"
+      }
+    },
+    "functional_test_policy": {
+      "ordinary_content_task": "verify_matching_certificate_only",
+      "forbid_modules_in_ordinary_content_audit": [
+        "ALL_RUNTIME_MODULES",
+        "FUNCTIONAL_TEST"
+      ],
+      "full_regression_triggers": [
+        "runtime_change",
+        "rule_change",
+        "schema_change",
+        "validator_change",
+        "script_change",
+        "dependency_or_environment_change",
+        "parser_contract_change",
+        "target_model_contract_change",
+        "certificate_missing_or_mismatch",
+        "validator_certificate_inconsistency"
+      ],
+      "certificate_fingerprints": [
+        "runtime",
+        "rules",
+        "schema",
+        "validator",
+        "scripts",
+        "dependencies_environment"
+      ]
+    },
+    "stage_timing_policy": {
+      "required_stages_when_applicable": [
+        "bootstrap_status",
+        "source_read",
+        "canonicalization",
+        "planning",
+        "generation",
+        "validation",
+        "repair",
+        "export",
+        "ledger_handoff"
+      ],
+      "required_metrics": [
+        "started_at",
+        "ended_at",
+        "duration_ms",
+        "tool_call_count",
+        "source_character_count",
+        "payload_bytes",
+        "shot_count",
+        "batch_count",
+        "cache_status_and_reason",
+        "retry_count",
+        "error_status"
+      ],
+      "parallel_wall_clock_rule": "父阶段墙钟时间不得重复累加并行子阶段耗时。",
+      "efficiency_claim_rule": "只比较相同源文、边界、规则、服务等级和输出契约的可比trace。"
+    },
+    "quality_equivalence": {
+      "preserve_ordered_gates": "G0-G13",
+      "preserve_audit_layers": 8,
+      "preserve_quality_thresholds": true,
+      "performance_never_overrides_quality_failure": true,
+      "human_signoff_still_required": true
+    }
+  },
   "modules": {
     "EXPRESSION": {
       "formula": "情绪=嘴角状态+眼神变化+面部状态",
@@ -1334,7 +1514,95 @@
         "Seedance 2.5"
       ],
       "verified_on": "2026-08-25"
+    },
+    "CANONICAL_AUTHORITY": {
+      "policy_ref": "windowed_execution_policy.canonical_policy",
+      "rule": "每个产物版本只允许一个经全量指纹绑定的canonical，所有正式消费者必须由它派生。"
+    },
+    "HANDOFF_BUILD": {
+      "policy_ref": "windowed_execution_policy.handoff_policy",
+      "rule": "生产、审计、修复窗口交接时创建版本化manifest，分开客观证据与待审声明。"
+    },
+    "HANDOFF_VERIFY": {
+      "policy_ref": "windowed_execution_policy.handoff_policy",
+      "rule": "消费交接包前验证全部依赖指纹；不一致时拒绝缓存并按影响范围重建或阻塞。"
+    },
+    "PRODUCTION_PREFLIGHT": {
+      "policy_ref": "windowed_execution_policy.audit_types.production_preflight",
+      "rule": "生产窗口执行全部适用前置检查，但不得签发独立审计结论。"
+    },
+    "INDEPENDENT_AUDIT": {
+      "policy_ref": "windowed_execution_policy.audit_types.independent_audit",
+      "rule": "只读审计窗口独立重算全部质量结论并独占最终pass/fail签发权。"
+    },
+    "RUNTIME_TEST_CERTIFICATE_VERIFY": {
+      "policy_ref": "windowed_execution_policy.functional_test_policy",
+      "rule": "普通内容任务验证匹配的全回归证书；任何依赖变化、缺失或不一致都触发完整回归。"
+    },
+    "CACHE_POLICY": {
+      "policy_ref": "windowed_execution_policy.cache_policy",
+      "rule": "只复用内容寻址的客观证据，按依赖与影响范围失效；禁止静默使用陈旧缓存。"
+    },
+    "STAGE_TIMING": {
+      "policy_ref": "windowed_execution_policy.stage_timing_policy",
+      "rule": "记录可比较的分阶段墙钟时间、调用量、数据量、缓存和重试证据。"
+    },
+    "AUDIT_INTAKE_IF_NO_HANDOFF": {
+      "policy_ref": "windowed_execution_policy.handoff_policy",
+      "rule": "外部或旧产物缺handoff时，由只读审计窗口建立audit_intake canonical；已有handoff失配才阻塞。"
+    },
+    "AUDIT_CERTIFICATE_VERIFY": {
+      "policy_ref": "windowed_execution_policy.cross_window_fact_reuse_whitelist",
+      "rule": "验证独立审计证书与源文、边界、raw/semantic产物、canonical及全部规则依赖指纹完全一致。"
+    },
+    "INDEPENDENT_AUDIT_IF_NEEDED": {
+      "policy_ref": "windowed_execution_policy.cache_policy.explicit_fresh_audit",
+      "rule": "仅在独立审计证书缺失、失配或用户明确要求fresh audit时重跑；相同有效证书可用于归档验证。"
+    },
+    "PREVENTIVE_GATE_CERT_VERIFY": {
+      "policy_ref": "windowed_execution_policy.quality_equivalence",
+      "rule": "归档先验证同指纹证书中的G0-G13唯一门禁证据；缺失或失配才重跑。"
+    },
+    "LAYERED_AUDIT_IF_NEEDED": {
+      "policy_ref": "windowed_execution_policy.cache_policy.explicit_fresh_audit",
+      "rule": "归档先验证同指纹证书的八层唯一结果；缺失、失配或fresh请求才重跑八层。"
+    },
+    "QUALITY_METRICS_CERT_VERIFY": {
+      "policy_ref": "windowed_execution_policy.quality_equivalence",
+      "rule": "归档验证同指纹证书的全部R10质量阈值，不复制生产预检指标。"
     }
+  },
+  "certificate_bound_patch_policy": {
+    "tool": "commit_storyboard_patch",
+    "allowed_operation": "replace_field",
+    "requires": [
+      "storyboard_repair_or_storyboard_change_work_order",
+      "explicit_execute",
+      "exact_base_canonical_hash",
+      "exact_raw_artifact_fingerprint",
+      "current_independent_audit_certificate",
+      "certificate_issue_code_for_each_operation",
+      "stable_unique_shot_id",
+      "work_order_protected_scope_check",
+      "complete_impact_scope",
+      "full_table_R10_validation",
+      "new_version_without_overwrite",
+      "separate_independent_final_audit"
+    ],
+    "forbidden_field_families": [
+      "shot_identity_order_or_timing",
+      "episode_or_scene_boundary",
+      "character_cognition_or_information_permission",
+      "source_evidence_or_source_mapping",
+      "scene_topology_or_core_shot_plan"
+    ],
+    "errors": {
+      "stale_base": "canonical_hash_conflict",
+      "invalid_certificate": "invalid_audit_certificate",
+      "protected_scope": "protected_scope_violation",
+      "structural_change": "full_rebuild_required"
+    },
+    "quality_rule": "局部补丁只减少重传和重写，不减少全表机器门禁，也不得由修复窗口签发最终审计通过。"
   },
   "deprecated_rules": [
     {
