@@ -6,6 +6,7 @@ import io
 import ipaddress
 import json
 import mimetypes
+import re
 import socket
 import ssl
 import urllib.error
@@ -41,6 +42,11 @@ BATCH_FIELDS = [
 
 MAX_ARCHIVE_ENTRIES = 10_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 250 * 1024 * 1024
+MAX_BULK_RESPONSE_CHARS = 16_000
+MAX_BULK_RANGES = 16
+DEFAULT_BULK_RESPONSE_CHARS = 12_000
+DEFAULT_BULK_CHARACTER_LIMIT = 8_000
+DEFAULT_BULK_ITEM_LIMITS = {"paragraphs": 80, "pages": 8, "rows": 50}
 
 
 def json_safe(value: Any) -> Any:
@@ -95,7 +101,7 @@ def download_openai_file(file: OpenAIFile, settings: Settings) -> tuple[bytes, s
     validate_download_url(file.download_url, settings)
     request = urllib.request.Request(
         file.download_url,
-        headers={"User-Agent": "shortdrama-project-agent/0.2"},
+        headers={"User-Agent": "shortdrama-project-agent/0.3"},
         method="GET",
     )
     opener = urllib.request.build_opener(_SafeRedirectHandler(settings), urllib.request.HTTPSHandler(context=ssl.create_default_context()))
@@ -246,13 +252,25 @@ def _extract_docx(data: bytes) -> dict[str, Any]:
         text = "".join(node.text or "" for node in paragraph.iter(f"{namespace}t")).strip()
         if text:
             paragraphs.append(text)
-    return {"kind": "text", "format": "docx", "paragraph_count": len(paragraphs), "text": "\n".join(paragraphs)}
+    return {
+        "kind": "text",
+        "format": "docx",
+        "paragraph_count": len(paragraphs),
+        "paragraphs": paragraphs,
+        "text": "\n".join(paragraphs),
+    }
 
 
 def _extract_pdf(data: bytes) -> dict[str, Any]:
     reader = PdfReader(io.BytesIO(data))
     pages = [(page.extract_text() or "").strip() for page in reader.pages]
-    return {"kind": "text", "format": "pdf", "page_count": len(pages), "text": "\n\n".join(pages)}
+    return {
+        "kind": "text",
+        "format": "pdf",
+        "page_count": len(pages),
+        "pages": pages,
+        "text": "\n\n".join(pages),
+    }
 
 
 def _extract_csv(data: bytes) -> dict[str, Any]:
@@ -274,7 +292,13 @@ def _extract_mm(data: bytes) -> dict[str, Any]:
             visit(child, depth + (1 if text else 0))
 
     visit(root, 0)
-    return {"kind": "text", "format": "freemind", "node_count": len(lines), "text": "\n".join(lines)}
+    return {
+        "kind": "text",
+        "format": "freemind",
+        "node_count": len(lines),
+        "paragraphs": lines,
+        "text": "\n".join(lines),
+    }
 
 
 def extract_file(data: bytes, file_name: str, mime_type: str | None = None) -> dict[str, Any]:
@@ -421,3 +445,328 @@ def preview_extracted(value: dict[str, Any], section: str | None, offset: int, l
         text = str(content or "")
         return {"kind": kind, "offset": offset, "limit": limit, "total": len(text), "content": text[offset : offset + limit]}
     return {"kind": kind, "content": value}
+
+
+def _paragraphs_from_text(text: str) -> list[str]:
+    blocks = [item.strip() for item in re.split(r"\n\s*\n", text) if item.strip()]
+    if len(blocks) <= 1:
+        lines = [item.strip() for item in text.splitlines() if item.strip()]
+        if lines:
+            return lines
+    return blocks
+
+
+def _range_dict(value: Any) -> dict[str, Any]:
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        return value.model_dump(exclude_none=True)
+    if isinstance(value, dict):
+        return dict(value)
+    raise ValueError("bulk_ranges entries must be objects")
+
+
+def _bulk_char_result(
+    text: str,
+    *,
+    section: str | None,
+    offset: int,
+    limit: int | None,
+    budget: int,
+) -> tuple[dict[str, Any], int]:
+    total = len(text)
+    requested = limit if limit is not None else DEFAULT_BULK_CHARACTER_LIMIT
+    take = min(max(0, requested), max(0, budget))
+    content = text[offset : offset + take]
+    next_offset = min(total, offset + len(content))
+    result = {
+        "section": section,
+        "unit": "characters",
+        "offset": offset,
+        "limit": requested,
+        "total": total,
+        "content": content,
+        "next_offset": next_offset,
+        "complete": next_offset >= total,
+    }
+    return result, len(content)
+
+
+def _bulk_text_items_result(
+    items: list[Any],
+    *,
+    section: str | None,
+    unit: str,
+    offset: int,
+    inner_offset: int,
+    limit: int | None,
+    budget: int,
+) -> tuple[dict[str, Any], int]:
+    total = len(items)
+    requested = limit if limit is not None else DEFAULT_BULK_ITEM_LIMITS[unit]
+    index = min(max(0, offset), total)
+    first_inner = max(0, inner_offset)
+    remaining = max(0, budget)
+    parts: list[str] = []
+    completed_items = 0
+    partial = False
+    next_inner_offset = 0
+
+    while index < total and completed_items < requested and remaining > 0:
+        item = str(items[index] or "")
+        item_offset = first_inner if completed_items == 0 else 0
+        item_offset = min(item_offset, len(item))
+        segment = item[item_offset:]
+        separator = "\n\n" if parts else ""
+        required = len(separator) + len(segment)
+        if required <= remaining:
+            parts.append(separator + segment)
+            remaining -= required
+            index += 1
+            completed_items += 1
+            first_inner = 0
+            continue
+        separator_size = len(separator)
+        available = max(0, remaining - separator_size)
+        if available:
+            parts.append(separator + segment[:available])
+            next_inner_offset = item_offset + available
+            remaining = 0
+            partial = next_inner_offset < len(item)
+            if not partial:
+                index += 1
+                completed_items += 1
+                next_inner_offset = 0
+        break
+
+    content = "".join(parts)
+    result = {
+        "section": section,
+        "unit": unit,
+        "offset": offset,
+        "inner_offset": inner_offset,
+        "limit": requested,
+        "total": total,
+        "content": content,
+        "next_offset": index,
+        "next_inner_offset": next_inner_offset,
+        "complete": index >= total and not partial,
+        "partial_item": partial,
+    }
+    return result, len(content)
+
+
+def _bulk_rows_result(
+    rows: list[Any],
+    *,
+    section: str | None,
+    offset: int,
+    limit: int | None,
+    budget: int,
+) -> tuple[dict[str, Any], int]:
+    total = len(rows)
+    requested = limit if limit is not None else DEFAULT_BULK_ITEM_LIMITS["rows"]
+    selected: list[Any] = []
+    used = 0
+    index = min(max(0, offset), total)
+    oversized_item = False
+    while index < total and len(selected) < requested:
+        row = rows[index]
+        row_size = len(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+        separator_size = 1 if selected else 0
+        if used + separator_size + row_size > max(0, budget):
+            oversized_item = not selected and row_size > max(0, budget)
+            break
+        selected.append(row)
+        used += separator_size + row_size
+        index += 1
+    result = {
+        "section": section,
+        "unit": "rows",
+        "offset": offset,
+        "limit": requested,
+        "total": total,
+        "rows": selected,
+        "next_offset": index,
+        "complete": index >= total,
+        "oversized_item": oversized_item,
+    }
+    if oversized_item:
+        result["hint"] = "single row exceeds max_chars; retry this section with unit=characters"
+    return result, used
+
+
+def _workbook_sheet(value: dict[str, Any], section: str | None) -> dict[str, Any] | None:
+    sheets = value.get("sheets", [])
+    if section:
+        return next((item for item in sheets if item.get("name") == section), None)
+    return sheets[0] if sheets else None
+
+
+def _bulk_one_range(
+    value: dict[str, Any],
+    request: dict[str, Any],
+    *,
+    default_unit: str,
+    budget: int,
+) -> tuple[dict[str, Any], int]:
+    kind = str(value.get("kind") or "unknown")
+    section = request.get("section")
+    offset = max(0, int(request.get("offset", 0)))
+    inner_offset = max(0, int(request.get("inner_offset", 0)))
+    limit_value = request.get("limit")
+    limit = None if limit_value is None else max(1, int(limit_value))
+    requested_unit = str(request.get("unit") or default_unit or "auto")
+
+    if kind == "text":
+        text = str(value.get("text") or "")
+        if requested_unit == "auto":
+            if value.get("format") == "pdf" and isinstance(value.get("pages"), list):
+                requested_unit = "pages"
+            elif isinstance(value.get("paragraphs"), list):
+                requested_unit = "paragraphs"
+            else:
+                requested_unit = "characters"
+        if requested_unit == "characters":
+            return _bulk_char_result(text, section=section, offset=offset, limit=limit, budget=budget)
+        if requested_unit == "paragraphs":
+            paragraphs = value.get("paragraphs")
+            if not isinstance(paragraphs, list):
+                paragraphs = _paragraphs_from_text(text)
+            return _bulk_text_items_result(
+                paragraphs,
+                section=section,
+                unit="paragraphs",
+                offset=offset,
+                inner_offset=inner_offset,
+                limit=limit,
+                budget=budget,
+            )
+        if requested_unit == "pages":
+            pages = value.get("pages")
+            if not isinstance(pages, list):
+                raise ValueError("pages unit is only available for page-indexed text")
+            return _bulk_text_items_result(
+                pages,
+                section=section,
+                unit="pages",
+                offset=offset,
+                inner_offset=inner_offset,
+                limit=limit,
+                budget=budget,
+            )
+        raise ValueError(f"unit {requested_unit!r} is not valid for text")
+
+    if kind == "workbook":
+        if section == "canonical_storyboard":
+            content = value.get("canonical_storyboard")
+            text = json.dumps(content, ensure_ascii=False, separators=(",", ":"))
+            if requested_unit not in {"auto", "characters"}:
+                raise ValueError("canonical_storyboard supports unit=characters")
+            return _bulk_char_result(text, section=section, offset=offset, limit=limit, budget=budget)
+        sheet = _workbook_sheet(value, section)
+        if not sheet:
+            return (
+                {
+                    "section": section,
+                    "unit": "rows",
+                    "offset": offset,
+                    "limit": limit or DEFAULT_BULK_ITEM_LIMITS["rows"],
+                    "total": 0,
+                    "rows": [],
+                    "next_offset": 0,
+                    "complete": True,
+                    "available_sections": [item.get("name") for item in value.get("sheets", [])],
+                },
+                0,
+            )
+        rows = list(sheet.get("rows") or [])
+        if requested_unit == "characters":
+            text = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+            return _bulk_char_result(text, section=sheet.get("name"), offset=offset, limit=limit, budget=budget)
+        if requested_unit not in {"auto", "rows"}:
+            raise ValueError(f"unit {requested_unit!r} is not valid for a workbook sheet")
+        result, used = _bulk_rows_result(
+            rows,
+            section=sheet.get("name"),
+            offset=offset,
+            limit=limit,
+            budget=budget,
+        )
+        result["headers"] = sheet.get("headers", [])
+        return result, used
+
+    if kind == "table":
+        rows = list(value.get("rows") or [])
+        if requested_unit == "characters":
+            text = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+            return _bulk_char_result(text, section=section, offset=offset, limit=limit, budget=budget)
+        if requested_unit not in {"auto", "rows"}:
+            raise ValueError(f"unit {requested_unit!r} is not valid for a table")
+        result, used = _bulk_rows_result(rows, section=section, offset=offset, limit=limit, budget=budget)
+        result["headers"] = value.get("headers", [])
+        return result, used
+
+    if kind == "json":
+        content = value.get("value")
+        if isinstance(content, dict) and section:
+            if section not in content:
+                return (
+                    {
+                        "section": section,
+                        "unit": requested_unit,
+                        "offset": offset,
+                        "limit": limit,
+                        "total": 0,
+                        "content": "",
+                        "next_offset": 0,
+                        "complete": True,
+                        "available_sections": sorted(content.keys()),
+                    },
+                    0,
+                )
+            content = content[section]
+        if isinstance(content, list) and requested_unit in {"auto", "rows"}:
+            return _bulk_rows_result(content, section=section, offset=offset, limit=limit, budget=budget)
+        if requested_unit not in {"auto", "characters"}:
+            raise ValueError(f"unit {requested_unit!r} is not valid for this JSON value")
+        text = json.dumps(content, ensure_ascii=False, separators=(",", ":"))
+        return _bulk_char_result(text, section=section, offset=offset, limit=limit, budget=budget)
+
+    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if requested_unit not in {"auto", "characters"}:
+        raise ValueError(f"unit {requested_unit!r} is not valid for {kind}")
+    return _bulk_char_result(text, section=section, offset=offset, limit=limit, budget=budget)
+
+
+def preview_extracted_bulk(
+    value: dict[str, Any],
+    ranges: list[Any] | None,
+    *,
+    default_unit: str = "auto",
+    max_chars: int = DEFAULT_BULK_RESPONSE_CHARS,
+) -> dict[str, Any]:
+    """Read several bounded ranges in one MCP round trip.
+
+    `max_chars` limits returned source/table content across every requested
+    range. Metadata is intentionally small and is not counted as source text.
+    """
+
+    budget = max(1, min(int(max_chars), MAX_BULK_RESPONSE_CHARS))
+    raw_ranges = ranges or [{}]
+    if len(raw_ranges) > MAX_BULK_RANGES:
+        raise ValueError(f"bulk_ranges supports at most {MAX_BULK_RANGES} ranges per call")
+    requests = [_range_dict(item) for item in raw_ranges]
+    results: list[dict[str, Any]] = []
+    used = 0
+    for request in requests:
+        remaining = max(0, budget - used)
+        result, consumed = _bulk_one_range(value, request, default_unit=default_unit, budget=remaining)
+        used += min(max(0, consumed), remaining)
+        results.append(result)
+    truncated = any(not bool(item.get("complete")) for item in results)
+    return {
+        "kind": value.get("kind"),
+        "ranges": results,
+        "max_chars": budget,
+        "returned_chars": used,
+        "truncated": truncated,
+    }
