@@ -18,6 +18,7 @@ from filelock import FileLock
 
 
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+PROJECT_RECORD_KINDS = {"handoffs", "certificates", "telemetry"}
 
 
 def utc_stamp() -> str:
@@ -251,6 +252,110 @@ class ProjectStore:
         result.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
         return result
 
+    def find_artifact_by_fingerprint(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        fingerprint: str,
+        artifact_type: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the newest matching artifact inside one OAuth/project boundary."""
+
+        for record in self.list_artifacts(namespace, project_id):
+            if record.get("fingerprint") != fingerprint:
+                continue
+            if artifact_type is not None and record.get("artifact_type") != artifact_type:
+                continue
+            return record
+        return None
+
+    @staticmethod
+    def _project_record_kind(kind: str) -> str:
+        if kind not in PROJECT_RECORD_KINDS:
+            raise ValueError(f"unsupported project record kind: {kind}")
+        return kind
+
+    def save_project_record(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        kind: str,
+        record_id: str,
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically save a small project-scoped runtime record.
+
+        Handoffs, audit certificates, and telemetry intentionally live outside
+        the downloadable artifact namespace.  This keeps their cache keys and
+        timings private to the authenticated OAuth namespace and project.
+        """
+
+        clean_kind = self._project_record_kind(kind)
+        clean_id = safe_id(record_id, "record_id")
+        directory = self.project_dir(namespace, project_id)
+        if not (directory / "hub.json").is_file():
+            raise ValueError(f"unknown project_id: {project_id}")
+        record = dict(value)
+        record.setdefault("record_id", clean_id)
+        record.setdefault("project_id", project_id)
+        record.setdefault("created_at", utc_stamp())
+        path = directory / clean_kind / f"{clean_id}.json"
+        with self.lock(f"{namespace}-{project_id}"):
+            self.atomic_write_json(path, record)
+        return record
+
+    def get_project_record(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        kind: str,
+        record_id: str,
+    ) -> dict[str, Any]:
+        clean_kind = self._project_record_kind(kind)
+        clean_id = safe_id(record_id, "record_id")
+        path = self.project_dir(namespace, project_id) / clean_kind / f"{clean_id}.json"
+        if not path.is_file():
+            raise ValueError(f"unknown {clean_kind} record_id: {clean_id}")
+        value = self.read_json(path)
+        if not isinstance(value, dict) or value.get("project_id") != project_id:
+            raise ValueError(f"invalid {clean_kind} record: {clean_id}")
+        return value
+
+    def list_project_records(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        kind: str,
+    ) -> list[dict[str, Any]]:
+        clean_kind = self._project_record_kind(kind)
+        directory = self.project_dir(namespace, project_id) / clean_kind
+        result: list[dict[str, Any]] = []
+        for path in sorted(directory.glob("*.json")):
+            with contextlib.suppress(Exception):
+                value = self.read_json(path)
+                if isinstance(value, dict) and value.get("project_id") == project_id:
+                    result.append(value)
+        result.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        return result
+
+    def find_project_record(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        kind: str,
+        field: str,
+        value: Any,
+    ) -> dict[str, Any] | None:
+        for record in self.list_project_records(namespace, project_id, kind=kind):
+            if record.get(field) == value:
+                return record
+        return None
+
     def update_artifact_metadata(
         self,
         namespace: str,
@@ -266,6 +371,78 @@ class ProjectStore:
                 raise ValueError(f"unknown artifact_id: {artifact_id}")
             record = self.read_json(meta_path)
             record.setdefault("metadata", {}).update(updates)
+            self.atomic_write_json(meta_path, record)
+            return record
+
+    def claim_storyboard_patch(
+        self,
+        namespace: str,
+        project_id: str,
+        artifact_id: str,
+        *,
+        expected_canonical_hash: str,
+        claim_id: str,
+    ) -> dict[str, Any]:
+        """Atomically reserve one canonical base for a patch attempt.
+
+        The compare-and-set prevents two repair windows from successfully
+        applying the same stale base hash at the same time.  A failed final
+        validation can release the claim; a successful patch records its
+        successor permanently.
+        """
+
+        safe_id(artifact_id, "artifact_id")
+        safe_id(claim_id, "claim_id")
+        directory = self.project_dir(namespace, project_id)
+        meta_path = directory / "artifacts" / f"{artifact_id}.meta.json"
+        with self.lock(f"{namespace}-{project_id}"):
+            if not meta_path.is_file():
+                raise ValueError(f"unknown artifact_id: {artifact_id}")
+            record = self.read_json(meta_path)
+            metadata = record.setdefault("metadata", {})
+            if metadata.get("canonical_sha256") != expected_canonical_hash:
+                raise ValueError("canonical_hash_conflict: base canonical hash changed")
+            if metadata.get("patch_successor_artifact_id") or metadata.get("active_patch_claim"):
+                raise ValueError("canonical_hash_conflict: base canonical hash was already consumed")
+            metadata["active_patch_claim"] = {
+                "claim_id": claim_id,
+                "expected_canonical_hash": expected_canonical_hash,
+                "claimed_at": utc_stamp(),
+            }
+            self.atomic_write_json(meta_path, record)
+            return record
+
+    def finish_storyboard_patch(
+        self,
+        namespace: str,
+        project_id: str,
+        artifact_id: str,
+        *,
+        claim_id: str,
+        successor_artifact_id: str | None,
+        successor_canonical_hash: str | None,
+    ) -> dict[str, Any]:
+        """Release a failed patch claim or bind a successful successor."""
+
+        safe_id(artifact_id, "artifact_id")
+        safe_id(claim_id, "claim_id")
+        if successor_artifact_id is not None:
+            safe_id(successor_artifact_id, "successor_artifact_id")
+        directory = self.project_dir(namespace, project_id)
+        meta_path = directory / "artifacts" / f"{artifact_id}.meta.json"
+        with self.lock(f"{namespace}-{project_id}"):
+            if not meta_path.is_file():
+                raise ValueError(f"unknown artifact_id: {artifact_id}")
+            record = self.read_json(meta_path)
+            metadata = record.setdefault("metadata", {})
+            claim = metadata.get("active_patch_claim")
+            if not isinstance(claim, dict) or claim.get("claim_id") != claim_id:
+                raise ValueError("canonical_hash_conflict: patch claim is no longer current")
+            metadata["active_patch_claim"] = None
+            if successor_artifact_id is not None:
+                metadata["patch_successor_artifact_id"] = successor_artifact_id
+                metadata["patch_successor_canonical_hash"] = successor_canonical_hash
+                metadata["patch_completed_at"] = utc_stamp()
             self.atomic_write_json(meta_path, record)
             return record
 
