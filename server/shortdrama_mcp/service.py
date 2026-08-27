@@ -4,10 +4,12 @@ import copy
 import json
 import re
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
 
+from .canonical import canonical_json_bytes, canonical_sha256 as _canonical_sha256
 from .config import Settings
 from .file_io import download_openai_file, extract_file, preview_extracted, storyboard_to_xlsx
 from .models import OpenAIFile, ToolResponse
@@ -62,6 +64,86 @@ PRODUCTION_ARTIFACT_TYPES = {
     "change_notes",
     "conversion",
 }
+
+AUDIT_CLASS_PRODUCTION_PREFLIGHT = "production_preflight"
+AUDIT_CLASS_INDEPENDENT = "independent_audit"
+
+# A local patch may repair presentation/execution detail, but it must never be
+# used to smuggle a story, boundary, timing, identity, cognition, or source
+# change past the full-rebuild workflow.  Matching is deliberately bilingual
+# because imported canonical storyboards can contain either Chinese or English
+# extension fields.
+PATCH_FORBIDDEN_FIELDS = {
+    "镜头编号",
+    "功能类型",
+    "镜头类型",
+    "场景连续性id",
+    "累计时长",
+    "时长",
+    "可见主体",
+    "人物调度",
+    "画面内容",
+    "动作与表演",
+    "台词",
+    "心理音轨",
+    "心理音轨属性",
+    "参考图锚定",
+    "覆盖原文",
+    "原文支撑句",
+    "shot_id",
+    "shotid",
+    "scene_continuity_id",
+    "duration",
+    "cumulative_duration",
+    "source_sentence",
+    "source_support",
+}
+PATCH_FORBIDDEN_FIELD_TERMS = (
+    "原文",
+    "章节边界",
+    "认知",
+    "信息权限",
+    "人物身份",
+    "source_",
+    "source.",
+    "boundary",
+    "cognition",
+    "knowledge_state",
+)
+
+
+def _stable_json_bytes(value: Any) -> bytes:
+    return canonical_json_bytes(value)
+
+
+def canonical_storyboard_sha256(storyboard: dict[str, Any]) -> str:
+    """Return the layout-independent identity of a canonical storyboard."""
+
+    return _canonical_sha256(storyboard)
+
+
+def build_audit_cache_key(
+    *,
+    canonical_sha256: str,
+    source_fingerprint: str,
+    boundary_hash: str,
+    ruleset_version: str,
+    validator_version: str,
+    audit_class: str,
+    artifact_fingerprint: str = "",
+) -> str:
+    """Build an audit cache key whose safety-relevant inputs are explicit."""
+
+    components = {
+        "canonical": canonical_sha256,
+        "source": source_fingerprint,
+        "boundary": boundary_hash,
+        "ruleset": ruleset_version,
+        "validator": validator_version,
+        "audit_class": audit_class,
+        "artifact": artifact_fingerprint,
+    }
+    return f"AUDCACHE-{sha256_bytes(_stable_json_bytes(components))}"
 
 
 def _new_id(prefix: str) -> str:
@@ -135,10 +217,246 @@ class StoryboardService:
         self.settings = settings
         self.store = ProjectStore(settings.data_dir, settings.public_base_url)
         self.bootstrap = r10_bootstrap.verify_bundled(self_test=False)
+        ruleset_paths = [SKILL_ROOT / "SKILL.md", *sorted((SKILL_ROOT / "references").glob("*.json"))]
+        ruleset_fingerprints = [
+            [str(path.relative_to(SKILL_ROOT)), sha256_bytes(path.read_bytes())]
+            for path in ruleset_paths
+            if path.is_file()
+        ]
+        validator_path = SCRIPTS_DIR / "validate_storyboard.py"
+        self._ruleset_digest = sha256_bytes(_stable_json_bytes(ruleset_fingerprints))[:16]
+        self._validator_digest = (
+            sha256_bytes(validator_path.read_bytes())[:16] if validator_path.is_file() else "missing"
+        )
+        script_fingerprints = [
+            [str(path.relative_to(SKILL_ROOT)), sha256_bytes(path.read_bytes())]
+            for path in sorted(SCRIPTS_DIR.glob("*.py"))
+            if path.is_file()
+        ]
+        requirements_path = PLUGIN_ROOT / "requirements.txt"
+        dependency_payload = {
+            "python": ".".join(str(value) for value in sys.version_info[:3]),
+            "requirements_sha256": (
+                sha256_bytes(requirements_path.read_bytes()) if requirements_path.is_file() else "missing"
+            ),
+        }
+        self._runtime_scripts_digest = sha256_bytes(_stable_json_bytes(script_fingerprints))[:16]
+        self._dependency_digest = sha256_bytes(_stable_json_bytes(dependency_payload))[:16]
 
     def _require_runtime(self) -> None:
         if self.bootstrap.get("status") != "pass":
             raise RuntimeError("R10 runtime bootstrap failed; execution is blocked")
+
+    @property
+    def _ruleset_version(self) -> str:
+        return ":".join(
+            [
+                str(self.bootstrap.get("version") or "unknown"),
+                str(self.bootstrap.get("workflow_revision") or "unknown"),
+                self._ruleset_digest,
+            ]
+        )
+
+    def _validator_version(self) -> str:
+        return ":".join(
+            [
+                str(getattr(validate_storyboard, "VERSION", "unknown")),
+                str(getattr(validate_storyboard, "SCHEMA_VERSION", "unknown")),
+                str(getattr(validate_storyboard, "WORKFLOW_PROFILE", "unknown")),
+                self._validator_digest,
+            ]
+        )
+
+    def _runtime_certificate_key(self) -> str:
+        return "RUNTIMECERT-" + sha256_bytes(
+            _stable_json_bytes(
+                {
+                    "runtime": self.bootstrap.get("version"),
+                    "workflow": self.bootstrap.get("workflow_revision"),
+                    "ruleset": self._ruleset_version,
+                    "validator": self._validator_version(),
+                    "scripts": self._runtime_scripts_digest,
+                    "dependencies": self._dependency_digest,
+                    "deployment_mode": self.settings.deployment_mode,
+                }
+            )
+        )
+
+    def _matching_runtime_certificate(
+        self, namespace: str, project_id: str
+    ) -> dict[str, Any] | None:
+        certificate = self.store.find_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            field="certificate_key",
+            value=self._runtime_certificate_key(),
+        )
+        if certificate is None:
+            return None
+        if (
+            certificate.get("certificate_type") != "runtime_full_regression"
+            or certificate.get("result") != "pass"
+            or certificate.get("ruleset_version") != self._ruleset_version
+            or certificate.get("validator_version") != self._validator_version()
+            or certificate.get("scripts_digest") != self._runtime_scripts_digest
+            or certificate.get("dependency_digest") != self._dependency_digest
+        ):
+            return None
+        return certificate
+
+    def _persist_runtime_certificate(
+        self,
+        namespace: str,
+        project_id: str,
+        report: dict[str, Any],
+    ) -> dict[str, Any]:
+        certificate_id = _new_id("CERT")
+        tests = {}
+        for key in ("golden_tests", "public_scene_tests", "agent_tests", "project_agent_tests"):
+            value = report.get(key)
+            if isinstance(value, dict):
+                tests[key] = {
+                    "status": value.get("status"),
+                    "test_count": value.get("test_count"),
+                    "test_pass_count": value.get("test_pass_count"),
+                    "test_fail_count": value.get("test_fail_count"),
+                }
+        value = {
+            "certificate_id": certificate_id,
+            "certificate_type": "runtime_full_regression",
+            "certificate_key": self._runtime_certificate_key(),
+            "result": "pass" if report.get("status") == "pass" else "fail_current",
+            "runtime_version": report.get("version"),
+            "workflow_revision": report.get("workflow_revision"),
+            "ruleset_version": self._ruleset_version,
+            "validator_version": self._validator_version(),
+            "scripts_digest": self._runtime_scripts_digest,
+            "dependency_digest": self._dependency_digest,
+            "deployment_mode": self.settings.deployment_mode,
+            "tests": tests,
+        }
+        return self.store.save_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=certificate_id,
+            value=value,
+        )
+
+    @staticmethod
+    def _boundary_hash(storyboard: dict[str, Any]) -> str:
+        chapter_intake = storyboard.get("chapter_intake")
+        if not isinstance(chapter_intake, dict):
+            chapter_intake = {}
+        boundary_payload = {
+            "source_lock": storyboard.get("source_lock") or {},
+            "chapter_boundary": chapter_intake.get("chapter_boundary")
+            or chapter_intake.get("target_boundary")
+            or chapter_intake.get("boundary"),
+            "previous_boundary": chapter_intake.get("previous_chapter_boundary"),
+            "next_boundary": chapter_intake.get("next_chapter_boundary"),
+        }
+        return sha256_bytes(_stable_json_bytes(boundary_payload))
+
+    def _source_fingerprint(
+        self,
+        namespace: str,
+        project_id: str,
+        storyboard: dict[str, Any],
+        source_artifact_id: str | None,
+        artifact_record: dict[str, Any] | None = None,
+    ) -> str:
+        if artifact_record:
+            cached = artifact_record.get("metadata", {}).get("source_fingerprint")
+            if cached:
+                return str(cached)
+        if source_artifact_id:
+            try:
+                source_record, _path = self.store.get_artifact(namespace, project_id, source_artifact_id)
+                cached = source_record.get("metadata", {}).get("canonical_sha256")
+                return str(cached or source_record.get("fingerprint"))
+            except ValueError:
+                pass
+        source_lock = storyboard.get("source_lock") or {}
+        explicit = source_lock.get("source_fingerprint") if isinstance(source_lock, dict) else None
+        return str(explicit or sha256_bytes(_stable_json_bytes(source_lock)))
+
+    def _audit_cache_components(
+        self,
+        *,
+        canonical_hash: str,
+        source_fingerprint: str,
+        boundary_hash: str,
+        audit_class: str,
+        artifact_fingerprint: str = "",
+    ) -> dict[str, str]:
+        return {
+            "canonical": canonical_hash,
+            "source": source_fingerprint,
+            "boundary": boundary_hash,
+            "ruleset": self._ruleset_version,
+            "validator": self._validator_version(),
+            "audit_class": audit_class,
+            "artifact": artifact_fingerprint,
+        }
+
+    @staticmethod
+    def _cache_key_from_components(components: dict[str, str]) -> str:
+        return build_audit_cache_key(
+            canonical_sha256=components["canonical"],
+            source_fingerprint=components["source"],
+            boundary_hash=components["boundary"],
+            ruleset_version=components["ruleset"],
+            validator_version=components["validator"],
+            audit_class=components["audit_class"],
+            artifact_fingerprint=components.get("artifact", ""),
+        )
+
+    @classmethod
+    def _valid_cache_identity(cls, record: dict[str, Any], audit_class: str) -> bool:
+        components = record.get("cache_components")
+        if not isinstance(components, dict) or components.get("audit_class") != audit_class:
+            return False
+        try:
+            expected = cls._cache_key_from_components(components)
+        except (KeyError, TypeError, ValueError):
+            return False
+        return record.get("cache_key") == expected
+
+    def _save_telemetry(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        operation: str,
+        started_ns: int,
+        stages_ms: dict[str, float],
+        cache_hit: bool = False,
+        artifact_id: str | None = None,
+    ) -> dict[str, Any]:
+        telemetry_id = _new_id("TEL")
+        rounded_stages = {key: round(float(value), 3) for key, value in stages_ms.items()}
+        value = {
+            "telemetry_id": telemetry_id,
+            "trace_id": telemetry_id,
+            "operation": operation,
+            "duration_ms": round((time.perf_counter_ns() - started_ns) / 1_000_000, 3),
+            "stages_ms": rounded_stages,
+            "stages": [
+                {"stage": key, "duration_ms": duration, "status": "ok", "metrics": {}}
+                for key, duration in rounded_stages.items()
+            ],
+            "cache_hit": bool(cache_hit),
+            "artifact_id": artifact_id,
+        }
+        return self.store.save_project_record(
+            namespace,
+            project_id,
+            kind="telemetry",
+            record_id=telemetry_id,
+            value=value,
+        )
 
     def agent_status(self, namespace: str, project_id: str | None = None, full_self_test: bool = False) -> ToolResponse:
         report = r10_bootstrap.verify_bundled(self_test=full_self_test) if full_self_test else self.bootstrap
@@ -155,12 +473,24 @@ class StoryboardService:
         if project_id:
             hub = self.store.load_hub(namespace, project_id)
             ledger = self.store.load_ledger(namespace, project_id)
+            runtime_certificate = (
+                self._persist_runtime_certificate(namespace, project_id, report)
+                if full_self_test
+                else self._matching_runtime_certificate(namespace, project_id)
+            )
             hub_errors = project_agent.validate_hub(hub)
             ledger_errors = storyboard_agent.validate_ledger(ledger)
             data["project"] = project_agent.summarize(hub)
             data["issues"] = storyboard_agent.summarize(ledger)
             data["state_valid"] = not hub_errors and not ledger_errors
             data["state_errors"] = hub_errors + ledger_errors
+            data["recent_telemetry"] = self.store.list_project_records(
+                namespace, project_id, kind="telemetry"
+            )[:20]
+            data["runtime_test_certificate_valid"] = bool(
+                runtime_certificate is not None and runtime_certificate.get("result") == "pass"
+            )
+            data["runtime_test_certificate"] = runtime_certificate
             summary += f"｜项目{hub.get('project_name')}｜开放问题{data['issues'].get('open_issue_count', 0)}"
         return ToolResponse(status=str(report.get("status")), summary=summary, project_id=project_id, data=data)
 
@@ -248,18 +578,84 @@ class StoryboardService:
         source_role: str,
     ) -> ToolResponse:
         self._require_runtime()
+        started_ns = time.perf_counter_ns()
         if not self.store.project_exists(namespace, project_id):
             raise ValueError(f"unknown project_id: {project_id}")
         data, file_name, mime_type = download_openai_file(file, self.settings)
+        downloaded_ns = time.perf_counter_ns()
+        fingerprint = sha256_bytes(data)
+        artifact_type = f"source:{source_role}"
+        existing = self.store.find_artifact_by_fingerprint(
+            namespace,
+            project_id,
+            fingerprint=fingerprint,
+            artifact_type=artifact_type,
+        )
+        if existing is not None:
+            extracted_id = existing.get("metadata", {}).get("extracted_artifact_id")
+            if extracted_id:
+                _extracted_record, extracted_path = self.store.get_artifact(
+                    namespace, project_id, str(extracted_id)
+                )
+                extracted = self.store.read_json(extracted_path)
+            else:
+                extracted = extract_file(data, file_name, mime_type)
+                extracted_record = self.store.save_artifact_json(
+                    namespace,
+                    project_id,
+                    extracted,
+                    file_name=f"{Path(file_name).stem}_提取内容.json",
+                    artifact_type="source_extraction",
+                    version=str(existing.get("version") or "v1"),
+                    source_artifact_id=str(existing["artifact_id"]),
+                    metadata={"source_role": source_role, "recovered": True},
+                )
+                extracted_id = extracted_record["artifact_id"]
+                existing = self.store.update_artifact_metadata(
+                    namespace,
+                    project_id,
+                    str(existing["artifact_id"]),
+                    {"extracted_artifact_id": extracted_id, "source_role": source_role},
+                )
+            preview = preview_extracted(extracted, None, 0, 20)
+            download_url = self.store.signed_download_url(
+                namespace, project_id, str(existing["artifact_id"]), str(existing["file_name"])
+            )
+            telemetry = self._save_telemetry(
+                namespace,
+                project_id,
+                operation="import_source_file",
+                started_ns=started_ns,
+                stages_ms={"download": (downloaded_ns - started_ns) / 1_000_000, "extract": 0.0},
+                cache_hit=True,
+                artifact_id=str(existing["artifact_id"]),
+            )
+            return ToolResponse(
+                status="existing",
+                summary=f"文件已存在并复用提取结果｜{existing['file_name']}｜{source_role}",
+                project_id=project_id,
+                artifact_id=str(existing["artifact_id"]),
+                download_url=download_url,
+                trace_id=telemetry["telemetry_id"],
+                data={
+                    "artifact": existing,
+                    "extracted_artifact_id": extracted_id,
+                    "preview": preview,
+                    "reused_extraction": True,
+                    "telemetry_id": telemetry["telemetry_id"],
+                    "telemetry": telemetry,
+                },
+            )
         extracted = extract_file(data, file_name, mime_type)
+        extracted_ns = time.perf_counter_ns()
         artifacts = self.store.list_artifacts(namespace, project_id)
-        version = _artifact_version(artifacts, f"source:{source_role}")
+        version = _artifact_version(artifacts, artifact_type)
         original = self.store.save_artifact_bytes(
             namespace,
             project_id,
             data,
             file_name=file_name,
-            artifact_type=f"source:{source_role}",
+            artifact_type=artifact_type,
             version=version,
             metadata={"chatgpt_file_id": file.file_id, "mime_type": mime_type},
         )
@@ -273,7 +669,7 @@ class StoryboardService:
             source_artifact_id=original["artifact_id"],
             metadata={"source_role": source_role},
         )
-        self.store.update_artifact_metadata(
+        original = self.store.update_artifact_metadata(
             namespace,
             project_id,
             original["artifact_id"],
@@ -295,16 +691,31 @@ class StoryboardService:
         download_url = self.store.signed_download_url(
             namespace, project_id, original["artifact_id"], original["file_name"]
         )
+        telemetry = self._save_telemetry(
+            namespace,
+            project_id,
+            operation="import_source_file",
+            started_ns=started_ns,
+            stages_ms={
+                "download": (downloaded_ns - started_ns) / 1_000_000,
+                "extract": (extracted_ns - downloaded_ns) / 1_000_000,
+            },
+            artifact_id=str(original["artifact_id"]),
+        )
         return ToolResponse(
             status="imported",
             summary=f"文件已导入｜{file_name}｜{source_role}",
             project_id=project_id,
             artifact_id=original["artifact_id"],
             download_url=download_url,
+            trace_id=telemetry["telemetry_id"],
             data={
                 "artifact": original,
                 "extracted_artifact_id": extracted_record["artifact_id"],
                 "preview": preview,
+                "reused_extraction": False,
+                "telemetry_id": telemetry["telemetry_id"],
+                "telemetry": telemetry,
             },
         )
 
@@ -478,6 +889,30 @@ class StoryboardService:
     def _storyboard_from_artifact(
         self, namespace: str, project_id: str, artifact_id: str
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        record, payload_path = self.store.get_artifact(namespace, project_id, artifact_id)
+        metadata = record.get("metadata", {})
+        canonical_id = metadata.get("canonical_json_artifact_id")
+        if canonical_id:
+            canonical_record, canonical_path = self.store.get_artifact(
+                namespace, project_id, str(canonical_id)
+            )
+            actual_payload_hash = sha256_bytes(canonical_path.read_bytes())
+            if actual_payload_hash != canonical_record.get("fingerprint"):
+                raise ValueError("canonical storyboard payload fingerprint mismatch")
+            storyboard = self.store.read_json(canonical_path)
+            if not isinstance(storyboard, dict) or "shots" not in storyboard:
+                raise ValueError("linked canonical storyboard is invalid")
+            actual_canonical_hash = canonical_storyboard_sha256(storyboard)
+            expected_hash = metadata.get("canonical_sha256") or canonical_record.get("metadata", {}).get(
+                "canonical_sha256"
+            )
+            if expected_hash and str(expected_hash) != actual_canonical_hash:
+                raise ValueError("canonical storyboard stable hash mismatch")
+            expected_json_fingerprint = metadata.get("canonical_json_fingerprint")
+            if expected_json_fingerprint and str(expected_json_fingerprint) != actual_payload_hash:
+                raise ValueError("canonical storyboard link fingerprint mismatch")
+            return storyboard, record
+
         extracted, record, _path = self._load_extracted_or_payload(namespace, project_id, artifact_id)
         if extracted.get("kind") == "workbook":
             storyboard = extracted.get("canonical_storyboard")
@@ -487,6 +922,40 @@ class StoryboardService:
             storyboard = None
         if not isinstance(storyboard, dict) or "shots" not in storyboard:
             raise ValueError("artifact does not contain a canonical storyboard")
+        canonical_hash = canonical_storyboard_sha256(storyboard)
+        expected_hash = record.get("metadata", {}).get("canonical_sha256")
+        if expected_hash and str(expected_hash) != canonical_hash:
+            raise ValueError("canonical storyboard stable hash mismatch")
+
+        # Legacy/imported workbooks do not have a canonical sidecar. Recover it
+        # once and link it atomically so every later window reads the complete
+        # canonical object instead of reparsing a lossy workbook projection.
+        if extracted.get("kind") == "workbook" and not canonical_id:
+            recovered = self.store.save_artifact_json(
+                namespace,
+                project_id,
+                storyboard,
+                file_name=f"{payload_path.stem}_规范化.json",
+                artifact_type="storyboard_json_recovered",
+                version=str(record.get("version") or "v1"),
+                work_order_id=record.get("work_order_id"),
+                source_artifact_id=artifact_id,
+                metadata={
+                    "canonical_sha256": canonical_hash,
+                    "recovered_from_artifact_id": artifact_id,
+                },
+            )
+            record = self.store.update_artifact_metadata(
+                namespace,
+                project_id,
+                artifact_id,
+                {
+                    "canonical_json_artifact_id": recovered["artifact_id"],
+                    "canonical_json_fingerprint": recovered["fingerprint"],
+                    "canonical_sha256": canonical_hash,
+                    "canonical_recovered": True,
+                },
+            )
         return storyboard, record
 
     @staticmethod
@@ -522,20 +991,29 @@ class StoryboardService:
         report: dict[str, Any],
         ledger: dict[str, Any],
         audit_cycle_id: str | None = None,
+        audit_class: str = AUDIT_CLASS_PRODUCTION_PREFLIGHT,
+        audit_cache_key: str | None = None,
     ) -> dict[str, Any]:
         root_artifact = self._root_artifact_id(namespace, project_id, artifact_record["artifact_id"])
-        cycle_id = audit_cycle_id or f"AUD-{root_artifact}"
+        cycle_id = audit_cycle_id or f"AUD-{audit_class}-{root_artifact}"
         duplicate = next(
             (
                 event
                 for event in ledger.get("events", [])
-                if event.get("file_fingerprint") == artifact_record.get("fingerprint")
+                if audit_cache_key
+                and event.get("audit_cache_key") == audit_cache_key
+                and event.get("audit_class") == audit_class
             ),
             None,
         )
         if duplicate:
             return {"status": "duplicate", "event": duplicate, "ingest": None}
-        prior_events = [event for event in ledger.get("events", []) if event.get("audit_cycle_id") == cycle_id]
+        prior_events = [
+            event
+            for event in ledger.get("events", [])
+            if event.get("audit_cycle_id") == cycle_id
+            and event.get("audit_class", AUDIT_CLASS_PRODUCTION_PREFLIGHT) == audit_class
+        ]
         audit_round = 1 + max((int(event.get("audit_round", 0)) for event in prior_events), default=0)
         if audit_round > 3:
             return {
@@ -543,17 +1021,29 @@ class StoryboardService:
                 "reason": "maximum three audit/repair rounds reached; rebuild the upstream structure",
                 "audit_cycle_id": cycle_id,
             }
-        prior_keys = {
-            (str(issue.get("error_code")), str(issue.get("field")))
-            for event in prior_events[-1:]
-            for issue in event.get("issues", [])
-        }
+        prior_keys: set[tuple[str, str, tuple[str, ...]]] = set()
+        for event in prior_events[-1:]:
+            for prior_issue in event.get("issues", []):
+                code = str(prior_issue.get("error_code"))
+                shots = tuple(str(value) for value in prior_issue.get("shot_ids", []))
+                field_or_location = str(prior_issue.get("location") or prior_issue.get("field"))
+                prior_keys.add((code, field_or_location, shots))
+                # Events written before the phase-1 upgrade only retained the
+                # terminal field. Keep them comparable without collapsing new
+                # events from different shots/locations into one signature.
+                prior_keys.add((code, str(prior_issue.get("field")), shots))
         issues = []
         for issue in report.get("issues", []):
             location = str(issue.get("location") or "全表")
             field = location.rsplit(".", 1)[-1]
-            key = (str(issue.get("error_code") or "E-UNKNOWN"), field)
-            status = "initial" if audit_round == 1 else ("residual" if key in prior_keys else "introduced")
+            shot_ids = self._shot_ids_for_location(storyboard, location)
+            key = (str(issue.get("error_code") or "E-UNKNOWN"), location, tuple(shot_ids))
+            legacy_key = (key[0], field, key[2])
+            status = (
+                "initial"
+                if audit_round == 1
+                else ("residual" if key in prior_keys or legacy_key in prior_keys else "introduced")
+            )
             severity = str(issue.get("severity") or "fail")
             if severity == "warning":
                 severity = "warn"
@@ -563,8 +1053,9 @@ class StoryboardService:
                     "category": _issue_category(key[0]),
                     "severity": severity if severity in storyboard_agent.SEVERITIES else "fail",
                     "blocking": bool(issue.get("blocking", severity == "fail")),
-                    "shot_ids": self._shot_ids_for_location(storyboard, location),
+                    "shot_ids": shot_ids,
                     "field": field,
+                    "location": location,
                     "evidence": str(issue.get("evidence") or location),
                     "source_sentence": str(issue.get("evidence") or "无额外原文证据"),
                     "repair_action": str(issue.get("repair_action") or "按R10规则修复后重跑。"),
@@ -582,12 +1073,22 @@ class StoryboardService:
             "event_id": _new_id("EVT"),
             "timestamp": utc_stamp(),
             "episode_id": episode_id,
-            "file_name": f"storyboard-{cycle_id}",
+            "file_name": f"storyboard-{audit_class}-{cycle_id}",
             "artifact_file_name": artifact_record.get("file_name") or "storyboard",
             "file_fingerprint": artifact_record.get("fingerprint") or sha256_bytes(json.dumps(storyboard, ensure_ascii=False).encode("utf-8")),
             "source_version": artifact_record.get("version") or "current",
             "audit_cycle_id": cycle_id,
-            "task_type": "generation_audit" if audit_round == 1 else "repair_regression",
+            "task_type": (
+                "audit"
+                if audit_class == AUDIT_CLASS_INDEPENDENT and audit_round == 1
+                else (
+                    "audit_repair"
+                    if audit_class == AUDIT_CLASS_INDEPENDENT
+                    else ("generation_audit" if audit_round == 1 else "repair_regression")
+                )
+            ),
+            "audit_class": audit_class,
+            "audit_cache_key": audit_cache_key,
             "audit_round": audit_round,
             "result": "pass" if not issues else "fail_current",
             "checked_shot_count": len(storyboard.get("shots", [])),
@@ -595,6 +1096,128 @@ class StoryboardService:
         }
         ingest = storyboard_agent.ingest_event(ledger, event)
         return {"status": "recorded", "event": event, "ingest": ingest}
+
+    def _persist_audit_certificate(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        artifact_id: str,
+        canonical_artifact_id: str | None,
+        cache_components: dict[str, str],
+        report: dict[str, Any],
+        work_order_id: str | None,
+    ) -> dict[str, Any]:
+        certificate_id = _new_id("CERT")
+        cache_key = self._cache_key_from_components(cache_components)
+        certificate = {
+            "certificate_id": certificate_id,
+            "work_order_id": work_order_id,
+            "artifact_id": artifact_id,
+            "canonical_artifact_id": canonical_artifact_id,
+            "canonical_sha256": cache_components["canonical"],
+            "source_fingerprint": cache_components["source"],
+            "boundary_hash": cache_components["boundary"],
+            "ruleset_version": cache_components["ruleset"],
+            "validator_version": cache_components["validator"],
+            "audit_class": cache_components["audit_class"],
+            "cache_key": cache_key,
+            "cache_components": cache_components,
+            "result": "pass" if not report.get("issues") else "fail_current",
+            "issue_count": len(report.get("issues", [])),
+            "checked_shot_count": int(report.get("shot_count", 0)),
+            "report_sha256": sha256_bytes(_stable_json_bytes(report)),
+            "report": copy.deepcopy(report),
+        }
+        return self.store.save_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=certificate_id,
+            value=certificate,
+        )
+
+    @staticmethod
+    def _certificate_summary(certificate: dict[str, Any]) -> dict[str, Any]:
+        """Return the reusable certificate identity without duplicating the report."""
+
+        return {key: copy.deepcopy(value) for key, value in certificate.items() if key != "report"}
+
+    def _persist_production_handoff(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        work_order_id: str,
+        storyboard_artifact_id: str,
+        canonical_artifact_id: str,
+        certificate: dict[str, Any],
+    ) -> dict[str, Any]:
+        handoff_id = _new_id("HND")
+        handoff = {
+            "handoff_id": handoff_id,
+            "work_order_id": work_order_id,
+            "storyboard_artifact_id": storyboard_artifact_id,
+            "canonical_artifact_id": canonical_artifact_id,
+            "canonical_sha256": certificate["canonical_sha256"],
+            "source_fingerprint": certificate["source_fingerprint"],
+            "boundary_hash": certificate["boundary_hash"],
+            "ruleset_version": certificate["ruleset_version"],
+            "validator_version": certificate["validator_version"],
+            "audit_class": AUDIT_CLASS_PRODUCTION_PREFLIGHT,
+            "certificate_id": certificate["certificate_id"],
+            "cache_key": certificate["cache_key"],
+            "cache_components": certificate["cache_components"],
+            "production_result": certificate["result"],
+            "issue_count": certificate["issue_count"],
+            "checked_shot_count": certificate["checked_shot_count"],
+            "facts_reusable": True,
+            "conclusion_reusable_for_independent_audit": False,
+        }
+        return self.store.save_project_record(
+            namespace,
+            project_id,
+            kind="handoffs",
+            record_id=handoff_id,
+            value=handoff,
+        )
+
+    def _matching_handoff(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        artifact_id: str,
+        canonical_hash: str,
+        handoff_id: str | None,
+    ) -> dict[str, Any] | None:
+        if handoff_id:
+            handoff = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="handoffs",
+                record_id=handoff_id,
+            )
+            if handoff.get("canonical_sha256") != canonical_hash:
+                raise ValueError("handoff canonical hash does not match the audited storyboard")
+            if artifact_id not in {
+                handoff.get("storyboard_artifact_id"),
+                handoff.get("canonical_artifact_id"),
+            }:
+                raise ValueError("handoff does not belong to the audited artifact")
+            if not self._valid_cache_identity(handoff, AUDIT_CLASS_PRODUCTION_PREFLIGHT):
+                raise ValueError("handoff cache identity is invalid")
+            return handoff
+        for handoff in self.store.list_project_records(namespace, project_id, kind="handoffs"):
+            if handoff.get("canonical_sha256") != canonical_hash:
+                continue
+            if artifact_id in {
+                handoff.get("storyboard_artifact_id"),
+                handoff.get("canonical_artifact_id"),
+            }:
+                if self._valid_cache_identity(handoff, AUDIT_CLASS_PRODUCTION_PREFLIGHT):
+                    return handoff
+        return None
 
     def commit_storyboard(
         self,
@@ -607,6 +1230,7 @@ class StoryboardService:
         source_artifact_id: str | None,
     ) -> ToolResponse:
         self._require_runtime()
+        started_ns = time.perf_counter_ns()
         if not isinstance(storyboard, dict):
             raise ValueError("storyboard must be an object")
         storyboard = copy.deepcopy(storyboard)
@@ -659,7 +1283,23 @@ class StoryboardService:
                 repair_row["repeat_rounds"] = 2
                 repair_row["action"] = "root_cause_repair"
             report = validate_storyboard.validate_project(storyboard, mode="repair")
+        validated_ns = time.perf_counter_ns()
         zero_issue = not report.get("issues")
+        canonical_hash = canonical_storyboard_sha256(storyboard)
+        source_fingerprint = self._source_fingerprint(
+            namespace,
+            project_id,
+            storyboard,
+            source_artifact_id,
+        )
+        boundary_hash = self._boundary_hash(storyboard)
+        cache_components = self._audit_cache_components(
+            canonical_hash=canonical_hash,
+            source_fingerprint=source_fingerprint,
+            boundary_hash=boundary_hash,
+            audit_class=AUDIT_CLASS_PRODUCTION_PREFLIGHT,
+        )
+        audit_cache_key = self._cache_key_from_components(cache_components)
         artifacts = self.store.list_artifacts(namespace, project_id)
         version = _artifact_version(artifacts, "storyboard")
         base_name = Path(slug_filename(file_name or f"正式分镜_{version}.xlsx")).stem
@@ -675,6 +1315,11 @@ class StoryboardService:
             metadata={
                 "audit_status": report.get("status"),
                 "issue_count": len(report.get("issues", [])),
+                "canonical_sha256": canonical_hash,
+                "source_fingerprint": source_fingerprint,
+                "boundary_hash": boundary_hash,
+                "ruleset_version": self._ruleset_version,
+                "validator_version": self._validator_version(),
                 "issue_signatures": [
                     [str(issue.get("error_code")), str(issue.get("location"))]
                     for issue in report.get("issues", [])
@@ -693,12 +1338,55 @@ class StoryboardService:
             source_artifact_id=source_artifact_id,
             metadata={
                 "canonical_json_artifact_id": json_record["artifact_id"],
+                "canonical_json_fingerprint": json_record["fingerprint"],
+                "canonical_sha256": canonical_hash,
+                "source_fingerprint": source_fingerprint,
+                "boundary_hash": boundary_hash,
+                "ruleset_version": self._ruleset_version,
+                "validator_version": self._validator_version(),
+                "production_preflight_cache_key": audit_cache_key,
                 "audit_status": report.get("status"),
                 "issue_count": len(report.get("issues", [])),
                 "issue_signatures": [
                     [str(issue.get("error_code")), str(issue.get("location"))]
                     for issue in report.get("issues", [])
                 ],
+            },
+        )
+        persisted_ns = time.perf_counter_ns()
+        certificate = self._persist_audit_certificate(
+            namespace,
+            project_id,
+            artifact_id=xlsx_record["artifact_id"],
+            canonical_artifact_id=json_record["artifact_id"],
+            cache_components=cache_components,
+            report=report,
+            work_order_id=work_order_id,
+        )
+        handoff = self._persist_production_handoff(
+            namespace,
+            project_id,
+            work_order_id=work_order_id,
+            storyboard_artifact_id=xlsx_record["artifact_id"],
+            canonical_artifact_id=json_record["artifact_id"],
+            certificate=certificate,
+        )
+        xlsx_record = self.store.update_artifact_metadata(
+            namespace,
+            project_id,
+            xlsx_record["artifact_id"],
+            {
+                "production_certificate_id": certificate["certificate_id"],
+                "handoff_id": handoff["handoff_id"],
+            },
+        )
+        json_record = self.store.update_artifact_metadata(
+            namespace,
+            project_id,
+            json_record["artifact_id"],
+            {
+                "production_certificate_id": certificate["certificate_id"],
+                "handoff_id": handoff["handoff_id"],
             },
         )
         with self.store.mutate_project(namespace, project_id) as (hub, ledger):
@@ -727,6 +1415,8 @@ class StoryboardService:
                 report=report,
                 ledger=ledger,
                 audit_cycle_id=f"AUD-{work_order_id}",
+                audit_class=AUDIT_CLASS_PRODUCTION_PREFLIGHT,
+                audit_cache_key=audit_cache_key,
             )
             recorded_issues = audit_result.get("event", {}).get("issues", [])
             residual_count = sum(issue.get("status") == "residual" for issue in recorded_issues)
@@ -746,17 +1436,33 @@ class StoryboardService:
             project_agent.transition_work_order(hub, work_order_id, "passed" if zero_issue else "failed_current")
             hub["project_state"]["current_stage"] = "passed" if zero_issue else "failed_current"
             internal_round = work_order.get("internal_round", 0)
+        ledger_ns = time.perf_counter_ns()
         download_url = self.store.signed_download_url(
             namespace, project_id, xlsx_record["artifact_id"], xlsx_record["file_name"]
         )
         if zero_issue:
-            summary = f"生成完成｜{report.get('shot_count', 0)}镜｜总时长{storyboard.get('total_duration', 0)}s｜审计通过"
+            summary = (
+                f"生成完成｜{report.get('shot_count', 0)}镜｜总时长{storyboard.get('total_duration', 0)}s"
+                "｜生产预检通过｜待独立审计"
+            )
             status = "pass"
         else:
             summary = f"未通过｜问题{len(report.get('issues', []))}项｜第{internal_round}/3轮"
             if internal_round >= 3:
                 summary += "｜需要上游重建"
             status = "fail_current"
+        telemetry = self._save_telemetry(
+            namespace,
+            project_id,
+            operation="commit_storyboard",
+            started_ns=started_ns,
+            stages_ms={
+                "validate": (validated_ns - started_ns) / 1_000_000,
+                "serialize_and_persist": (persisted_ns - validated_ns) / 1_000_000,
+                "ledger": (ledger_ns - persisted_ns) / 1_000_000,
+            },
+            artifact_id=str(xlsx_record["artifact_id"]),
+        )
         return ToolResponse(
             status=status,
             summary=summary,
@@ -764,15 +1470,376 @@ class StoryboardService:
             work_order_id=work_order_id,
             artifact_id=xlsx_record["artifact_id"],
             download_url=download_url,
+            trace_id=telemetry["telemetry_id"],
             data={
                 "artifact": xlsx_record,
                 "canonical_json_artifact_id": json_record["artifact_id"],
+                "canonical_sha256": canonical_hash,
+                "handoff": handoff,
+                "handoff_artifact_id": handoff["handoff_id"],
+                "certificate": self._certificate_summary(certificate),
+                "telemetry_id": telemetry["telemetry_id"],
+                "telemetry": telemetry,
                 "validation": validation_result,
                 "audit": audit_result,
                 "report": report,
                 "next_action": "deliver" if zero_issue else ("upstream_rebuild" if internal_round >= 3 else "repair_all_issues_then_recommit"),
             },
         )
+
+    @staticmethod
+    def _patch_field_requires_full_rebuild(field: str) -> bool:
+        normalized = re.sub(r"\s+", "", str(field)).casefold()
+        if normalized in PATCH_FORBIDDEN_FIELDS:
+            return True
+        if any(term in normalized for term in PATCH_FORBIDDEN_FIELD_TERMS):
+            return True
+        # Nested paths can escape the explicitly audited shot field and are
+        # therefore outside the local-patch contract.
+        return any(marker in normalized for marker in (".", "[", "]", "__"))
+
+    @staticmethod
+    def _protected_scope_hit(protected_scope: list[Any], shot_id: str, field: str) -> str | None:
+        shot_key = shot_id.strip().casefold()
+        field_key = re.sub(r"\s+", "", field).casefold()
+        exact = {
+            shot_key,
+            field_key,
+            f"{shot_key}.{field_key}",
+            f"{shot_key}:{field_key}",
+            f"{shot_key}/{field_key}",
+        }
+        for item in protected_scope:
+            value = re.sub(r"\s+", "", str(item)).casefold()
+            if value in {"all", "全部", "全表", "完整分镜"} or value in exact:
+                return str(item)
+            if shot_key in value and field_key in value:
+                return str(item)
+        return None
+
+    def commit_storyboard_patch(
+        self,
+        namespace: str,
+        *,
+        project_id: str,
+        work_order_id: str,
+        base_artifact_id: str,
+        expected_canonical_hash: str,
+        audit_certificate_id: str,
+        operations: list[dict[str, Any]],
+        impact_scope: list[str],
+        file_name: str,
+    ) -> ToolResponse:
+        """Apply evidence-bound shot-field repairs, then run the full validator.
+
+        This is intentionally narrower than ``commit_storyboard``: the caller
+        cannot alter structural, source, boundary, timing, or cognition fields,
+        and an independent-audit certificate must prove every requested fix.
+        The final persistence and project-ledger path is delegated to the
+        existing full commit function so patching never weakens R10 gates.
+        """
+
+        self._require_runtime()
+        if not isinstance(operations, list) or not operations:
+            raise ValueError("patch_operations_required: operations must be non-empty")
+        if not isinstance(impact_scope, list) or not impact_scope:
+            raise ValueError("impact_scope_incomplete: impact_scope must be non-empty")
+
+        hub = self.store.load_hub(namespace, project_id)
+        work_order = _find_work_order(hub, work_order_id)
+        if work_order.get("operation") not in {"storyboard_repair", "storyboard_change"}:
+            raise ValueError(
+                "patch_work_order_invalid: commit_storyboard_patch requires storyboard_repair or storyboard_change"
+            )
+        if work_order.get("authorization") != "explicit_execute":
+            raise ValueError("patch_authorization_required: work order must have explicit_execute")
+        self._ensure_can_execute(work_order)
+
+        storyboard, base_record = self._storyboard_from_artifact(
+            namespace, project_id, base_artifact_id
+        )
+        base_canonical_hash = canonical_storyboard_sha256(storyboard)
+        if expected_canonical_hash != base_canonical_hash:
+            raise ValueError(
+                "canonical_hash_conflict: expected canonical hash does not match the base artifact"
+            )
+        base_metadata = base_record.get("metadata") or {}
+        if base_metadata.get("patch_successor_artifact_id") or base_metadata.get("active_patch_claim"):
+            raise ValueError("canonical_hash_conflict: base canonical hash was already consumed")
+
+        try:
+            certificate = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="certificates",
+                record_id=audit_certificate_id,
+            )
+        except ValueError as exc:
+            raise ValueError("invalid_audit_certificate: certificate does not exist in this project") from exc
+        if certificate.get("project_id") != project_id:
+            raise ValueError("invalid_audit_certificate: certificate belongs to another project")
+        if certificate.get("audit_class") != AUDIT_CLASS_INDEPENDENT:
+            raise ValueError("invalid_audit_certificate: independent_audit certificate is required")
+        if certificate.get("canonical_sha256") != base_canonical_hash:
+            raise ValueError("invalid_audit_certificate: certificate is not bound to the base canonical hash")
+        if base_artifact_id not in {
+            certificate.get("artifact_id"),
+            certificate.get("canonical_artifact_id"),
+        }:
+            raise ValueError("invalid_audit_certificate: certificate is not bound to the base artifact")
+        if not self._valid_cache_identity(certificate, AUDIT_CLASS_INDEPENDENT):
+            raise ValueError("invalid_audit_certificate: certificate cache identity is invalid")
+        current_source_fingerprint = self._source_fingerprint(
+            namespace,
+            project_id,
+            storyboard,
+            base_record.get("source_artifact_id"),
+            base_record,
+        )
+        current_cache_components = self._audit_cache_components(
+            canonical_hash=base_canonical_hash,
+            source_fingerprint=current_source_fingerprint,
+            boundary_hash=self._boundary_hash(storyboard),
+            audit_class=AUDIT_CLASS_INDEPENDENT,
+            artifact_fingerprint=str(base_record.get("fingerprint") or ""),
+        )
+        if certificate.get("cache_components") != current_cache_components:
+            raise ValueError(
+                "invalid_audit_certificate: source, boundary, rules, or validator changed after audit"
+            )
+        certificate_report = certificate.get("report")
+        if not isinstance(certificate_report, dict) or not isinstance(
+            certificate_report.get("issues"), list
+        ):
+            raise ValueError("invalid_audit_certificate: certificate report is missing")
+        if certificate.get("report_sha256") != sha256_bytes(
+            _stable_json_bytes(certificate_report)
+        ):
+            raise ValueError("invalid_audit_certificate: certificate report fingerprint mismatch")
+
+        shots = storyboard.get("shots")
+        if not isinstance(shots, list) or not shots:
+            raise ValueError("full_rebuild_required: canonical storyboard has no stable shots")
+        shots_by_id: dict[str, dict[str, Any]] = {}
+        duplicate_ids: set[str] = set()
+        for shot in shots:
+            if not isinstance(shot, dict):
+                raise ValueError("full_rebuild_required: every shot must be an object")
+            shot_id = str(shot.get("镜头编号") or "").strip()
+            if not shot_id:
+                raise ValueError("full_rebuild_required: every shot requires a stable 镜头编号")
+            if shot_id in shots_by_id:
+                duplicate_ids.add(shot_id)
+            shots_by_id[shot_id] = shot
+        if duplicate_ids:
+            raise ValueError(
+                "full_rebuild_required: duplicate shot_id values: " + ", ".join(sorted(duplicate_ids))
+            )
+
+        issue_rows = certificate_report.get("issues", [])
+        issues_by_code: dict[str, list[dict[str, Any]]] = {}
+        for issue in issue_rows:
+            if isinstance(issue, dict):
+                issues_by_code.setdefault(str(issue.get("error_code") or ""), []).append(issue)
+
+        protected_scope = list(work_order.get("protected_scope") or [])
+        impact_ids = {str(item).strip() for item in impact_scope if str(item).strip()}
+        patched = copy.deepcopy(storyboard)
+        patched_shots = {
+            str(shot.get("镜头编号") or "").strip(): shot
+            for shot in patched.get("shots", [])
+            if isinstance(shot, dict)
+        }
+        applied_operations: list[dict[str, Any]] = []
+        modified_shots: set[str] = set()
+        modified_targets: set[tuple[str, str]] = set()
+
+        for index, operation in enumerate(operations, 1):
+            if not isinstance(operation, dict) or operation.get("op") != "replace_field":
+                raise ValueError(f"patch_operation_invalid: operations[{index}] must be replace_field")
+            shot_id = str(operation.get("shot_id") or "").strip()
+            field = str(operation.get("field") or "").strip()
+            if shot_id not in patched_shots:
+                raise ValueError(f"patch_target_missing: unknown shot_id {shot_id!r}")
+            if self._patch_field_requires_full_rebuild(field):
+                raise ValueError(
+                    f"full_rebuild_required: field {field!r} is structural, boundary, cognition, timing, or source evidence"
+                )
+            target_key = (shot_id, field)
+            if target_key in modified_targets:
+                raise ValueError(
+                    f"patch_operation_conflict: duplicate replacement for {shot_id}.{field}"
+                )
+            modified_targets.add(target_key)
+            if field not in patched_shots[shot_id]:
+                raise ValueError(
+                    f"full_rebuild_required: replace_field cannot create unknown field {field!r}"
+                )
+            protected_hit = self._protected_scope_hit(protected_scope, shot_id, field)
+            if protected_hit is not None:
+                raise ValueError(
+                    f"protected_scope_violation: {shot_id}.{field} matches work-order protected scope {protected_hit!r}"
+                )
+
+            issue_ids = operation.get("issue_ids")
+            if not isinstance(issue_ids, list) or not issue_ids or any(
+                not str(item).strip() for item in issue_ids
+            ):
+                raise ValueError(
+                    f"patch_evidence_required: operations[{index}].issue_ids must be non-empty"
+                )
+            for issue_id_value in issue_ids:
+                issue_id = str(issue_id_value).strip()
+                matching_issues = issues_by_code.get(issue_id, [])
+                if not matching_issues:
+                    raise ValueError(
+                        f"patch_evidence_mismatch: issue {issue_id!r} is absent from the independent audit certificate"
+                    )
+                scoped_matches = []
+                unscoped_matches = []
+                for issue in matching_issues:
+                    related_shots = self._shot_ids_for_location(
+                        storyboard, str(issue.get("location") or "")
+                    )
+                    if related_shots:
+                        if shot_id in related_shots:
+                            scoped_matches.append(issue)
+                    else:
+                        unscoped_matches.append(issue)
+                if not scoped_matches and not unscoped_matches:
+                    raise ValueError(
+                        f"patch_evidence_mismatch: issue {issue_id!r} does not apply to shot {shot_id!r}"
+                    )
+
+            reason = str(operation.get("reason") or "").strip()
+            if not reason:
+                raise ValueError(f"patch_reason_required: operations[{index}].reason is required")
+            before_value = copy.deepcopy(patched_shots[shot_id][field])
+            patched_shots[shot_id][field] = copy.deepcopy(operation.get("value"))
+            modified_shots.add(shot_id)
+            applied_operations.append(
+                {
+                    "op": "replace_field",
+                    "shot_id": shot_id,
+                    "field": field,
+                    "issue_ids": [str(item).strip() for item in issue_ids],
+                    "reason": reason,
+                    "before_sha256": sha256_bytes(_stable_json_bytes(before_value)),
+                    "after_sha256": sha256_bytes(_stable_json_bytes(operation.get("value"))),
+                }
+            )
+
+        missing_impact = sorted(modified_shots - impact_ids)
+        if missing_impact:
+            raise ValueError(
+                "impact_scope_incomplete: missing modified shot ids " + ", ".join(missing_impact)
+            )
+        patched_input_hash = canonical_storyboard_sha256(patched)
+        if patched_input_hash == base_canonical_hash:
+            raise ValueError("patch_no_change: operations do not change the canonical storyboard")
+
+        claim_id = _new_id("PATCH")
+        self.store.claim_storyboard_patch(
+            namespace,
+            project_id,
+            base_artifact_id,
+            expected_canonical_hash=base_canonical_hash,
+            claim_id=claim_id,
+        )
+        try:
+            response = self.commit_storyboard(
+                namespace,
+                project_id=project_id,
+                work_order_id=work_order_id,
+                storyboard=patched,
+                file_name=file_name,
+                source_artifact_id=base_artifact_id,
+            )
+        except Exception:
+            self.store.finish_storyboard_patch(
+                namespace,
+                project_id,
+                base_artifact_id,
+                claim_id=claim_id,
+                successor_artifact_id=None,
+                successor_canonical_hash=None,
+            )
+            raise
+
+        report = response.data.get("report")
+        if not isinstance(report, dict):
+            self.store.finish_storyboard_patch(
+                namespace,
+                project_id,
+                base_artifact_id,
+                claim_id=claim_id,
+                successor_artifact_id=None,
+                successor_canonical_hash=None,
+            )
+            raise RuntimeError("patch final full-table validation report is missing")
+        new_canonical_hash = str(response.data.get("canonical_sha256") or "")
+        if not new_canonical_hash:
+            self.store.finish_storyboard_patch(
+                namespace,
+                project_id,
+                base_artifact_id,
+                claim_id=claim_id,
+                successor_artifact_id=None,
+                successor_canonical_hash=None,
+            )
+            raise RuntimeError("patch persisted canonical hash is missing")
+
+        if response.status == "pass" and not report.get("issues"):
+            self.store.finish_storyboard_patch(
+                namespace,
+                project_id,
+                base_artifact_id,
+                claim_id=claim_id,
+                successor_artifact_id=str(response.artifact_id),
+                successor_canonical_hash=new_canonical_hash,
+            )
+            response.data["artifact"] = self.store.update_artifact_metadata(
+                namespace,
+                project_id,
+                str(response.artifact_id),
+                {
+                    "patch_base_artifact_id": base_artifact_id,
+                    "patch_base_canonical_sha256": base_canonical_hash,
+                    "patch_audit_certificate_id": audit_certificate_id,
+                    "patch_impact_scope": sorted(impact_ids),
+                },
+            )
+        else:
+            # A failed full validation is never a successful patch.  Preserve
+            # the newly written draft for diagnosis, but allow the original
+            # canonical base to be repaired again with corrected operations.
+            self.store.finish_storyboard_patch(
+                namespace,
+                project_id,
+                base_artifact_id,
+                claim_id=claim_id,
+                successor_artifact_id=None,
+                successor_canonical_hash=None,
+            )
+
+        response.data.update(
+            {
+                "final_full_validation": True,
+                "base_artifact_id": base_artifact_id,
+                "base_canonical_hash": base_canonical_hash,
+                "new_canonical_hash": new_canonical_hash,
+                "audit_certificate_id": audit_certificate_id,
+                "impact_scope": sorted(impact_ids),
+                "applied_operations": applied_operations,
+                "report": report,
+            }
+        )
+        response.summary = (
+            "局部修复已完成｜全表生产预检通过｜待独立终审"
+            if response.status == "pass"
+            else response.summary
+        )
+        return response
 
     def audit_storyboard(
         self,
@@ -781,10 +1848,88 @@ class StoryboardService:
         project_id: str,
         artifact_id: str,
         audit_cycle_id: str | None,
+        work_order_id: str | None = None,
+        handoff_artifact_id: str | None = None,
+        force_machine_recheck: bool = False,
     ) -> ToolResponse:
         self._require_runtime()
+        started_ns = time.perf_counter_ns()
         storyboard, record = self._storyboard_from_artifact(namespace, project_id, artifact_id)
-        report = validate_storyboard.validate_project(storyboard, mode="audit")
+        loaded_ns = time.perf_counter_ns()
+        canonical_hash = canonical_storyboard_sha256(storyboard)
+        handoff = self._matching_handoff(
+            namespace,
+            project_id,
+            artifact_id=artifact_id,
+            canonical_hash=canonical_hash,
+            handoff_id=handoff_artifact_id,
+        )
+        boundary_hash = self._boundary_hash(storyboard)
+        if handoff:
+            production_components = handoff.get("cache_components", {})
+            if production_components.get("boundary") not in {None, boundary_hash}:
+                raise ValueError("handoff boundary hash does not match the audited storyboard")
+            source_fingerprint = str(
+                production_components.get("source")
+                or self._source_fingerprint(
+                    namespace,
+                    project_id,
+                    storyboard,
+                    record.get("source_artifact_id"),
+                    record,
+                )
+            )
+        else:
+            source_fingerprint = self._source_fingerprint(
+                namespace,
+                project_id,
+                storyboard,
+                record.get("source_artifact_id"),
+                record,
+            )
+        cache_components = self._audit_cache_components(
+            canonical_hash=canonical_hash,
+            source_fingerprint=source_fingerprint,
+            boundary_hash=boundary_hash,
+            audit_class=AUDIT_CLASS_INDEPENDENT,
+            artifact_fingerprint=str(record.get("fingerprint") or ""),
+        )
+        audit_cache_key = self._cache_key_from_components(cache_components)
+        cached_certificate = None
+        if not force_machine_recheck:
+            cached_certificate = self.store.find_project_record(
+                namespace,
+                project_id,
+                kind="certificates",
+                field="cache_key",
+                value=audit_cache_key,
+            )
+        cache_hit = cached_certificate is not None
+        if cached_certificate is not None:
+            if (
+                not self._valid_cache_identity(cached_certificate, AUDIT_CLASS_INDEPENDENT)
+                or cached_certificate.get("canonical_sha256") != canonical_hash
+                or cached_certificate.get("cache_components") != cache_components
+            ):
+                raise ValueError("cached independent audit certificate identity is invalid")
+            report = copy.deepcopy(cached_certificate.get("report"))
+            if not isinstance(report, dict) or not isinstance(report.get("issues"), list):
+                raise ValueError("cached independent audit certificate is invalid")
+            if cached_certificate.get("report_sha256") != sha256_bytes(_stable_json_bytes(report)):
+                raise ValueError("cached independent audit report fingerprint mismatch")
+            certificate = cached_certificate
+        else:
+            report = validate_storyboard.validate_project(storyboard, mode="audit")
+            certificate = self._persist_audit_certificate(
+                namespace,
+                project_id,
+                artifact_id=artifact_id,
+                canonical_artifact_id=record.get("metadata", {}).get("canonical_json_artifact_id"),
+                cache_components=cache_components,
+                report=report,
+                work_order_id=work_order_id,
+            )
+        validated_ns = time.perf_counter_ns()
         with self.store.mutate_project(namespace, project_id) as (_hub, ledger):
             audit_result = self._record_audit(
                 namespace=namespace,
@@ -794,7 +1939,10 @@ class StoryboardService:
                 report=report,
                 ledger=ledger,
                 audit_cycle_id=audit_cycle_id,
+                audit_class=AUDIT_CLASS_INDEPENDENT,
+                audit_cache_key=audit_cache_key,
             )
+        recorded_ns = time.perf_counter_ns()
         if audit_result["status"] == "duplicate":
             prior = audit_result["event"]
             issue_count = len(prior.get("issues", []))
@@ -807,12 +1955,36 @@ class StoryboardService:
             issue_count = len(report.get("issues", []))
             status = "pass" if issue_count == 0 else "fail_current"
             summary = "审计通过｜0个问题" if issue_count == 0 else f"审计未通过｜{issue_count}个问题"
+        telemetry = self._save_telemetry(
+            namespace,
+            project_id,
+            operation="audit_storyboard",
+            started_ns=started_ns,
+            stages_ms={
+                "canonical_load": (loaded_ns - started_ns) / 1_000_000,
+                "machine_validation": (validated_ns - loaded_ns) / 1_000_000,
+                "ledger": (recorded_ns - validated_ns) / 1_000_000,
+            },
+            cache_hit=cache_hit,
+            artifact_id=artifact_id,
+        )
         return ToolResponse(
             status=status,
             summary=summary,
             project_id=project_id,
             artifact_id=artifact_id,
-            data={"report": report, "audit": audit_result},
+            trace_id=telemetry["telemetry_id"],
+            data={
+                "report": report,
+                "audit": audit_result,
+                "audit_class": AUDIT_CLASS_INDEPENDENT,
+                "cache_hit": cache_hit,
+                "canonical_sha256": canonical_hash,
+                "handoff": handoff,
+                "certificate": self._certificate_summary(certificate),
+                "telemetry_id": telemetry["telemetry_id"],
+                "telemetry": telemetry,
+            },
         )
 
     def complete_validation(
@@ -903,6 +2075,59 @@ class StoryboardService:
             data={**result, "gap_id": record["gap_id"]},
         )
 
+    def _clean_independent_certificate_for_work_order(
+        self,
+        namespace: str,
+        project_id: str,
+        hub: dict[str, Any],
+        work_order_id: str,
+    ) -> dict[str, Any]:
+        deliverable = next(
+            (
+                item
+                for item in reversed(hub.get("deliverables", []))
+                if item.get("work_order_id") == work_order_id
+                and item.get("artifact_type") == "storyboard"
+            ),
+            None,
+        )
+        if deliverable is None:
+            raise ValueError("independent_audit_required: storyboard deliverable is missing")
+        artifact_id = str(deliverable.get("deliverable_id") or "")
+        storyboard, record = self._storyboard_from_artifact(namespace, project_id, artifact_id)
+        canonical_hash = canonical_storyboard_sha256(storyboard)
+        components = self._audit_cache_components(
+            canonical_hash=canonical_hash,
+            source_fingerprint=self._source_fingerprint(
+                namespace,
+                project_id,
+                storyboard,
+                record.get("source_artifact_id"),
+                record,
+            ),
+            boundary_hash=self._boundary_hash(storyboard),
+            audit_class=AUDIT_CLASS_INDEPENDENT,
+            artifact_fingerprint=str(record.get("fingerprint") or ""),
+        )
+        certificate = self.store.find_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            field="cache_key",
+            value=self._cache_key_from_components(components),
+        )
+        if (
+            certificate is None
+            or certificate.get("cache_components") != components
+            or certificate.get("result") != "pass"
+            or int(certificate.get("issue_count", -1)) != 0
+            or not self._valid_cache_identity(certificate, AUDIT_CLASS_INDEPENDENT)
+        ):
+            raise ValueError(
+                "independent_audit_required: exact storyboard version needs a clean independent audit before sign-off"
+            )
+        return certificate
+
     def signoff_task(
         self,
         namespace: str,
@@ -916,10 +2141,22 @@ class StoryboardService:
             raise ValueError("signer is required for human sign-off")
         with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
             work_order = _find_work_order(hub, work_order_id)
+            independent_certificate = None
+            if decision == "approve" and work_order.get("operation") in STORYBOARD_OPERATIONS:
+                independent_certificate = self._clean_independent_certificate_for_work_order(
+                    namespace,
+                    project_id,
+                    hub,
+                    work_order_id,
+                )
             if work_order["status"] == "passed":
                 project_agent.transition_work_order(hub, work_order_id, "awaiting_signoff")
             result = project_agent.signoff_work_order(hub, work_order_id, decision)
             hub["human_signoffs"][-1]["signer"] = signer.strip()
+            if independent_certificate is not None:
+                hub["human_signoffs"][-1]["independent_audit_certificate_id"] = (
+                    independent_certificate["certificate_id"]
+                )
             if decision == "approve":
                 for deliverable in hub.get("deliverables", []):
                     if deliverable.get("work_order_id") == work_order_id:
@@ -932,5 +2169,12 @@ class StoryboardService:
             summary=f"人工签核已记录｜{decision}｜{result['status']}",
             project_id=project_id,
             work_order_id=work_order_id,
-            data=result,
+            data={
+                **result,
+                "independent_audit_certificate_id": (
+                    independent_certificate.get("certificate_id")
+                    if independent_certificate is not None
+                    else None
+                ),
+            },
         )
