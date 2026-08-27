@@ -2,6 +2,13 @@
   "profile_version": "R10-PROJECT-AGENT-1",
   "runtime_version": "V16.3-148-R10-StableRuntime",
   "workflow_revision": "R10-PG1",
+  "storyboard_window_architecture": {
+    "always_required": ["production", "independent_audit"],
+    "conditional": "repair",
+    "repair_activation": "independent_audit_fail_and_explicit_authorization",
+    "repair_return": "original_independent_audit_authority",
+    "quality_contract": "49 validators + G0-G13 + 8 audit layers unchanged"
+  },
   "change_operations": [
     "add",
     "modify",
@@ -142,28 +149,28 @@
       "operation": "storyboard_regenerate",
       "group": "分镜工作流",
       "status": "supported",
-      "output": "根据最新版剧本重建全量或受影响范围分镜",
+      "output": "根据最新版剧本走全量或稳定UID增量路线，输出完整canonical、XLSX、生产预检与审计handoff",
       "approval_policy": "explicit_execute"
     },
     {
       "operation": "storyboard_change",
       "group": "分镜工作流",
       "status": "supported",
-      "output": "镜头新增、修改、删除、替换、合并、拆分或移动及连锁更新",
+      "output": "以稳定UID、精确边界和CAS保护执行镜头增量变更，确定性重算派生字段并完成全表校验",
       "approval_policy": "explicit_execute"
     },
     {
       "operation": "storyboard_audit",
       "group": "审计闭环",
       "status": "supported",
-      "output": "源文至统计全表审计（含公共场景人物/环境音生态）、问题证据和简洁结论",
+      "output": "原审计窗口独立重算八层审计（含公共场景人物/环境音生态）、签发问题证据或最终结论",
       "approval_policy": "read_only"
     },
     {
       "operation": "storyboard_repair",
       "group": "审计闭环",
       "status": "supported",
-      "output": "统一修正、影响回归、残留和新增问题闭合版本",
+      "output": "仅在审计失败且授权后按一次性修复包生成新版本，完整回归并返回原审计窗口",
       "approval_policy": "explicit_execute"
     },
     {

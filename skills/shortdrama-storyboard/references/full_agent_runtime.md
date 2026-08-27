@@ -14,14 +14,16 @@ Use this policy with `V16.3-148-R10-StableRuntime`, `R10-PG1`, and the issue pol
 8. Capability-gap handling
 9. User-facing behavior
 
-## Keep two authoritative shared files
+## Route authoritative project state
 
-Resolve these exact Library titles at the start of every full Agent task:
+In MCP plugin mode, the authenticated plugin store for the exact `project_id` is the operational source of truth. Use its hub, work orders, deliverables, handoffs, audit events and issue ledger through the tools; do not separately fetch or rewrite the global Library copies for an ordinary content task. This avoids duplicate reads and conflicting state while preserving the same machine gates.
+
+Resolve these exact Library titles only for standalone skill operation, explicit shared-ledger work, system/rule architecture updates, or final archival synchronization:
 
 - `分镜项目Agent_项目中枢.json`: current project state, work orders, change requests, deliverables, decisions, capability gaps, and version history.
 - `分镜项目Agent_问题台账.json`: audit events, issue recurrence, statistics, rule candidates, and sign-offs.
 
-Validate the project hub with `python scripts/project_agent.py validate --hub HUB.json` and the issue ledger with `python scripts/storyboard_agent.py validate --ledger LEDGER.json`. Replace the same Library identities after accepted updates. If either write fails, preserve a local pending record and explicitly report which shared state is not synchronized.
+On those Library-backed routes, validate the project hub with `python scripts/project_agent.py validate --hub HUB.json` and the issue ledger with `python scripts/storyboard_agent.py validate --ledger LEDGER.json`. Replace the same Library identities after accepted updates. If either write fails, preserve a local pending record and explicitly report which shared state is not synchronized.
 
 Operate the project hub through these deterministic commands after preparing the corresponding JSON request or record:
 
@@ -43,13 +45,13 @@ Do not call `record-validation` or transition a storyboard work order to `passed
 
 ## Preserve window separation and evidence independence
 
-Use three logical authorities even when a workflow is orchestrated from one product:
+Use two permanent logical authorities and one conditional authority. In cloud operation, each authority must be bound to a distinct trusted MCP transport session; a logical name alone does not prove window independence:
 
 - `production`: creates a new storyboard artifact and may issue only `production_preflight`.
 - `independent_audit`: reads the locked source and artifact, never mutates either, and alone may issue the final audit verdict.
-- `repair`: applies an authorized structured repair package to a new artifact version; its result must return to `independent_audit` before release.
+- `repair`: created only after an audit failure and explicit repair authorization; applies one immutable structured repair package to a new artifact version, then returns to the original `independent_audit` work order/window/session before release.
 
-Do not merge production and independent audit to save time. Save time by reusing verified objective evidence, while recomputing every quality conclusion.
+The exact role matrix is `production + storyboard_create/regenerate/change or seedance_create + execute + explicit_execute`, `independent_audit + storyboard_audit + audit_only + read_only`, and `repair + storyboard_repair + audit_and_repair + explicit_execute`. Reject every other combination. Do not start repair for a clean audit, and do not merge production with independent audit to save time. Save time by reusing verified objective evidence and limiting generation to the authorized delta, while recomputing every quality conclusion.
 
 ### Keep one canonical truth
 
@@ -73,7 +75,7 @@ Create a handoff manifest for `production_to_audit`, `audit_to_repair`, and `rep
 - producer claims that remain subject to audit: chapter map, causal map, source treatment, protected dialogue, cognition, scene state, shot plan, coverage, and preflight findings;
 - cache entries used or rejected, stage-timing trace ID, and repair/audit cycle IDs.
 
-The receiving window verifies every fingerprint before using the handoff. Missing or mismatched evidence is a cache miss or task blocker; never silently fall back to a stale project copy.
+The receiving window atomically claims one exact handoff, verifies its type, status, workflow chain, artifact, fingerprints, destination authority and session, then marks it consumed. Missing, replayed, concurrently consumed or mismatched evidence is a blocker; never silently select another handoff or fall back to a stale project copy. A `repair_to_audit` handoff is valid only for the original audit authority and original signed audit cycle.
 
 Before any release transition, resolve referential integrity in both directions: every certificate `event_id`, `handoff_id`, and `stage_trace_id` must exist and match the same work order, audit cycle, logical artifact, scope, and fingerprints; every handoff certificate or immutable repair-package reference must resolve to exactly one record. If the installed hub/ledger writer does not initialize, persist, and validate these structures deterministically, preserve them as versioned deliverable attachments, record the missing writer as a capability gap, and do not claim that the new lifecycle is machine-enforced.
 
@@ -129,7 +131,7 @@ Run the full suites when the runtime, rule, schema, validator, script, dependenc
 
 ### Record comparable stage timing
 
-For production, independent audit, and repair, record one trace ID and these stages when applicable: bootstrap/status, source read, canonicalization, planning, generation, validation, repair, export, and ledger/handoff. Each stage records start/end, duration, tool-call count, source characters, payload bytes, shot/batch count, cache hit/miss and reason, retry count, and error status. A parallel parent stage must not double-count child durations as wall-clock time.
+For production, independent audit, and repair, record one trace ID and the server-observable stages that actually ran: canonicalization, delta base/scope/merge, materialization, validation, repair, export, and ledger/handoff as applicable. Persist measured start/end or duration, payload and affected/preserved/final counts when the service truly observes them. Do not infer model tool-call count, source characters, retries, or planning/generation duration from server time. A parallel parent stage must not double-count child durations as wall-clock time. Server records must say `measurement_scope=server_only`; ChatGPT planning/generation and every unavailable metric must be listed in `unmeasured_stages`, not reported as measured zero.
 
 Use traces from the same locked source, boundary, rule version, hardware/service tier, and output contract when claiming an efficiency change. Performance is never allowed to override a failed quality gate.
 
@@ -140,7 +142,7 @@ Map every request to one operation in `project_agent_capabilities.json` and one 
 - `plan_only`: analyze or propose; do not change the source artifact.
 - `execute`: create or modify the requested artifact.
 - `audit_only`: complete all checks; do not repair.
-- `audit_and_repair`: audit, repair, impact regression, and final verification in one task.
+- `audit_and_repair`: one workflow chain whose initial `audit_only` work order is read-only; after a failed audit and explicit repair authorization, create a separate repair work order and return its successor to the original audit work order for impact regression and final verification.
 
 Treat “给方案、分析、建议、怎么改” as `plan_only`. Treat “生成、改写、修改、新增、删除、替换、合并、拆分、移动、修正后输出” as explicit execution authorization for the named scope. Do not extend authorization to unrelated episodes, files, characters, scenes, or rules.
 
@@ -148,18 +150,18 @@ If the request mixes planning and execution, lock the selected plan first. When 
 
 ## Run the universal task lifecycle
 
-1. Load and validate both shared files.
-2. Create one work order with request text, window key, operation, mode, targets, expected outputs, and authorization.
+1. Load the exact plugin project state, or validate both shared Library files only on a Library-backed/standalone route.
+2. Create one role-specific work order with request text, window key, operation, mode, targets, expected outputs, and authorization. An `audit_and_repair` request remains one workflow chain but uses an initial `audit_only` work order, then—only after failure and explicit authorization—a distinct repair work order; never place `storyboard_audit` and `storyboard_repair` under one role binding.
 3. Lock the authoritative source, latest artifact version, episode/scene/shot boundary, must-keep list, must-remove list, and protected scope. Resolve or create the single canonical fingerprint and verify any incoming handoff before content work.
 4. Resolve conflicts in this order: user’s current explicit instruction, current authoritative modified story, current source text, current approved project state, older reference versions.
 5. Perform the selected planning or execution workflow.
 6. Produce a new version by default. Preserve the original unless the user explicitly requests replacement of the same artifact.
 7. Validate every required downstream consumer and impact boundary.
-8. For storyboard output, run `production_preflight` before handoff. A separate `independent_audit` must complete the eight-layer audit and issue the release verdict. When repair is authorized, apply the structured repair package, regress the defined impact scope, and return the new fingerprinted version for independent verification.
+8. For storyboard output, choose the full route for a first draft or an invalidated scene/episode, and the stable-UID delta route for a bounded change to an existing canonical. Both routes run the same full production gates and issue only `production_preflight`. A separate `independent_audit` must complete the eight-layer audit and issue the release verdict. Only after a failed audit and explicit authorization may a third repair authority consume the structured repair package; it must return the new fingerprinted version to the original audit authority for verification.
 9. Record deliverables, versions, decisions, issue events, unresolved blockers, and capability gaps.
 10. Mark a clean task `awaiting_signoff`; archive only after human approval.
 
-Never claim completion when the work order, deliverable, issue ledger, or Library writeback is incomplete.
+Never claim completion when the required work order, deliverable, or issue-ledger update is incomplete. Require Library writeback only on a route that actually uses the shared Library files.
 
 ## Plan, create, and rewrite story content
 
@@ -278,7 +280,7 @@ Use `agent_runtime.md` for issue event structure, recurrence escalation, concise
 
 - Audit-only tasks never modify artifacts.
 - Audit-and-repair work orders close within two preferred and three maximum rounds, but keep authorities distinct: independent audit establishes the immutable issue baseline, repair creates a new artifact version, and independent audit verifies that new version.
-- Prefer the certificate-bound `commit_storyboard_patch` path only when every requested change is a non-structural field replacement on a stable shot ID and the exact independent-audit certificate names that issue. The service must compare-and-set the base canonical hash, enforce the work-order protected scope, reject stale rules/source/boundary/artifact fingerprints, save a new full artifact, and run the complete validator. Episode/scene boundaries, cognition, source evidence, shot order/identity/timing, scene topology, or core shot-plan changes require scene/episode rebuild. A patch pass is production preflight, not the independent final verdict.
+- Prefer the certificate-bound `commit_storyboard_patch` path only when every requested repair is a non-structural field replacement on a stable shot UID and the exact independent-audit certificate names that issue. Use production-authorized `commit_storyboard_delta` for a user-directed bounded change to an existing canonical. Structural audit repair must consume its immutable package and use full `commit_storyboard` for the complete affected scene or episode. The service must compare-and-set base hashes, enforce stable UID boundaries and protected scope where applicable, save a new full artifact, and run the complete validator. Production, patch, delta, and repair preflight are never the independent final verdict.
 - Record every repair result as original issue resolved, residual, or introduced.
 - A second consecutive recurrence requires root-cause repair; a third requires upstream rebuild.
 - Never activate a formal rule or validator automatically.

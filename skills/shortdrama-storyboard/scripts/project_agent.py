@@ -33,6 +33,13 @@ CHANGE_PARENT_OPERATIONS = {
     "script_rewrite", "script_change", "dialogue_rewrite", "change_impact",
     "storyboard_regenerate", "storyboard_change", "storyboard_repair",
 }
+STORYBOARD_AUTHORITY_MATRIX = {
+    "storyboard_create": ("execute", "explicit_execute"),
+    "storyboard_regenerate": ("execute", "explicit_execute"),
+    "storyboard_change": ("execute", "explicit_execute"),
+    "storyboard_audit": ("audit_only", "read_only"),
+    "storyboard_repair": ("audit_and_repair", "explicit_execute"),
+}
 STATES = {
     "intake", "scope_locked", "proposal_ready", "awaiting_approval", "approved",
     "executing", "validating", "passed", "awaiting_signoff", "archived",
@@ -229,6 +236,20 @@ def validate_work_order_request(request: Any, hub: dict[str, Any]) -> list[str]:
         errors.append("plan_only mode requires plan_only or read_only authorization")
     if request.get("mode") in {"execute", "audit_and_repair"} and request.get("authorization") == "read_only":
         errors.append("mutating mode cannot use read_only authorization")
+    operation = request.get("operation")
+    if operation in STORYBOARD_AUTHORITY_MATRIX:
+        expected_mode, expected_authorization = STORYBOARD_AUTHORITY_MATRIX[operation]
+        # A pending production/repair request may be registered for explicit
+        # approval, but it remains non-executable.  Authority-sensitive service
+        # calls enforce the exact authorization before any artifact mutation.
+        allowed_authorizations = {expected_authorization}
+        if expected_authorization == "explicit_execute":
+            allowed_authorizations.add("pending")
+        if request.get("mode") != expected_mode or request.get("authorization") not in allowed_authorizations:
+            errors.append(
+                "storyboard authority matrix requires "
+                f"mode={expected_mode} and authorization={expected_authorization} for {operation}"
+            )
     return errors
 
 
@@ -246,6 +267,19 @@ def _initial_status(request: dict[str, Any], hub: dict[str, Any]) -> str:
     return "awaiting_approval"
 
 
+def _server_role_for_work_order(operation: str) -> str:
+    if operation == "storyboard_audit":
+        return "independent_audit"
+    if operation == "storyboard_repair":
+        return "repair"
+    return "production"
+
+
+def _local_binding(prefix: str, work_order_id: str) -> str:
+    digest = hashlib.sha256(f"{prefix}:{work_order_id}".encode("utf-8")).hexdigest()[:20]
+    return f"{prefix}-{digest}"
+
+
 def create_work_order(hub: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     errors = validate_work_order_request(request, hub)
     if errors:
@@ -254,6 +288,16 @@ def create_work_order(hub: dict[str, Any], request: dict[str, Any]) -> dict[str,
     if existing is not None:
         return {"status": "duplicate", "work_order_id": existing["work_order_id"], "work_order_status": existing["status"]}
     work_order = copy.deepcopy(request)
+    work_order.setdefault("server_actor_role", _server_role_for_work_order(str(request["operation"])))
+    work_order.setdefault(
+        "server_window_binding_id",
+        _local_binding("WIN", str(request["work_order_id"])),
+    )
+    work_order.setdefault(
+        "server_actor_binding_id",
+        _local_binding("ACT", str(request["work_order_id"])),
+    )
+    work_order.setdefault("transport_session_fingerprint", None)
     work_order.update({
         "status": _initial_status(request, hub),
         "internal_round": 0,
@@ -590,7 +634,9 @@ def validate_hub(hub: Any) -> list[str]:
             continue
         for field in [
             "work_order_id", "operation", "mode", "authorization", "status", "internal_round",
-            "mutates_source", "validation", "deliverable_ids", "change_request_ids", "state_history",
+            "server_actor_role", "server_window_binding_id", "server_actor_binding_id",
+            "transport_session_fingerprint", "mutates_source", "validation", "deliverable_ids",
+            "change_request_ids", "state_history",
         ]:
             if field not in work_order:
                 errors.append(f"work_orders[{index}] missing field: {field}")

@@ -262,8 +262,11 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": [
-          "镜头编号",
+  "required": [
+    "shot_uid",
+    "scene_uid",
+    "episode_id",
+    "镜头编号",
           "时长",
           "累计时长",
           "功能类型",
@@ -298,7 +301,22 @@
           "原文支撑句",
           "生成批次"
         ],
-        "properties": {
+  "properties": {
+    "shot_uid": {
+      "type": "string",
+      "minLength": 1,
+      "description": "服务端持久化的不可变镜头身份；展示编号变化时不得复用或重建该UID。"
+    },
+    "scene_uid": {
+      "type": "string",
+      "minLength": 1,
+      "description": "服务端持久化的场景身份。"
+    },
+    "episode_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "镜头所属分集的稳定身份。"
+    },
           "镜头编号": {
             "type": [
               "string",
@@ -509,8 +527,10 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "批次编号",
+  "required": [
+    "batch_uid",
+    "episode_id",
+    "批次编号",
           "覆盖镜头",
           "时长",
           "主运镜",
@@ -526,7 +546,17 @@
           "光影",
           "独立执行提示词"
         ],
-        "properties": {
+  "properties": {
+    "batch_uid": {
+      "type": "string",
+      "minLength": 1,
+      "description": "服务端持久化的不可变批次身份。"
+    },
+    "episode_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "批次覆盖镜头所属分集的稳定身份。"
+    },
           "批次编号": {
             "type": "string"
           },

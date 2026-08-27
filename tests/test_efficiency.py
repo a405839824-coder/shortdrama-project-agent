@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator
 from shortdrama_mcp.app import create_mcp
 from shortdrama_mcp.auth import request_namespace
 from shortdrama_mcp.config import Settings
+from shortdrama_mcp.delta import ensure_shot_uids
 import shortdrama_mcp.service as service_module
 
 
@@ -251,7 +252,12 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(record["artifact_id"], committed["artifact_id"])
-        self.assertEqual(storyboard["shots"], valid_storyboard()["shots"])
+        expected_storyboard, identity_manifest = ensure_shot_uids(valid_storyboard())
+        self.assertEqual(storyboard["shots"], expected_storyboard["shots"])
+        self.assertEqual(storyboard["batches"], expected_storyboard["batches"])
+        self.assertEqual(len(identity_manifest["shot_uids"]), len(storyboard["shots"]))
+        self.assertTrue(all(shot.get("shot_uid") for shot in storyboard["shots"]))
+        self.assertTrue(all(batch.get("batch_uid") for batch in storyboard["batches"]))
         self.assertEqual(
             committed["data"]["canonical_sha256"],
             service_module.canonical_storyboard_sha256(storyboard),
@@ -580,9 +586,9 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         result = await self.rejection_text("commit_storyboard_patch", arguments)
         self.assertIn("full_rebuild_required", result)
 
-    async def test_storyboard_patch_runs_final_full_table_validation(self) -> None:
+    async def test_storyboard_patch_runs_full_production_validation(self) -> None:
         project_id, work_order_id, committed, audited = await self._prepare_patch_base(
-            project_name="补丁全表终验测试"
+            project_name="补丁完整生产校验测试"
         )
         arguments = self._patch_arguments(project_id, work_order_id, committed, audited)
         original_validator = service_module.validate_storyboard.validate_project
@@ -594,6 +600,8 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             result = await self.call("commit_storyboard_patch", arguments)
 
         self.assertEqual(result["status"], "pass")
+        self.assertTrue(result["data"]["full_production_validation"])
+        # Compatibility alias for 0.3.x callers; not an independent-audit verdict.
         self.assertTrue(result["data"]["final_full_validation"])
         self.assertEqual(result["data"]["report"]["issues"], [])
         self.assertEqual(
@@ -617,7 +625,14 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             self.service._project_schema, "immutable_repair_package", issued
         )
         self.service._validate_schema_record(
-            self.service._project_schema, "handoff_manifest", audit_to_repair
+            self.service._project_schema,
+            "handoff_manifest",
+            self.service.store.get_project_record(
+                self.namespace,
+                project_id,
+                kind="handoffs",
+                record_id=audit_to_repair["handoff_id"],
+            ),
         )
         self.assertEqual(
             audit_to_repair["immutable_repair_package_id"],
@@ -651,7 +666,14 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             self.service._project_schema, "immutable_repair_package", consumed
         )
         self.service._validate_schema_record(
-            self.service._project_schema, "handoff_manifest", repair_to_audit
+            self.service._project_schema,
+            "handoff_manifest",
+            self.service.store.get_project_record(
+                self.namespace,
+                project_id,
+                kind="handoffs",
+                record_id=repair_to_audit["handoff_id"],
+            ),
         )
         hub = self.service.store.load_hub(self.namespace, project_id)
         Draft202012Validator(self.service._project_schema).validate(hub)

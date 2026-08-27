@@ -64,7 +64,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_contracts_and_file_params(self) -> None:
         tools = await self.server.list_tools()
-        self.assertEqual(len(tools), 13)
+        self.assertEqual(len(tools), 14)
         by_name = {tool.name: tool.model_dump(by_alias=True, exclude_none=True) for tool in tools}
         self.assertEqual(by_name["get_agent_status"]["annotations"]["readOnlyHint"], True)
         self.assertEqual(by_name["audit_storyboard"]["annotations"]["readOnlyHint"], False)
@@ -211,7 +211,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
             {
                 "project_id": project_id,
                 "operation": "storyboard_create",
-                "mode": "audit_and_repair",
+                "mode": "execute",
                 "authorization": "explicit_execute",
                 "request_text": "检查古代市集普通人物和环境音并修正",
                 "targets": ["市集场景"],
@@ -301,6 +301,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
                     "section": "分镜",
                     "offset": 0,
                     "limit": 10,
+                    "automatic_bulk": False,
                 },
             )
             self.assertFalse(read.is_error, read.content)

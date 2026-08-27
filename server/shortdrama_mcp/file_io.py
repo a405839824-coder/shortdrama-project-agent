@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
 import datetime as dt
+import hashlib
+import hmac
 import io
 import ipaddress
 import json
@@ -44,9 +48,26 @@ MAX_ARCHIVE_ENTRIES = 10_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 250 * 1024 * 1024
 MAX_BULK_RESPONSE_CHARS = 16_000
 MAX_BULK_RANGES = 16
-DEFAULT_BULK_RESPONSE_CHARS = 12_000
-DEFAULT_BULK_CHARACTER_LIMIT = 8_000
+DEFAULT_BULK_RESPONSE_CHARS = 16_000
+DEFAULT_BULK_CHARACTER_LIMIT = 16_000
 DEFAULT_BULK_ITEM_LIMITS = {"paragraphs": 80, "pages": 8, "rows": 50}
+
+CANONICAL_SIDECAR_SHEET = "__shortdrama_canonical_v1"
+CANONICAL_SIDECAR_MARKER = "SHORTDRAMA_CANONICAL_V1"
+CANONICAL_SIDECAR_FORMAT = "canonical-storyboard-json-v1"
+CANONICAL_SIDECAR_ENCODING = "base64url-utf8-json"
+CANONICAL_SIDECAR_PAYLOAD_PREFIX = "b64u:"
+CANONICAL_SIDECAR_CHUNK_CHARS = 24_000
+CANONICAL_SIDECAR_HEADERS = [
+    "record_type",
+    "marker",
+    "format",
+    "encoding",
+    "sha256",
+    "chunk_index",
+    "chunk_count",
+    "payload",
+]
 
 
 def json_safe(value: Any) -> Any:
@@ -185,13 +206,118 @@ def _json_cell(value: Any, fallback: Any) -> Any:
         return value
 
 
+def _canonical_sidecar_error(reason: str) -> ValueError:
+    return ValueError(f"canonical sidecar invalid: {reason}")
+
+
+def _canonical_positive_int(value: Any, field: str) -> int:
+    if isinstance(value, bool):
+        raise _canonical_sidecar_error(f"{field} must be a positive integer")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, float) and value.is_integer():
+        parsed = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        parsed = int(value.strip())
+    else:
+        raise _canonical_sidecar_error(f"{field} must be a positive integer")
+    if parsed <= 0:
+        raise _canonical_sidecar_error(f"{field} must be a positive integer")
+    return parsed
+
+
+def _canonical_storyboard_from_sidecar(sheets: list[dict[str, Any]]) -> dict[str, Any] | None:
+    sidecars = [sheet for sheet in sheets if sheet.get("name") == CANONICAL_SIDECAR_SHEET]
+    if not sidecars:
+        return None
+    if len(sidecars) != 1:
+        raise _canonical_sidecar_error("duplicate reserved sidecar sheets")
+
+    sidecar = sidecars[0]
+    if sidecar.get("headers") != CANONICAL_SIDECAR_HEADERS:
+        raise _canonical_sidecar_error("sidecar header or marker is missing")
+    rows = sidecar.get("rows")
+    if not isinstance(rows, list):
+        raise _canonical_sidecar_error("sidecar rows are missing")
+
+    manifests = [row for row in rows if row.get("record_type") == "manifest"]
+    chunks = [row for row in rows if row.get("record_type") == "chunk"]
+    if len(manifests) != 1:
+        raise _canonical_sidecar_error("exactly one manifest is required")
+    if len(manifests) + len(chunks) != len(rows):
+        raise _canonical_sidecar_error("unknown sidecar record type")
+
+    manifest = manifests[0]
+    if manifest.get("marker") != CANONICAL_SIDECAR_MARKER:
+        raise _canonical_sidecar_error("manifest marker mismatch")
+    if manifest.get("format") != CANONICAL_SIDECAR_FORMAT:
+        raise _canonical_sidecar_error("manifest format mismatch")
+    if manifest.get("encoding") != CANONICAL_SIDECAR_ENCODING:
+        raise _canonical_sidecar_error("manifest encoding mismatch")
+    digest = manifest.get("sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise _canonical_sidecar_error("manifest SHA-256 is malformed")
+    chunk_count = _canonical_positive_int(manifest.get("chunk_count"), "chunk_count")
+    if len(chunks) != chunk_count:
+        raise _canonical_sidecar_error("canonical payload chunk count mismatch")
+
+    payload_by_index: dict[int, str] = {}
+    for chunk in chunks:
+        if chunk.get("marker") != CANONICAL_SIDECAR_MARKER:
+            raise _canonical_sidecar_error("chunk marker mismatch")
+        if chunk.get("format") != CANONICAL_SIDECAR_FORMAT:
+            raise _canonical_sidecar_error("chunk format mismatch")
+        if chunk.get("encoding") != CANONICAL_SIDECAR_ENCODING:
+            raise _canonical_sidecar_error("chunk encoding mismatch")
+        if chunk.get("sha256") != digest:
+            raise _canonical_sidecar_error("chunk SHA-256 manifest mismatch")
+        if _canonical_positive_int(chunk.get("chunk_count"), "chunk_count") != chunk_count:
+            raise _canonical_sidecar_error("chunk count manifest mismatch")
+        index = _canonical_positive_int(chunk.get("chunk_index"), "chunk_index")
+        if index > chunk_count:
+            raise _canonical_sidecar_error("chunk index is out of range")
+        if index in payload_by_index:
+            raise _canonical_sidecar_error("duplicate canonical payload chunk")
+        payload = chunk.get("payload")
+        if not isinstance(payload, str) or not payload.startswith(CANONICAL_SIDECAR_PAYLOAD_PREFIX):
+            raise _canonical_sidecar_error("chunk payload encoding marker is missing")
+        encoded = payload[len(CANONICAL_SIDECAR_PAYLOAD_PREFIX) :]
+        if not encoded:
+            raise _canonical_sidecar_error("canonical payload chunk is empty")
+        payload_by_index[index] = encoded
+
+    expected_indexes = set(range(1, chunk_count + 1))
+    if set(payload_by_index) != expected_indexes:
+        raise _canonical_sidecar_error("canonical payload chunk sequence is incomplete")
+    encoded_payload = "".join(payload_by_index[index] for index in range(1, chunk_count + 1))
+    try:
+        serialized = base64.b64decode(encoded_payload, altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise _canonical_sidecar_error("canonical payload is not valid base64url") from exc
+    actual_digest = hashlib.sha256(serialized).hexdigest()
+    if not hmac.compare_digest(actual_digest, digest):
+        raise _canonical_sidecar_error("canonical payload SHA-256 mismatch")
+    try:
+        canonical = json.loads(serialized.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _canonical_sidecar_error("canonical payload is not valid UTF-8 JSON") from exc
+    if not isinstance(canonical, dict):
+        raise _canonical_sidecar_error("canonical storyboard root must be an object")
+    return canonical
+
+
 def workbook_to_storyboard(sheets: list[dict[str, Any]]) -> dict[str, Any] | None:
+    sidecar_storyboard = _canonical_storyboard_from_sidecar(sheets)
+    if sidecar_storyboard is not None:
+        return sidecar_storyboard
+
     shots_sheet = next((sheet for sheet in sheets if "镜头编号" in sheet.get("headers", [])), None)
     if not shots_sheet:
         return None
     batches_sheet = next((sheet for sheet in sheets if "批次编号" in sheet.get("headers", [])), None)
     metadata_sheet = next((sheet for sheet in sheets if sheet.get("name") in {"元数据", "metadata"}), None)
     evidence_sheet = next((sheet for sheet in sheets if sheet.get("name") in {"流程证据", "prevention_evidence"}), None)
+    identity_sheet = next((sheet for sheet in sheets if sheet.get("name") == "内部标识"), None)
     metadata: dict[str, Any] = {}
     if metadata_sheet:
         for row in metadata_sheet.get("rows", []):
@@ -209,6 +335,29 @@ def workbook_to_storyboard(sheets: list[dict[str, Any]]) -> dict[str, Any] | Non
     for row in batches:
         if isinstance(row.get("覆盖镜头"), str):
             row["覆盖镜头"] = [item.strip() for item in row["覆盖镜头"].replace("，", ",").split(",") if item.strip()]
+    if identity_sheet:
+        shot_identity = {
+            str(row.get("显示编号") or ""): row
+            for row in identity_sheet.get("rows", [])
+            if row.get("类型") == "shot"
+        }
+        batch_identity = {
+            str(row.get("显示编号") or ""): row
+            for row in identity_sheet.get("rows", [])
+            if row.get("类型") == "batch"
+        }
+        for row in shots:
+            identity = shot_identity.get(str(row.get("镜头编号") or ""))
+            if identity:
+                for field in ("shot_uid", "episode_id", "scene_uid"):
+                    if identity.get(field) not in (None, ""):
+                        row[field] = identity[field]
+        for row in batches:
+            identity = batch_identity.get(str(row.get("批次编号") or ""))
+            if identity:
+                for field in ("batch_uid", "episode_id"):
+                    if identity.get(field) not in (None, ""):
+                        row[field] = identity[field]
     total_duration = metadata.get("total_duration")
     if total_duration in (None, "") and shots:
         total_duration = shots[-1].get("累计时长", 0)
@@ -233,10 +382,11 @@ def extract_xlsx(data: bytes) -> dict[str, Any]:
         headers, rows = _rows_from_sheet(sheet)
         sheets.append({"name": sheet.title, "headers": headers, "row_count": len(rows), "rows": rows})
     canonical = workbook_to_storyboard(sheets)
+    public_sheets = [sheet for sheet in sheets if sheet.get("name") != CANONICAL_SIDECAR_SHEET]
     return {
         "kind": "workbook",
-        "sheet_count": len(sheets),
-        "sheets": sheets,
+        "sheet_count": len(public_sheets),
+        "sheets": public_sheets,
         "canonical_storyboard": canonical,
     }
 
@@ -331,7 +481,7 @@ def _cell_value(value: Any) -> Any:
     return value
 
 
-def _write_table(workbook: Workbook, title: str, headers: list[str], rows: list[dict[str, Any]]) -> None:
+def _write_table(workbook: Workbook, title: str, headers: list[str], rows: list[dict[str, Any]]) -> Any:
     sheet = workbook.create_sheet(title)
     sheet.append(headers)
     for row in rows:
@@ -351,6 +501,57 @@ def _write_table(workbook: Workbook, title: str, headers: list[str], rows: list[
         if header in {"画面内容", "动作与表演", "台词", "发声方式", "独立执行提示词", "证据", "修复动作"}:
             width = 34
         sheet.column_dimensions[get_column_letter(index)].width = width
+    return sheet
+
+
+def _write_canonical_sidecar(workbook: Workbook, storyboard: dict[str, Any]) -> None:
+    canonical = json_safe(storyboard)
+    if not isinstance(canonical, dict):
+        raise ValueError("canonical storyboard root must be an object")
+    serialized = json.dumps(
+        canonical,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    digest = hashlib.sha256(serialized).hexdigest()
+    encoded = base64.urlsafe_b64encode(serialized).decode("ascii")
+    chunks = [
+        encoded[offset : offset + CANONICAL_SIDECAR_CHUNK_CHARS]
+        for offset in range(0, len(encoded), CANONICAL_SIDECAR_CHUNK_CHARS)
+    ]
+    if not chunks:
+        raise ValueError("canonical storyboard serialization is empty")
+
+    sheet = workbook.create_sheet(CANONICAL_SIDECAR_SHEET)
+    sheet.append(CANONICAL_SIDECAR_HEADERS)
+    sheet.append(
+        [
+            "manifest",
+            CANONICAL_SIDECAR_MARKER,
+            CANONICAL_SIDECAR_FORMAT,
+            CANONICAL_SIDECAR_ENCODING,
+            digest,
+            None,
+            len(chunks),
+            None,
+        ]
+    )
+    for index, chunk in enumerate(chunks, 1):
+        sheet.append(
+            [
+                "chunk",
+                CANONICAL_SIDECAR_MARKER,
+                CANONICAL_SIDECAR_FORMAT,
+                CANONICAL_SIDECAR_ENCODING,
+                digest,
+                index,
+                len(chunks),
+                f"{CANONICAL_SIDECAR_PAYLOAD_PREFIX}{chunk}",
+            ]
+        )
+    sheet.sheet_state = "veryHidden"
 
 
 def storyboard_to_xlsx(storyboard: dict[str, Any], audit_report: dict[str, Any]) -> bytes:
@@ -360,6 +561,39 @@ def storyboard_to_xlsx(storyboard: dict[str, Any], audit_report: dict[str, Any])
     _write_table(workbook, "分镜", field_order, list(storyboard.get("shots") or []))
     batch_headers = list(BATCH_FIELDS)
     _write_table(workbook, "生成批次", batch_headers, list(storyboard.get("batches") or []))
+
+    identity_rows = [
+        {
+            "类型": "shot",
+            "显示编号": row.get("镜头编号"),
+            "shot_uid": row.get("shot_uid"),
+            "episode_id": row.get("episode_id"),
+            "scene_uid": row.get("scene_uid"),
+            "batch_uid": None,
+        }
+        for row in storyboard.get("shots", [])
+        if isinstance(row, dict) and row.get("shot_uid")
+    ]
+    identity_rows.extend(
+        {
+            "类型": "batch",
+            "显示编号": row.get("批次编号"),
+            "shot_uid": None,
+            "episode_id": row.get("episode_id"),
+            "scene_uid": None,
+            "batch_uid": row.get("batch_uid"),
+        }
+        for row in storyboard.get("batches", [])
+        if isinstance(row, dict) and row.get("batch_uid")
+    )
+    if identity_rows:
+        identity_sheet = _write_table(
+            workbook,
+            "内部标识",
+            ["类型", "显示编号", "shot_uid", "episode_id", "scene_uid", "batch_uid"],
+            identity_rows,
+        )
+        identity_sheet.sheet_state = "hidden"
 
     evidence_rows = [
         {"证据块": key, "JSON": json.dumps(value, ensure_ascii=False, separators=(",", ":"))}
@@ -390,6 +624,8 @@ def storyboard_to_xlsx(storyboard: dict[str, Any], audit_report: dict[str, Any])
     if not issue_rows:
         issue_rows = [{"错误码": "PASS", "严重度": "info", "位置": "全表", "证据": "零问题", "修复动作": "无需修复"}]
     _write_table(workbook, "审计报告", ["错误码", "严重度", "位置", "证据", "修复动作"], issue_rows)
+
+    _write_canonical_sidecar(workbook, storyboard)
 
     stream = io.BytesIO()
     workbook.save(stream)

@@ -252,11 +252,28 @@
     }
   },
   "windowed_execution_policy": {
-    "principle": "生产与独立审计保持分窗；复用经指纹验证的客观事实，不复用生产结论；任何提速不得减少G0-G13、八层审计或质量阈值。",
+    "principle": "生产与独立审计两个窗口常驻；仅审计失败且获修复授权时启用第三个repair窗口；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、八层审计或质量阈值。",
+    "activation": {
+      "always_required": ["production", "independent_audit"],
+      "conditional": "repair",
+      "repair_activation_condition": "independent_audit_fail_and_explicit_repair_authorization",
+      "clean_audit_forbids_repair_window": true
+    },
     "window_roles": {
-      "production": "创建或修复新版本，只能签发production_preflight和handoff，不能签发最终审计通过。",
+      "production": "创建全量或用户授权的增量新版本，只能签发production_preflight和handoff，不能签发最终审计通过。",
       "independent_audit": "只读源文与产物，独立重算质量结论，独占最终pass/fail签发权。",
-      "repair": "依据结构化修复包生成新版本，必须返回independent_audit。"
+      "repair": "仅依据一次性不可变修复包生成新版本，不能签发最终结论，必须返回原independent_audit工单、窗口、会话与审计周期。"
+    },
+    "exact_role_matrix": [
+      {"role": "production", "operations": ["storyboard_create", "storyboard_regenerate", "storyboard_change", "seedance_create"], "mode": "execute", "authorization": "explicit_execute"},
+      {"role": "independent_audit", "operations": ["storyboard_audit"], "mode": "audit_only", "authorization": "read_only"},
+      {"role": "repair", "operations": ["storyboard_repair"], "mode": "audit_and_repair", "authorization": "explicit_execute"}
+    ],
+    "cloud_session_policy": {
+      "trusted_transport_session_required": true,
+      "roles_must_be_pairwise_distinct": true,
+      "logical_window_name_is_not_proof": true,
+      "missing_or_reused_session": "block"
     },
     "audit_types": {
       "production_preflight": {
@@ -313,8 +330,26 @@
         "cycle_ids"
       ],
       "receiver_must_verify_fingerprints": true,
+      "atomic_state_machine": ["prepared", "consuming", "consumed_or_rejected"],
+      "single_consumer_cas": true,
+      "explicit_handoff_id_required_in_cloud": true,
+      "repair_return_requires_original_audit_authority": true,
+      "audit_cycle_is_server_signed_not_caller_selected": true,
       "missing_or_mismatch": "cache_miss_or_block",
       "forbid_silent_stale_fallback": true
+    },
+    "incremental_execution_policy": {
+      "full_route": "首次全量分镜，或认知、分集边界、场景拓扑、核心镜头计划导致整个场/集失效。",
+      "delta_route": "已有canonical上的用户授权范围变更，输入只含完整受影响原子镜头、闭合批次、稳定UID和精确左右边界。",
+      "patch_route": "独立审计证书确认的稳定镜头非结构字段修复。",
+      "stable_internal_ids": ["episode_id", "scene_uid", "shot_uid", "batch_uid"],
+      "compare_and_set": ["base_canonical_sha256", "base_raw_artifact_fingerprint", "single_successor_claim"],
+      "must_reject": ["stale_base", "wrong_boundary", "protected_scope", "noncontiguous_range", "cross_boundary_batch", "handoff_before_materialization"],
+      "untouched_semantic_hash_must_match": true,
+      "server_materialized_derived_fields": ["稳定batch_uid", "累计时长", "总时长", "批次时长", "批次映射校验", "独立执行提示词"],
+      "materializer_must_be_deterministic_and_noncreative": true,
+      "final_outputs": ["完整canonical JSON", "完整XLSX", "production_preflight", "signed handoff", "stage trace"],
+      "full_validation_after_delta": true
     },
     "cross_window_fact_reuse_whitelist": [
       "exact_source_text_and_chunk_manifest",
@@ -400,6 +435,10 @@
         "bootstrap_status",
         "source_read",
         "canonicalization",
+        "delta_base_load",
+        "delta_scope_check",
+        "delta_merge",
+        "materialization",
         "planning",
         "generation",
         "validation",
@@ -407,19 +446,35 @@
         "export",
         "ledger_handoff"
       ],
-      "required_metrics": [
+      "always_required_metrics": [
+        "measurement_scope",
+        "unmeasured_stages",
+        "trace_id",
+        "wall_duration_ms",
+        "shot_count",
+        "batch_count",
+        "cache_status_and_reason",
+        "error_status"
+      ],
+      "reported_only_when_server_observed": [
         "started_at",
         "ended_at",
         "duration_ms",
         "tool_call_count",
         "source_character_count",
-        "payload_bytes",
+        "input_payload_bytes",
+        "output_payload_bytes",
+        "affected_shot_count",
+        "preserved_semantic_count",
         "shot_count",
         "batch_count",
         "cache_status_and_reason",
         "retry_count",
         "error_status"
       ],
+      "measurement_scope": "server_only",
+      "unobserved_chatgpt_planning_and_generation": "unmeasured_not_zero",
+      "forbid_inferred_or_placeholder_measurements": true,
       "parallel_wall_clock_rule": "父阶段墙钟时间不得重复累加并行子阶段耗时。",
       "efficiency_claim_rule": "只比较相同源文、边界、规则、服务等级和输出契约的可比trace。"
     },

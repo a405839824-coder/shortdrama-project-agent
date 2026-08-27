@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from mcp.server.auth.settings import AuthSettings
 from mcp.types import ToolAnnotations
+from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
 
@@ -17,8 +18,10 @@ from .file_io import DEFAULT_BULK_RESPONSE_CHARS, preview_extracted_bulk
 from .models import (
     ArtifactReadRange,
     ChangeOperationInput,
+    MAX_DELTA_ITEMS,
     OpenAIFile,
     ReadUnit,
+    StoryboardDeltaEvidenceInput,
     StoryboardPatchOperationInput,
     ToolResponse,
 )
@@ -60,18 +63,19 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     server = MCPServer(
         name="shortdrama-project-agent",
         title="分镜项目 Agent",
-        description="R10-PG1 short-drama service with canonical handoff, independent audit, safe local repair, public-scene ecology, and Seedance 2.5",
+        description="R10-PG1 short-drama service with canonical delta commits, independent audit, conditional repair, public-scene ecology, and Seedance 2.5",
         version=__version__,
         instructions=(
             "先调用get_agent_status，再创建或确认项目并调用begin_project_task。"
             "小说章节转分镜必须先完整读取并建立章节地图、取舍台账、人物认知、对白保护、时长预算和节拍计划，未完成不得生成。"
             "生成内容后必须调用提交工具；commit_storyboard只签发生产预检和handoff，不能冒充独立审计。"
+            "已有分镜只改受影响范围时使用commit_storyboard_delta：提交稳定shot_uid、精确左右边界和原子批次字段；服务端合并未改内容、物化完整提示词并执行同一完整R10生产校验，随后交给独立审计。"
             "审计窗口必须调用audit_storyboard独立重算；相同canonical、原文件、源文、边界、规则和验证器才可复用。"
             "街道、市集、酒楼、城门等公共场景必须写普通人物密度、地点角色、错峰动作和空间层次，并写具体近中远环境声、对白避让和声画来源；有因空场除外。"
             "正式分镜与Seedance批次必须复现同一组公共人物和环境声生态。"
             "正式母版执行列固定为Seedance 2.5独立正式执行分镜。"
-            "非结构字段可用commit_storyboard_patch按独立审计证书局部修复，但仍全表终验；边界、认知、原文、编号和时长变化必须重建。"
-            "若失败，应一次修复报告中的全部问题并重提，最多三轮；零残留、零新增才可称通过。"
+            "只有独立审计失败且用户明确授权后，独立repair窗口才可使用签名修复包；非结构字段可用commit_storyboard_patch局部修复，边界、认知、原文、编号和时长变化必须执行绑定修复包的完整重建。"
+            "修复后仍执行完整生产校验并交回原独立审计窗口复核；最多三轮，只有原审计窗口确认零残留、零新增才可称通过。"
             "正式归档必须同时具备精确版本的独立审计通过证书和signoff_task人工签核。"
         ),
         token_verifier=token_verifier,
@@ -182,7 +186,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         name="read_project_artifact",
         title="读取项目文件",
         description=(
-            "读取已导入或已生成文件。旧版section/offset/limit分页保持兼容；读取长章节时优先使用"
+            "读取已导入或已生成文件。默认自动批量读取长内容并返回无重叠续读位置；旧版"
+            "section/offset/limit分页可用automatic_bulk=false保持兼容。也可使用"
             "bulk_ranges一次获取最多16个段落、页面、行或字符范围，合并内容硬限制为16000字符。"
             "可传if_none_match避免重复返回未变化文件。"
         ),
@@ -200,6 +205,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         unit: ReadUnit = "auto",
         max_chars: int = DEFAULT_BULK_RESPONSE_CHARS,
         if_none_match: str | None = None,
+        automatic_bulk: bool = True,
     ) -> ToolResponse:
         namespace = request_namespace(settings)
         trace = WorkflowTrace()
@@ -231,7 +237,12 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                     trace,
                 )
 
-        bulk_mode = bulk_ranges is not None or unit != "auto" or max_chars != DEFAULT_BULK_RESPONSE_CHARS
+        bulk_mode = bool(
+            automatic_bulk
+            or bulk_ranges is not None
+            or unit != "auto"
+            or max_chars != DEFAULT_BULK_RESPONSE_CHARS
+        )
         if not bulk_mode:
             with trace.stage("legacy-artifact-read", offset=offset, limit=limit):
                 response = service.read_artifact(
@@ -253,6 +264,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             response.data.setdefault("etag", etag)
             response.data.setdefault("content_hash", content_hash)
             response.data.setdefault("not_modified", False)
+            response.data["read_mode"] = "legacy"
             return traced(response, trace)
 
         with trace.stage("artifact-load"):
@@ -298,6 +310,10 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                     "content_hash": content_hash,
                     "extracted_content_hash": extracted_content_hash,
                     "not_modified": False,
+                    "read_mode": "automatic_bulk" if automatic_bulk and bulk_ranges is None else "explicit_bulk",
+                    "shot_identity_manifest": service.storyboard_identity_manifest(
+                        namespace, project_id, loaded_record, extracted
+                    ),
                 },
             ),
             trace,
@@ -366,7 +382,12 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     @server.tool(
         name="commit_storyboard",
         title="提交并生产预检分镜",
-        description="生成、重建或完整修复R10分镜后调用；执行全部生产门禁，保存canonical JSON、Excel、production_preflight证书和审计交接包。生产预检不能替代独立审计。正式执行列使用Seedance 2.5。",
+        description=(
+            "生成、重建或完整修复R10分镜后调用；执行全部生产门禁，保存canonical JSON、Excel、"
+            "production_preflight证书和审计交接包。结构性修复必须由repair窗口同时提交审计签发的"
+            "repair_package_id和其精确base artifact；服务端单次消费修复包并把成功结果送回原独立"
+            "审计窗口。生产预检不能替代独立审计。正式执行列使用Seedance 2.5。"
+        ),
         annotations=_annotations(read_only=False),
         meta=meta("正在保存并生产预检…", "分镜生产预检已完成"),
         structured_output=True,
@@ -378,6 +399,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         ctx: Context,
         file_name: str = "正式分镜.xlsx",
         source_artifact_id: str | None = None,
+        repair_package_id: str | None = None,
     ) -> ToolResponse:
         return service.commit_storyboard(
             request_namespace(settings),
@@ -386,6 +408,66 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             storyboard=storyboard,
             file_name=file_name,
             source_artifact_id=source_artifact_id,
+            repair_package_id=repair_package_id,
+            request_session_id=_transport_session_id(ctx),
+        )
+
+    @server.tool(
+        name="commit_storyboard_delta",
+        title="增量提交并全表生产预检分镜",
+        description=(
+            "已有正式分镜仅重建工单授权的连续镜头范围时调用。必须绑定基础canonical哈希、"
+            "原始文件指纹、稳定shot_uid及精确左右邻镜；仅提交替换镜头、原子Seedance批次字段"
+            "和必要流程证据。服务端无损保留未影响语义，重算累计时长与批次时长，物化完整独立"
+            "提示词，随后执行与全量提交相同的R10全表验证、JSON/XLSX导出和审计交接。"
+            "替换镜头必须保持原shot_uid、镜头编号、episode和scene身份；插删、跨集跨场景、"
+            "源文、对白、认知或全局映射变化必须走全量路线。画面、表演或场景状态变化会同步"
+            "更新受影响镜头的shot_plan、performance_chains和scene_state_ledger证据，未影响证据保持哈希一致。"
+        ),
+        annotations=_annotations(read_only=False),
+        meta=meta("正在合并并物化受影响分镜…", "增量分镜生产预检已完成"),
+        structured_output=True,
+    )
+    async def commit_storyboard_delta(
+        project_id: str,
+        work_order_id: str,
+        base_artifact_id: str,
+        expected_base_canonical_sha256: str,
+        expected_base_raw_fingerprint: str,
+        scope_target: str,
+        affected_shot_uids: Annotated[list[str], Field(min_length=1, max_length=MAX_DELTA_ITEMS)],
+        replacement_shots: Annotated[
+            list[dict[str, Any]], Field(min_length=1, max_length=MAX_DELTA_ITEMS)
+        ],
+        replacement_batches: Annotated[
+            list[dict[str, Any]], Field(min_length=1, max_length=MAX_DELTA_ITEMS)
+        ],
+        ctx: Context,
+        left_boundary_shot_uid: str | None = None,
+        right_boundary_shot_uid: str | None = None,
+        evidence_updates: StoryboardDeltaEvidenceInput | None = None,
+        file_name: str = "正式分镜_增量生产版.xlsx",
+    ) -> ToolResponse:
+        return service.commit_storyboard_delta(
+            request_namespace(settings),
+            project_id=project_id,
+            work_order_id=work_order_id,
+            base_artifact_id=base_artifact_id,
+            expected_base_canonical_sha256=expected_base_canonical_sha256,
+            expected_base_raw_fingerprint=expected_base_raw_fingerprint,
+            scope_target=scope_target,
+            affected_shot_uids=affected_shot_uids,
+            left_boundary_shot_uid=left_boundary_shot_uid,
+            right_boundary_shot_uid=right_boundary_shot_uid,
+            replacement_shots=replacement_shots,
+            replacement_batches=replacement_batches,
+            evidence_updates=(
+                evidence_updates.model_dump(mode="python")
+                if evidence_updates is not None
+                else None
+            ),
+            top_level_updates=None,
+            file_name=file_name,
             request_session_id=_transport_session_id(ctx),
         )
 
@@ -399,7 +481,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "保存新的JSON与Excel版本且绝不覆盖基础版本。"
         ),
         annotations=_annotations(read_only=False),
-        meta=meta("正在应用审计修复…", "局部修复与全表终验已完成"),
+        meta=meta("正在应用审计修复…", "局部修复与完整生产校验已完成，待原审计复核"),
         structured_output=True,
     )
     async def commit_storyboard_patch(
