@@ -2,6 +2,9 @@
   "name": "shortdrama-project-agent",
   "version": "0.3.0",
   "description": "Chinese short-drama chapter intake, canonical handoff, independent audit, safe incremental repair, Seedance 2.5, and production workflow agent.",
+  "author": {
+    "name": "Storyboard Project Agent"
+  },
   "keywords": [
     "short-drama",
     "storyboard",
