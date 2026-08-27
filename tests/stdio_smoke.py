@@ -14,7 +14,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 
 async def inspect_bundled_server() -> dict:
     config = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
-    entry = config["shortdrama-project-agent"]
+    entry = config["mcpServers"]["shortdrama-project-agent"]
     parameters = StdioServerParameters(
         command=entry["command"],
         args=entry.get("args", []),
@@ -35,11 +35,10 @@ async def inspect_bundled_server() -> dict:
 
 def main() -> int:
     inspection = asyncio.run(inspect_bundled_server())
-    passed = inspection["tool_count"] == 12 and not inspection["status_call_is_error"]
+    passed = inspection["tool_count"] == 13 and not inspection["status_call_is_error"]
     print(json.dumps({"status": "pass" if passed else "fail", "inspection": inspection}, ensure_ascii=False, indent=2))
     return 0 if passed else 1
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
