@@ -55,11 +55,16 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
     async def create_project(self, name: str = "插件自动化测试") -> str:
         result = await self.call("create_project", {"project_name": name})
         self.assertEqual(result["status"], "created")
-        return result["project_id"]
+        project_id = result["project_id"]
+        checked = await self.call(
+            "get_agent_status", {"project_id": project_id, "full_self_test": True}
+        )
+        self.assertTrue(checked["data"]["runtime_test_certificate_valid"])
+        return project_id
 
     async def test_tool_contracts_and_file_params(self) -> None:
         tools = await self.server.list_tools()
-        self.assertEqual(len(tools), 12)
+        self.assertEqual(len(tools), 13)
         by_name = {tool.name: tool.model_dump(by_alias=True, exclude_none=True) for tool in tools}
         self.assertEqual(by_name["get_agent_status"]["annotations"]["readOnlyHint"], True)
         self.assertEqual(by_name["audit_storyboard"]["annotations"]["readOnlyHint"], False)
@@ -180,15 +185,23 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(repaired["status"], "pass")
         self.assertEqual(repaired["data"]["report"]["issues"], [])
+        independent = await self.call(
+            "audit_storyboard",
+            {"project_id": project_id, "artifact_id": repaired["artifact_id"]},
+        )
+        self.assertEqual(independent["status"], "pass")
+        self.assertEqual(independent["data"]["audit"]["status"], "recorded")
+        self.assertFalse(independent["data"]["cache_hit"])
         repeated = await self.call(
             "audit_storyboard",
             {"project_id": project_id, "artifact_id": repaired["artifact_id"]},
         )
         self.assertEqual(repeated["status"], "pass")
         self.assertEqual(repeated["data"]["audit"]["status"], "duplicate")
+        self.assertTrue(repeated["data"]["cache_hit"])
         status = await self.call("get_agent_status", {"project_id": project_id})
         self.assertTrue(status["data"]["state_valid"])
-        self.assertEqual(status["data"]["issues"]["event_count"], 2)
+        self.assertEqual(status["data"]["issues"]["event_count"], 3)
         self.assertEqual(status["data"]["issues"]["open_issue_count"], 0)
 
     async def test_public_scene_people_audio_gate_and_repair(self) -> None:

@@ -33,8 +33,13 @@
       "SHOT_GRANULARITY",
       "PERFORMANCE_CHAIN",
       "I2V_INDEPENDENCE",
+      "CANONICAL_AUTHORITY",
+      "PRODUCTION_PREFLIGHT",
       "LAYERED_AUDIT",
-      "QUALITY_METRICS"
+      "QUALITY_METRICS",
+      "HANDOFF_BUILD",
+      "CACHE_POLICY",
+      "STAGE_TIMING"
     ],
     "forbidden_skip_items": [
       "R10版本锁",
@@ -42,7 +47,11 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）",
+      "唯一canonical及全量指纹",
+      "production_preflight不得冒充独立审计",
+      "生产到审计交接包",
+      "阶段计时"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -54,7 +63,10 @@
       "触发模块",
       "证据",
       "问题与修复",
-      "最终状态"
+      "最终状态",
+      "production_preflight结论",
+      "待独立审计的handoff清单",
+      "阶段计时"
     ],
     "blocking_conditions": [
       "版本不一致",
@@ -88,11 +100,19 @@
     ],
     "must_call_modules": [
       "BOOTSTRAP",
-      "ALL_RUNTIME_MODULES",
-      "FUNCTIONAL_TEST",
+      "SOURCE",
+      "BOUNDARY",
+      "CHAPTER_COVERAGE_AUDIT_IF_NOVEL",
+      "AUDIT_INTAKE_IF_NO_HANDOFF",
+      "HANDOFF_VERIFY",
+      "CANONICAL_AUTHORITY",
+      "RUNTIME_TEST_CERTIFICATE_VERIFY",
       "PREVENTIVE_GATES",
+      "INDEPENDENT_AUDIT",
       "LAYERED_AUDIT",
-      "QUALITY_METRICS"
+      "QUALITY_METRICS",
+      "CACHE_POLICY",
+      "STAGE_TIMING"
     ],
     "forbidden_skip_items": [
       "R10版本锁",
@@ -100,7 +120,11 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）",
+      "handoff和canonical指纹验证",
+      "生产结论不得复用",
+      "八层独立重算",
+      "阶段计时"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -112,10 +136,16 @@
       "触发模块",
       "证据",
       "问题与修复",
-      "最终状态"
+      "最终状态",
+      "independent_audit证书",
+      "缓存命中与失效证据",
+      "阶段计时"
     ],
     "blocking_conditions": [
       "版本不一致",
+      "已有handoff或canonical指纹不一致，或无handoff时未建立只读audit_intake",
+      "将production_preflight当作独立审计结论",
+      "缓存依赖不完整或过期仍继续",
       "硬规则fail",
       "输入缺失却假pass",
       "越界修改"
@@ -145,12 +175,19 @@
     ],
     "must_call_modules": [
       "BOOTSTRAP",
+      "HANDOFF_VERIFY",
+      "CANONICAL_AUTHORITY",
+      "CERTIFICATE_BOUND_PATCH_IF_ELIGIBLE",
       "ERROR_TARGET_MODULE",
       "REGRESSION",
       "CHANGE_LOCK",
       "IMPACT_ANALYSIS",
       "SYSTEMIC_ESCALATION",
-      "QUALITY_METRICS"
+      "QUALITY_METRICS",
+      "RUNTIME_TEST_CERTIFICATE_VERIFY",
+      "CACHE_POLICY",
+      "STAGE_TIMING",
+      "HANDOFF_BUILD"
     ],
     "forbidden_skip_items": [
       "R10版本锁",
@@ -158,22 +195,30 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）",
+      "局部补丁必须绑定独立审计证书、基础canonical/原文件指纹、稳定镜头ID和影响范围",
+      "结构/边界/认知/原文/镜头时长编号变化必须重建而非局部补丁",
+      "修复版必须全表终验并返回独立终审"
     ],
     "minimum_input_required": [
       "用户任务范围",
       "输入文件或文本",
-      "边界/目标/约束"
+      "边界/目标/约束",
+      "独立审计证书或完整重建依据"
     ],
     "minimum_output_required": [
       "执行版本",
       "触发模块",
       "证据",
       "问题与修复",
-      "最终状态"
+      "最终状态",
+      "新canonical与原文件指纹",
+      "全表终验及待独立终审状态"
     ],
     "blocking_conditions": [
       "版本不一致",
+      "证书、基础哈希、影响范围或保护范围不一致",
+      "结构性变化误用局部补丁",
       "硬规则fail",
       "输入缺失却假pass",
       "越界修改"
@@ -219,7 +264,7 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -279,7 +324,7 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -324,6 +369,8 @@
     ],
     "must_call_modules": [
       "BOOTSTRAP",
+      "HANDOFF_VERIFY",
+      "CANONICAL_AUTHORITY",
       "SCOPE_LOCK",
       "ERROR_TARGET_MODULE",
       "REGRESSION",
@@ -331,7 +378,11 @@
       "SCENE_STATE",
       "IMPACT_ANALYSIS",
       "SYSTEMIC_ESCALATION",
-      "QUALITY_METRICS"
+      "QUALITY_METRICS",
+      "RUNTIME_TEST_CERTIFICATE_VERIFY",
+      "CACHE_POLICY",
+      "STAGE_TIMING",
+      "HANDOFF_BUILD"
     ],
     "forbidden_skip_items": [
       "R10版本锁",
@@ -339,7 +390,7 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -388,15 +439,31 @@
       "BOUNDARY",
       "BEAT",
       "TEMPLATE",
-      "ALL_RUNTIME_MODULES",
+      "VISIBILITY",
+      "EXPRESSION",
+      "MOTION",
+      "CINEMATIC",
+      "VOICE",
+      "DIALOGUE",
+      "PSYCH",
+      "BATCH",
+      "STAT",
+      "PUBLIC_SCENE_ECOLOGY",
       "CHANGE_LOCK",
       "COGNITION",
       "SCENE_STATE",
       "SHOT_GRANULARITY",
       "PERFORMANCE_CHAIN",
       "I2V_INDEPENDENCE",
+      "CANONICAL_AUTHORITY",
+      "PRODUCTION_PREFLIGHT",
+      "PREVENTIVE_GATES",
       "LAYERED_AUDIT",
-      "QUALITY_METRICS"
+      "QUALITY_METRICS",
+      "RUNTIME_TEST_CERTIFICATE_VERIFY",
+      "HANDOFF_BUILD",
+      "CACHE_POLICY",
+      "STAGE_TIMING"
     ],
     "forbidden_skip_items": [
       "R10版本锁",
@@ -404,7 +471,7 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -462,7 +529,7 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -884,12 +951,19 @@
     ],
     "must_call_modules": [
       "BOOTSTRAP",
+      "HANDOFF_VERIFY",
+      "CANONICAL_AUTHORITY",
+      "RUNTIME_TEST_CERTIFICATE_VERIFY",
+      "PRODUCTION_PREFLIGHT",
       "BATCH",
       "MOTION",
       "ACTIONUNIT",
       "SHOTGRAPH",
       "I2V_INDEPENDENCE",
-      "AUDIO_WORKFLOW"
+      "AUDIO_WORKFLOW",
+      "HANDOFF_BUILD",
+      "CACHE_POLICY",
+      "STAGE_TIMING"
     ],
     "forbidden_skip_items": [
       "R10版本锁",
@@ -897,7 +971,7 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -942,13 +1016,20 @@
     ],
     "must_call_modules": [
       "BOOTSTRAP",
+      "AUDIT_INTAKE_IF_NO_HANDOFF",
+      "HANDOFF_VERIFY",
+      "CANONICAL_AUTHORITY",
+      "RUNTIME_TEST_CERTIFICATE_VERIFY",
+      "INDEPENDENT_AUDIT",
       "BATCH",
       "REFERENCE",
       "MOTION",
       "CONTINUITY",
       "I2V_INDEPENDENCE",
       "AUDIO_WORKFLOW",
-      "SCENE_STATE"
+      "SCENE_STATE",
+      "CACHE_POLICY",
+      "STAGE_TIMING"
     ],
     "forbidden_skip_items": [
       "R10版本锁",
@@ -956,7 +1037,7 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1017,7 +1098,7 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1342,9 +1423,18 @@
     ],
     "must_call_modules": [
       "BOOTSTRAP",
+      "AUDIT_INTAKE_IF_NO_HANDOFF",
+      "HANDOFF_VERIFY",
       "INTEGRATION",
       "MIRROR_SYNC",
-      "FUNCTIONAL_TEST"
+      "CANONICAL_AUTHORITY",
+      "RUNTIME_TEST_CERTIFICATE_VERIFY",
+      "INDEPENDENT_AUDIT",
+      "PREVENTIVE_GATES",
+      "LAYERED_AUDIT",
+      "QUALITY_METRICS",
+      "CACHE_POLICY",
+      "STAGE_TIMING"
     ],
     "forbidden_skip_items": [
       "R10版本锁",
@@ -1465,7 +1555,7 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1619,13 +1709,18 @@
     ],
     "must_call_modules": [
       "BOOTSTRAP",
-      "ALL_RUNTIME_MODULES",
-      "FUNCTIONAL_TEST",
+      "HANDOFF_VERIFY",
+      "CANONICAL_AUTHORITY",
+      "RUNTIME_TEST_CERTIFICATE_VERIFY",
+      "AUDIT_CERTIFICATE_VERIFY",
+      "INDEPENDENT_AUDIT_IF_NEEDED",
       "HUMAN_SIGNOFF",
-      "PREVENTIVE_GATES",
-      "LAYERED_AUDIT",
-      "QUALITY_METRICS",
-      "SYSTEMIC_ESCALATION"
+      "PREVENTIVE_GATE_CERT_VERIFY",
+      "LAYERED_AUDIT_IF_NEEDED",
+      "QUALITY_METRICS_CERT_VERIFY",
+      "SYSTEMIC_ESCALATION",
+      "CACHE_POLICY",
+      "STAGE_TIMING"
     ],
     "forbidden_skip_items": [
       "R10版本锁",
@@ -1633,7 +1728,7 @@
       "具体证据",
       "错误码/通过证据",
       "重跑结论",
-      "R10-PG1十道门禁证据"
+      "G0-G13十四道门禁证据（小说条件门可N/A并附理由）"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1697,8 +1792,14 @@
       "PUBLIC_SCENE_ECOLOGY",
       "I2V_INDEPENDENCE",
       "CHAPTER_COVERAGE_AUDIT",
+      "CANONICAL_AUTHORITY",
+      "PRODUCTION_PREFLIGHT",
       "LAYERED_AUDIT",
-      "QUALITY_METRICS"
+      "QUALITY_METRICS",
+      "RUNTIME_TEST_CERTIFICATE_VERIFY",
+      "HANDOFF_BUILD",
+      "CACHE_POLICY",
+      "STAGE_TIMING"
     ],
     "forbidden_skip_items": [
       "完整章节读取证明",

@@ -79,7 +79,7 @@ def main() -> int:
                 raise RuntimeError(f"server did not become healthy\nstdout={stdout}\nstderr={stderr}")
             inspection = asyncio.run(inspect_endpoint(f"http://127.0.0.1:{port}/mcp"))
             result = {"status": "pass", "health": health, "inspection": inspection}
-            if inspection["tool_count"] != 12 or inspection["status_call_is_error"]:
+            if inspection["tool_count"] != 13 or inspection["status_call_is_error"]:
                 result["status"] = "fail"
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result["status"] == "pass" else 1

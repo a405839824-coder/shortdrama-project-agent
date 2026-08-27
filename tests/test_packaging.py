@@ -35,8 +35,8 @@ class PackagingTests(unittest.IsolatedAsyncioTestCase):
         for key in ("skills", "mcpServers"):
             self.assertTrue((PLUGIN_ROOT / manifest[key]).exists(), key)
         bundled_mcp = json.loads((PLUGIN_ROOT / manifest["mcpServers"]).read_text(encoding="utf-8"))
-        self.assertIn("shortdrama-project-agent", bundled_mcp)
-        self.assertNotIn("mcpServers", bundled_mcp)
+        self.assertEqual(set(bundled_mcp), {"mcpServers"})
+        self.assertIn("shortdrama-project-agent", bundled_mcp["mcpServers"])
         with tempfile.TemporaryDirectory(prefix="shortdrama-cloud-test-") as data_dir:
             local = Settings(
                 data_dir=Path(data_dir),
@@ -55,7 +55,7 @@ class PackagingTests(unittest.IsolatedAsyncioTestCase):
             local.validate()
             server, _service = create_mcp(local)
             tools = await server.list_tools()
-            self.assertEqual(len(tools), 12)
+            self.assertEqual(len(tools), 13)
             for tool in tools:
                 descriptor = tool.model_dump(by_alias=True, exclude_none=True)
                 self.assertEqual(descriptor["_meta"]["securitySchemes"][0]["type"], "oauth2")

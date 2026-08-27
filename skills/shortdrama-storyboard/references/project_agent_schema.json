@@ -68,6 +68,10 @@
     "capability_gaps": {"type": "array"},
     "version_history": {"type": "array"},
     "human_signoffs": {"type": "array"},
+    "handoffs": {"type": "array", "items": {"$ref": "#/$defs/handoff_manifest"}},
+    "performance_traces": {"type": "array", "items": {"$ref": "#/$defs/stage_timing_trace"}},
+    "runtime_test_certificates": {"type": "array", "items": {"$ref": "#/$defs/runtime_test_certificate"}},
+    "repair_packages": {"type": "array", "items": {"$ref": "#/$defs/immutable_repair_package"}},
     "counters": {"type": "object"}
   },
   "$defs": {
@@ -91,6 +95,262 @@
         "deliverable_ids"
       ]
     },
+    "handoff_manifest": {
+      "type": "object",
+      "required": [
+        "handoff_id",
+        "work_order_id",
+        "audit_cycle_id",
+        "logical_artifact_id",
+        "handoff_type",
+        "created_at",
+        "from_window_role",
+        "to_window_role",
+        "scope",
+        "fingerprints",
+        "objective_evidence",
+        "producer_claims",
+        "cache_manifest",
+        "stage_trace_id",
+        "status"
+      ],
+      "properties": {
+        "handoff_id": {"type": "string", "minLength": 1},
+        "work_order_id": {"type": "string", "minLength": 1},
+        "audit_cycle_id": {"type": "string", "minLength": 1},
+        "logical_artifact_id": {"type": "string", "minLength": 1},
+        "handoff_type": {"enum": ["production_to_audit", "audit_to_repair", "repair_to_audit", "audit_intake"]},
+        "created_at": {"type": "string", "minLength": 1},
+        "from_window_role": {"enum": ["external_input", "production", "independent_audit", "repair"]},
+        "to_window_role": {"enum": ["production", "independent_audit", "repair"]},
+        "scope": {
+          "type": "object",
+          "required": ["target_ids", "source_range", "boundary_context", "protected_scope"],
+          "properties": {
+            "target_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "source_range": {"type": "object", "minProperties": 1},
+            "boundary_context": {
+              "type": "object",
+              "required": ["previous_end", "current_start", "current_end", "next_start"]
+            },
+            "protected_scope": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "fingerprints": {
+          "type": "object",
+          "required": [
+            "source_bytes",
+            "normalized_source",
+            "episode_boundary",
+            "artifact_raw",
+            "artifact_semantic",
+            "canonical",
+            "parser",
+            "schema",
+            "runtime",
+            "rules",
+            "validator",
+            "scripts",
+            "dependencies_environment",
+            "project_anchors",
+            "target_model_contract"
+          ],
+          "properties": {
+            "source_bytes": {"$ref": "#/$defs/sha256"},
+            "normalized_source": {"$ref": "#/$defs/sha256"},
+            "episode_boundary": {"$ref": "#/$defs/sha256"},
+            "artifact_raw": {"$ref": "#/$defs/sha256"},
+            "artifact_semantic": {"$ref": "#/$defs/sha256"},
+            "canonical": {"$ref": "#/$defs/sha256"},
+            "parser": {"$ref": "#/$defs/sha256"},
+            "schema": {"$ref": "#/$defs/sha256"},
+            "runtime": {"$ref": "#/$defs/sha256"},
+            "rules": {"$ref": "#/$defs/sha256"},
+            "validator": {"$ref": "#/$defs/sha256"},
+            "scripts": {"$ref": "#/$defs/sha256"},
+            "dependencies_environment": {"$ref": "#/$defs/sha256"},
+            "project_anchors": {"$ref": "#/$defs/sha256"},
+            "target_model_contract": {"$ref": "#/$defs/sha256"}
+          },
+          "additionalProperties": false
+        },
+        "objective_evidence": {
+          "type": "object",
+          "required": ["source_manifest", "workbook_manifest", "canonical_ref", "approved_locks", "deterministic_statistics"],
+          "properties": {
+            "source_manifest": {"type": "object", "minProperties": 1},
+            "workbook_manifest": {"type": "object", "minProperties": 1},
+            "canonical_ref": {"type": "string", "minLength": 1},
+            "approved_locks": {"type": "object", "minProperties": 1},
+            "deterministic_statistics": {"type": "object", "minProperties": 1}
+          }
+        },
+        "producer_claims": {
+          "type": "object",
+          "required": ["claim_type", "chapter_map", "source_mapping", "protected_dialogue", "cognition_matrix", "scene_state", "shot_plan", "coverage", "preflight_findings"],
+          "properties": {
+            "claim_type": {"enum": ["production_claim", "audit_issue_baseline", "repair_result", "external_input_claim"]},
+            "chapter_map": {"type": ["object", "array"]},
+            "source_mapping": {"type": ["object", "array"]},
+            "protected_dialogue": {"type": "array"},
+            "cognition_matrix": {"type": "array"},
+            "scene_state": {"type": "array"},
+            "shot_plan": {"type": "array"},
+            "coverage": {"type": "object"},
+            "preflight_findings": {"type": "array"}
+          }
+        },
+        "audit_certificate_id": {"type": "string"},
+        "immutable_repair_package_id": {"type": "string"},
+        "cache_manifest": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["cache_class", "cache_key", "status", "dependency_fingerprints"],
+            "properties": {
+              "cache_class": {"enum": ["source_extract", "canonical_parse", "project_anchors", "runtime_test_certificate", "independent_audit_scope"]},
+              "cache_key": {"type": "string", "minLength": 1},
+              "status": {"enum": ["hit", "miss", "invalidated", "not_applicable"]},
+              "reason": {"type": "string"},
+              "dependency_fingerprints": {"type": "object"}
+            }
+          }
+        },
+        "stage_trace_id": {"type": "string", "minLength": 1},
+        "status": {"enum": ["prepared", "verified", "rejected", "consumed"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"handoff_type": {"const": "production_to_audit"}}, "required": ["handoff_type"]},
+          "then": {"properties": {"from_window_role": {"const": "production"}, "to_window_role": {"const": "independent_audit"}}}
+        },
+        {
+          "if": {"properties": {"handoff_type": {"const": "audit_to_repair"}}, "required": ["handoff_type"]},
+          "then": {"properties": {"from_window_role": {"const": "independent_audit"}, "to_window_role": {"const": "repair"}}, "required": ["audit_certificate_id", "immutable_repair_package_id"]}
+        },
+        {
+          "if": {"properties": {"handoff_type": {"const": "repair_to_audit"}}, "required": ["handoff_type"]},
+          "then": {"properties": {"from_window_role": {"const": "repair"}, "to_window_role": {"const": "independent_audit"}}, "required": ["immutable_repair_package_id"]}
+        },
+        {
+          "if": {"properties": {"handoff_type": {"const": "audit_intake"}}, "required": ["handoff_type"]},
+          "then": {"properties": {"from_window_role": {"const": "external_input"}, "to_window_role": {"const": "independent_audit"}}}
+        }
+      ]
+    },
+    "stage_timing_trace": {
+      "type": "object",
+      "required": ["trace_id", "window_role", "task_type", "started_at", "ended_at", "wall_duration_ms", "input_fingerprints", "stages"],
+      "properties": {
+        "trace_id": {"type": "string", "minLength": 1},
+        "window_role": {"enum": ["production", "independent_audit", "repair"]},
+        "task_type": {"enum": ["production_preflight", "independent_audit", "repair", "archive"]},
+        "started_at": {"type": "string", "minLength": 1},
+        "ended_at": {"type": "string", "minLength": 1},
+        "wall_duration_ms": {"type": "integer", "minimum": 0},
+        "input_fingerprints": {"type": "object", "minProperties": 1},
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["stage", "started_at", "ended_at", "duration_ms", "tool_call_count", "source_character_count", "payload_bytes", "shot_count", "batch_count", "cache_status", "cache_reason", "retry_count", "error_status"],
+            "properties": {
+              "stage": {"enum": ["bootstrap_status", "source_read", "canonicalization", "planning", "generation", "validation", "repair", "export", "ledger_handoff"]},
+              "started_at": {"type": "string", "minLength": 1},
+              "ended_at": {"type": "string", "minLength": 1},
+              "duration_ms": {"type": "integer", "minimum": 0},
+              "tool_call_count": {"type": "integer", "minimum": 0},
+              "source_character_count": {"type": "integer", "minimum": 0},
+              "payload_bytes": {"type": "integer", "minimum": 0},
+              "shot_count": {"type": "integer", "minimum": 0},
+              "batch_count": {"type": "integer", "minimum": 0},
+              "cache_status": {"enum": ["hit", "miss", "mixed", "not_applicable"]},
+              "cache_reason": {"type": "string", "minLength": 1},
+              "retry_count": {"type": "integer", "minimum": 0},
+              "error_status": {"enum": ["none", "recovered", "blocked"]},
+              "parallel_group_id": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "runtime_test_certificate": {
+      "type": "object",
+      "required": ["certificate_id", "created_at", "generator_version", "fingerprints", "suite_results", "status"],
+      "properties": {
+        "certificate_id": {"type": "string", "minLength": 1},
+        "created_at": {"type": "string", "minLength": 1},
+        "generator_version": {"type": "string", "minLength": 1},
+        "fingerprints": {
+          "type": "object",
+          "required": ["runtime", "rules", "schema", "validator", "scripts", "dependencies_environment"],
+          "properties": {
+            "runtime": {"$ref": "#/$defs/sha256"},
+            "rules": {"$ref": "#/$defs/sha256"},
+            "schema": {"$ref": "#/$defs/sha256"},
+            "validator": {"$ref": "#/$defs/sha256"},
+            "scripts": {"$ref": "#/$defs/sha256"},
+            "dependencies_environment": {"$ref": "#/$defs/sha256"}
+          },
+          "additionalProperties": false
+        },
+        "suite_results": {
+          "type": "object",
+          "required": ["golden_tests", "public_scene_tests", "agent_tests", "project_agent_tests"],
+          "properties": {
+            "golden_tests": {"$ref": "#/$defs/golden_suite_result"},
+            "public_scene_tests": {"$ref": "#/$defs/public_scene_suite_result"},
+            "agent_tests": {"$ref": "#/$defs/agent_suite_result"},
+            "project_agent_tests": {"$ref": "#/$defs/project_agent_suite_result"}
+          },
+          "additionalProperties": false
+        },
+        "status": {"const": "pass"}
+      }
+    },
+    "sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"},
+    "golden_suite_result": {
+      "type": "object",
+      "required": ["test_count", "test_pass_count", "test_fail_count", "status"],
+      "properties": {
+        "test_count": {"const": 73},
+        "test_pass_count": {"const": 73},
+        "test_fail_count": {"const": 0},
+        "status": {"const": "pass"}
+      }
+    },
+    "public_scene_suite_result": {
+      "type": "object",
+      "required": ["test_count", "test_pass_count", "test_fail_count", "status"],
+      "properties": {
+        "test_count": {"const": 11},
+        "test_pass_count": {"const": 11},
+        "test_fail_count": {"const": 0},
+        "status": {"const": "pass"}
+      }
+    },
+    "agent_suite_result": {
+      "type": "object",
+      "required": ["test_count", "test_pass_count", "test_fail_count", "status"],
+      "properties": {
+        "test_count": {"const": 14},
+        "test_pass_count": {"const": 14},
+        "test_fail_count": {"const": 0},
+        "status": {"const": "pass"}
+      }
+    },
+    "project_agent_suite_result": {
+      "type": "object",
+      "required": ["test_count", "test_pass_count", "test_fail_count", "status"],
+      "properties": {
+        "test_count": {"const": 18},
+        "test_pass_count": {"const": 18},
+        "test_fail_count": {"const": 0},
+        "status": {"const": "pass"}
+      }
+    },
     "change_operation": {
       "type": "object",
       "required": [
@@ -102,6 +362,56 @@
       ],
       "properties": {
         "operation": {"enum": ["add", "modify", "delete", "replace", "merge", "split", "move"]}
+      }
+    },
+    "immutable_repair_package": {
+      "type": "object",
+      "required": [
+        "repair_package_id", "audit_certificate_id", "audit_event_id",
+        "audit_to_repair_handoff_id", "created_at", "expires_at", "status",
+        "base_artifact_id", "base_canonical_sha256", "fingerprints",
+        "authorized_scope", "protected_scope_hash", "issue_targets", "topology_fingerprint"
+      ],
+      "properties": {
+        "repair_package_id": {"type": "string", "minLength": 1},
+        "audit_certificate_id": {"type": "string", "minLength": 1},
+        "audit_event_id": {"type": "string", "minLength": 1},
+        "audit_to_repair_handoff_id": {"type": "string", "minLength": 1},
+        "repair_to_audit_handoff_id": {"type": "string", "minLength": 1},
+        "created_at": {"type": "string", "minLength": 1},
+        "expires_at": {"type": "string", "minLength": 1},
+        "status": {"enum": ["issued", "consuming", "consumed", "expired", "revoked"]},
+        "base_artifact_id": {"type": "string", "minLength": 1},
+        "base_canonical_sha256": {"$ref": "#/$defs/sha256"},
+        "fingerprints": {"$ref": "#/$defs/handoff_manifest/properties/fingerprints"},
+        "authorized_scope": {
+          "type": "object",
+          "required": ["shot_ids", "fields", "issue_codes"],
+          "properties": {
+            "shot_ids": {"type": "array", "items": {"type": "string"}},
+            "fields": {"type": "array", "items": {"type": "string"}},
+            "issue_codes": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "protected_scope_hash": {"$ref": "#/$defs/sha256"},
+        "issue_targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["issue_code", "shot_id", "field", "location"],
+            "properties": {
+              "issue_code": {"type": "string", "minLength": 1},
+              "shot_id": {"type": "string", "minLength": 1},
+              "field": {"type": "string", "minLength": 1},
+              "location": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "topology_fingerprint": {"$ref": "#/$defs/sha256"},
+        "consumed_by_work_order_id": {"type": "string"},
+        "successor_artifact_id": {"type": "string"},
+        "successor_canonical_sha256": {"$ref": "#/$defs/sha256"}
       }
     },
     "change_request": {

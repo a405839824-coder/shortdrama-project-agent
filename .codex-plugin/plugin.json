@@ -1,7 +1,10 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.2.1",
-  "description": "Chinese short-drama chapter intake, storyboard, public-scene people and ambience ecology, Seedance 2.5, audit, repair, and production workflow agent.",
+  "version": "0.3.0",
+  "description": "Chinese short-drama chapter intake, canonical handoff, independent audit, safe incremental repair, Seedance 2.5, and production workflow agent.",
+  "author": {
+    "name": "Storyboard Project Agent"
+  },
   "keywords": [
     "short-drama",
     "storyboard",
@@ -15,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10-PG1 全流程执行短剧项目：完整章节理解、剧情取舍与节拍规划、剧本创建与改写、分镜生成与变更、公共场景普通人物和近中远环境音生态、Seedance 2.5独立执行批次、锚点、声音、审计修复、跨窗口台账和文件交付。",
+    "longDescription": "按 R10-PG1 全流程执行短剧项目：完整章节理解、剧情取舍与节拍规划、分镜生成与变更、公共场景人物和环境音生态、Seedance 2.5独立执行、生产到独立审计的canonical交接、全表审计及受证书约束的局部修复。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [
@@ -29,6 +32,7 @@
       "创建一个新的短剧项目，并告诉我还缺哪些输入。",
       "完整读取我上传的小说章节，先建立剧情地图和取舍台账，再生成正式分镜。",
       "审计我上传的分镜文件，自动修正全部问题后再简洁汇报。",
+      "读取生产交接包，独立审计后只修复证书确认的非结构字段，并执行全表终验。",
       "按我的修改要求重写剧本，并同步更新受影响的分镜与生产批次。",
       "检查公共场景的普通人物、环境音和Seedance声画生态，修正后保存。"
     ],

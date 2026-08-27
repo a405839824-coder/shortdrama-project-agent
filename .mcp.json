@@ -1,13 +1,15 @@
 {
-  "shortdrama-project-agent": {
-    "cwd": ".",
-    "command": "./.venv/bin/python",
-    "args": [
-      "./server/main.py",
-      "--stdio"
-    ],
-    "env": {
-      "SHORTDRAMA_DEPLOYMENT_MODE": "local"
+  "mcpServers": {
+    "shortdrama-project-agent": {
+      "cwd": ".",
+      "command": "./.venv/bin/python",
+      "args": [
+        "./server/main.py",
+        "--stdio"
+      ],
+      "env": {
+        "SHORTDRAMA_DEPLOYMENT_MODE": "local"
+      }
     }
   }
 }

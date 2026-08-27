@@ -3,3 +3,4 @@ openpyxl==3.1.5
 pypdf==6.0.0
 PyJWT[crypto]==2.10.1
 filelock==3.18.0
+jsonschema>=4.20.0,<5

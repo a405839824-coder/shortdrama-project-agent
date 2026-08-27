@@ -53,6 +53,8 @@
     "counters": {"type": "object"},
     "scope_states": {"type": "array", "items": {"$ref": "#/$defs/scope_state"}},
     "events": {"type": "array", "items": {"$ref": "#/$defs/audit_event"}},
+    "audit_certificates": {"type": "array", "items": {"$ref": "#/$defs/independent_audit_certificate"}},
+    "performance_traces": {"type": "array", "items": {"$ref": "#/$defs/stage_timing_trace"}},
     "issues": {"type": "array", "items": {"$ref": "#/$defs/issue_record"}},
     "rule_candidates": {"type": "array", "items": {"$ref": "#/$defs/rule_candidate"}},
     "promotion_history": {"type": "array"},
@@ -60,6 +62,7 @@
     "historical_patterns": {"type": "array"}
   },
   "$defs": {
+    "sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"},
     "event_issue": {
       "type": "object",
       "required": [
@@ -127,12 +130,318 @@
         "source_version": {"type": "string", "minLength": 1},
         "audit_cycle_id": {"type": "string", "minLength": 1},
         "task_type": {"enum": ["generation_audit", "audit", "audit_repair", "repair_regression", "bootstrap_import"]},
+        "audit_class": {"enum": ["independent_audit", "legacy"]},
+        "validation_role": {"enum": ["production", "independent_audit", "repair", "bootstrap"]},
+        "handoff_id": {"type": "string"},
+        "artifact_semantic_fingerprint": {"$ref": "#/$defs/sha256"},
+        "canonical_fingerprint": {"$ref": "#/$defs/sha256"},
+        "source_fingerprint": {"$ref": "#/$defs/sha256"},
+        "boundary_fingerprint": {"$ref": "#/$defs/sha256"},
+        "runtime_fingerprint": {"$ref": "#/$defs/sha256"},
+        "rules_fingerprint": {"$ref": "#/$defs/sha256"},
+        "validator_fingerprint": {"$ref": "#/$defs/sha256"},
+        "runtime_test_certificate_id": {"type": "string"},
+        "stage_trace_id": {"type": "string"},
+        "cache_evidence": {"type": "array"},
+        "independence_assertions": {
+          "type": "object",
+          "properties": {
+            "artifact_read_only": {"type": "boolean"},
+            "production_verdict_not_reused": {"type": "boolean"},
+            "quality_conclusions_recomputed": {"type": "boolean"},
+            "eight_layers_completed": {"type": "boolean"}
+          }
+        },
         "audit_round": {"type": "integer", "minimum": 1, "maximum": 3},
         "result": {"enum": ["pass", "fail_current", "blocked"]},
         "checked_shot_count": {"type": "integer", "minimum": 0},
         "blockers": {"type": "array", "items": {"type": "string"}},
         "counts": {"type": "object"},
         "issues": {"type": "array", "items": {"$ref": "#/$defs/event_issue"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"audit_class": {"const": "independent_audit"}}, "required": ["audit_class"]},
+          "then": {
+            "properties": {
+              "task_type": {"const": "audit"},
+              "validation_role": {"const": "independent_audit"},
+              "independence_assertions": {
+                "properties": {
+                  "artifact_read_only": {"const": true},
+                  "production_verdict_not_reused": {"const": true},
+                  "quality_conclusions_recomputed": {"const": true},
+                  "eight_layers_completed": {"const": true}
+                },
+                "required": ["artifact_read_only", "production_verdict_not_reused", "quality_conclusions_recomputed", "eight_layers_completed"]
+              }
+            },
+            "required": ["validation_role", "handoff_id", "artifact_semantic_fingerprint", "canonical_fingerprint", "source_fingerprint", "boundary_fingerprint", "runtime_fingerprint", "rules_fingerprint", "validator_fingerprint", "runtime_test_certificate_id", "stage_trace_id", "cache_evidence", "independence_assertions"]
+          }
+        }
+      ]
+    },
+    "independent_audit_certificate": {
+      "type": "object",
+      "required": [
+        "certificate_id",
+        "event_id",
+        "handoff_id",
+        "created_at",
+        "fingerprints",
+        "source_ingestion_mode",
+        "independent_of_production",
+        "preventive_gate_results",
+        "audit_layer_results",
+        "quality_thresholds",
+        "result"
+      ],
+      "properties": {
+        "certificate_id": {"type": "string", "minLength": 1},
+        "event_id": {"type": "string", "minLength": 1},
+        "handoff_id": {"type": "string", "minLength": 1},
+        "created_at": {"type": "string", "minLength": 1},
+        "fingerprints": {
+          "type": "object",
+          "required": ["source", "boundary", "artifact_raw", "artifact_semantic", "canonical", "parser", "schema", "runtime", "rules", "validator", "project_anchors", "target_model_contract"],
+          "properties": {
+            "source": {"$ref": "#/$defs/sha256"},
+            "boundary": {"$ref": "#/$defs/sha256"},
+            "artifact_raw": {"$ref": "#/$defs/sha256"},
+            "artifact_semantic": {"$ref": "#/$defs/sha256"},
+            "canonical": {"$ref": "#/$defs/sha256"},
+            "parser": {"$ref": "#/$defs/sha256"},
+            "schema": {"$ref": "#/$defs/sha256"},
+            "runtime": {"$ref": "#/$defs/sha256"},
+            "rules": {"$ref": "#/$defs/sha256"},
+            "validator": {"$ref": "#/$defs/sha256"},
+            "project_anchors": {"$ref": "#/$defs/sha256"},
+            "target_model_contract": {"$ref": "#/$defs/sha256"}
+          },
+          "additionalProperties": false
+        },
+        "source_ingestion_mode": {"enum": ["chapter_to_storyboard", "non_chapter"]},
+        "independent_of_production": {"const": true},
+        "preventive_gate_results": {
+          "type": "object",
+          "required": ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10", "G11", "G12", "G13"],
+          "properties": {
+            "G0": {"$ref": "#/$defs/check_result"},
+            "G1": {"$ref": "#/$defs/check_result"},
+            "G2": {"$ref": "#/$defs/check_result"},
+            "G3": {"$ref": "#/$defs/check_result"},
+            "G4": {"$ref": "#/$defs/check_result"},
+            "G5": {"$ref": "#/$defs/check_result"},
+            "G6": {"$ref": "#/$defs/check_result"},
+            "G7": {"$ref": "#/$defs/check_result"},
+            "G8": {"$ref": "#/$defs/check_result"},
+            "G9": {"$ref": "#/$defs/check_result"},
+            "G10": {"$ref": "#/$defs/check_result"},
+            "G11": {"$ref": "#/$defs/check_result"},
+            "G12": {"$ref": "#/$defs/check_result"},
+            "G13": {"$ref": "#/$defs/check_result"}
+          },
+          "additionalProperties": false
+        },
+        "audit_layer_results": {
+          "type": "object",
+          "required": ["源文对白", "机位可见性", "空间连续", "表演链", "镜头节奏", "Seedance独立执行", "禁项与声音", "统计闭合"],
+          "properties": {
+            "源文对白": {"$ref": "#/$defs/check_result"},
+            "机位可见性": {"$ref": "#/$defs/check_result"},
+            "空间连续": {"$ref": "#/$defs/check_result"},
+            "表演链": {"$ref": "#/$defs/check_result"},
+            "镜头节奏": {"$ref": "#/$defs/check_result"},
+            "Seedance独立执行": {"$ref": "#/$defs/check_result"},
+            "禁项与声音": {"$ref": "#/$defs/check_result"},
+            "统计闭合": {"$ref": "#/$defs/check_result"}
+          },
+          "additionalProperties": false
+        },
+        "quality_thresholds": {
+          "type": "object",
+          "required": [
+            "source_and_key_dialogue_mapping_percent",
+            "blocking_error_count",
+            "old_content_hit_count",
+            "cross_context_term_count",
+            "shot_pass_percent",
+            "residual_issue_count",
+            "introduced_issue_count"
+          ],
+          "properties": {
+            "source_and_key_dialogue_mapping_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "core_event_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "causal_link_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "character_state_change_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "protected_dialogue_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "source_treatment_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "blocking_error_count": {"type": "integer", "minimum": 0},
+            "old_content_hit_count": {"type": "integer", "minimum": 0},
+            "cross_context_term_count": {"type": "integer", "minimum": 0},
+            "shot_pass_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "residual_issue_count": {"type": "integer", "minimum": 0},
+            "introduced_issue_count": {"type": "integer", "minimum": 0}
+          }
+        },
+        "result": {"enum": ["pass", "fail_current", "blocked"]},
+        "stage_trace_id": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"result": {"const": "pass"}}, "required": ["result"]},
+          "then": {
+            "properties": {
+              "preventive_gate_results": {
+                "properties": {
+                  "G0": {"$ref": "#/$defs/pass_check_result"},
+                  "G1": {"$ref": "#/$defs/pass_or_na_check_result"},
+                  "G2": {"$ref": "#/$defs/pass_or_na_check_result"},
+                  "G3": {"$ref": "#/$defs/pass_or_na_check_result"},
+                  "G4": {"$ref": "#/$defs/pass_check_result"},
+                  "G5": {"$ref": "#/$defs/pass_check_result"},
+                  "G6": {"$ref": "#/$defs/pass_check_result"},
+                  "G7": {"$ref": "#/$defs/pass_check_result"},
+                  "G8": {"$ref": "#/$defs/pass_check_result"},
+                  "G9": {"$ref": "#/$defs/pass_check_result"},
+                  "G10": {"$ref": "#/$defs/pass_check_result"},
+                  "G11": {"$ref": "#/$defs/pass_check_result"},
+                  "G12": {"$ref": "#/$defs/pass_check_result"},
+                  "G13": {"$ref": "#/$defs/pass_check_result"}
+                }
+              },
+              "audit_layer_results": {
+                "properties": {
+                  "源文对白": {"$ref": "#/$defs/pass_check_result"},
+                  "机位可见性": {"$ref": "#/$defs/pass_check_result"},
+                  "空间连续": {"$ref": "#/$defs/pass_check_result"},
+                  "表演链": {"$ref": "#/$defs/pass_check_result"},
+                  "镜头节奏": {"$ref": "#/$defs/pass_check_result"},
+                  "Seedance独立执行": {"$ref": "#/$defs/pass_check_result"},
+                  "禁项与声音": {"$ref": "#/$defs/pass_check_result"},
+                  "统计闭合": {"$ref": "#/$defs/pass_check_result"}
+                }
+              },
+              "quality_thresholds": {
+                "properties": {
+                  "source_and_key_dialogue_mapping_percent": {"const": 100},
+                  "blocking_error_count": {"const": 0},
+                  "old_content_hit_count": {"const": 0},
+                  "cross_context_term_count": {"const": 0},
+                  "shot_pass_percent": {"const": 100},
+                  "residual_issue_count": {"const": 0},
+                  "introduced_issue_count": {"const": 0}
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "result": {"const": "pass"},
+              "source_ingestion_mode": {"const": "chapter_to_storyboard"}
+            },
+            "required": ["result", "source_ingestion_mode"]
+          },
+          "then": {
+            "properties": {
+              "preventive_gate_results": {
+                "properties": {
+                  "G1": {"$ref": "#/$defs/pass_check_result"},
+                  "G2": {"$ref": "#/$defs/pass_check_result"},
+                  "G3": {"$ref": "#/$defs/pass_check_result"}
+                }
+              },
+              "quality_thresholds": {
+                "required": ["core_event_coverage_percent", "causal_link_coverage_percent", "character_state_change_coverage_percent", "protected_dialogue_coverage_percent", "source_treatment_percent"],
+                "properties": {
+                  "core_event_coverage_percent": {"const": 100},
+                  "causal_link_coverage_percent": {"const": 100},
+                  "character_state_change_coverage_percent": {"const": 100},
+                  "protected_dialogue_coverage_percent": {"const": 100},
+                  "source_treatment_percent": {"const": 100}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "check_result": {
+      "type": "object",
+      "required": ["status", "evidence_count", "evidence_ids"],
+      "properties": {
+        "status": {"enum": ["pass", "fail_current", "unable_to_check", "not_applicable"]},
+        "evidence_count": {"type": "integer", "minimum": 0},
+        "evidence_ids": {"type": "array", "items": {"type": "string"}},
+        "not_applicable_reason": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "not_applicable"}}, "required": ["status"]},
+          "then": {"required": ["not_applicable_reason"], "properties": {"not_applicable_reason": {"minLength": 1}}}
+        }
+      ]
+    },
+    "pass_check_result": {
+      "type": "object",
+      "required": ["status", "evidence_count", "evidence_ids"],
+      "properties": {
+        "status": {"const": "pass"},
+        "evidence_count": {"type": "integer", "minimum": 1},
+        "evidence_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }
+    },
+    "pass_or_na_check_result": {
+      "oneOf": [
+        {"$ref": "#/$defs/pass_check_result"},
+        {
+          "type": "object",
+          "required": ["status", "evidence_count", "not_applicable_reason"],
+          "properties": {
+            "status": {"const": "not_applicable"},
+            "evidence_count": {"const": 0},
+            "not_applicable_reason": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "stage_timing_trace": {
+      "type": "object",
+      "required": ["trace_id", "window_role", "task_type", "started_at", "ended_at", "wall_duration_ms", "input_fingerprints", "stages"],
+      "properties": {
+        "trace_id": {"type": "string", "minLength": 1},
+        "window_role": {"enum": ["production", "independent_audit", "repair"]},
+        "task_type": {"enum": ["production_preflight", "independent_audit", "repair", "archive"]},
+        "started_at": {"type": "string", "minLength": 1},
+        "ended_at": {"type": "string", "minLength": 1},
+        "wall_duration_ms": {"type": "integer", "minimum": 0},
+        "input_fingerprints": {"type": "object", "minProperties": 1},
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["stage", "started_at", "ended_at", "duration_ms", "tool_call_count", "source_character_count", "payload_bytes", "shot_count", "batch_count", "cache_status", "cache_reason", "retry_count", "error_status"],
+            "properties": {
+              "stage": {"enum": ["bootstrap_status", "source_read", "canonicalization", "planning", "generation", "validation", "repair", "export", "ledger_handoff"]},
+              "started_at": {"type": "string", "minLength": 1},
+              "ended_at": {"type": "string", "minLength": 1},
+              "duration_ms": {"type": "integer", "minimum": 0},
+              "tool_call_count": {"type": "integer", "minimum": 0},
+              "source_character_count": {"type": "integer", "minimum": 0},
+              "payload_bytes": {"type": "integer", "minimum": 0},
+              "shot_count": {"type": "integer", "minimum": 0},
+              "batch_count": {"type": "integer", "minimum": 0},
+              "cache_status": {"enum": ["hit", "miss", "mixed", "not_applicable"]},
+              "cache_reason": {"type": "string", "minLength": 1},
+              "retry_count": {"type": "integer", "minimum": 0},
+              "error_status": {"enum": ["none", "recovered", "blocked"]},
+              "parallel_group_id": {"type": "string"}
+            }
+          }
+        }
       }
     },
     "issue_record": {
