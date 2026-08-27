@@ -39,6 +39,100 @@ python scripts/project_agent.py summary --hub HUB.json
 
 Do not use the hub script to edit the actual script, storyboard, image, or audio artifact. It controls scope, authorization, state, versions, deliverables, validation, and sign-off; perform the domain work through the appropriate file or media workflow.
 
+Do not call `record-validation` or transition a storyboard work order to `passed` from production preflight or repair evidence. First verify an `independent_audit` certificate whose source, boundary, raw/semantic artifact, canonical, runtime, rules, validator, and scope fingerprints match. If the available hub/ledger writer cannot enforce this role check, keep the work order awaiting audit, record a capability gap, and do not claim that window separation is machine-enforced.
+
+## Preserve window separation and evidence independence
+
+Use three logical authorities even when a workflow is orchestrated from one product:
+
+- `production`: creates a new storyboard artifact and may issue only `production_preflight`.
+- `independent_audit`: reads the locked source and artifact, never mutates either, and alone may issue the final audit verdict.
+- `repair`: applies an authorized structured repair package to a new artifact version; its result must return to `independent_audit` before release.
+
+Do not merge production and independent audit to save time. Save time by reusing verified objective evidence, while recomputing every quality conclusion.
+
+### Keep one canonical truth
+
+For each artifact version, materialize one canonical object before spreadsheet export or audit. Bind it to these fingerprints:
+
+- authoritative source bytes and normalized source text;
+- authorized chapter/episode boundary and approved episode plan;
+- raw artifact bytes plus a separate normalized semantic workbook hash covering sheet order, cells, formulas, rows, and columns;
+- canonical parser, schema, runtime, rules, validator, and target-model contract;
+- approved character, scene, prop, costume, position, light, and project-state anchors.
+
+The workbook, formal shots, independent Seedance batches, coverage map, and statistics must derive from the same canonical object. The canonical must reproduce the normalized semantic workbook hash; it is not required to reproduce raw XLSX ZIP bytes whose metadata or timestamps may differ. Reject an audit when two candidate canonical objects exist, when canonical semantics do not reproduce the normalized workbook hash, or when any required fingerprint is missing.
+
+### Pass a versioned handoff manifest
+
+Create a handoff manifest for `production_to_audit`, `audit_to_repair`, and `repair_to_audit`. If an external or legacy artifact has no handoff, the read-only audit window creates `audit_intake` from that exact source and artifact before auditing; absence alone is not a failure, while an existing mismatched handoff is blocking. Every manifest must include:
+
+- handoff ID, source and destination window roles, authorized scope, and previous/current/next boundaries;
+- source, raw-artifact, normalized-semantic-workbook, canonical, parser, schema, runtime, rule, validator, dependency/environment, project-anchor, and target-model fingerprints;
+- exact objective evidence: normalized source/chunk proof, workbook cells/formulas, canonical parse, approved locks, and deterministic statistics;
+- producer claims that remain subject to audit: chapter map, causal map, source treatment, protected dialogue, cognition, scene state, shot plan, coverage, and preflight findings;
+- cache entries used or rejected, stage-timing trace ID, and repair/audit cycle IDs.
+
+The receiving window verifies every fingerprint before using the handoff. Missing or mismatched evidence is a cache miss or task blocker; never silently fall back to a stale project copy.
+
+Before any release transition, resolve referential integrity in both directions: every certificate `event_id`, `handoff_id`, and `stage_trace_id` must exist and match the same work order, audit cycle, logical artifact, scope, and fingerprints; every handoff certificate or immutable repair-package reference must resolve to exactly one record. If the installed hub/ledger writer does not initialize, persist, and validate these structures deterministically, preserve them as versioned deliverable attachments, record the missing writer as a capability gap, and do not claim that the new lifecycle is machine-enforced.
+
+### Reuse facts, never conclusions
+
+After successful fingerprint verification, these objective facts may cross windows without semantic regeneration:
+
+- exact source text and complete-read/chunk manifest;
+- deterministic workbook extraction, formulas, sheet/row/field inventory, and canonical serialization;
+- approved human decisions, authoritative boundaries, and project anchors;
+- deterministic file statistics;
+- a full-test certificate for an unchanged runtime package.
+
+Production-created chapter maps, source mappings, protected-dialogue lists, cognition matrices, scene-state ledgers, shot plans, performance chains, audio workflow, coverage figures, and preflight findings may cross only as claims to inspect. The independent audit must recompute:
+
+1. core-event, causal-link, character-state, protected-dialogue, and source-treatment coverage;
+2. source fidelity, deletion authority, new-plot prohibition, and episode boundaries;
+3. cognition, seven-field scene continuity, camera visibility, performance, rhythm, transitions, and timing;
+4. public-scene ordinary people, sound ecology, audiovisual matching, and same-scene continuity;
+5. every Seedance batch's blank-context independence, field completeness, duration, and model contract;
+6. prohibitions, formulas, statistics, residual issues, introduced issues, and final pass/fail.
+
+An audit verdict may be reused only as an auditor-issued certificate for an exactly unchanged artifact and exactly unchanged dependency fingerprints. If the user explicitly requests a fresh independent semantic audit, reuse extraction and parsing only and recompute the semantic verdict. Never accept a producer-issued certificate as an audit certificate.
+
+### Use content-addressed caches safely
+
+Key each cache entry by the smallest complete dependency set:
+
+- source extraction: source bytes + normalization/parser fingerprint;
+- canonical parse: artifact bytes + parser + schema fingerprints;
+- project anchors: approved anchor version + project-state fingerprint;
+- runtime test certificate: runtime + rules + schema + validator + scripts + dependency/environment fingerprints;
+- independent audit scope certificate: source + boundary + artifact/canonical + rules/validator + anchor + target-model fingerprints and exact scope.
+
+Invalidate by impact, while preserving the R10 regression rules:
+
+- dialogue or story change invalidates the current beat, source mapping, protected dialogue, and cognition dependents;
+- action or gaze change invalidates the current shot, neighbors, and visibility chain;
+- position, direction, prop, door/window, action-progress, or light-direction change invalidates the continuous scene;
+- shot insertion/deletion invalidates downstream numbering, cumulative time, transitions, and batch mappings;
+- time or lighting change invalidates the continuous scene;
+- Seedance change invalidates the complete batch;
+- episode boundary, cognition transition, scene topology, or core shot-plan change invalidates the affected scene or episode;
+- runtime, rule, schema, validator, script, dependency/environment, parser, or target-model change invalidates every dependent certificate and triggers the full defined regression suites.
+
+Unchanged auditor-issued shot/scene certificates may support impact regression only when their sub-fingerprints and upstream dependencies are unchanged. Always rerun global source coverage, episode entry/exit, cognition, total duration, numbering, formulas, statistics, and batch mapping before a final verdict.
+
+### Separate content checks from system regression
+
+Ordinary content generation, audit, repair, and archive tasks must run all applicable R10 preventive gates, chapter coverage checks, eight audit layers, and impact regression. They must verify, but not regenerate, a matching full-test certificate. Do not load or diagnose every runtime module, inspect source code, or rerun functional/golden/Agent/project-Agent suites during an ordinary content audit.
+
+Run the full suites when the runtime, rule, schema, validator, script, dependency/environment, parser contract, or target-model contract changes; when the certificate is absent or mismatched; or when a deterministic validator behaves inconsistently with its certificate. Keep `TP-PATCH-ABSORB` and other explicit system-change tasks on the full-regression path.
+
+### Record comparable stage timing
+
+For production, independent audit, and repair, record one trace ID and these stages when applicable: bootstrap/status, source read, canonicalization, planning, generation, validation, repair, export, and ledger/handoff. Each stage records start/end, duration, tool-call count, source characters, payload bytes, shot/batch count, cache hit/miss and reason, retry count, and error status. A parallel parent stage must not double-count child durations as wall-clock time.
+
+Use traces from the same locked source, boundary, rule version, hardware/service tier, and output contract when claiming an efficiency change. Performance is never allowed to override a failed quality gate.
+
 ## Classify intent before acting
 
 Map every request to one operation in `project_agent_capabilities.json` and one mode:
@@ -56,12 +150,12 @@ If the request mixes planning and execution, lock the selected plan first. When 
 
 1. Load and validate both shared files.
 2. Create one work order with request text, window key, operation, mode, targets, expected outputs, and authorization.
-3. Lock the authoritative source, latest artifact version, episode/scene/shot boundary, must-keep list, must-remove list, and protected scope.
+3. Lock the authoritative source, latest artifact version, episode/scene/shot boundary, must-keep list, must-remove list, and protected scope. Resolve or create the single canonical fingerprint and verify any incoming handoff before content work.
 4. Resolve conflicts in this order: user’s current explicit instruction, current authoritative modified story, current source text, current approved project state, older reference versions.
 5. Perform the selected planning or execution workflow.
 6. Produce a new version by default. Preserve the original unless the user explicitly requests replacement of the same artifact.
 7. Validate every required downstream consumer and impact boundary.
-8. For storyboard output, complete the eight-layer audit and repair loop internally when repair is authorized.
+8. For storyboard output, run `production_preflight` before handoff. A separate `independent_audit` must complete the eight-layer audit and issue the release verdict. When repair is authorized, apply the structured repair package, regress the defined impact scope, and return the new fingerprinted version for independent verification.
 9. Record deliverables, versions, decisions, issue events, unresolved blockers, and capability gaps.
 10. Mark a clean task `awaiting_signoff`; archive only after human approval.
 
@@ -183,7 +277,8 @@ Recalculate dialogue capacity, shot load, rhythm, source coverage, continuity, n
 Use `agent_runtime.md` for issue event structure, recurrence escalation, concise reporting, and guarded rule candidates.
 
 - Audit-only tasks never modify artifacts.
-- Audit-and-repair tasks close internally within two preferred and three maximum rounds.
+- Audit-and-repair work orders close within two preferred and three maximum rounds, but keep authorities distinct: independent audit establishes the immutable issue baseline, repair creates a new artifact version, and independent audit verifies that new version.
+- Prefer the certificate-bound `commit_storyboard_patch` path only when every requested change is a non-structural field replacement on a stable shot ID and the exact independent-audit certificate names that issue. The service must compare-and-set the base canonical hash, enforce the work-order protected scope, reject stale rules/source/boundary/artifact fingerprints, save a new full artifact, and run the complete validator. Episode/scene boundaries, cognition, source evidence, shot order/identity/timing, scene topology, or core shot-plan changes require scene/episode rebuild. A patch pass is production preflight, not the independent final verdict.
 - Record every repair result as original issue resolved, residual, or introduced.
 - A second consecutive recurrence requires root-cause repair; a third requires upstream rebuild.
 - Never activate a formal rule or validator automatically.
@@ -205,7 +300,8 @@ Default task reports:
 
 - Plan: `方案完成｜推荐方案X｜影响N处｜待执行/无需执行`
 - Execution: `处理完成｜新增N｜修改N｜删除N｜替换N｜回归通过`
-- Storyboard: `生成完成｜N镜｜总时长Xs｜审计通过`
+- Storyboard production: `生成完成｜N镜｜总时长Xs｜生产预检通过｜待独立审计`
+- Independent audit: `审计通过｜阻塞错误0｜原问题残留0｜修改新增问题0｜待人工确认归档`
 - Audit: use the concise formats in `agent_runtime.md`.
 - Blocked: `任务阻塞｜原因一句话｜下一步一句话`
 
