@@ -10,9 +10,19 @@ from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from . import __version__
 from .auth import JwtTokenVerifier, request_namespace, security_schemes
+from .canonical import etag_matches, stable_json_hash
 from .config import Settings
-from .models import ChangeOperationInput, OpenAIFile, ToolResponse
+from .file_io import DEFAULT_BULK_RESPONSE_CHARS, preview_extracted_bulk
+from .models import (
+    ArtifactReadRange,
+    ChangeOperationInput,
+    OpenAIFile,
+    ReadUnit,
+    StoryboardPatchOperationInput,
+    ToolResponse,
+)
 from .service import StoryboardService
+from .telemetry import WorkflowTrace
 
 
 def _annotations(*, read_only: bool, destructive: bool = False, open_world: bool = False) -> ToolAnnotations:
@@ -38,17 +48,19 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     server = MCPServer(
         name="shortdrama-project-agent",
         title="分镜项目 Agent",
-        description="R10-PG1 Chinese short-drama service with chapter intake, public-scene people/ambience ecology, and Seedance 2.5 execution",
+        description="R10-PG1 short-drama service with canonical handoff, independent audit, safe local repair, public-scene ecology, and Seedance 2.5",
         version=__version__,
         instructions=(
             "先调用get_agent_status，再创建或确认项目并调用begin_project_task。"
             "小说章节转分镜必须先完整读取并建立章节地图、取舍台账、人物认知、对白保护、时长预算和节拍计划，未完成不得生成。"
-            "生成内容后必须调用提交工具；分镜必须经commit_storyboard全表校验。"
+            "生成内容后必须调用提交工具；commit_storyboard只签发生产预检和handoff，不能冒充独立审计。"
+            "审计窗口必须调用audit_storyboard独立重算；相同canonical、原文件、源文、边界、规则和验证器才可复用。"
             "街道、市集、酒楼、城门等公共场景必须写普通人物密度、地点角色、错峰动作和空间层次，并写具体近中远环境声、对白避让和声画来源；有因空场除外。"
             "正式分镜与Seedance批次必须复现同一组公共人物和环境声生态。"
             "正式母版执行列固定为Seedance 2.5独立正式执行分镜。"
+            "非结构字段可用commit_storyboard_patch按独立审计证书局部修复，但仍全表终验；边界、认知、原文、编号和时长变化必须重建。"
             "若失败，应一次修复报告中的全部问题并重提，最多三轮；零残留、零新增才可称通过。"
-            "同一文件不要重复制造审计轮次。正式归档必须调用signoff_task取得人工签核。"
+            "正式归档必须同时具备精确版本的独立审计通过证书和signoff_task人工签核。"
         ),
         token_verifier=token_verifier,
         auth=auth_settings,
@@ -65,6 +77,11 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         if file_params:
             value["openai/fileParams"] = file_params
         return value
+
+    def traced(response: ToolResponse, trace: WorkflowTrace) -> ToolResponse:
+        response.trace_id = trace.trace_id
+        response.data.setdefault("telemetry", trace.as_dict())
+        return response
 
     @server.tool(
         name="get_agent_status",
@@ -150,7 +167,11 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     @server.tool(
         name="read_project_artifact",
         title="读取项目文件",
-        description="读取已导入或已生成文件的内容、工作表或分页片段；先读取元数据，再按section和offset继续。",
+        description=(
+            "读取已导入或已生成文件。旧版section/offset/limit分页保持兼容；读取长章节时优先使用"
+            "bulk_ranges一次获取最多16个段落、页面、行或字符范围，合并内容硬限制为16000字符。"
+            "可传if_none_match避免重复返回未变化文件。"
+        ),
         annotations=_annotations(read_only=True),
         meta=meta("正在读取文件…", "文件内容已读取"),
         structured_output=True,
@@ -161,14 +182,111 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         section: str | None = None,
         offset: int = 0,
         limit: int = 50,
+        bulk_ranges: list[ArtifactReadRange] | None = None,
+        unit: ReadUnit = "auto",
+        max_chars: int = DEFAULT_BULK_RESPONSE_CHARS,
+        if_none_match: str | None = None,
     ) -> ToolResponse:
-        return service.read_artifact(
-            request_namespace(settings),
-            project_id=project_id,
-            artifact_id=artifact_id,
-            section=section,
-            offset=offset,
-            limit=limit,
+        namespace = request_namespace(settings)
+        trace = WorkflowTrace()
+        record: dict[str, Any] | None = None
+        if if_none_match is not None:
+            with trace.stage("artifact-lookup"):
+                record, _path = service.store.get_artifact(namespace, project_id, artifact_id)
+            etag = str(record.get("fingerprint") or "")
+            if etag_matches(if_none_match, etag):
+                metadata = record.get("metadata") or {}
+                content_hash = str(
+                    metadata.get("content_hash")
+                    or metadata.get("canonical_sha256")
+                    or etag
+                )
+                return traced(
+                    ToolResponse(
+                        status="not_modified",
+                        summary=f"文件未变化｜{record['file_name']}",
+                        project_id=project_id,
+                        artifact_id=artifact_id,
+                        data={
+                            "artifact": record,
+                            "etag": etag,
+                            "content_hash": content_hash,
+                            "not_modified": True,
+                        },
+                    ),
+                    trace,
+                )
+
+        bulk_mode = bulk_ranges is not None or unit != "auto" or max_chars != DEFAULT_BULK_RESPONSE_CHARS
+        if not bulk_mode:
+            with trace.stage("legacy-artifact-read", offset=offset, limit=limit):
+                response = service.read_artifact(
+                    namespace,
+                    project_id=project_id,
+                    artifact_id=artifact_id,
+                    section=section,
+                    offset=offset,
+                    limit=limit,
+                )
+            artifact = response.data.get("artifact") or record or {}
+            etag = str(artifact.get("fingerprint") or "")
+            metadata = artifact.get("metadata") or {}
+            content_hash = str(
+                metadata.get("content_hash")
+                or metadata.get("canonical_sha256")
+                or etag
+            )
+            response.data.setdefault("etag", etag)
+            response.data.setdefault("content_hash", content_hash)
+            response.data.setdefault("not_modified", False)
+            return traced(response, trace)
+
+        with trace.stage("artifact-load"):
+            extracted, loaded_record, _path = service._load_extracted_or_payload(
+                namespace, project_id, artifact_id
+            )
+        range_values = [item.model_dump(exclude_none=True) for item in (bulk_ranges or [])]
+        if not range_values:
+            range_values = [{"section": section, "offset": offset, "unit": unit}]
+        with trace.stage("bulk-preview", range_count=len(range_values), unit=unit) as metrics:
+            content = preview_extracted_bulk(
+                extracted,
+                range_values,
+                default_unit=unit,
+                max_chars=max_chars,
+            )
+            metrics["returned_chars"] = content.get("returned_chars", 0)
+            metrics["truncated"] = content.get("truncated", False)
+            metrics["kind"] = str(content.get("kind") or "")
+        with trace.stage("content-hash"):
+            extracted_content_hash = stable_json_hash(extracted)
+        metadata = loaded_record.get("metadata") or {}
+        content_hash = str(
+            metadata.get("content_hash")
+            or metadata.get("canonical_sha256")
+            or loaded_record.get("fingerprint")
+            or extracted_content_hash
+        )
+        download_url = service.store.signed_download_url(
+            namespace, project_id, artifact_id, loaded_record["file_name"]
+        )
+        return traced(
+            ToolResponse(
+                status="ok",
+                summary=f"已批量读取｜{loaded_record['file_name']}｜{content['returned_chars']}字符",
+                project_id=project_id,
+                artifact_id=artifact_id,
+                download_url=download_url,
+                data={
+                    "artifact": loaded_record,
+                    "content": content,
+                    "etag": loaded_record.get("fingerprint"),
+                    "content_hash": content_hash,
+                    "extracted_content_hash": extracted_content_hash,
+                    "not_modified": False,
+                },
+            ),
+            trace,
         )
 
     @server.tool(
@@ -233,10 +351,10 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
 
     @server.tool(
         name="commit_storyboard",
-        title="提交并全表审计分镜",
-        description="生成、重建或修复完整R10分镜后调用；同时校验章节规划/覆盖、公共场景人物与环境音生态、Seedance声画复现，保存JSON与Excel并写入跨窗口台账。正式执行列使用Seedance 2.5。不要只提交局部问题。",
+        title="提交并生产预检分镜",
+        description="生成、重建或完整修复R10分镜后调用；执行全部生产门禁，保存canonical JSON、Excel、production_preflight证书和审计交接包。生产预检不能替代独立审计。正式执行列使用Seedance 2.5。",
         annotations=_annotations(read_only=False),
-        meta=meta("正在保存并全表审计…", "分镜审计已完成"),
+        meta=meta("正在保存并生产预检…", "分镜生产预检已完成"),
         structured_output=True,
     )
     async def commit_storyboard(
@@ -256,6 +374,41 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         )
 
     @server.tool(
+        name="commit_storyboard_patch",
+        title="提交审计确认的分镜局部修复",
+        description=(
+            "仅用于修复独立审计证书已经确认的非结构字段问题；必须绑定未过期的基础分镜规范哈希，"
+            "逐镜提供问题证据和影响范围。禁止修改镜头编号、时长、场景连续性、章节边界、人物认知、"
+            "原文支撑或其他结构字段；这类变化必须重建完整分镜。补丁后仍执行完整R10全表校验，"
+            "保存新的JSON与Excel版本且绝不覆盖基础版本。"
+        ),
+        annotations=_annotations(read_only=False),
+        meta=meta("正在应用审计修复…", "局部修复与全表终验已完成"),
+        structured_output=True,
+    )
+    async def commit_storyboard_patch(
+        project_id: str,
+        work_order_id: str,
+        base_artifact_id: str,
+        expected_canonical_hash: str,
+        audit_certificate_id: str,
+        operations: list[StoryboardPatchOperationInput],
+        impact_scope: list[str],
+        file_name: str = "正式分镜_局部修复版.xlsx",
+    ) -> ToolResponse:
+        return service.commit_storyboard_patch(
+            request_namespace(settings),
+            project_id=project_id,
+            work_order_id=work_order_id,
+            base_artifact_id=base_artifact_id,
+            expected_canonical_hash=expected_canonical_hash,
+            audit_certificate_id=audit_certificate_id,
+            operations=[item.model_dump() for item in operations],
+            impact_scope=impact_scope,
+            file_name=file_name,
+        )
+
+    @server.tool(
         name="audit_storyboard",
         title="审计并记录分镜",
         description="审计已存在的分镜文件时调用；执行全表检查（含公共人物、环境音、声画来源和Seedance复现）并记录问题。同一指纹重复审计会复用结果，不增加轮次。",
@@ -267,12 +420,18 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         project_id: str,
         artifact_id: str,
         audit_cycle_id: str | None = None,
+        work_order_id: str | None = None,
+        handoff_artifact_id: str | None = None,
+        force_machine_recheck: bool = False,
     ) -> ToolResponse:
         return service.audit_storyboard(
             request_namespace(settings),
             project_id=project_id,
             artifact_id=artifact_id,
             audit_cycle_id=audit_cycle_id,
+            work_order_id=work_order_id,
+            handoff_artifact_id=handoff_artifact_id,
+            force_machine_recheck=force_machine_recheck,
         )
 
     @server.tool(
