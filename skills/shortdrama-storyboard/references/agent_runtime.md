@@ -14,6 +14,14 @@ Use this policy together with `V16.3-148-R10-StableRuntime` and `R10-PG1`. The A
 
 For every generation audit, audit-only run, repair, or repair regression, create one `audit_event` that satisfies `references/agent_ledger_schema.json`.
 
+Distinguish the event authority explicitly:
+
+- `production_preflight` may be stored as a separately classified production-evidence event and in the handoff's `producer_claims`, but it must use a distinct scope and audit class from `independent_audit`. It cannot close prior independent issues, increment an independent audit round, set release readiness, or issue the final audit verdict.
+- `audit_class=independent_audit` uses the backward-compatible `task_type=audit`, is read-only, and must bind its event and certificate to the verified handoff, source, boundary, artifact, canonical, runtime, rule, and validator fingerprints. Only this audit class may issue the final pass/fail conclusion.
+- Repair checks are stored in the immutable repair handoff and must return the new artifact fingerprint to `independent_audit` for final verification. Until the ledger writer enforces role-aware transitions, do not let a repair `result=pass` event close an audit cycle.
+
+Reuse cross-window source extraction, deterministic canonical parsing, approved anchors, and an unchanged-runtime test certificate only after fingerprint verification. Never reuse a production coverage figure, cognition/state conclusion, issue resolution, or pass/fail verdict. Attach the stage-timing trace and cache hit/miss evidence to the event when available.
+
 Required event identity and scope:
 
 - `event_id`, ISO timestamp, `episode_id`, logical `file_name`, content `file_fingerprint`, `source_version`, and `audit_cycle_id`.
