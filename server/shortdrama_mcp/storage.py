@@ -18,7 +18,7 @@ from filelock import FileLock
 
 
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-PROJECT_RECORD_KINDS = {"handoffs", "certificates", "telemetry"}
+PROJECT_RECORD_KINDS = {"handoffs", "certificates", "telemetry", "repair_packages"}
 
 
 def utc_stamp() -> str:
@@ -51,10 +51,31 @@ class ProjectStore:
         self.projects_dir = self.root / "projects"
         self.projects_dir.mkdir(parents=True, exist_ok=True)
         self._secret = self._load_or_create_secret()
+        self._integrity_secret = self._load_or_create_integrity_secret()
 
     def _load_or_create_secret(self) -> bytes:
         path = self.root / ".download_secret"
         with self.lock("download-secret"):
+            if path.is_file():
+                raw = path.read_bytes().strip()
+                if len(raw) >= 32:
+                    return raw
+            raw = secrets.token_bytes(48)
+            self.atomic_write_bytes(path, raw)
+            with contextlib.suppress(OSError):
+                path.chmod(0o600)
+            return raw
+
+    def _load_or_create_integrity_secret(self) -> bytes:
+        """Return a restart-stable key dedicated to internal record integrity.
+
+        It is deliberately separate from the download-link key and from every
+        OAuth/Auth0 secret.  Railway's persistent data directory keeps the key
+        stable across deployments without exposing it in tool output.
+        """
+
+        path = self.root / ".record_integrity_secret"
+        with self.lock("record-integrity-secret"):
             if path.is_file():
                 raw = path.read_bytes().strip()
                 if len(raw) >= 32:
@@ -241,7 +262,47 @@ class ProjectStore:
         payload_path = (directory / str(record["relative_path"])).resolve()
         if directory.resolve() not in payload_path.parents or not payload_path.is_file():
             raise ValueError("artifact payload is unavailable")
+        # Artifact metadata is only an index.  Recompute the bytes identity on
+        # every read so a workbook (or its canonical sidecar) changed outside
+        # the service can never inherit a previously issued audit certificate.
+        actual_fingerprint = sha256_bytes(payload_path.read_bytes())
+        if actual_fingerprint != record.get("fingerprint"):
+            raise ValueError(
+                f"artifact_raw_fingerprint_mismatch: payload bytes changed for {artifact_id}"
+            )
         return record, payload_path
+
+    def _record_integrity_hmac(self, value: dict[str, Any]) -> str:
+        unsigned = {key: item for key, item in value.items() if key != "integrity_hmac"}
+        payload = json.dumps(
+            unsigned,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hmac.new(self._integrity_secret, payload, hashlib.sha256).hexdigest()
+
+    def project_record_is_signed(self, value: dict[str, Any]) -> bool:
+        signature = value.get("integrity_hmac")
+        if not isinstance(signature, str):
+            return False
+        return hmac.compare_digest(signature, self._record_integrity_hmac(value))
+
+    def _verify_record_integrity(self, value: dict[str, Any], *, record_id: str) -> None:
+        """Verify new signed records while accepting pre-0.3 legacy records.
+
+        Handoffs and certificates written before the integrity upgrade have no
+        signature and remain readable for backwards compatibility.  Every new
+        record is signed, so changing a report and recomputing a public SHA is
+        still detected before repair or sign-off.
+        """
+
+        signature = value.get("integrity_hmac")
+        if signature is None:
+            return
+        expected = self._record_integrity_hmac(value)
+        if not isinstance(signature, str) or not hmac.compare_digest(signature, expected):
+            raise ValueError(f"project_record_integrity_mismatch: {record_id}")
 
     def list_artifacts(self, namespace: str, project_id: str) -> list[dict[str, Any]]:
         directory = self.project_dir(namespace, project_id) / "artifacts"
@@ -301,6 +362,7 @@ class ProjectStore:
         record.setdefault("record_id", clean_id)
         record.setdefault("project_id", project_id)
         record.setdefault("created_at", utc_stamp())
+        record["integrity_hmac"] = self._record_integrity_hmac(record)
         path = directory / clean_kind / f"{clean_id}.json"
         with self.lock(f"{namespace}-{project_id}"):
             self.atomic_write_json(path, record)
@@ -322,6 +384,7 @@ class ProjectStore:
         value = self.read_json(path)
         if not isinstance(value, dict) or value.get("project_id") != project_id:
             raise ValueError(f"invalid {clean_kind} record: {clean_id}")
+        self._verify_record_integrity(value, record_id=clean_id)
         return value
 
     def list_project_records(
@@ -338,6 +401,9 @@ class ProjectStore:
             with contextlib.suppress(Exception):
                 value = self.read_json(path)
                 if isinstance(value, dict) and value.get("project_id") == project_id:
+                    self._verify_record_integrity(
+                        value, record_id=str(value.get("record_id") or path.stem)
+                    )
                     result.append(value)
         result.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
         return result
@@ -355,6 +421,71 @@ class ProjectStore:
             if record.get(field) == value:
                 return record
         return None
+
+    def claim_repair_package(
+        self,
+        namespace: str,
+        project_id: str,
+        repair_package_id: str,
+        *,
+        work_order_id: str,
+    ) -> dict[str, Any]:
+        clean_id = safe_id(repair_package_id, "repair_package_id")
+        path = self.project_dir(namespace, project_id) / "repair_packages" / f"{clean_id}.json"
+        with self.lock(f"{namespace}-{project_id}"):
+            if not path.is_file():
+                raise ValueError("repair_package_required: immutable package does not exist")
+            record = self.read_json(path)
+            self._verify_record_integrity(record, record_id=clean_id)
+            if record.get("status") != "issued":
+                raise ValueError("repair_package_unavailable: package is not issued")
+            record["status"] = "consuming"
+            record["consumed_by_work_order_id"] = work_order_id
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(path, record)
+            return record
+
+    def finish_repair_package(
+        self,
+        namespace: str,
+        project_id: str,
+        repair_package_id: str,
+        *,
+        work_order_id: str,
+        successor_artifact_id: str | None,
+        successor_canonical_sha256: str | None,
+        repair_to_audit_handoff_id: str | None = None,
+    ) -> dict[str, Any]:
+        clean_id = safe_id(repair_package_id, "repair_package_id")
+        path = self.project_dir(namespace, project_id) / "repair_packages" / f"{clean_id}.json"
+        with self.lock(f"{namespace}-{project_id}"):
+            if not path.is_file():
+                raise ValueError("repair_package_required: immutable package does not exist")
+            record = self.read_json(path)
+            self._verify_record_integrity(record, record_id=clean_id)
+            if (
+                record.get("status") != "consuming"
+                or record.get("consumed_by_work_order_id") != work_order_id
+            ):
+                raise ValueError("repair_package_claim_conflict")
+            if successor_artifact_id and successor_canonical_sha256:
+                if not repair_to_audit_handoff_id:
+                    raise ValueError(
+                        "repair_package_binding_incomplete: repair_to_audit handoff is required"
+                    )
+                record["status"] = "consumed"
+                record["successor_artifact_id"] = successor_artifact_id
+                record["successor_canonical_sha256"] = successor_canonical_sha256
+                record["repair_to_audit_handoff_id"] = repair_to_audit_handoff_id
+            else:
+                record["status"] = "issued"
+                record.pop("consumed_by_work_order_id", None)
+                record.pop("successor_artifact_id", None)
+                record.pop("successor_canonical_sha256", None)
+                record.pop("repair_to_audit_handoff_id", None)
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(path, record)
+            return record
 
     def update_artifact_metadata(
         self,
