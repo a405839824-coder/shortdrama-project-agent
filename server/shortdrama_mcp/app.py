@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver import Context
 from mcp.server.auth.settings import AuthSettings
 from mcp.types import ToolAnnotations
 from starlette.requests import Request
@@ -32,6 +33,17 @@ def _annotations(*, read_only: bool, destructive: bool = False, open_world: bool
         idempotentHint=read_only,
         openWorldHint=open_world,
     )
+
+
+def _transport_session_id(ctx: Context) -> str | None:
+    """Read the server-owned MCP connection id without trusting HTTP headers."""
+
+    try:
+        connection = getattr(ctx.request_context.session, "_connection", None)
+        value = getattr(connection, "session_id", None)
+    except (AttributeError, ValueError):
+        return None
+    return str(value) if value else None
 
 
 def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
@@ -127,6 +139,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         must_remove: list[str],
         protected_scope: list[str],
         expected_outputs: list[str],
+        ctx: Context,
         window_key: str = "chat",
     ) -> ToolResponse:
         return service.begin_task(
@@ -145,6 +158,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             protected_scope=protected_scope,
             expected_outputs=expected_outputs,
             window_key=window_key,
+            request_session_id=_transport_session_id(ctx),
         )
 
     @server.tool(
@@ -361,6 +375,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         project_id: str,
         work_order_id: str,
         storyboard: dict[str, Any],
+        ctx: Context,
         file_name: str = "正式分镜.xlsx",
         source_artifact_id: str | None = None,
     ) -> ToolResponse:
@@ -371,6 +386,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             storyboard=storyboard,
             file_name=file_name,
             source_artifact_id=source_artifact_id,
+            request_session_id=_transport_session_id(ctx),
         )
 
     @server.tool(
@@ -394,6 +410,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         audit_certificate_id: str,
         operations: list[StoryboardPatchOperationInput],
         impact_scope: list[str],
+        ctx: Context,
+        expected_raw_artifact_fingerprint: str | None = None,
         file_name: str = "正式分镜_局部修复版.xlsx",
     ) -> ToolResponse:
         return service.commit_storyboard_patch(
@@ -402,10 +420,12 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             work_order_id=work_order_id,
             base_artifact_id=base_artifact_id,
             expected_canonical_hash=expected_canonical_hash,
+            expected_raw_artifact_fingerprint=expected_raw_artifact_fingerprint,
             audit_certificate_id=audit_certificate_id,
             operations=[item.model_dump() for item in operations],
             impact_scope=impact_scope,
             file_name=file_name,
+            request_session_id=_transport_session_id(ctx),
         )
 
     @server.tool(
@@ -419,6 +439,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     async def audit_storyboard(
         project_id: str,
         artifact_id: str,
+        ctx: Context,
         audit_cycle_id: str | None = None,
         work_order_id: str | None = None,
         handoff_artifact_id: str | None = None,
@@ -432,6 +453,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             work_order_id=work_order_id,
             handoff_artifact_id=handoff_artifact_id,
             force_machine_recheck=force_machine_recheck,
+            request_session_id=_transport_session_id(ctx),
         )
 
     @server.tool(
