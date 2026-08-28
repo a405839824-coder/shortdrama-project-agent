@@ -1,8 +1,69 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+MAX_DELTA_ITEMS = 128
+MAX_DELTA_STRING_CHARS = 20_000
+MAX_DELTA_SERIALIZED_BYTES = 2 * 1024 * 1024
+MAX_DELTA_NESTING_DEPTH = 12
+
+SEMANTIC_AUDIT_LAYER_NAMES = (
+    "源文对白",
+    "机位可见性",
+    "空间连续",
+    "表演链",
+    "镜头节奏",
+    "正式母版单镜执行完整性",
+    "禁项与声音",
+    "统计闭合",
+)
+
+LEGACY_SEMANTIC_AUDIT_LAYER_ALIASES = {
+    "Seedance独立执行": "正式母版单镜执行完整性",
+}
+
+SemanticAuditLayerName = Literal[
+    "源文对白",
+    "机位可见性",
+    "空间连续",
+    "表演链",
+    "镜头节奏",
+    "正式母版单镜执行完整性",
+    "禁项与声音",
+    "统计闭合",
+]
+
+
+def _check_delta_json_limits(value: Any, *, path: str = "delta", depth: int = 0) -> None:
+    """Bound nested caller data before the merge layer deep-copies it."""
+
+    if depth > MAX_DELTA_NESTING_DEPTH:
+        raise ValueError(f"delta_input_too_deep: {path}")
+    if isinstance(value, str):
+        if len(value) > MAX_DELTA_STRING_CHARS:
+            raise ValueError(f"delta_field_too_large: {path} exceeds {MAX_DELTA_STRING_CHARS} characters")
+        return
+    if isinstance(value, dict):
+        if len(value) > 128:
+            raise ValueError(f"delta_object_too_large: {path} has more than 128 fields")
+        for key, item in value.items():
+            key_text = str(key)
+            if len(key_text) > 128:
+                raise ValueError(f"delta_key_too_large: {path}")
+            _check_delta_json_limits(item, path=f"{path}.{key_text}", depth=depth + 1)
+        return
+    if isinstance(value, list):
+        if len(value) > 256:
+            raise ValueError(f"delta_array_too_large: {path} has more than 256 items")
+        for index, item in enumerate(value):
+            _check_delta_json_limits(item, path=f"{path}[{index}]", depth=depth + 1)
+        return
+    if value is not None and not isinstance(value, (bool, int, float)):
+        raise ValueError(f"delta_value_invalid: {path} is not JSON-compatible")
 
 
 class OpenAIFile(BaseModel):
@@ -71,3 +132,194 @@ class StoryboardPatchOperationInput(BaseModel):
     value: Any
     issue_ids: list[str] = Field(min_length=1, max_length=64)
     reason: str = Field(min_length=1, max_length=2_000)
+
+
+class SemanticAuditLayerInput(BaseModel):
+    """One independently reviewed semantic layer with concrete evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    layer: SemanticAuditLayerName
+    status: Literal["pass", "fail_current"]
+    summary: str = Field(min_length=1, max_length=4_000)
+    evidence_ids: list[str] = Field(min_length=1, max_length=256)
+
+    @field_validator("layer", mode="before")
+    @classmethod
+    def normalize_legacy_layer(cls, value: Any) -> Any:
+        return LEGACY_SEMANTIC_AUDIT_LAYER_ALIASES.get(str(value), value)
+
+    @field_validator("evidence_ids")
+    @classmethod
+    def validate_evidence_ids(cls, values: list[str]) -> list[str]:
+        cleaned = [str(value).strip() for value in values]
+        if any(not value or len(value) > 256 for value in cleaned):
+            raise ValueError("semantic_audit_evidence_invalid: evidence ids must be 1-256 characters")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("semantic_audit_evidence_invalid: evidence ids must be unique per layer")
+        if any(":" not in value for value in cleaned):
+            raise ValueError(
+                "semantic_audit_evidence_invalid: use concrete kind:id evidence references"
+            )
+        return cleaned
+
+
+class SemanticAuditIssueInput(BaseModel):
+    """One semantic defect found by the independent audit authority."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    issue_id: str = Field(min_length=1, max_length=128)
+    layer: SemanticAuditLayerName
+    error_code: str = Field(min_length=1, max_length=128)
+    severity: Literal["fail", "blocking"] = "fail"
+    blocking: bool = True
+    shot_ids: list[str] = Field(default_factory=list, max_length=256)
+    batch_ids: list[str] = Field(default_factory=list, max_length=256)
+    field: str = Field(default="语义审计", min_length=1, max_length=256)
+    evidence_ids: list[str] = Field(min_length=1, max_length=256)
+    evidence: str = Field(min_length=1, max_length=8_000)
+    repair_action: str = Field(min_length=1, max_length=4_000)
+
+    @field_validator("layer", mode="before")
+    @classmethod
+    def normalize_legacy_layer(cls, value: Any) -> Any:
+        return LEGACY_SEMANTIC_AUDIT_LAYER_ALIASES.get(str(value), value)
+
+    @field_validator("issue_id", "error_code", "field")
+    @classmethod
+    def strip_identifiers(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("shot_ids", "batch_ids", "evidence_ids")
+    @classmethod
+    def validate_reference_lists(cls, values: list[str]) -> list[str]:
+        cleaned = [str(value).strip() for value in values]
+        if any(not value or len(value) > 256 for value in cleaned):
+            raise ValueError("semantic_audit_reference_invalid: references must be 1-256 characters")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("semantic_audit_reference_invalid: references must be unique")
+        return cleaned
+
+    @field_validator("batch_ids")
+    @classmethod
+    def reject_compact_batch_targets(cls, values: list[str]) -> list[str]:
+        if values:
+            raise ValueError(
+                "semantic_audit_batch_removed: R10.1 issues target formal-master shots/fields, not batches"
+            )
+        return values
+
+    @field_validator("evidence_ids")
+    @classmethod
+    def validate_issue_evidence_ids(cls, values: list[str]) -> list[str]:
+        if any(":" not in value for value in values):
+            raise ValueError(
+                "semantic_audit_evidence_invalid: use concrete kind:id evidence references"
+            )
+        return values
+
+
+class SemanticAuditConclusionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["pass", "fail_current"]
+    summary: str = Field(min_length=1, max_length=4_000)
+
+
+class SemanticAuditInput(BaseModel):
+    """Independent semantic review required on an uncached audit path."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_sha256: str = Field(pattern=r"^[A-Fa-f0-9]{64}$")
+    reviewed_shot_count: int = Field(ge=0)
+    # R10.1 has no persisted Seedance batches.  The default keeps old callers
+    # readable while making the compact contract natural to submit.
+    reviewed_batch_count: Literal[0] = 0
+    layers: list[SemanticAuditLayerInput] = Field(min_length=8, max_length=8)
+    issues: list[SemanticAuditIssueInput] = Field(default_factory=list, max_length=512)
+    conclusion: SemanticAuditConclusionInput
+
+    @model_validator(mode="after")
+    def validate_complete_review(self) -> "SemanticAuditInput":
+        layer_names = [row.layer for row in self.layers]
+        if len(set(layer_names)) != len(layer_names) or set(layer_names) != set(
+            SEMANTIC_AUDIT_LAYER_NAMES
+        ):
+            raise ValueError(
+                "semantic_audit_layers_invalid: exactly eight unique R10 layers are required"
+            )
+        issue_ids = [row.issue_id for row in self.issues]
+        if len(set(issue_ids)) != len(issue_ids):
+            raise ValueError("semantic_audit_issue_invalid: issue_id values must be unique")
+        return self
+
+
+class StoryboardDeltaEvidenceInput(BaseModel):
+    """Affected-shot evidence supplied when an execution delta changes semantics.
+
+    These are deliberately the only evidence blocks accepted by the delta
+    route. Source mapping, protected dialogue, cognition, chapter boundaries,
+    and global coverage must use the complete canonical route.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    shot_plan: list[dict[str, Any]] = Field(default_factory=list, max_length=MAX_DELTA_ITEMS)
+    performance_chains: list[dict[str, Any]] = Field(default_factory=list, max_length=MAX_DELTA_ITEMS)
+    scene_state_ledger: list[dict[str, Any]] = Field(default_factory=list, max_length=MAX_DELTA_ITEMS)
+
+    @model_validator(mode="after")
+    def validate_nested_limits(self) -> "StoryboardDeltaEvidenceInput":
+        _check_delta_json_limits(self.model_dump(mode="python"), path="evidence_updates")
+        return self
+
+
+class StoryboardDeltaRequestInput(BaseModel):
+    """Strict pre-copy contract for one bounded, execution-only delta."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    affected_shot_uids: list[str] = Field(min_length=1, max_length=MAX_DELTA_ITEMS)
+    replacement_shots: list[dict[str, Any]] = Field(min_length=1, max_length=MAX_DELTA_ITEMS)
+    # Deprecated compatibility input.  Validate its shape/size, then discard
+    # it so an old caller can never reactivate background batch generation.
+    replacement_batches: list[dict[str, Any]] = Field(
+        default_factory=list, max_length=MAX_DELTA_ITEMS
+    )
+    evidence_updates: StoryboardDeltaEvidenceInput = Field(
+        default_factory=StoryboardDeltaEvidenceInput
+    )
+
+    @field_validator("affected_shot_uids")
+    @classmethod
+    def validate_uids(cls, values: list[str]) -> list[str]:
+        cleaned = [str(value).strip() for value in values]
+        if any(not value or len(value) > 128 for value in cleaned):
+            raise ValueError("delta_scope_invalid: shot_uids must be 1-128 characters")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("delta_scope_invalid: affected_shot_uids must be unique")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_payload_limits(self) -> "StoryboardDeltaRequestInput":
+        value = self.model_dump(mode="python")
+        _check_delta_json_limits(value)
+        try:
+            size = len(
+                json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("delta_value_invalid: request must be strict JSON") from exc
+        if size > MAX_DELTA_SERIALIZED_BYTES:
+            raise ValueError(
+                f"delta_payload_too_large: {size} bytes exceeds {MAX_DELTA_SERIALIZED_BYTES}"
+            )
+        self.replacement_batches = []
+        return self

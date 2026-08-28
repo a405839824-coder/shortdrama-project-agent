@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
 import datetime as dt
+import hashlib
+import hmac
 import io
 import ipaddress
 import json
@@ -23,17 +27,22 @@ from openpyxl.utils import get_column_letter
 from pypdf import PdfReader
 
 from .config import Settings
+from .materializer import (
+    COMPACT_SCHEMA_VERSION,
+    COMPACT_SHOT_FIELDS,
+    FORMAL_MERGED_FIELD,
+    GPT_KEYFRAME_FIELD,
+    LEGACY_STANDALONE_FIELDS,
+    MOTHER_TEMPLATE_COLUMNS,
+    formal_mother_template_rows,
+    migrate_legacy_shot,
+    migrate_storyboard_to_compact,
+)
 from .models import OpenAIFile
 from .storage import slug_filename
 
 
-SHOT_FIELDS = [
-    "镜头编号", "时长", "累计时长", "功能类型", "场景连续性ID", "镜头类型", "可见主体", "机位",
-    "运镜方式", "运镜主体", "运镜功能", "人物调度", "画面内容", "动作与表演", "台词", "音色",
-    "发声方式", "标点语气", "心理音轨", "心理音轨属性", "环境音效", "环境动态", "光影",
-    "光源来源", "光源方向", "色温倾向", "生成限制", "转场类型", "切镜/转场提示词", "参考图锚定",
-    "覆盖原文", "原文依据类型", "原文支撑句", "生成批次",
-]
+SHOT_FIELDS = list(COMPACT_SHOT_FIELDS)
 
 BATCH_FIELDS = [
     "批次编号", "覆盖镜头", "时长", "主运镜", "生成限制", "起始画面", "起始表演状态", "动作过程",
@@ -44,9 +53,26 @@ MAX_ARCHIVE_ENTRIES = 10_000
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 250 * 1024 * 1024
 MAX_BULK_RESPONSE_CHARS = 16_000
 MAX_BULK_RANGES = 16
-DEFAULT_BULK_RESPONSE_CHARS = 12_000
-DEFAULT_BULK_CHARACTER_LIMIT = 8_000
+DEFAULT_BULK_RESPONSE_CHARS = 16_000
+DEFAULT_BULK_CHARACTER_LIMIT = 16_000
 DEFAULT_BULK_ITEM_LIMITS = {"paragraphs": 80, "pages": 8, "rows": 50}
+
+CANONICAL_SIDECAR_SHEET = "__shortdrama_canonical_v1"
+CANONICAL_SIDECAR_MARKER = "SHORTDRAMA_CANONICAL_V1"
+CANONICAL_SIDECAR_FORMAT = "canonical-storyboard-json-v1"
+CANONICAL_SIDECAR_ENCODING = "base64url-utf8-json"
+CANONICAL_SIDECAR_PAYLOAD_PREFIX = "b64u:"
+CANONICAL_SIDECAR_CHUNK_CHARS = 24_000
+CANONICAL_SIDECAR_HEADERS = [
+    "record_type",
+    "marker",
+    "format",
+    "encoding",
+    "sha256",
+    "chunk_index",
+    "chunk_count",
+    "payload",
+]
 
 
 def json_safe(value: Any) -> Any:
@@ -185,36 +211,325 @@ def _json_cell(value: Any, fallback: Any) -> Any:
         return value
 
 
-def workbook_to_storyboard(sheets: list[dict[str, Any]]) -> dict[str, Any] | None:
-    shots_sheet = next((sheet for sheet in sheets if "镜头编号" in sheet.get("headers", [])), None)
-    if not shots_sheet:
+def _canonical_sidecar_error(reason: str) -> ValueError:
+    return ValueError(f"canonical sidecar invalid: {reason}")
+
+
+def _canonical_positive_int(value: Any, field: str) -> int:
+    if isinstance(value, bool):
+        raise _canonical_sidecar_error(f"{field} must be a positive integer")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, float) and value.is_integer():
+        parsed = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        parsed = int(value.strip())
+    else:
+        raise _canonical_sidecar_error(f"{field} must be a positive integer")
+    if parsed <= 0:
+        raise _canonical_sidecar_error(f"{field} must be a positive integer")
+    return parsed
+
+
+def _canonical_storyboard_from_sidecar(sheets: list[dict[str, Any]]) -> dict[str, Any] | None:
+    sidecars = [sheet for sheet in sheets if sheet.get("name") == CANONICAL_SIDECAR_SHEET]
+    if not sidecars:
         return None
-    batches_sheet = next((sheet for sheet in sheets if "批次编号" in sheet.get("headers", [])), None)
-    metadata_sheet = next((sheet for sheet in sheets if sheet.get("name") in {"元数据", "metadata"}), None)
-    evidence_sheet = next((sheet for sheet in sheets if sheet.get("name") in {"流程证据", "prevention_evidence"}), None)
+    if len(sidecars) != 1:
+        raise _canonical_sidecar_error("duplicate reserved sidecar sheets")
+
+    sidecar = sidecars[0]
+    if sidecar.get("headers") != CANONICAL_SIDECAR_HEADERS:
+        raise _canonical_sidecar_error("sidecar header or marker is missing")
+    rows = sidecar.get("rows")
+    if not isinstance(rows, list):
+        raise _canonical_sidecar_error("sidecar rows are missing")
+
+    manifests = [row for row in rows if row.get("record_type") == "manifest"]
+    chunks = [row for row in rows if row.get("record_type") == "chunk"]
+    if len(manifests) != 1:
+        raise _canonical_sidecar_error("exactly one manifest is required")
+    if len(manifests) + len(chunks) != len(rows):
+        raise _canonical_sidecar_error("unknown sidecar record type")
+
+    manifest = manifests[0]
+    if manifest.get("marker") != CANONICAL_SIDECAR_MARKER:
+        raise _canonical_sidecar_error("manifest marker mismatch")
+    if manifest.get("format") != CANONICAL_SIDECAR_FORMAT:
+        raise _canonical_sidecar_error("manifest format mismatch")
+    if manifest.get("encoding") != CANONICAL_SIDECAR_ENCODING:
+        raise _canonical_sidecar_error("manifest encoding mismatch")
+    digest = manifest.get("sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise _canonical_sidecar_error("manifest SHA-256 is malformed")
+    chunk_count = _canonical_positive_int(manifest.get("chunk_count"), "chunk_count")
+    if len(chunks) != chunk_count:
+        raise _canonical_sidecar_error("canonical payload chunk count mismatch")
+
+    payload_by_index: dict[int, str] = {}
+    for chunk in chunks:
+        if chunk.get("marker") != CANONICAL_SIDECAR_MARKER:
+            raise _canonical_sidecar_error("chunk marker mismatch")
+        if chunk.get("format") != CANONICAL_SIDECAR_FORMAT:
+            raise _canonical_sidecar_error("chunk format mismatch")
+        if chunk.get("encoding") != CANONICAL_SIDECAR_ENCODING:
+            raise _canonical_sidecar_error("chunk encoding mismatch")
+        if chunk.get("sha256") != digest:
+            raise _canonical_sidecar_error("chunk SHA-256 manifest mismatch")
+        if _canonical_positive_int(chunk.get("chunk_count"), "chunk_count") != chunk_count:
+            raise _canonical_sidecar_error("chunk count manifest mismatch")
+        index = _canonical_positive_int(chunk.get("chunk_index"), "chunk_index")
+        if index > chunk_count:
+            raise _canonical_sidecar_error("chunk index is out of range")
+        if index in payload_by_index:
+            raise _canonical_sidecar_error("duplicate canonical payload chunk")
+        payload = chunk.get("payload")
+        if not isinstance(payload, str) or not payload.startswith(CANONICAL_SIDECAR_PAYLOAD_PREFIX):
+            raise _canonical_sidecar_error("chunk payload encoding marker is missing")
+        encoded = payload[len(CANONICAL_SIDECAR_PAYLOAD_PREFIX) :]
+        if not encoded:
+            raise _canonical_sidecar_error("canonical payload chunk is empty")
+        payload_by_index[index] = encoded
+
+    expected_indexes = set(range(1, chunk_count + 1))
+    if set(payload_by_index) != expected_indexes:
+        raise _canonical_sidecar_error("canonical payload chunk sequence is incomplete")
+    encoded_payload = "".join(payload_by_index[index] for index in range(1, chunk_count + 1))
+    try:
+        serialized = base64.b64decode(encoded_payload, altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise _canonical_sidecar_error("canonical payload is not valid base64url") from exc
+    actual_digest = hashlib.sha256(serialized).hexdigest()
+    if not hmac.compare_digest(actual_digest, digest):
+        raise _canonical_sidecar_error("canonical payload SHA-256 mismatch")
+    try:
+        canonical = json.loads(serialized.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _canonical_sidecar_error("canonical payload is not valid UTF-8 JSON") from exc
+    if not isinstance(canonical, dict):
+        raise _canonical_sidecar_error("canonical storyboard root must be an object")
+    return canonical
+
+
+def _metadata_from_sheets(sheets: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
+    metadata_sheet = next(
+        (sheet for sheet in sheets if sheet.get("name") in {"元数据", "metadata"}),
+        None,
+    )
+    evidence_sheet = next(
+        (
+            sheet
+            for sheet in sheets
+            if sheet.get("name") in {"流程证据", "prevention_evidence"}
+        ),
+        None,
+    )
     metadata: dict[str, Any] = {}
     if metadata_sheet:
         for row in metadata_sheet.get("rows", []):
             values = list(row.values())
             if values and values[0] not in (None, ""):
-                metadata[str(values[0])] = _json_cell(values[1] if len(values) > 1 else None, None)
+                metadata[str(values[0])] = _json_cell(
+                    values[1] if len(values) > 1 else None,
+                    None,
+                )
     evidence: dict[str, Any] = {}
     if evidence_sheet:
         for row in evidence_sheet.get("rows", []):
             values = list(row.values())
             if values and values[0] not in (None, ""):
-                evidence[str(values[0])] = _json_cell(values[1] if len(values) > 1 else None, None)
-    shots = shots_sheet.get("rows", [])
-    batches = batches_sheet.get("rows", []) if batches_sheet else []
+                evidence[str(values[0])] = _json_cell(
+                    values[1] if len(values) > 1 else None,
+                    None,
+                )
+    return metadata, evidence
+
+
+def _parse_labeled_cell(value: Any) -> dict[str, str]:
+    if value in (None, ""):
+        return {}
+    parsed: dict[str, str] = {}
+    accepted = set(COMPACT_SHOT_FIELDS) | LEGACY_STANDALONE_FIELDS | {
+        "切镜转场提示词",
+        "光源",
+        "光线方向",
+        "色温",
+    }
+    current_label: str | None = None
+    # Legacy formal cells used both newlines and full-/half-width pipes as
+    # structural separators. Unlabelled fragments remain continuations of the
+    # preceding field (for example movement modifiers and picture time stages).
+    for raw_line in re.split(r"[\n|｜]", str(value)):
+        line = raw_line.strip()
+        if not line:
+            continue
+        candidate = ""
+        text = ""
+        if "：" in line:
+            candidate, text = line.split("：", 1)
+            candidate = candidate.strip()
+        if candidate in accepted:
+            current_label = candidate
+            if text.strip():
+                parsed[current_label] = text.strip()
+            else:
+                parsed.setdefault(current_label, "")
+            continue
+        if current_label:
+            prior = parsed.get(current_label, "")
+            parsed[current_label] = f"{prior}\n{line}".strip()
+    for old, current in (
+        ("光源", "光源来源"),
+        ("光线方向", "光源方向"),
+        ("色温", "色温倾向"),
+    ):
+        if not parsed.get(current) and parsed.get(old):
+            parsed[current] = parsed[old]
+        parsed.pop(old, None)
+    return parsed
+
+
+def _parse_function_scene_cell(value: Any) -> tuple[str, str]:
+    text = str(value or "").strip()
+    function = ""
+    scene = ""
+    function_match = re.search(
+        r"功能类型\s*[:：]\s*(.*?)(?=\s*(?:[|｜]\s*)?场景连续性ID\s*[:：]|$)",
+        text,
+    )
+    scene_match = re.search(r"场景连续性ID\s*[:：]\s*(.+)$", text)
+    if function_match:
+        function = function_match.group(1).strip()
+    elif text and "场景连续性ID" not in text:
+        function = text
+    if scene_match:
+        scene = scene_match.group(1).strip()
+    return function, scene
+
+
+def _compact_shots_from_mother_sheet(sheet: dict[str, Any]) -> list[dict[str, Any]]:
+    shots: list[dict[str, Any]] = []
+    for source in sheet.get("rows", []):
+        shot = _parse_labeled_cell(source.get(FORMAL_MERGED_FIELD))
+        shot["镜头编号"] = source.get("分镜序号")
+        shot["时长"] = source.get("时长")
+        shot["累计时长"] = source.get("累计时长")
+        function, scene = _parse_function_scene_cell(
+            source.get("功能类型/场景连续性ID")
+        )
+        shot["功能类型"] = function
+        shot["场景连续性ID"] = scene
+        for field in ("参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句"):
+            shot[field] = source.get(field)
+        migrated = migrate_legacy_shot(shot, legacy=True)
+        if not str(migrated.get("光影") or "").strip():
+            raise ValueError(
+                "materialization_input_missing: legacy migration cannot derive "
+                f"光影 for {migrated.get('镜头编号') or '<unknown>'}"
+            )
+        shots.append(migrated)
+    return shots
+
+
+def workbook_to_storyboard(
+    sheets: list[dict[str, Any]],
+    *,
+    migrate: bool = False,
+) -> dict[str, Any] | None:
+    sidecar_storyboard = _canonical_storyboard_from_sidecar(sheets)
+    if sidecar_storyboard is not None:
+        # Audit callers must verify the artifact's original canonical bytes and
+        # SHA before any migration. New-production callers opt into the one-way
+        # compact migration explicitly.
+        if migrate:
+            return migrate_storyboard_to_compact(sidecar_storyboard)
+        return sidecar_storyboard
+
+    metadata, evidence = _metadata_from_sheets(sheets)
+    mother_sheet = next(
+        (
+            sheet
+            for sheet in sheets
+            if list(sheet.get("headers", [])) == list(MOTHER_TEMPLATE_COLUMNS)
+        ),
+        None,
+    )
+    if mother_sheet:
+        shots = _compact_shots_from_mother_sheet(mother_sheet)
+        total_duration = metadata.get("total_duration")
+        if total_duration in (None, "") and shots:
+            total_duration = shots[-1].get("累计时长", 0)
+        return {
+            "project_version": metadata.get(
+                "project_version",
+                "V16.3-148-R10-StableRuntime",
+            ),
+            "schema_version": COMPACT_SCHEMA_VERSION,
+            "workflow_profile": metadata.get("workflow_profile", "R10-PG1"),
+            "prevention_evidence": evidence,
+            "field_order": list(COMPACT_SHOT_FIELDS),
+            "source_lock": metadata.get("source_lock", {}),
+            "shots": shots,
+            "total_duration": total_duration or 0,
+        }
+
+    # Legacy R10.0 workbook import is read-only. Its atomic and batch sheets are
+    # accepted only long enough to migrate each shot; batches are discarded.
+    shots_sheet = next(
+        (sheet for sheet in sheets if "镜头编号" in sheet.get("headers", [])),
+        None,
+    )
+    if not shots_sheet:
+        return None
+    batches_sheet = next(
+        (sheet for sheet in sheets if "批次编号" in sheet.get("headers", [])),
+        None,
+    )
+    identity_sheet = next(
+        (sheet for sheet in sheets if sheet.get("name") == "内部标识"),
+        None,
+    )
+    shots = list(shots_sheet.get("rows", []))
+    batches = list(batches_sheet.get("rows", [])) if batches_sheet else []
     for row in batches:
         if isinstance(row.get("覆盖镜头"), str):
-            row["覆盖镜头"] = [item.strip() for item in row["覆盖镜头"].replace("，", ",").split(",") if item.strip()]
+            row["覆盖镜头"] = [
+                item.strip()
+                for item in row["覆盖镜头"].replace("，", ",").split(",")
+                if item.strip()
+            ]
+    if identity_sheet:
+        shot_identity = {
+            str(row.get("显示编号") or ""): row
+            for row in identity_sheet.get("rows", [])
+            if row.get("类型") == "shot"
+        }
+        batch_identity = {
+            str(row.get("显示编号") or ""): row
+            for row in identity_sheet.get("rows", [])
+            if row.get("类型") == "batch"
+        }
+        for row in shots:
+            identity = shot_identity.get(str(row.get("镜头编号") or ""))
+            if identity:
+                for field in ("shot_uid", "episode_id", "scene_uid"):
+                    if identity.get(field) not in (None, ""):
+                        row[field] = identity[field]
+        for row in batches:
+            identity = batch_identity.get(str(row.get("批次编号") or ""))
+            if identity:
+                for field in ("batch_uid", "episode_id"):
+                    if identity.get(field) not in (None, ""):
+                        row[field] = identity[field]
     total_duration = metadata.get("total_duration")
     if total_duration in (None, "") and shots:
         total_duration = shots[-1].get("累计时长", 0)
-    return {
-        "project_version": metadata.get("project_version", "V16.3-148-R10-StableRuntime"),
-        "schema_version": metadata.get("schema_version", "R10.0"),
+    legacy = {
+        "project_version": metadata.get(
+            "project_version",
+            "V16.3-148-R10-StableRuntime",
+        ),
+        "schema_version": "R10.0",
         "workflow_profile": metadata.get("workflow_profile", "R10-PG1"),
         "prevention_evidence": evidence,
         "field_order": shots_sheet.get("headers", []),
@@ -223,6 +538,10 @@ def workbook_to_storyboard(sheets: list[dict[str, Any]]) -> dict[str, Any] | Non
         "batches": batches,
         "total_duration": total_duration or 0,
     }
+    # Without a canonical sidecar there is no historical canonical SHA to
+    # preserve. The legacy atom sheet is therefore migrated exactly once on
+    # import and never re-exported in its old shape.
+    return migrate_storyboard_to_compact(legacy)
 
 
 def extract_xlsx(data: bytes) -> dict[str, Any]:
@@ -233,10 +552,11 @@ def extract_xlsx(data: bytes) -> dict[str, Any]:
         headers, rows = _rows_from_sheet(sheet)
         sheets.append({"name": sheet.title, "headers": headers, "row_count": len(rows), "rows": rows})
     canonical = workbook_to_storyboard(sheets)
+    public_sheets = [sheet for sheet in sheets if sheet.get("name") != CANONICAL_SIDECAR_SHEET]
     return {
         "kind": "workbook",
-        "sheet_count": len(sheets),
-        "sheets": sheets,
+        "sheet_count": len(public_sheets),
+        "sheets": public_sheets,
         "canonical_storyboard": canonical,
     }
 
@@ -331,7 +651,7 @@ def _cell_value(value: Any) -> Any:
     return value
 
 
-def _write_table(workbook: Workbook, title: str, headers: list[str], rows: list[dict[str, Any]]) -> None:
+def _write_table(workbook: Workbook, title: str, headers: list[str], rows: list[dict[str, Any]]) -> Any:
     sheet = workbook.create_sheet(title)
     sheet.append(headers)
     for row in rows:
@@ -348,48 +668,152 @@ def _write_table(workbook: Workbook, title: str, headers: list[str], rows: list[
             cell.alignment = Alignment(vertical="top", wrap_text=True)
     for index, header in enumerate(headers, 1):
         width = 14
-        if header in {"画面内容", "动作与表演", "台词", "发声方式", "独立执行提示词", "证据", "修复动作"}:
+        if header in {
+            "画面内容",
+            "动作与表演",
+            "台词",
+            "发声方式",
+            "独立执行提示词",
+            "正式分镜母版·字段合并",
+            "GPT关键帧生成指令",
+            "Seedance 2.5独立正式执行分镜",
+            "证据",
+            "修复动作",
+        }:
             width = 34
         sheet.column_dimensions[get_column_letter(index)].width = width
+    return sheet
 
 
-def storyboard_to_xlsx(storyboard: dict[str, Any], audit_report: dict[str, Any]) -> bytes:
-    workbook = Workbook()
-    workbook.remove(workbook.active)
-    field_order = list(storyboard.get("field_order") or SHOT_FIELDS)
-    _write_table(workbook, "分镜", field_order, list(storyboard.get("shots") or []))
-    batch_headers = list(BATCH_FIELDS)
-    _write_table(workbook, "生成批次", batch_headers, list(storyboard.get("batches") or []))
-
-    evidence_rows = [
-        {"证据块": key, "JSON": json.dumps(value, ensure_ascii=False, separators=(",", ":"))}
-        for key, value in (storyboard.get("prevention_evidence") or {}).items()
+def _write_canonical_sidecar(workbook: Workbook, storyboard: dict[str, Any]) -> None:
+    canonical = json_safe(storyboard)
+    if not isinstance(canonical, dict):
+        raise ValueError("canonical storyboard root must be an object")
+    serialized = json.dumps(
+        canonical,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    digest = hashlib.sha256(serialized).hexdigest()
+    encoded = base64.urlsafe_b64encode(serialized).decode("ascii")
+    chunks = [
+        encoded[offset : offset + CANONICAL_SIDECAR_CHUNK_CHARS]
+        for offset in range(0, len(encoded), CANONICAL_SIDECAR_CHUNK_CHARS)
     ]
-    _write_table(workbook, "流程证据", ["证据块", "JSON"], evidence_rows)
+    if not chunks:
+        raise ValueError("canonical storyboard serialization is empty")
 
-    metadata = {
-        "project_version": storyboard.get("project_version"),
-        "schema_version": storyboard.get("schema_version"),
-        "workflow_profile": storyboard.get("workflow_profile"),
-        "total_duration": storyboard.get("total_duration"),
-        "source_lock": storyboard.get("source_lock", {}),
-    }
-    metadata_rows = [{"字段": key, "值": _cell_value(value)} for key, value in metadata.items()]
-    _write_table(workbook, "元数据", ["字段", "值"], metadata_rows)
+    sheet = workbook.create_sheet(CANONICAL_SIDECAR_SHEET)
+    sheet.append(CANONICAL_SIDECAR_HEADERS)
+    sheet.append(
+        [
+            "manifest",
+            CANONICAL_SIDECAR_MARKER,
+            CANONICAL_SIDECAR_FORMAT,
+            CANONICAL_SIDECAR_ENCODING,
+            digest,
+            None,
+            len(chunks),
+            None,
+        ]
+    )
+    for index, chunk in enumerate(chunks, 1):
+        sheet.append(
+            [
+                "chunk",
+                CANONICAL_SIDECAR_MARKER,
+                CANONICAL_SIDECAR_FORMAT,
+                CANONICAL_SIDECAR_ENCODING,
+                digest,
+                index,
+                len(chunks),
+                f"{CANONICAL_SIDECAR_PAYLOAD_PREFIX}{chunk}",
+            ]
+        )
+    sheet.sheet_state = "veryHidden"
 
+
+def _write_scope_audit_sheet(
+    workbook: Workbook,
+    storyboard: dict[str, Any],
+    audit_report: dict[str, Any],
+) -> Any:
+    """Write the sample-compatible single visible scope/audit page."""
+
+    sheet = workbook.create_sheet("00_范围与审计")
+    sheet.append(["00_范围与审计", None, None, None, None])
+    sheet.append([])
+    sheet.append(["范围字段", "值", None, None, None])
+    scope_rows = [
+        ("project_version", storyboard.get("project_version")),
+        ("schema_version", storyboard.get("schema_version")),
+        ("workflow_profile", storyboard.get("workflow_profile")),
+        ("total_duration", storyboard.get("total_duration")),
+        ("source_lock", storyboard.get("source_lock", {})),
+    ]
+    for label, value in scope_rows:
+        sheet.append([label, _cell_value(value), None, None, None])
+    for key, value in (storyboard.get("prevention_evidence") or {}).items():
+        sheet.append([f"prevention_evidence/{key}", _cell_value(value), None, None, None])
+
+    sheet.append([])
+    issue_header_row = sheet.max_row + 1
+    sheet.append(["错误码", "严重度", "位置", "证据", "修复动作"])
     issue_rows = [
-        {
-            "错误码": issue.get("error_code"),
-            "严重度": issue.get("severity"),
-            "位置": issue.get("location"),
-            "证据": issue.get("evidence"),
-            "修复动作": issue.get("repair_action"),
-        }
+        [
+            issue.get("error_code"),
+            issue.get("severity"),
+            issue.get("location"),
+            issue.get("evidence"),
+            issue.get("repair_action"),
+        ]
         for issue in audit_report.get("issues", [])
     ]
     if not issue_rows:
-        issue_rows = [{"错误码": "PASS", "严重度": "info", "位置": "全表", "证据": "零问题", "修复动作": "无需修复"}]
-    _write_table(workbook, "审计报告", ["错误码", "严重度", "位置", "证据", "修复动作"], issue_rows)
+        issue_rows = [["PASS", "info", "全表", "零问题", "无需修复"]]
+    for row in issue_rows:
+        sheet.append([_cell_value(value) for value in row])
+
+    green = PatternFill("solid", fgColor="1F6F5F")
+    for row_index in (1, 3, issue_header_row):
+        for cell in sheet[row_index]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = green
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for row in sheet.iter_rows():
+        for cell in row:
+            if cell.row not in {1, 3}:
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+    for index, width in enumerate((24, 28, 24, 48, 36), 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.freeze_panes = "A3"
+    return sheet
+
+
+def storyboard_to_xlsx(
+    storyboard: dict[str, Any],
+    audit_report: dict[str, Any],
+    *,
+    assume_compact: bool = False,
+) -> bytes:
+    # Export is a one-way compact projection. Legacy atom sheets, batch sheets,
+    # model-authored derived prose and Seedance prompt copies are never emitted.
+    compact = storyboard if assume_compact else migrate_storyboard_to_compact(storyboard)
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    _write_scope_audit_sheet(workbook, compact, audit_report)
+    formal_sheet = _write_table(
+        workbook,
+        "正式生产母版",
+        list(MOTHER_TEMPLATE_COLUMNS),
+        formal_mother_template_rows(compact, assume_compact=True),
+    )
+    for index, width in enumerate((16, 9, 11, 23.5, 62, 60, 42, 20, 13, 46), 1):
+        formal_sheet.column_dimensions[get_column_letter(index)].width = width
+
+    _write_canonical_sidecar(workbook, compact)
 
     stream = io.BytesIO()
     workbook.save(stream)
