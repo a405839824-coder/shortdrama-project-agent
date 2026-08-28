@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""R10 functional validator for Chinese short-drama storyboard JSON.
+"""R10.1 compact-master validator for Chinese short-drama storyboard JSON.
 
-The validator is intentionally deterministic.  It validates the canonical R10
-field contract and the four learned method modules instead of merely checking
-that a heading or keyword exists.
+The validator is intentionally deterministic. It validates the compact
+27-field contract, the optional single-shot timeline, and the learned method
+modules without regenerating any derived prompt or independent batch.
 """
 from __future__ import annotations
 
@@ -17,8 +17,58 @@ from pathlib import Path
 from typing import Any
 
 VERSION = "V16.3-148-R10-StableRuntime"
-SCHEMA_VERSION = "R10.0"
+SCHEMA_VERSION = "R10.1"
 WORKFLOW_PROFILE = "R10-PG1"
+
+COMPACT_SHOT_FIELDS = [
+    "镜头编号", "时长", "累计时长", "功能类型", "场景连续性ID", "镜头类型", "可见主体",
+    "空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "音色", "心理音轨",
+    "环境音效", "环境动态", "光影", "光源来源", "光源方向", "色温倾向", "生成限制",
+    "转场类型", "切镜/转场提示词", "参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句",
+]
+COMPACT_MOTHER_COLUMNS = [
+    "分镜序号", "时长", "累计时长", "功能类型/场景连续性ID", "正式分镜母版·字段合并",
+    "GPT关键帧生成指令", "参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句",
+]
+DEPRECATED_SHOT_FIELDS = {
+    "运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气",
+    "心理音轨属性", "生成批次",
+}
+DEPRECATED_DISPLAY_LABELS = (
+    "运镜主体：", "运镜主体:", "运镜功能：", "运镜功能:", "叙事功能：", "叙事功能:",
+    "人物调度：", "人物调度:", "动作与表演：", "动作与表演:", "台词：", "台词:",
+    "发声方式：", "发声方式:", "标点语气：", "标点语气:",
+    "心理音轨属性：", "心理音轨属性:", "生成批次：", "生成批次:",
+)
+DEPRECATED_LABEL_SCAN_FIELDS = {
+    "功能类型", "场景连续性ID", "镜头类型", "可见主体", "空间站位描述", "起始状态",
+    "机位", "运镜方式", "画面内容", "音色", "心理音轨", "环境音效", "环境动态",
+    "光影", "光源来源", "光源方向", "色温倾向", "生成限制", "转场类型", "切镜/转场提示词",
+}
+PERSISTED_DERIVED_FIELDS = {
+    "正式分镜母版·字段合并", "GPT关键帧生成指令", "Seedance 2.5独立正式执行分镜", "Seedance 2.0独立正式执行分镜",
+}
+COMPACT_TOP_LEVEL_FIELDS = {
+    "project_version", "schema_version", "schema_profile", "workflow_profile",
+    "prevention_evidence", "source_ingestion", "chapter_intake",
+    "field_order", "source_lock", "shots", "total_duration", "chapter_map", "source_mapping",
+    "protected_dialogue", "cognition_matrix", "scene_state", "coverage", "anchors",
+    "character_anchors", "scene_anchors", "prop_anchors", "costume_anchors", "project_anchors",
+    "stage_evidence", "human_review", "canonical_extension",
+    "episode_id", "episode", "分集",
+}
+FORBIDDEN_GENERATION_TOP_LEVEL_FIELDS = {
+    "batches", "i2v_batches", "seedance_batches", "seedance_prompt_cache", "derived",
+    "formal_mother_template_rows", "mother_template_columns", "gpt_keyframe_prompt_cache", "prompt_cache",
+}
+DERIVED_OR_CACHE_ROOT_RE = re.compile(
+    r"(?:^|_)(?:batches?|seedance|i2v|derived|prompt_cache|cache)(?:$|_)",
+    re.I,
+)
+FORBIDDEN_CANONICAL_EXTENSION_KEY_RE = re.compile(
+    r"(?:seedance|i2v|batch|derived|prompt[_-]?cache|cache)",
+    re.I,
+)
 
 CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 ABSTRACT_EMOTIONS = {
@@ -41,9 +91,11 @@ FACE_TERMS = ["眼睛", "眼神", "目光", "眉", "嘴唇", "嘴角", "瞳孔",
 FACE_VISIBLE_TERMS = ["面部可见", "眼睛可见", "侧脸可见", "人物反应", "过肩同框", "OTS同框"]
 VAGUE_TERMS = ["电影感", "高级感", "氛围感", "自然移动", "高级运镜", "电影感运镜"]
 STATIC_MOTIONS = ["无运镜", "固定镜头", "静态镜头", "固定机位"]
-HARD_TIMECODE_RE = re.compile(
-    r"(?:\d+(?:\.\d+)?\s*(?:-|–|—|~|～|至|到)\s*\d+(?:\.\d+)?\s*秒|第\s*\d+(?:\.\d+)?\s*秒|\d+(?:\.\d+)?\s*秒(?:时|后|内|左右))"
+TIMELINE_RANGE_RE = re.compile(
+    r"(?P<start>\d+(?:\.\d+)?)\s*(?:-|–|—|~|～|至|到)\s*(?P<end>\d+(?:\.\d+)?)\s*(?:秒|s)",
+    re.I,
 )
+DIALOGUE_TAG_RE = re.compile(r"【(?P<speaker>[^】\n]{1,30})】\s*(?P<line>[^【\n｜|；;]+)")
 
 VOICE_DIMENSION_PATTERNS = {
     "声音强弱": re.compile(r"声音|音量|放轻|压低|变亮|变稳|抬高"),
@@ -131,7 +183,20 @@ def _candidate_rule_paths(explicit: str | None = None) -> list[Path]:
 def load_runtime_rules(explicit: str | None = None) -> dict[str, Any]:
     for path in _candidate_rule_paths(explicit):
         if path.is_file():
-            return json.loads(path.read_text(encoding="utf-8"))
+            rules = json.loads(path.read_text(encoding="utf-8"))
+            # The standalone catalog is the canonical documentation source.
+            # Merge newly introduced codes so the functional validator returns
+            # their blocking and repair metadata even before a runtime-rule
+            # snapshot is regenerated.
+            catalog_path = path.parent / "error_catalog.json"
+            if catalog_path.is_file():
+                standalone = json.loads(catalog_path.read_text(encoding="utf-8"))
+                existing = {row.get("error_code") for row in rules.get("error_catalog", []) if isinstance(row, dict)}
+                rules.setdefault("error_catalog", []).extend(
+                    row for row in standalone
+                    if isinstance(row, dict) and row.get("error_code") not in existing
+                )
+            return rules
     raise FileNotFoundError("storyboard_runtime_rules.json not found")
 
 
@@ -145,6 +210,23 @@ def cjk_len(value: Any) -> int:
 
 def is_empty(value: Any) -> bool:
     return value is None or value == "" or value == [] or value == {}
+
+
+def _forbidden_extension_paths(value: Any, location: str = "canonical_extension") -> list[str]:
+    """Return nested extension keys that would persist generated/cache state."""
+
+    hits: list[str] = []
+    if isinstance(value, dict):
+        for raw_key, child in value.items():
+            key = str(raw_key)
+            child_location = f"{location}.{key}"
+            if FORBIDDEN_CANONICAL_EXTENSION_KEY_RE.search(key):
+                hits.append(child_location)
+            hits.extend(_forbidden_extension_paths(child, child_location))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            hits.extend(_forbidden_extension_paths(child, f"{location}[{index}]"))
+    return hits
 
 
 def is_none_value(value: Any) -> bool:
@@ -186,6 +268,30 @@ def match_motion(value: str, motions: list[dict[str, Any]]) -> dict[str, Any] | 
         if any(str(name).casefold() in normalized or normalized in str(name).casefold() for name in names):
             return motion
     return None
+
+
+def _motion_has_natural_subject(motion_text: str, visible: str) -> bool:
+    if re.search(r"(?:推近|靠近|跟随|围绕|对准|落到|移向|锁定|聚焦|展示|揭示|拍摄|朝向)\s*(?:无|不适用)", motion_text):
+        return False
+    target_cue = re.compile(
+        r"(?:推近|靠近|跟随|环绕|对准|落到|移向|锁定|聚焦|展示|揭示|拍摄|朝向)"
+        r"\s*(?:在|向|着|至)?\s*(?!用于|以便|从而)(?:[\u3400-\u9fffA-Za-z0-9·]{1,20})"
+    )
+    if target_cue.search(motion_text):
+        return True
+    if re.search(r"主体|人物|角色|面部|眼神|双手|道具|门窗|桌面|信件|环境|空间|前景|后景", motion_text):
+        return True
+    for part in re.split(r"[、，,；;｜|与和及\s]", visible):
+        subject = re.split(r"上半身|全身|面部|双手|肩缘|背影|轮廓|可辨|可见", part, maxsplit=1)[0].strip()
+        if len(subject) >= 2 and subject in motion_text:
+            return True
+    return False
+
+
+def _motion_has_narrative_purpose(motion_text: str, motion: dict[str, Any]) -> bool:
+    if _has_any(motion_text, [str(value) for value in motion.get("functions", [])]):
+        return True
+    return bool(re.search(r"用于|以便|从而|强化|突出|聚焦|制造|表现|展示|揭示|建立|营造|传达|强调|放大|呈现", motion_text))
 
 
 def parse_blink_range(text: str) -> tuple[int, int] | None:
@@ -232,6 +338,50 @@ def _pause_budget(dialogue: str) -> float:
     return 0.3 * (ellipses + dashes) + 0.2 * explosive
 
 
+def extract_dialogues(picture_content: Any) -> list[tuple[str, str]]:
+    """Extract the sole canonical dialogue representation: ``【角色】对白``.
+
+    The line ends at the next field separator/newline.  Trailing performance
+    prose is trimmed after the first sentence-ending punctuation so duration
+    checks never count the merged delivery instructions as spoken text.
+    """
+    rows: list[tuple[str, str]] = []
+    for match in DIALOGUE_TAG_RE.finditer(str(picture_content or "")):
+        line = match.group("line").strip()
+        sentence = re.match(r"(.+?[。！？?!](?:[。！？?!…])?)", line)
+        if sentence:
+            line = sentence.group(1).strip()
+        if line:
+            rows.append((match.group("speaker").strip(), line))
+    return rows
+
+
+def _validate_timeline(text: str, duration: float) -> list[str]:
+    """Return concrete faults for an optional 1–3 segment single-shot timeline."""
+    segments = [(float(m.group("start")), float(m.group("end"))) for m in TIMELINE_RANGE_RE.finditer(text)]
+    if not segments:
+        return []
+    faults: list[str] = []
+    if len(segments) > 3:
+        faults.append(f"时间段数量为{len(segments)}，最多3段")
+    tolerance = 0.02
+    if abs(segments[0][0]) > tolerance:
+        faults.append(f"首段必须从0秒开始，当前{segments[0][0]:g}秒")
+    previous_end: float | None = None
+    for index, (start, end) in enumerate(segments, 1):
+        if end <= start:
+            faults.append(f"第{index}段终点{end:g}必须大于起点{start:g}")
+        if previous_end is not None:
+            if start < previous_end - tolerance:
+                faults.append(f"第{index}段与上一段重叠：{start:g}<{previous_end:g}")
+            elif start > previous_end + tolerance:
+                faults.append(f"第{index}段与上一段不连续：{previous_end:g}->{start:g}")
+        previous_end = end
+    if segments and abs(segments[-1][1] - duration) > tolerance:
+        faults.append(f"末段必须覆盖至镜头时长{duration:g}秒，当前止于{segments[-1][1]:g}秒")
+    return faults
+
+
 def _missing_fields(obj: Any, fields: list[str]) -> list[str]:
     if not isinstance(obj, dict):
         return list(fields)
@@ -261,7 +411,7 @@ def _public_density_class(text: str) -> str | None:
 
 def _validate_public_scene_ecology(
     shots: list[dict[str, Any]],
-    batch_by_id: dict[str, dict[str, Any]],
+    _batch_by_id: dict[str, dict[str, Any]],
     catalog: dict[str, dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Validate ordinary-person and ambience ecology in public locations.
@@ -276,18 +426,16 @@ def _validate_public_scene_ecology(
         "public_scene_exemption_count": 0,
         "public_scene_visual_pass_count": 0,
         "public_scene_audio_pass_count": 0,
-        "public_scene_batch_pass_count": 0,
+        "public_scene_master_pass_count": 0,
     }
     scene_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
     for index, shot in enumerate(shots, 1):
         location = f"shots[{index}]"
-        batch_id = str(shot.get("生成批次", ""))
-        batch = batch_by_id.get(batch_id, {})
         visual_text = " ".join(str(shot.get(field, "")) for field in (
-            "可见主体", "人物调度", "画面内容", "环境动态", "生成限制"
+            "可见主体", "空间站位描述", "起始状态", "画面内容", "环境动态", "生成限制"
         ))
-        scene_text = f"{visual_text} {batch.get('场景', '')} {batch.get('起始画面', '')}"
+        scene_text = visual_text
         if not PUBLIC_SCENE_RE.search(scene_text):
             continue
 
@@ -338,7 +486,7 @@ def _validate_public_scene_ecology(
             issues.append(_issue(
                 catalog,
                 "E-PUBLIC-CROWD-001",
-                f"{location}.人物调度/画面内容/环境动态",
+                f"{location}.空间站位描述/画面内容/环境动态",
                 f"公共人物生态缺少：{missing_visual}；当前={visual_text!r}",
             ))
         elif role_ok and not forbidden_extras:
@@ -348,7 +496,7 @@ def _validate_public_scene_ecology(
         audio_families = _matched_pattern_names(audio_text, PUBLIC_AUDIO_FAMILY_PATTERNS)
         audio_layers = _matched_pattern_names(audio_text, PUBLIC_AUDIO_LAYER_PATTERNS)
         required_audio_count = 3 if wide else 2
-        dialogue = str(shot.get("台词", ""))
+        dialogues = extract_dialogues(shot.get("画面内容"))
         audio_missing = []
         if is_none_value(audio_text):
             audio_missing.append("可听环境声")
@@ -356,7 +504,7 @@ def _validate_public_scene_ecology(
             audio_missing.append(f"声源族（需{required_audio_count}类，现有{sorted(audio_families)}）")
         if len(audio_layers) < required_audio_count:
             audio_missing.append(f"声场层次（需{required_audio_count}层，现有{sorted(audio_layers)}）")
-        if not is_none_value(dialogue) and not PUBLIC_DIALOGUE_DUCK_RE.search(f"{audio_text} {shot.get('生成限制', '')}"):
+        if dialogues and not PUBLIC_DIALOGUE_DUCK_RE.search(f"{audio_text} {shot.get('生成限制', '')}"):
             audio_missing.append("对白避让/ducking")
         if audio_missing:
             issues.append(_issue(
@@ -381,33 +529,15 @@ def _validate_public_scene_ecology(
             if sound_hit and not source_pattern.search(visual_text) and not offscreen_cue:
                 av_faults.append(f"声源{sound_hit.group(0)!r}在画内不可见，也未标为可信画外声")
 
-        batch_sound = str(batch.get("声音", ""))
-        batch_environment = " ".join(str(batch.get(field, "")) for field in (
-            "起始画面", "动作过程", "结束状态", "环境动态", "独立执行提示词"
-        ))
-        batch_families = _matched_pattern_names(batch_sound, PUBLIC_AUDIO_FAMILY_PATTERNS)
-        batch_layers = _matched_pattern_names(batch_sound, PUBLIC_AUDIO_LAYER_PATTERNS)
-        batch_visual_ok = bool(PUBLIC_ROLE_RE.search(batch_environment) and PUBLIC_ACTION_RE.search(batch_environment))
-        batch_audio_ok = (
-            len(batch_families) >= required_audio_count
-            and len(batch_layers) >= required_audio_count
-            and bool(audio_families & batch_families)
-        )
-        if not batch_visual_ok:
-            av_faults.append("Seedance批次环境动态未独立写明公共人物角色及动作")
-        if not batch_audio_ok:
-            av_faults.append(
-                f"Seedance批次声音未复现镜头声源/层次：镜头={sorted(audio_families)}，批次={sorted(batch_families)}，批次层次={sorted(batch_layers)}"
-            )
         if av_faults:
             issues.append(_issue(
                 catalog,
                 "E-PUBLIC-AVSYNC-001",
-                f"{location}/batch:{batch_id}",
+                location,
                 "；".join(av_faults),
             ))
         else:
-            metrics["public_scene_batch_pass_count"] += 1
+            metrics["public_scene_master_pass_count"] += 1
 
         scene_id = str(shot.get("场景连续性ID", ""))
         if scene_id:
@@ -797,7 +927,7 @@ def _validate_preventive_gates(
         ))
 
     shot_ids = {str(shot.get("镜头编号")) for shot in shots}
-    story_blob = json.dumps({"shots": shots, "batches": batches}, ensure_ascii=False)
+    story_blob = json.dumps({"shots": shots}, ensure_ascii=False)
     ledger = evidence.get("source_ledger")
     covered_shots: set[str] = set()
     allowed_treatments = {"保留", "合并", "压缩", "授权删除", "借用"}
@@ -835,7 +965,7 @@ def _validate_preventive_gates(
     else:
         missing_required = [str(term) for term in change_lock["must_include"] if str(term).strip() and str(term) not in story_blob]
         if missing_required:
-            issues.append(_issue(catalog, "E-SOURCE-005", "prevention_evidence.change_lock.must_include", f"必含内容未进入正式镜头/批次：{missing_required}"))
+            issues.append(_issue(catalog, "E-SOURCE-005", "prevention_evidence.change_lock.must_include", f"必含内容未进入正式镜头：{missing_required}"))
         residue = [str(term) for term in change_lock["must_exclude"] if str(term).strip() and str(term) in story_blob]
         if residue:
             metrics["old_content_hit_count"] = len(residue)
@@ -903,7 +1033,7 @@ def _validate_preventive_gates(
     chain_by_shot = {str(row.get("shot_id")): row for row in chains if isinstance(row, dict)} if isinstance(chains, list) else {}
     for shot in shots:
         shot_id = str(shot.get("镜头编号"))
-        dialogue = str(shot.get("台词", ""))
+        dialogue = " ".join(line for _, line in extract_dialogues(shot.get("画面内容")))
         core = str(shot.get("功能类型", ""))
         relevant = not is_none_value(dialogue) or _has_any(core, ["情绪", "关系", "冲突", "反应", "内心"])
         if not relevant:
@@ -922,22 +1052,21 @@ def _validate_preventive_gates(
     if audio_missing or (isinstance(audio, dict) and "禁止" not in str(audio.get("seedance_bgm_policy"))) or (isinstance(audio, dict) and not _has_any(str(audio.get("bgm_cue_stage")), ["画面锁定后", "后期", "独立"])):
         issues.append(_issue(catalog, "E-AUDIO-STAGE-001", "prevention_evidence.audio_workflow", f"音频分层缺失或不合规：missing={audio_missing}, audio={audio!r}"))
 
-    required_batch_fields = policy.get("i2v_required_batch_fields", [])
     forbidden_context_terms = policy.get("i2v_forbidden_context_terms", [])
-    for index, batch in enumerate(batches, 1):
-        location = f"batches[{index}]"
-        missing = _missing_fields(batch, required_batch_fields)
+    independent_fields = ["空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "环境音效", "环境动态", "光影"]
+    for index, shot in enumerate(shots, 1):
+        location = f"shots[{index}]"
+        missing = _missing_fields(shot, independent_fields)
         if missing:
-            issues.append(_issue(catalog, "E-I2V-INDEP-002", location, f"独立执行字段缺失：{missing}"))
-        batch_text = json.dumps(batch, ensure_ascii=False)
-        context_hits = [term for term in forbidden_context_terms if term in batch_text]
+            issues.append(_issue(catalog, "E-I2V-INDEP-002", location, f"紧凑母版无法空白上下文独立执行，缺字段：{missing}"))
+        master_text = " ".join(str(shot.get(field, "")) for field in independent_fields)
+        context_hits = [term for term in forbidden_context_terms if term in master_text]
         if context_hits:
             metrics["cross_context_term_count"] += len(context_hits)
             issues.append(_issue(catalog, "E-I2V-INDEP-001", location, f"跨上下文代指：{context_hits}"))
-        prompt = str(batch.get("独立执行提示词", ""))
-        prompt_without_bans = re.sub(r"(?:禁止|不要|不使用|无)(?:任何)?(?:BGM|背景音乐)", "", prompt, flags=re.I)
+        prompt_without_bans = re.sub(r"(?:禁止|不要|不使用|无)(?:任何)?(?:BGM|背景音乐)", "", master_text, flags=re.I)
         if re.search(r"加入\s*BGM|播放\s*BGM|配上\s*BGM|背景音乐(?:响起|播放|进入|渐入)", prompt_without_bans, flags=re.I):
-            issues.append(_issue(catalog, "E-AUDIO-STAGE-001", f"{location}.独立执行提示词", f"Seedance主提示词要求BGM：{prompt!r}"))
+            issues.append(_issue(catalog, "E-AUDIO-STAGE-001", f"{location}.画面内容", "正式分镜母版要求在生成阶段加入BGM。"))
 
     repair_history = evidence.get("repair_history")
     if mode == "repair" and (not isinstance(repair_history, list) or not repair_history):
@@ -988,23 +1117,44 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
     if obj.get("schema_version") != SCHEMA_VERSION:
         issues.append(_issue(catalog, "E-VERSION-001", "schema_version", f"expected {SCHEMA_VERSION}, got {obj.get('schema_version')!r}"))
 
-    required_fields = rules["canonical_shot_fields"]
+    unknown_root_fields = set(obj) - COMPACT_TOP_LEVEL_FIELDS
+    duplicate_generation_fields = sorted(
+        field
+        for field in unknown_root_fields
+        if field in FORBIDDEN_GENERATION_TOP_LEVEL_FIELDS or DERIVED_OR_CACHE_ROOT_RE.search(field)
+    )
+    if duplicate_generation_fields:
+        issues.append(_issue(
+            catalog,
+            "E-DUPLICATE-GENERATION-001",
+            "root",
+            "R10.1禁止持久化批次、派生提示词或缓存顶层字段；"
+            f"命中={duplicate_generation_fields}。旧版字段仅允许迁移层只读处理。",
+        ))
+    unregistered_root_fields = sorted(unknown_root_fields - set(duplicate_generation_fields))
+    if unregistered_root_fields:
+        issues.append(_issue(
+            catalog,
+            "E-TEMPLATE-001",
+            "root",
+            f"R10.1 canonical包含未登记顶层字段：{unregistered_root_fields}；仅允许Schema登记字段。",
+        ))
+    forbidden_extension_paths = _forbidden_extension_paths(obj.get("canonical_extension"))
+    if forbidden_extension_paths:
+        issues.append(_issue(
+            catalog,
+            "E-DUPLICATE-GENERATION-001",
+            "canonical_extension",
+            "canonical_extension不得嵌套Seedance/i2v/batch/derived/cache状态；"
+            f"命中={forbidden_extension_paths}。",
+        ))
+
+    required_fields = COMPACT_SHOT_FIELDS
     declared_order = obj.get("field_order")
     if declared_order != required_fields:
-        issues.append(_issue(catalog, "E-FIELDORDER-001", "field_order", "顶层field_order缺失或与R10字段顺序不一致。"))
+        issues.append(_issue(catalog, "E-FIELDORDER-001", "field_order", "顶层field_order缺失或与R10.1紧凑字段顺序不一致。"))
 
-    mother_columns = obj.get("mother_template_columns")
-    if mother_columns is not None:
-        formal_execution_column = rules.get("modules", {}).get("JIMENG_TIMING", {}).get(
-            "formal_execution_column", "Seedance 2.5独立正式执行分镜"
-        )
-        if not isinstance(mother_columns, list) or formal_execution_column not in mother_columns:
-            issues.append(_issue(
-                catalog,
-                "E-SEEDANCE-VERSION-001",
-                "mother_template_columns",
-                f"正式执行列必须包含{formal_execution_column!r}；当前={mother_columns!r}",
-            ))
+    batches = []
 
     source_lock = obj.get("source_lock")
     source_lock_fields = ["上集终点", "本集起点", "本集计划终点", "下一集起点", "禁止重复", "禁止提前"]
@@ -1027,6 +1177,36 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         if not isinstance(raw, dict):
             issues.append(_issue(catalog, "E-TEMPLATE-001", location, "镜头不是对象。"))
             continue
+        deprecated_hits = sorted(DEPRECATED_SHOT_FIELDS.intersection(raw))
+        if deprecated_hits:
+            issues.append(_issue(
+                catalog,
+                "E-DEPRECATED-FIELD-001",
+                location,
+                f"R10.1镜头仍含已删除字段：{deprecated_hits}",
+            ))
+        deprecated_label_hits = sorted({
+            f"{field}:{label}"
+            for field in DEPRECATED_LABEL_SCAN_FIELDS
+            for label in DEPRECATED_DISPLAY_LABELS
+            if label in str(raw.get(field, ""))
+        })
+        if deprecated_label_hits:
+            issues.append(_issue(
+                catalog,
+                "E-DEPRECATED-FIELD-001",
+                location,
+                "R10.1展示/执行字段仍含退休子标签："
+                f"{deprecated_label_hits}；原文证据字段未参与此扫描。",
+            ))
+        derived_hits = sorted(PERSISTED_DERIVED_FIELDS.intersection(raw))
+        if derived_hits:
+            issues.append(_issue(
+                catalog,
+                "E-DUPLICATE-GENERATION-001",
+                location,
+                f"canonical不得持久化按需编译字段：{derived_hits}",
+            ))
         shot, used_aliases = normalize_shot(raw, aliases)
         normalized_shots.append(shot)
         for old, new in used_aliases:
@@ -1052,17 +1232,15 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
 
         shot_type = str(shot.get("镜头类型", ""))
         visible = str(shot.get("可见主体", ""))
-        action = str(shot.get("动作与表演", ""))
         image_content = str(shot.get("画面内容", ""))
-        combined_performance = f"{action} {image_content}"
-        image_timecodes = sorted(set(HARD_TIMECODE_RE.findall(image_content)))
-        if image_timecodes:
+        combined_performance = image_content
+        timeline_faults = _validate_timeline(image_content, duration)
+        if timeline_faults:
             issues.append(_issue(
                 catalog,
-                "E-JIMENG-TIMING-001",
+                "E-TIMELINE-001",
                 f"{location}.画面内容",
-                f"正式画面描述混入硬时间码：{image_timecodes}",
-                severity="warning",
+                "；".join(timeline_faults),
             ))
         invisible_context = _has_any(f"{shot_type} {visible}", INVISIBLE_SHOT_TERMS) and not _has_any(visible, FACE_VISIBLE_TERMS)
         if invisible_context:
@@ -1070,13 +1248,13 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
             if bad:
                 issues.append(_issue(catalog, "E-VIS-005", location, f"不可见镜头写入面部/眨眼细节：{sorted(set(bad))}"))
 
-        categories = detail_categories(action)
-        emotion_labels = [x for x in ABSTRACT_EMOTIONS if x in action]
+        categories = detail_categories(image_content)
+        emotion_labels = [x for x in ABSTRACT_EMOTIONS if x in image_content]
         core_emotion = _has_any(str(shot.get("功能类型", "")), ["情绪", "关系", "冲突", "哭", "内心", "反应"]) or bool(emotion_labels)
-        if emotion_labels and not categories:
-            issues.append(_issue(catalog, "E-EXPRESSION-001", f"{location}.动作与表演", f"只有抽象情绪标签 {emotion_labels}，没有可观察细节。"))
+        if emotion_labels and len(categories) < 2:
+            issues.append(_issue(catalog, "E-EXPRESSION-001", f"{location}.画面内容", f"只有抽象情绪标签 {emotion_labels}，缺少成组的可观察表演细节；当前={categories}。"))
         elif core_emotion and len(categories) < 4:
-            issues.append(_issue(catalog, "E-EXPRESSION-002", f"{location}.动作与表演", f"重要情绪镜只有 {len(categories)} 类细节：{categories}", severity="warning"))
+            issues.append(_issue(catalog, "E-EXPRESSION-002", f"{location}.画面内容", f"重要情绪镜只有 {len(categories)} 类细节：{categories}", severity="warning"))
 
         if "眨眼" in combined_performance:
             blink_range = parse_blink_range(combined_performance)
@@ -1101,49 +1279,54 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         if _has_any(motion_text, VAGUE_TERMS) or (not matched_motion and not is_static):
             issues.append(_issue(catalog, "E-MOTION-001", f"{location}.运镜方式", f"运镜不属于R10菜单或过于空泛：{motion_text!r}"))
         if matched_motion and not is_static:
-            subject = str(shot.get("运镜主体", ""))
-            function = str(shot.get("运镜功能", ""))
-            if is_none_value(subject):
-                issues.append(_issue(catalog, "E-MOTION-002", f"{location}.运镜主体", "运镜有类型但无主体。"))
-            allowed_functions = matched_motion.get("functions", [])
-            if is_none_value(function):
-                issues.append(_issue(catalog, "E-MOTION-003", f"{location}.运镜功能", "运镜有类型但无叙事功能。", severity="warning"))
-            elif allowed_functions and not _has_any(function, allowed_functions):
-                issues.append(_issue(catalog, "E-MOTION-003", f"{location}.运镜功能", f"功能 {function!r} 与 {matched_motion['name']} 的典型功能弱匹配。", severity="warning"))
+            if not _motion_has_natural_subject(motion_text, visible):
+                issues.append(_issue(
+                    catalog,
+                    "E-MOTION-002",
+                    f"{location}.运镜方式",
+                    "移动镜头的自然句未说明摄影机朝哪个人物、道具或空间运动。",
+                ))
+            if not _motion_has_narrative_purpose(motion_text, matched_motion):
+                issues.append(_issue(
+                    catalog,
+                    "E-MOTION-003",
+                    f"{location}.运镜方式",
+                    "移动镜头的自然句未说明聚焦、揭示、强化或营造等叙事用途。",
+                    severity="warning",
+                ))
 
         light = str(shot.get("光影", ""))
         light_source = str(shot.get("光源来源", ""))
         light_direction = str(shot.get("光源方向", ""))
         color_temp = str(shot.get("色温倾向", ""))
-        if is_none_value(light_source) or is_none_value(light_direction) or is_none_value(color_temp) or (light.strip() in VAGUE_TERMS):
-            issues.append(_issue(catalog, "E-LIGHT-001", f"{location}.光影", f"缺具体光源/方向/色温：光影={light!r}, 光源={light_source!r}, 方向={light_direction!r}, 色温={color_temp!r}"))
+        if any(is_none_value(value) for value in (light, light_source, light_direction, color_temp)) or (light.strip() in VAGUE_TERMS):
+            issues.append(_issue(catalog, "E-LIGHT-001", f"{location}.光影", f"光影四项必须完整：光影={light!r}, 光源={light_source!r}, 方向={light_direction!r}, 色温={color_temp!r}"))
         if "底光" in f"{light} {light_source}" and _has_any(str(shot.get("功能类型", "")), ["甜宠", "温情", "浪漫", "关系"]):
             issues.append(_issue(catalog, "E-LIGHT-002", f"{location}.光影", "普通关系/浪漫镜使用底光，需改为有源且有剧情必要的光效。", severity="warning"))
 
-        dialogue = str(shot.get("台词", ""))
-        if not is_none_value(dialogue):
-            if is_none_value(shot.get("音色")) or is_none_value(shot.get("发声方式")):
-                issues.append(_issue(catalog, "E-VOICE-001", location, "带台词镜缺音色或发声方式。"))
-            delivery = str(shot.get("发声方式", ""))
+        dialogue_rows = extract_dialogues(image_content)
+        dialogue = "".join(line for _, line in dialogue_rows)
+        if dialogue_rows:
+            if is_none_value(shot.get("音色")):
+                issues.append(_issue(catalog, "E-VOICE-001", f"{location}.音色", "带对白镜必须保留独立音色字段。"))
+            delivery = image_content
             dimensions = [name for name, pattern in VOICE_DIMENSION_PATTERNS.items() if pattern.search(delivery)]
             if core_emotion and len(dimensions) < 6:
-                issues.append(_issue(catalog, "E-VOICE-001", f"{location}.发声方式", f"核心情绪台词只覆盖 {len(dimensions)}/6 项：{dimensions}"))
+                issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容", f"核心情绪对白的发声说明只覆盖 {len(dimensions)}/6 项：{dimensions}"))
             elif len(dimensions) < 4:
-                issues.append(_issue(catalog, "E-VOICE-002", f"{location}.发声方式", f"普通台词只覆盖 {len(dimensions)}/6 项：{dimensions}", severity="warning"))
-            punctuation_delivery = str(shot.get("标点语气", ""))
-            if is_none_value(punctuation_delivery):
-                issues.append(_issue(catalog, "E-PUNCT-001", f"{location}.标点语气", "带台词镜未填写标点语气。"))
-            else:
-                missing_punct = _validate_punctuation(dialogue, punctuation_delivery)
-                if missing_punct:
-                    issues.append(_issue(catalog, "E-PUNCT-004", f"{location}.标点语气", f"未说明：{missing_punct}"))
+                issues.append(_issue(catalog, "E-VOICE-002", f"{location}.画面内容", f"普通对白的发声说明只覆盖 {len(dimensions)}/6 项：{dimensions}", severity="warning"))
+            if re.search(r"标点(?:语气|效果|按[^：:]{0,30}表现)[：:]\s*(?:无|不适用)", image_content):
+                issues.append(_issue(catalog, "E-PUNCT-001", f"{location}.画面内容", "带对白镜在画面内容中明确取消了标点语气。"))
+            missing_punct = _validate_punctuation(dialogue, image_content)
+            if missing_punct:
+                issues.append(_issue(catalog, "E-PUNCT-004", f"{location}.画面内容", f"对白标点语气未说明：{missing_punct}"))
             min_duration = cjk_len(dialogue) / 2.8 + _pause_budget(dialogue)
             if duration + 1e-9 < min_duration:
-                issues.append(_issue(catalog, "E-DIALOGUE-003", f"{location}.台词", f"{cjk_len(dialogue)}个汉字 + 停顿预算需至少{min_duration:.2f}s，镜头仅{duration:.2f}s。"))
+                issues.append(_issue(catalog, "E-DIALOGUE-003", f"{location}.画面内容", f"{cjk_len(dialogue)}个对白汉字 + 停顿预算需至少{min_duration:.2f}s，镜头仅{duration:.2f}s。"))
 
         psych = str(shot.get("心理音轨", ""))
         if not is_none_value(psych):
-            safety = f"{shot.get('心理音轨属性', '')} {shot.get('生成限制', '')}"
+            safety = f"{psych} {shot.get('生成限制', '')} {image_content}"
             required_psych = ["不张嘴", "不驱动口型", "不生成字幕", "不计入"]
             missing = [term for term in required_psych if term not in safety]
             if missing:
@@ -1162,44 +1345,7 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         if len(directions) > 1 or len(temperatures) > 1 or len(sources) > 1:
             issues.append(_issue(catalog, "E-LIGHT-002", f"scene:{scene_id}", f"连续镜光线不一致：光源={sorted(sources)}, 方向={sorted(directions)}, 色温={sorted(temperatures)}", severity="warning"))
 
-    batches = obj.get("batches")
-    if not isinstance(batches, list):
-        batches = []
-    batch_by_id = {str(b.get("批次编号")): b for b in batches if isinstance(b, dict)}
-    shot_by_id = {str(s.get("镜头编号")): s for s in normalized_shots}
-    for index, shot in enumerate(normalized_shots, 1):
-        batch_id = str(shot.get("生成批次", ""))
-        if not batch_id or batch_id not in batch_by_id:
-            issues.append(_issue(catalog, "E-BATCH-001", f"shots[{index}].生成批次", f"批次 {batch_id!r} 不存在。"))
-
-    for index, batch in enumerate(batches, 1):
-        location = f"batches[{index}]"
-        try:
-            duration = float(batch.get("时长", 0))
-        except (TypeError, ValueError):
-            duration = 0.0
-        if duration < 4:
-            issues.append(_issue(catalog, "E-BATCH-002", f"{location}.时长", f"批次时长{duration}s，小于4s。"))
-        elif duration > 15:
-            issues.append(_issue(catalog, "E-BATCH-004", f"{location}.时长", f"批次时长{duration}s，大于15s。"))
-        elif duration > 12:
-            issues.append(_issue(catalog, "E-BATCH-003", f"{location}.时长", f"批次时长{duration}s，大于12s。", severity="warning"))
-        covered = batch.get("覆盖镜头", [])
-        if isinstance(covered, str):
-            covered = [x.strip() for x in re.split(r"[,，、]", covered) if x.strip()]
-        motion_names = set()
-        for shot_id in covered or []:
-            shot = shot_by_id.get(str(shot_id))
-            if not shot:
-                continue
-            motion_text = str(shot.get("运镜方式", ""))
-            motion = match_motion(motion_text, motions)
-            if motion and not _has_any(motion_text, STATIC_MOTIONS):
-                motion_names.add(motion["name"])
-        declared_main = str(batch.get("主运镜", ""))
-        declared_multi = len([x for x in re.split(r"[+＋、,，]", declared_main) if x.strip()]) > 1
-        if len(motion_names) > 1 or declared_multi:
-            issues.append(_issue(catalog, "E-BATCH-004", f"{location}.主运镜", f"单批次包含多个主运镜：镜头内={sorted(motion_names)}, 声明={declared_main!r}"))
+    batch_by_id: dict[str, dict[str, Any]] = {}
 
     if normalized_shots and obj.get("total_duration") is not None:
         try:

@@ -1,15 +1,32 @@
 #!/usr/bin/env python3
-"""Execute R10 functional Golden Tests against validate_storyboard.py."""
+"""Execute R10.1 compact-master Golden Tests against validate_storyboard.py."""
 from __future__ import annotations
 
 import argparse
 import copy
 import importlib.util
 import json
+import re
 import sys
 import time
 from pathlib import Path
 from typing import Any
+
+
+COMPACT_SHOT_FIELDS = [
+    "镜头编号", "时长", "累计时长", "功能类型", "场景连续性ID", "镜头类型", "可见主体",
+    "空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "音色", "心理音轨",
+    "环境音效", "环境动态", "光影", "光源来源", "光源方向", "色温倾向", "生成限制",
+    "转场类型", "切镜/转场提示词", "参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句",
+]
+COMPACT_MOTHER_COLUMNS = [
+    "分镜序号", "时长", "累计时长", "功能类型/场景连续性ID", "正式分镜母版·字段合并",
+    "GPT关键帧生成指令", "参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句",
+]
+DEPRECATED_SHOT_FIELDS = [
+    "运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气",
+    "心理音轨属性", "生成批次",
+]
 
 
 def project_root() -> Path:
@@ -53,6 +70,72 @@ def apply_mutation(obj: Any, mutation: dict[str, Any]) -> None:
         target.append(copy.deepcopy(mutation.get("value")))
     else:
         raise ValueError(f"unsupported mutation op: {op}")
+
+
+def upgrade_fixture_to_compact(obj: dict[str, Any]) -> None:
+    """Migrate legacy Golden source fixtures to the R10.1 validator input.
+
+    Mutations are intentionally applied before this adapter, so every existing
+    regression test still changes the same semantic fact while the validator
+    only ever receives the compact 27-field shape.
+    """
+    legacy_batches = obj.get("batches") if isinstance(obj.get("batches"), list) else []
+    first_batch = legacy_batches[0] if legacy_batches and isinstance(legacy_batches[0], dict) else {}
+    legacy_prompt = str(first_batch.get("独立执行提示词", ""))
+    missing_legacy_end = bool(first_batch) and "结束状态" not in first_batch
+
+    obj["schema_version"] = "R10.1"
+    declared_order = obj.get("field_order")
+    if not isinstance(declared_order, list) or not declared_order or declared_order[0] == "镜头编号":
+        obj["field_order"] = copy.deepcopy(COMPACT_SHOT_FIELDS)
+    columns = obj.get("mother_template_columns")
+    if isinstance(columns, list):
+        if any("Seedance 2.0" in str(value) for value in columns):
+            # Keep the obsolete declaration so the new duplicate-generation
+            # gate proves it is rejected.
+            pass
+        else:
+            obj["mother_template_columns"] = copy.deepcopy(COMPACT_MOTHER_COLUMNS)
+
+    for shot in obj.get("shots", []):
+        if not isinstance(shot, dict):
+            continue
+        scheduling = str(shot.get("人物调度") or shot.get("空间站位描述") or "人物与道具保持既定空间关系")
+        action = str(shot.get("动作与表演") or "")
+        picture = str(shot.get("画面内容") or "")
+        dialogue = str(shot.get("台词") or "")
+        delivery = str(shot.get("发声方式") or "")
+        punctuation = str(shot.get("标点语气") or "")
+        visible = str(shot.get("可见主体") or "角色")
+        speaker = "女主" if "女主" in visible else re.split(r"[、，,；;\s]", visible, maxsplit=1)[0] or "角色"
+
+        sections = [picture, action]
+        if dialogue and not dialogue.startswith(("无", "不适用")):
+            sections.append(f"【{speaker}】{dialogue}")
+            sections.append(f"发声说明：{delivery}")
+            sections.append(f"标点按停顿、上扬、重落或收住表现：{punctuation}")
+        if legacy_prompt and any(term in legacy_prompt for term in ("上一镜", "关键帧", "继续原动作", "加入BGM", "背景音乐")):
+            sections.append(legacy_prompt)
+        shot["画面内容"] = "；".join(section.strip("； ") for section in sections if section.strip("； "))
+        shot["空间站位描述"] = scheduling
+        shot["起始状态"] = str(shot.get("起始状态") or ("人物位置、朝向、视线、姿态与道具起始状态明确；" + scheduling))
+        if missing_legacy_end:
+            shot.pop("起始状态", None)
+
+        motion = str(shot.get("运镜方式") or "")
+        if not any(term in motion for term in ("无运镜", "固定镜头", "静态镜头", "固定机位")):
+            subject = str(shot.get("运镜主体") or "无")
+            function = str(shot.get("运镜功能") or "无")
+            shot["运镜方式"] = f"{motion}，摄影机围绕{subject}运动，用于{function}"
+
+        psych = str(shot.get("心理音轨") or "")
+        psych_attr = str(shot.get("心理音轨属性") or "")
+        if psych and not psych.startswith(("无", "不适用")) and psych_attr:
+            shot["心理音轨"] = f"{psych}；{psych_attr}"
+        for field in DEPRECATED_SHOT_FIELDS:
+            shot.pop(field, None)
+
+    obj.pop("batches", None)
 
 
 def inject_pg1_fixture_evidence(obj: dict[str, Any]) -> None:
@@ -145,7 +228,7 @@ def inject_pg1_fixture_evidence(obj: dict[str, Any]) -> None:
             "空间连续",
             "表演链",
             "镜头节奏",
-            "Seedance独立执行",
+            "正式母版单镜执行完整性",
             "禁项与声音",
             "统计闭合",
         ],
@@ -331,18 +414,21 @@ def main() -> int:
             inject_chapter_intake_evidence(obj)
         for mutation in test.get("mutations", []):
             apply_mutation(obj, mutation)
+        if not test.get("skip_fixture_upgrade"):
+            upgrade_fixture_to_compact(obj)
         report = validator.validate_project(obj, mode=test.get("mode", "audit"), rules_path=args.rules)
         codes = [issue["error_code"] for issue in report["issues"]]
+        expected_status = test["expected_status"]
         expected_codes = test.get("expected_error_codes", [])
         forbidden_codes = test.get("forbidden_error_codes", [])
         missing = [code for code in expected_codes if code not in codes]
         forbidden_present = [code for code in forbidden_codes if code in codes]
-        status_match = report["status"] == test["expected_status"]
+        status_match = report["status"] == expected_status
         passed = status_match and not missing and not forbidden_present
         results.append({
             "test_id": test["test_id"],
             "passed": passed,
-            "expected_status": test["expected_status"],
+            "expected_status": expected_status,
             "actual_status": report["status"],
             "expected_error_codes": expected_codes,
             "actual_error_codes": codes,
