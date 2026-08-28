@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:shortdrama-storyboard:r10",
-  "title": "R10 Chinese Short Drama Storyboard",
+  "$id": "urn:shortdrama-storyboard:r10.1-compact-master",
+  "title": "R10.1 Chinese Short Drama Compact Storyboard Master",
+  "description": "模型只提交一次语义原子；正式分镜母版与GPT关键帧由服务端按需编译。画面内容同时承载动作、表演、对白、发声和可选的Seedance 2.5单镜头时间阶段，不再生成独立批次。",
   "type": "object",
   "required": [
     "project_version",
@@ -11,19 +12,13 @@
     "field_order",
     "source_lock",
     "shots",
-    "batches",
     "total_duration"
   ],
   "properties": {
-    "project_version": {
-      "const": "V16.3-148-R10-StableRuntime"
-    },
-    "schema_version": {
-      "const": "R10.0"
-    },
-    "workflow_profile": {
-      "const": "R10-PG1"
-    },
+    "project_version": {"const": "V16.3-148-R10-StableRuntime"},
+    "schema_version": {"const": "R10.1"},
+    "schema_profile": {"const": "compact_master_v1"},
+    "workflow_profile": {"const": "R10-PG1"},
     "prevention_evidence": {
       "type": "object",
       "required": [
@@ -39,183 +34,47 @@
         "repair_history"
       ],
       "properties": {
-        "scope_lock": {
-          "type": "object"
-        },
-        "source_ledger": {
-          "type": "array",
-          "minItems": 1
-        },
-        "change_lock": {
-          "type": "object"
-        },
-        "cognition_matrix": {
-          "type": "array",
-          "minItems": 1
-        },
-        "scene_state_ledger": {
-          "type": "array",
-          "minItems": 1
-        },
-        "shot_plan": {
-          "type": "array",
-          "minItems": 1
-        },
-        "performance_chains": {
-          "type": "array"
-        },
-        "audio_workflow": {
-          "type": "object"
-        },
-        "audit_layers": {
-          "type": "array",
-          "minItems": 8
-        },
-        "repair_history": {
-          "type": "array"
-        }
+        "scope_lock": {"type": "object"},
+        "source_ledger": {"type": "array", "minItems": 1},
+        "change_lock": {"type": "object"},
+        "cognition_matrix": {"type": "array", "minItems": 1},
+        "scene_state_ledger": {"type": "array", "minItems": 1},
+        "shot_plan": {"type": "array", "minItems": 1},
+        "performance_chains": {"type": "array"},
+        "audio_workflow": {"type": "object"},
+        "audit_layers": {"type": "array", "minItems": 8},
+        "repair_history": {"type": "array"}
       },
       "additionalProperties": true
     },
     "source_ingestion": {
       "type": "object",
-      "description": "仅在小说章节或连续叙事直接转分镜时使用的前置规划证据。",
-      "required": [
-        "mode",
-        "chapter_id",
-        "complete_read",
-        "chunk_count",
-        "chunks_read",
-        "boundary_context",
-        "chapter_goal",
-        "events",
-        "causal_links",
-        "character_state_changes",
-        "source_treatment_ledger",
-        "protected_dialogue",
-        "adaptation_budget",
-        "beat_plan",
-        "visualization_license",
-        "new_plot_events",
-        "uncertainty_status",
-        "coverage_metrics"
-      ],
-      "properties": {
-        "mode": {
-          "const": "chapter_to_storyboard"
-        },
-        "chapter_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "complete_read": {
-          "const": true
-        },
-        "chunk_count": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "chunks_read": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "boundary_context": {
-          "type": "object",
-          "required": [
-            "previous_end",
-            "current_start",
-            "current_end",
-            "next_start"
-          ]
-        },
-        "chapter_goal": {
-          "type": "string",
-          "minLength": 1
-        },
-        "events": {
-          "type": "array",
-          "minItems": 1
-        },
-        "causal_links": {
-          "type": "array",
-          "minItems": 1
-        },
-        "character_state_changes": {
-          "type": "array",
-          "minItems": 1
-        },
-        "source_treatment_ledger": {
-          "type": "array",
-          "minItems": 1
-        },
-        "protected_dialogue": {
-          "type": "array"
-        },
-        "adaptation_budget": {
-          "type": "object",
-          "required": [
-            "target_duration_seconds",
-            "dialogue_seconds",
-            "action_seconds",
-            "transition_seconds",
-            "shot_count_min",
-            "shot_count_max"
-          ]
-        },
-        "beat_plan": {
-          "type": "array",
-          "minItems": 1
-        },
-        "visualization_license": {
-          "type": "array"
-        },
-        "new_plot_events": {
-          "type": "array",
-          "maxItems": 0
-        },
-        "uncertainty_status": {
-          "enum": [
-            "clear",
-            "resolved"
-          ]
-        },
-        "coverage_metrics": {
-          "type": "object",
-          "required": [
-            "core_event_coverage_percent",
-            "causal_link_coverage_percent",
-            "character_state_change_coverage_percent",
-            "protected_dialogue_coverage_percent",
-            "source_treatment_percent"
-          ],
-          "properties": {
-            "core_event_coverage_percent": {
-              "const": 100
-            },
-            "causal_link_coverage_percent": {
-              "const": 100
-            },
-            "character_state_change_coverage_percent": {
-              "const": 100
-            },
-            "protected_dialogue_coverage_percent": {
-              "const": 100
-            },
-            "source_treatment_percent": {
-              "const": 100
-            }
-          }
-        }
-      },
+      "description": "仅在小说章节或连续叙事直接转分镜时使用；细粒度门禁由功能验证器执行。",
       "additionalProperties": true
     },
-    "mother_template_columns": {
-      "type": "array",
-      "description": "仅在导出10列正式母版时填写；正式执行列必须使用Seedance 2.5名称。",
-      "contains": {
-        "const": "Seedance 2.5独立正式执行分镜"
-      }
+    "chapter_intake": {"type": "object", "additionalProperties": true},
+    "chapter_map": {"type": ["object", "array"]},
+    "source_mapping": {"type": ["object", "array"]},
+    "protected_dialogue": {"type": "array"},
+    "cognition_matrix": {"type": ["object", "array"]},
+    "scene_state": {"type": ["object", "array"]},
+    "coverage": {"type": "object"},
+    "anchors": {"type": ["object", "array"]},
+    "character_anchors": {"type": ["object", "array"]},
+    "scene_anchors": {"type": ["object", "array"]},
+    "prop_anchors": {"type": ["object", "array"]},
+    "costume_anchors": {"type": ["object", "array"]},
+    "project_anchors": {"type": ["object", "array"]},
+    "stage_evidence": {"type": "object", "additionalProperties": true},
+    "human_review": {"type": "object", "additionalProperties": true},
+    "canonical_extension": {
+      "type": "object",
+      "description": "已登记的兼容扩展容器；不得在根级新增任意字段，也不得嵌套Seedance/i2v/batch/derived/cache状态，递归禁项由功能验证器执行。",
+      "additionalProperties": true
     },
+    "episode_id": {"type": "string", "minLength": 1},
+    "episode": {"type": ["string", "integer"]},
+    "分集": {"type": ["string", "integer"]},
     "field_order": {
       "const": [
         "镜头编号",
@@ -225,19 +84,13 @@
         "场景连续性ID",
         "镜头类型",
         "可见主体",
+        "空间站位描述",
+        "起始状态",
         "机位",
         "运镜方式",
-        "运镜主体",
-        "运镜功能",
-        "人物调度",
         "画面内容",
-        "动作与表演",
-        "台词",
         "音色",
-        "发声方式",
-        "标点语气",
         "心理音轨",
-        "心理音轨属性",
         "环境音效",
         "环境动态",
         "光影",
@@ -250,352 +103,113 @@
         "参考图锚定",
         "覆盖原文",
         "原文依据类型",
-        "原文支撑句",
-        "生成批次"
+        "原文支撑句"
       ]
     },
-    "source_lock": {
-      "type": "object"
-    },
+    "source_lock": {"type": "object"},
     "shots": {
       "type": "array",
       "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": [
-          "镜头编号",
-          "时长",
-          "累计时长",
-          "功能类型",
-          "场景连续性ID",
-          "镜头类型",
-          "可见主体",
-          "机位",
-          "运镜方式",
-          "运镜主体",
-          "运镜功能",
-          "人物调度",
-          "画面内容",
-          "动作与表演",
-          "台词",
-          "音色",
-          "发声方式",
-          "标点语气",
-          "心理音轨",
-          "心理音轨属性",
-          "环境音效",
-          "环境动态",
-          "光影",
-          "光源来源",
-          "光源方向",
-          "色温倾向",
-          "生成限制",
-          "转场类型",
-          "切镜/转场提示词",
-          "参考图锚定",
-          "覆盖原文",
-          "原文依据类型",
-          "原文支撑句",
-          "生成批次"
-        ],
-        "properties": {
-          "镜头编号": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "时长": {
-            "type": "number",
-            "minimum": 0
-          },
-          "累计时长": {
-            "type": "number",
-            "minimum": 0
-          },
-          "功能类型": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "场景连续性ID": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "镜头类型": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "可见主体": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "机位": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "运镜方式": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "运镜主体": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "运镜功能": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "人物调度": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "画面内容": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "动作与表演": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "台词": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "音色": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "发声方式": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "标点语气": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "心理音轨": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "心理音轨属性": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "环境音效": {
-            "description": "具体可追溯声源。公共场景按景别写两至三类近中远声源；带对白时写明环境底声避让，禁止只填环境声或街道嘈杂声。",
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "环境动态": {
-            "description": "场景内可见动态。公共场景必须含普通人物密度、地点角色、错峰动作和空间层次，或同时给出空场状态及剧情原因。",
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "光影": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "光源来源": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "光源方向": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "色温倾向": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "生成限制": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "转场类型": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "切镜/转场提示词": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "参考图锚定": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "覆盖原文": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "原文依据类型": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "原文支撑句": {
-            "type": [
-              "string",
-              "number"
-            ]
-          },
-          "生成批次": {
-            "type": [
-              "string",
-              "number"
-            ]
-          }
-        },
-        "additionalProperties": true
-      }
+      "items": {"$ref": "#/$defs/shot"}
     },
-    "batches": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "批次编号",
-          "覆盖镜头",
-          "时长",
-          "主运镜",
-          "生成限制",
-          "起始画面",
-          "起始表演状态",
-          "动作过程",
-          "听话反应",
-          "结束状态",
-          "摄影机",
-          "声音",
-          "环境动态",
-          "光影",
-          "独立执行提示词"
-        ],
-        "properties": {
-          "批次编号": {
-            "type": "string"
-          },
-          "覆盖镜头": {
-            "type": [
-              "array",
-              "string"
+    "total_duration": {"type": "number", "minimum": 0}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "shot": {
+      "type": "object",
+      "required": [
+        "镜头编号",
+        "时长",
+        "累计时长",
+        "功能类型",
+        "场景连续性ID",
+        "镜头类型",
+        "可见主体",
+        "空间站位描述",
+        "起始状态",
+        "机位",
+        "运镜方式",
+        "画面内容",
+        "音色",
+        "心理音轨",
+        "环境音效",
+        "环境动态",
+        "光影",
+        "光源来源",
+        "光源方向",
+        "色温倾向",
+        "生成限制",
+        "转场类型",
+        "切镜/转场提示词",
+        "参考图锚定",
+        "覆盖原文",
+        "原文依据类型",
+        "原文支撑句"
+      ],
+      "properties": {
+        "shot_uid": {"type": "string", "minLength": 1, "description": "服务端持久化的不可变镜头身份。"},
+        "scene_uid": {"type": "string", "minLength": 1},
+        "episode_id": {"type": "string", "minLength": 1},
+        "镜头编号": {"type": ["string", "number"]},
+        "时长": {"type": "number", "exclusiveMinimum": 0},
+        "累计时长": {"type": "number", "minimum": 0},
+        "功能类型": {"type": ["string", "number"]},
+        "场景连续性ID": {"type": ["string", "number"]},
+        "镜头类型": {"type": ["string", "number"]},
+        "可见主体": {"type": ["string", "number"]},
+        "空间站位描述": {"type": "string", "minLength": 1, "description": "独立说明空间拓扑、人物相对位置、门窗、道具和画面层次。"},
+        "起始状态": {"type": "string", "minLength": 1, "description": "独立说明镜头开始瞬间的位置、朝向、姿态、视线、道具与表演状态。"},
+        "机位": {"type": ["string", "number"]},
+        "运镜方式": {"type": "string", "minLength": 1, "description": "移动镜头在同一字段写明速度、运镜主体和叙事功能。"},
+        "画面内容": {"type": "string", "minLength": 1, "description": "描述本镜头内人物怎么做、怎么说、表情动作、听者反应和镜尾状态；对白使用【角色】对白；发声六维与标点语气也写在此字段。可写1至3个连续、不重叠、覆盖完整时长的时间段。"},
+        "音色": {"type": "string", "minLength": 1, "description": "保留为独立字段；无对白时写不适用及原因。"},
+        "心理音轨": {"type": ["string", "number"]},
+        "环境音效": {"type": ["string", "number"]},
+        "环境动态": {"type": ["string", "number"]},
+        "光影": {"type": ["string", "number"]},
+        "光源来源": {"type": ["string", "number"]},
+        "光源方向": {"type": ["string", "number"]},
+        "色温倾向": {"type": ["string", "number"]},
+        "生成限制": {"type": ["string", "number"]},
+        "转场类型": {"type": ["string", "number"]},
+        "切镜/转场提示词": {"type": ["string", "number"]},
+        "参考图锚定": {"type": ["string", "number"]},
+        "覆盖原文": {"type": ["string", "number"]},
+        "原文依据类型": {"type": ["string", "number"]},
+        "原文支撑句": {"type": ["string", "number"]}
+      },
+      "allOf": [
+        {
+          "not": {
+            "anyOf": [
+              {"required": ["运镜主体"]},
+              {"required": ["运镜功能"]},
+              {"required": ["人物调度"]},
+              {"required": ["动作与表演"]},
+              {"required": ["台词"]},
+              {"required": ["发声方式"]},
+              {"required": ["标点语气"]},
+              {"required": ["心理音轨属性"]},
+              {"required": ["生成批次"]}
             ]
-          },
-          "时长": {
-            "type": "number",
-            "minimum": 0
-          },
-          "主运镜": {
-            "type": "string"
-          },
-          "生成限制": {
-            "type": "string"
-          },
-          "起始画面": {
-            "type": "string",
-            "minLength": 1
-          },
-          "起始表演状态": {
-            "type": "string",
-            "minLength": 1
-          },
-          "动作过程": {
-            "type": "string",
-            "minLength": 1
-          },
-          "听话反应": {
-            "type": "string",
-            "minLength": 1
-          },
-          "结束状态": {
-            "type": "string",
-            "minLength": 1
-          },
-          "摄影机": {
-            "type": "string",
-            "minLength": 1
-          },
-          "声音": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Seedance独立声音层。公共场景必须复现正式镜头的具体声源、声场层次与对白避让；禁止BGM。"
-          },
-          "环境动态": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Seedance独立环境动态。公共场景必须从零写明普通人物角色、错峰动作和空间分布。"
-          },
-          "光影": {
-            "type": "string",
-            "minLength": 1
-          },
-          "独立执行提示词": {
-            "type": "string",
-            "minLength": 1
           }
         }
-      }
-    },
-    "total_duration": {
-      "type": "number",
-      "minimum": 0
+      ],
+      "additionalProperties": false
     }
   },
+  "x-deprecated-shot-fields": [
+    "运镜主体",
+    "运镜功能",
+    "人物调度",
+    "动作与表演",
+    "台词",
+    "发声方式",
+    "标点语气",
+    "心理音轨属性",
+    "生成批次"
+  ],
   "x-field-aliases": {
     "镜头": "镜头类型",
     "拍摄方式": "机位",
@@ -603,7 +217,16 @@
     "参考锚定": "参考图锚定",
     "原文依据": "原文支撑句"
   },
-  "x-version": "V16.3-148-R10-StableRuntime"
-  ,
-  "x-workflow-revision": "R10-PG1"
+  "x-top-level-allowlist": [
+    "project_version", "schema_version", "schema_profile", "workflow_profile",
+    "prevention_evidence", "source_ingestion", "chapter_intake",
+    "field_order", "source_lock", "shots", "total_duration", "chapter_map", "source_mapping",
+    "protected_dialogue", "cognition_matrix", "scene_state", "coverage", "anchors",
+    "character_anchors", "scene_anchors", "prop_anchors", "costume_anchors", "project_anchors",
+    "stage_evidence", "human_review", "canonical_extension",
+    "episode_id", "episode", "分集"
+  ],
+  "x-version": "V16.3-148-R10-StableRuntime",
+  "x-workflow-revision": "R10-PG1",
+  "x-schema-profile": "compact_master_v1"
 }

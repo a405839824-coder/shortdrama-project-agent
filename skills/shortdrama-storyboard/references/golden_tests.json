@@ -1,6 +1,6 @@
 {
   "version": "V16.3-148-R10-StableRuntime",
-  "schema_version": "R10.0",
+  "schema_version": "R10.1",
   "workflow_revision": "R10-PG1",
   "inject_pg1_fixture_evidence": true,
   "fixtures": {
@@ -687,12 +687,86 @@
         "最终归档": "approved",
         "签名": "TEST-SIGNATURE"
       }
+    },
+    "valid_compact_master": {
+      "project_version": "V16.3-148-R10-StableRuntime",
+      "schema_version": "R10.1",
+      "field_order": [
+        "镜头编号",
+        "时长",
+        "累计时长",
+        "功能类型",
+        "场景连续性ID",
+        "镜头类型",
+        "可见主体",
+        "空间站位描述",
+        "起始状态",
+        "机位",
+        "运镜方式",
+        "画面内容",
+        "音色",
+        "心理音轨",
+        "环境音效",
+        "环境动态",
+        "光影",
+        "光源来源",
+        "光源方向",
+        "色温倾向",
+        "生成限制",
+        "转场类型",
+        "切镜/转场提示词",
+        "参考图锚定",
+        "覆盖原文",
+        "原文依据类型",
+        "原文支撑句"
+      ],
+      "source_lock": {
+        "上集终点": "上一集结束于她走到门前。",
+        "本集起点": "她推门进屋。",
+        "本集计划终点": "她看见桌上的信。",
+        "下一集起点": "她伸手拿起信。",
+        "禁止重复": "不重复上一集走到门前的过程。",
+        "禁止提前": "不提前展示信中内容。"
+      },
+      "shots": [
+        {
+          "镜头编号": "S001",
+          "时长": 5.0,
+          "累计时长": 5.0,
+          "功能类型": "关系情绪",
+          "场景连续性ID": "SC01",
+          "镜头类型": "中近景",
+          "可见主体": "女主上半身、面部与双手可见，听者肩缘可辨",
+          "空间站位描述": "女主站在中央偏左面向右侧主位，听者肩缘位于右前景，桌面信件保持可见。",
+          "起始状态": "女主已停稳，双手离开门框，先看听者再垂眸整理袖口；听者肩背未放松。",
+          "机位": "主位左前方平视65mm，焦点在女主",
+          "运镜方式": "推镜头，摄影机极缓慢推近女主，用于聚焦注意力",
+          "画面内容": "0.0–0.8秒，女主垂眸整理袖口，嘴角收住；0.8–4.3秒，她重新抬眼，肩颈微紧，呼吸克制后开口：【女主】你终于来了？声音压低，语速放慢，开口前呼吸稳定，在‘终于’前停顿，‘来了’加重，尾音克制上扬，问号表现试探；4.3–5.0秒，听者延后反应，女主保持视线和站位，动作收束。",
+          "音色": "清冷偏柔的青年女声",
+          "心理音轨": "不适用：本镜无心理音轨",
+          "环境音效": "近处衣料与呼吸声，中层木门轻响，远处晨鸟压低；对白清晰，环境底声避让。",
+          "环境动态": "窗纱轻动，桌面纸角微颤，人物之外无无源人群。",
+          "光影": "窗侧晨光勾勒人物与门框，面部不过曝。",
+          "光源来源": "左侧窗纸透入的自然晨光与右前浅墙反射",
+          "光源方向": "左侧向右侧衰减，右前弱补",
+          "色温倾向": "中性微暖晨光",
+          "生成限制": "禁止字幕、BGM、现代物件、额外角色、人物看镜头和跨镜代指。",
+          "转场类型": "视线与动作切",
+          "切镜/转场提示词": "女主保持视线、站位与稳定呼吸后切。",
+          "参考图锚定": "人物图锁脸与服装，场景图锁空间；排除分镜图风格污染。",
+          "覆盖原文": "她抬眼看向来人：你终于来了？",
+          "原文依据类型": "直接动作+原台词",
+          "原文支撑句": "她抬眼看向来人：你终于来了？"
+        }
+      ],
+      "total_duration": 5.0
     }
   },
   "tests": [
     {
       "test_id": "G-R10-BASE-PASS",
-      "fixture_id": "valid_base",
+      "fixture_id": "valid_compact_master",
+      "skip_fixture_upgrade": true,
       "mode": "audit",
       "mutations": [],
       "expected_status": "pass",
@@ -1597,7 +1671,7 @@
       "forbidden_error_codes": []
     },
     {
-      "test_id": "G-R10-BATCH-SHORT",
+      "test_id": "G-R10.1-LEGACY-BATCH-SHORT-IGNORED",
       "fixture_id": "valid_base",
       "mode": "audit",
       "mutations": [
@@ -1607,14 +1681,12 @@
           "value": 3.5
         }
       ],
-      "expected_status": "fail",
-      "expected_error_codes": [
-        "E-BATCH-002"
-      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
       "forbidden_error_codes": []
     },
     {
-      "test_id": "G-R10-BATCH-WARN-LONG",
+      "test_id": "G-R10.1-LEGACY-BATCH-WARN-LONG-IGNORED",
       "fixture_id": "valid_base",
       "mode": "audit",
       "mutations": [
@@ -1624,14 +1696,12 @@
           "value": 13.0
         }
       ],
-      "expected_status": "warning",
-      "expected_error_codes": [
-        "E-BATCH-003"
-      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
       "forbidden_error_codes": []
     },
     {
-      "test_id": "G-R10-BATCH-FAIL-LONG",
+      "test_id": "G-R10.1-LEGACY-BATCH-FAIL-LONG-IGNORED",
       "fixture_id": "valid_base",
       "mode": "audit",
       "mutations": [
@@ -1641,14 +1711,12 @@
           "value": 16.0
         }
       ],
-      "expected_status": "fail",
-      "expected_error_codes": [
-        "E-BATCH-004"
-      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
       "forbidden_error_codes": []
     },
     {
-      "test_id": "G-R10-BATCH-MULTI-MOTION",
+      "test_id": "G-R10.1-LEGACY-BATCH-MULTI-MOTION-IGNORED",
       "fixture_id": "valid_two_shot",
       "mode": "audit",
       "mutations": [
@@ -1668,10 +1736,8 @@
           "value": "推镜头+拉镜头"
         }
       ],
-      "expected_status": "fail",
-      "expected_error_codes": [
-        "E-BATCH-004"
-      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
       "forbidden_error_codes": []
     },
     {
@@ -2143,7 +2209,7 @@
       "forbidden_error_codes": []
     },
     {
-      "test_id": "G-R10-PG1-JIMENG-TIMECODE-IN-VISUAL",
+      "test_id": "G-R10.1-SEEDANCE25-TIMELINE-IN-VISUAL-PASS",
       "fixture_id": "valid_base",
       "mode": "audit",
       "mutations": [
@@ -2153,10 +2219,8 @@
           "value": "0—2秒女主推门；2—4秒女主看向桌上的信。"
         }
       ],
-      "expected_status": "warning",
-      "expected_error_codes": [
-        "E-JIMENG-TIMING-001"
-      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
       "forbidden_error_codes": []
     },
     {
@@ -2299,7 +2363,7 @@
       "forbidden_error_codes": []
     },
     {
-      "test_id": "G-R10-PG1-SEEDANCE25-COLUMN-PASS",
+      "test_id": "G-R10.1-MOTHER-COLUMNS-CANONICAL-FORBIDDEN",
       "fixture_id": "valid_base",
       "mode": "audit",
       "mutations": [
@@ -2307,20 +2371,27 @@
           "op": "set",
           "path": "mother_template_columns",
           "value": [
-            "时间码",
-            "画面内容",
-            "Seedance 2.5独立正式执行分镜"
+            "分镜序号",
+            "时长",
+            "累计时长",
+            "功能类型/场景连续性ID",
+            "正式分镜母版·字段合并",
+            "GPT关键帧生成指令",
+            "参考图锚定",
+            "覆盖原文",
+            "原文依据类型",
+            "原文支撑句"
           ]
         }
       ],
-      "expected_status": "pass",
-      "expected_error_codes": [],
-      "forbidden_error_codes": [
-        "E-SEEDANCE-VERSION-001"
-      ]
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-DUPLICATE-GENERATION-001"
+      ],
+      "forbidden_error_codes": []
     },
     {
-      "test_id": "G-R10-PG1-SEEDANCE20-COLUMN-FAIL",
+      "test_id": "G-R10.1-LEGACY-SEEDANCE-COLUMN-FAIL",
       "fixture_id": "valid_base",
       "mode": "audit",
       "mutations": [
@@ -2336,7 +2407,7 @@
       ],
       "expected_status": "fail",
       "expected_error_codes": [
-        "E-SEEDANCE-VERSION-001"
+        "E-DUPLICATE-GENERATION-001"
       ],
       "forbidden_error_codes": []
     }

@@ -2,6 +2,25 @@
   "profile_version": "R10-PROJECT-AGENT-1",
   "runtime_version": "V16.3-148-R10-StableRuntime",
   "workflow_revision": "R10-PG1",
+  "compact_master_contract": {
+    "plugin_version": "0.5.0",
+    "schema_version": "R10.1",
+    "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
+    "canonical_atomic_field_count": 27,
+    "mother_template_column_count": 10,
+    "single_execution_master": "正式分镜母版·字段合并",
+    "export_only_projection": "GPT关键帧生成指令",
+    "forbid_new_writes": ["人物调度", "动作与表演", "台词", "发声方式", "标点语气", "心理音轨属性", "生成批次", "batches", "Seedance 2.5独立正式执行分镜"],
+    "background_seedance_generation": false,
+    "legacy_policy": "read_only_migration_to_compact_successor"
+  },
+  "storyboard_window_architecture": {
+    "always_required": ["production", "independent_audit"],
+    "conditional": "repair",
+    "repair_activation": "independent_audit_fail_and_explicit_authorization",
+    "repair_return": "original_independent_audit_authority",
+    "quality_contract": "49项validator完整机器验证 + G0-G13 + 首次/失效后显式8层语义审计；命中精确独立审计缓存时才复用"
+  },
   "change_operations": [
     "add",
     "modify",
@@ -121,7 +140,7 @@
       "operation": "change_impact",
       "group": "变更管理",
       "status": "supported",
-      "output": "原文、节拍、认知、场景状态、镜头、Seedance、声音和统计影响矩阵",
+      "output": "原文、节拍、认知、场景状态、27字段单镜母版、声音、十列投影和统计影响矩阵",
       "approval_policy": "required_before_mutation"
     },
     {
@@ -135,42 +154,35 @@
       "operation": "storyboard_create",
       "group": "分镜工作流",
       "status": "supported",
-      "output": "R10正式分镜、章节/原文映射、公共场景人物与环境音生态和Seedance 2.5独立正式执行分镜",
+      "output": "R10.1 compact 27字段正式分镜、章节/原文映射、公共场景人物与环境音生态，以及精确十列XLSX；正式字段合并内容是唯一单镜执行母版",
       "approval_policy": "explicit_execute"
     },
     {
       "operation": "storyboard_regenerate",
       "group": "分镜工作流",
       "status": "supported",
-      "output": "根据最新版剧本重建全量或受影响范围分镜",
+      "output": "根据最新版剧本走全量或稳定UID增量路线，输出完整canonical、XLSX、生产预检与审计handoff",
       "approval_policy": "explicit_execute"
     },
     {
       "operation": "storyboard_change",
       "group": "分镜工作流",
       "status": "supported",
-      "output": "镜头新增、修改、删除、替换、合并、拆分或移动及连锁更新",
+      "output": "仅对精确对白、标点、顺序/分句、说话人、原文映射、认知和保护对白证据均未变化的同身份同数量镜头，以稳定UID、更新后的镜头级证据、精确边界和CAS执行视觉或其他非认知增量变更；任何对白/说话人变化完整重建受影响场景或分集；服务端只更新27字段原子canonical并在导出时确定性投影正式母版与GPT关键帧，不生成Seedance或批次副本",
       "approval_policy": "explicit_execute"
     },
     {
       "operation": "storyboard_audit",
       "group": "审计闭环",
       "status": "supported",
-      "output": "源文至统计全表审计（含公共场景人物/环境音生态）、问题证据和简洁结论",
+      "output": "原审计窗口对精确compact canonical提交八层语义证据，服务端合并新鲜机器校验并签发问题证据或最终结论；仅精确缓存命中可省略提交，审计过程禁止再生成内容",
       "approval_policy": "read_only"
     },
     {
       "operation": "storyboard_repair",
       "group": "审计闭环",
       "status": "supported",
-      "output": "统一修正、影响回归、残留和新增问题闭合版本",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "seedance_create",
-      "group": "视频生产",
-      "status": "supported",
-      "output": "脱离GPT上下文可独立执行且复现公共人物/环境声生态的Seedance 2.5正式提示词与批次",
+      "output": "仅在审计失败且授权后按一次性修复包生成新版本，完整回归并返回原审计窗口",
       "approval_policy": "explicit_execute"
     },
     {
@@ -221,7 +233,7 @@
       "operation": "production_batch",
       "group": "交付生产",
       "status": "supported",
-      "output": "生成批次、镜头包、关键帧包、i2v包和声音Cue清单",
+      "output": "按需生成镜头包、关键帧包和声音Cue清单；i2v直接使用正式单镜母版，不预生成或持久化独立Seedance提示词/批次",
       "approval_policy": "explicit_execute"
     },
     {
@@ -287,6 +299,10 @@
     {
       "id": "no_silent_destructive_overwrite",
       "description": "不能静默覆盖唯一原件、删除未授权范围或跨越用户锁定的剧情边界。"
+    },
+    {
+      "id": "delta_no_structural_edit_v050",
+      "description": "0.5.0增量路线只支持稳定UID、同数量且精确对白与说话人不变的视觉或其他非认知执行变化；不支持任何对白/说话人增删改、重排、拆并或改归属，也不支持镜头插入、删除、移动、拆分、合并或重编号；这些变化及原文/认知/保护对白/边界/拓扑失效必须完整重建受影响场景或分集。"
     }
   ]
 }
