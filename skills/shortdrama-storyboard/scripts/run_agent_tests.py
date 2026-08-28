@@ -29,10 +29,17 @@ def load_agent():
 agent = load_agent()
 
 
-def event(event_id: str, audit_round: int, status: str = "initial", result: str = "fail_current", cycle: str = "CYCLE-001") -> dict[str, Any]:
+def event(
+    event_id: str,
+    audit_round: int,
+    status: str = "initial",
+    result: str = "fail_current",
+    cycle: str = "CYCLE-001",
+    category: str = "表演链",
+) -> dict[str, Any]:
     issues = [] if result == "pass" else [{
         "error_code": "E-PERFORM-TEST",
-        "category": "表演链",
+        "category": category,
         "severity": "fail",
         "blocking": True,
         "shot_ids": ["S03"],
@@ -79,6 +86,7 @@ def test_init_and_validate() -> None:
     ledger = fresh()
     assert_true(agent.validate_ledger(ledger) == [], "new ledger must validate")
     assert_true(ledger["policy"]["formal_rule_auto_mutation"] is False, "safe mode must forbid rule mutation")
+    assert_true(agent.AUDIT_CATEGORIES[5] == "正式母版单镜执行完整性", "canonical audit category must use compact master")
 
 
 def test_first_occurrence_no_candidate() -> None:
@@ -213,6 +221,35 @@ def test_malformed_event_rejected() -> None:
         raise AssertionError("malformed event must be rejected")
 
 
+def test_compact_master_audit_category_is_canonical() -> None:
+    ledger = fresh()
+    agent.ingest_event(
+        ledger,
+        event("EV-COMPACT", 1, category="正式母版单镜执行完整性"),
+    )
+    assert_true(
+        ledger["events"][0]["issues"][0]["category"] == "正式母版单镜执行完整性",
+        "compact category must persist unchanged",
+    )
+
+
+def test_legacy_seedance_category_is_input_alias_only() -> None:
+    ledger = fresh()
+    agent.ingest_event(
+        ledger,
+        event("EV-LEGACY", 1, category="Seedance独立执行"),
+    )
+    stored = ledger["events"][0]
+    assert_true(
+        stored["issues"][0]["category"] == "正式母版单镜执行完整性",
+        "legacy input must normalize to compact category",
+    )
+    assert_true(
+        stored["legacy_aliases_applied"] == {"Seedance独立执行": "正式母版单镜执行完整性"},
+        "legacy mapping must be explicit and traceable",
+    )
+
+
 TESTS: list[tuple[str, Callable[[], None]]] = [
     ("init_and_validate", test_init_and_validate),
     ("first_occurrence_no_candidate", test_first_occurrence_no_candidate),
@@ -228,6 +265,8 @@ TESTS: list[tuple[str, Callable[[], None]]] = [
     ("approval_without_validation_stays_pending", test_approval_without_validation_stays_pending),
     ("resolution_and_metrics", test_resolution_and_metrics),
     ("malformed_event_rejected", test_malformed_event_rejected),
+    ("compact_master_audit_category_is_canonical", test_compact_master_audit_category_is_canonical),
+    ("legacy_seedance_category_is_input_alias_only", test_legacy_seedance_category_is_input_alias_only),
 ]
 
 

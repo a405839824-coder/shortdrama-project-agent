@@ -47,7 +47,9 @@
         "max_internal_repair_rounds",
         "impact_regression_required",
         "human_signoff_required_for_archive",
-        "formal_rule_auto_mutation"
+        "formal_rule_auto_mutation",
+        "compact_master_version",
+        "background_seedance_generation"
       ],
       "properties": {
         "plan_only_never_mutates": {"const": true},
@@ -56,7 +58,9 @@
         "max_internal_repair_rounds": {"const": 3},
         "impact_regression_required": {"const": true},
         "human_signoff_required_for_archive": {"const": true},
-        "formal_rule_auto_mutation": {"const": false}
+        "formal_rule_auto_mutation": {"const": false},
+        "compact_master_version": {"const": "0.5.0"},
+        "background_seedance_generation": {"const": false}
       }
     },
     "capability_registry": {"type": "object"},
@@ -89,11 +93,21 @@
         "protected_scope",
         "expected_outputs",
         "authorization",
+        "server_actor_role",
+        "server_window_binding_id",
+        "server_actor_binding_id",
+        "transport_session_fingerprint",
         "status",
         "internal_round",
         "validation",
         "deliverable_ids"
-      ]
+      ],
+      "properties": {
+        "server_actor_role": {"enum": ["production", "independent_audit", "repair"]},
+        "server_window_binding_id": {"type": "string", "minLength": 1},
+        "server_actor_binding_id": {"type": "string", "minLength": 1},
+        "transport_session_fingerprint": {"type": ["string", "null"]}
+      }
     },
     "handoff_manifest": {
       "type": "object",
@@ -202,6 +216,10 @@
         },
         "audit_certificate_id": {"type": "string"},
         "immutable_repair_package_id": {"type": "string"},
+        "return_to_audit_work_order_id": {"type": "string", "minLength": 1},
+        "return_to_audit_window_binding_id": {"type": "string", "minLength": 1},
+        "return_to_audit_actor_binding_id": {"type": "string", "minLength": 1},
+        "return_to_audit_session_fingerprint": {"type": "string", "minLength": 1},
         "cache_manifest": {
           "type": "array",
           "minItems": 1,
@@ -218,7 +236,7 @@
           }
         },
         "stage_trace_id": {"type": "string", "minLength": 1},
-        "status": {"enum": ["prepared", "verified", "rejected", "consumed"]}
+        "status": {"enum": ["prepared", "consuming", "verified", "rejected", "consumed"]}
       },
       "allOf": [
         {
@@ -231,7 +249,7 @@
         },
         {
           "if": {"properties": {"handoff_type": {"const": "repair_to_audit"}}, "required": ["handoff_type"]},
-          "then": {"properties": {"from_window_role": {"const": "repair"}, "to_window_role": {"const": "independent_audit"}}, "required": ["immutable_repair_package_id"]}
+          "then": {"properties": {"from_window_role": {"const": "repair"}, "to_window_role": {"const": "independent_audit"}}, "required": ["immutable_repair_package_id", "return_to_audit_work_order_id", "return_to_audit_window_binding_id", "return_to_audit_actor_binding_id", "return_to_audit_session_fingerprint"]}
         },
         {
           "if": {"properties": {"handoff_type": {"const": "audit_intake"}}, "required": ["handoff_type"]},
@@ -241,11 +259,20 @@
     },
     "stage_timing_trace": {
       "type": "object",
-      "required": ["trace_id", "window_role", "task_type", "started_at", "ended_at", "wall_duration_ms", "input_fingerprints", "stages"],
+      "required": ["trace_id", "window_role", "task_type", "measurement_scope", "unmeasured_stages", "started_at", "ended_at", "wall_duration_ms", "input_fingerprints", "legacy_generation_calls", "seedance_batches_generated", "model_authored_derived_chars", "stages"],
       "properties": {
         "trace_id": {"type": "string", "minLength": 1},
         "window_role": {"enum": ["production", "independent_audit", "repair"]},
         "task_type": {"enum": ["production_preflight", "independent_audit", "repair", "archive"]},
+        "measurement_scope": {"const": "server_only"},
+        "unmeasured_stages": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "input_payload_bytes": {"type": "integer", "minimum": 0},
+        "output_payload_bytes": {"type": "integer", "minimum": 0},
+        "affected_shot_count": {"type": "integer", "minimum": 0},
+        "preserved_semantic_count": {"type": "integer", "minimum": 0},
+        "legacy_generation_calls": {"const": 0},
+        "seedance_batches_generated": {"const": 0},
+        "model_authored_derived_chars": {"const": 0},
         "started_at": {"type": "string", "minLength": 1},
         "ended_at": {"type": "string", "minLength": 1},
         "wall_duration_ms": {"type": "integer", "minimum": 0},
@@ -257,18 +284,18 @@
             "type": "object",
             "required": ["stage", "started_at", "ended_at", "duration_ms", "tool_call_count", "source_character_count", "payload_bytes", "shot_count", "batch_count", "cache_status", "cache_reason", "retry_count", "error_status"],
             "properties": {
-              "stage": {"enum": ["bootstrap_status", "source_read", "canonicalization", "planning", "generation", "validation", "repair", "export", "ledger_handoff"]},
-              "started_at": {"type": "string", "minLength": 1},
-              "ended_at": {"type": "string", "minLength": 1},
+              "stage": {"enum": ["bootstrap_status", "source_read", "canonicalization", "delta_base_load", "delta_scope_check", "delta_merge", "materialization", "legacy_materialization", "export_projection", "planning", "generation", "validation", "repair", "export", "ledger_handoff"]},
+              "started_at": {"type": ["string", "null"], "minLength": 1},
+              "ended_at": {"type": ["string", "null"], "minLength": 1},
               "duration_ms": {"type": "integer", "minimum": 0},
-              "tool_call_count": {"type": "integer", "minimum": 0},
-              "source_character_count": {"type": "integer", "minimum": 0},
-              "payload_bytes": {"type": "integer", "minimum": 0},
+              "tool_call_count": {"type": ["integer", "null"], "minimum": 0},
+              "source_character_count": {"type": ["integer", "null"], "minimum": 0},
+              "payload_bytes": {"type": ["integer", "null"], "minimum": 0},
               "shot_count": {"type": "integer", "minimum": 0},
-              "batch_count": {"type": "integer", "minimum": 0},
+              "batch_count": {"const": 0},
               "cache_status": {"enum": ["hit", "miss", "mixed", "not_applicable"]},
               "cache_reason": {"type": "string", "minLength": 1},
-              "retry_count": {"type": "integer", "minimum": 0},
+              "retry_count": {"type": ["integer", "null"], "minimum": 0},
               "error_status": {"enum": ["none", "recovered", "blocked"]},
               "parallel_group_id": {"type": "string"}
             }
@@ -368,7 +395,10 @@
       "type": "object",
       "required": [
         "repair_package_id", "audit_certificate_id", "audit_event_id",
-        "audit_to_repair_handoff_id", "created_at", "expires_at", "status",
+        "audit_to_repair_handoff_id", "production_work_order_id", "production_window_binding_id",
+        "production_actor_binding_id", "production_session_fingerprint", "audit_work_order_id",
+        "audit_window_binding_id", "audit_actor_binding_id", "audit_session_fingerprint",
+        "created_at", "expires_at", "status",
         "base_artifact_id", "base_canonical_sha256", "fingerprints",
         "authorized_scope", "protected_scope_hash", "issue_targets", "topology_fingerprint"
       ],
@@ -378,6 +408,14 @@
         "audit_event_id": {"type": "string", "minLength": 1},
         "audit_to_repair_handoff_id": {"type": "string", "minLength": 1},
         "repair_to_audit_handoff_id": {"type": "string", "minLength": 1},
+        "production_work_order_id": {"type": "string", "minLength": 1},
+        "production_window_binding_id": {"type": "string", "minLength": 1},
+        "production_actor_binding_id": {"type": "string", "minLength": 1},
+        "production_session_fingerprint": {"type": "string", "minLength": 1},
+        "audit_work_order_id": {"type": "string", "minLength": 1},
+        "audit_window_binding_id": {"type": "string", "minLength": 1},
+        "audit_actor_binding_id": {"type": "string", "minLength": 1},
+        "audit_session_fingerprint": {"type": "string", "minLength": 1},
         "created_at": {"type": "string", "minLength": 1},
         "expires_at": {"type": "string", "minLength": 1},
         "status": {"enum": ["issued", "consuming", "consumed", "expired", "revoked"]},

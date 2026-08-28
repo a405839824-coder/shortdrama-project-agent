@@ -14,14 +14,16 @@ Use this policy with `V16.3-148-R10-StableRuntime`, `R10-PG1`, and the issue pol
 8. Capability-gap handling
 9. User-facing behavior
 
-## Keep two authoritative shared files
+## Route authoritative project state
 
-Resolve these exact Library titles at the start of every full Agent task:
+In MCP plugin mode, the authenticated plugin store for the exact `project_id` is the operational source of truth. Use its hub, work orders, deliverables, handoffs, audit events and issue ledger through the tools; do not separately fetch or rewrite the global Library copies for an ordinary content task. This avoids duplicate reads and conflicting state while preserving the same machine gates.
+
+Resolve these exact Library titles only for standalone skill operation, explicit shared-ledger work, system/rule architecture updates, or final archival synchronization:
 
 - `分镜项目Agent_项目中枢.json`: current project state, work orders, change requests, deliverables, decisions, capability gaps, and version history.
 - `分镜项目Agent_问题台账.json`: audit events, issue recurrence, statistics, rule candidates, and sign-offs.
 
-Validate the project hub with `python scripts/project_agent.py validate --hub HUB.json` and the issue ledger with `python scripts/storyboard_agent.py validate --ledger LEDGER.json`. Replace the same Library identities after accepted updates. If either write fails, preserve a local pending record and explicitly report which shared state is not synchronized.
+On those Library-backed routes, validate the project hub with `python scripts/project_agent.py validate --hub HUB.json` and the issue ledger with `python scripts/storyboard_agent.py validate --ledger LEDGER.json`. Replace the same Library identities after accepted updates. If either write fails, preserve a local pending record and explicitly report which shared state is not synchronized.
 
 Operate the project hub through these deterministic commands after preparing the corresponding JSON request or record:
 
@@ -43,17 +45,17 @@ Do not call `record-validation` or transition a storyboard work order to `passed
 
 ## Preserve window separation and evidence independence
 
-Use three logical authorities even when a workflow is orchestrated from one product:
+Use two permanent logical authorities and one conditional authority. In cloud operation, each authority must be bound to a distinct trusted MCP transport session; a logical name alone does not prove window independence:
 
 - `production`: creates a new storyboard artifact and may issue only `production_preflight`.
 - `independent_audit`: reads the locked source and artifact, never mutates either, and alone may issue the final audit verdict.
-- `repair`: applies an authorized structured repair package to a new artifact version; its result must return to `independent_audit` before release.
+- `repair`: created only after an audit failure and explicit repair authorization; applies one immutable structured repair package to a new artifact version, then returns to the original `independent_audit` work order/window/session before release.
 
-Do not merge production and independent audit to save time. Save time by reusing verified objective evidence, while recomputing every quality conclusion.
+The exact role matrix is `production + storyboard_create/regenerate/change + execute + explicit_execute`, `independent_audit + storyboard_audit + audit_only + read_only`, and `repair + storyboard_repair + audit_and_repair + explicit_execute`. Reject every other combination. Do not start repair for a clean audit, and do not merge production with independent audit to save time. Save time by reusing verified objective evidence, authoring each fact once in the compact master, and limiting generation to the authorized delta, while recomputing every quality conclusion.
 
 ### Keep one canonical truth
 
-For each artifact version, materialize one canonical object before spreadsheet export or audit. Bind it to these fingerprints:
+For each artifact version, canonicalize one 27-field atomic object before spreadsheet export or audit. Export projections are not written back into it. Bind it to these fingerprints:
 
 - authoritative source bytes and normalized source text;
 - authorized chapter/episode boundary and approved episode plan;
@@ -61,7 +63,7 @@ For each artifact version, materialize one canonical object before spreadsheet e
 - canonical parser, schema, runtime, rules, validator, and target-model contract;
 - approved character, scene, prop, costume, position, light, and project-state anchors.
 
-The workbook, formal shots, independent Seedance batches, coverage map, and statistics must derive from the same canonical object. The canonical must reproduce the normalized semantic workbook hash; it is not required to reproduce raw XLSX ZIP bytes whose metadata or timestamps may differ. Reject an audit when two candidate canonical objects exist, when canonical semantics do not reproduce the normalized workbook hash, or when any required fingerprint is missing.
+The workbook, formal shots, GPT keyframe projection, coverage map, and statistics must derive from the same compact atomic canonical. The canonical stores neither export projections nor Seedance/batch artifacts. It must reproduce the normalized semantic workbook hash; it is not required to reproduce raw XLSX ZIP bytes whose metadata or timestamps may differ. Reject an audit when two candidate canonicals exist, canonical semantics do not reproduce the normalized workbook hash, a retired field/batch is written into a successor, or any required fingerprint is missing.
 
 ### Pass a versioned handoff manifest
 
@@ -73,7 +75,7 @@ Create a handoff manifest for `production_to_audit`, `audit_to_repair`, and `rep
 - producer claims that remain subject to audit: chapter map, causal map, source treatment, protected dialogue, cognition, scene state, shot plan, coverage, and preflight findings;
 - cache entries used or rejected, stage-timing trace ID, and repair/audit cycle IDs.
 
-The receiving window verifies every fingerprint before using the handoff. Missing or mismatched evidence is a cache miss or task blocker; never silently fall back to a stale project copy.
+The receiving window atomically claims one exact handoff, verifies its type, status, workflow chain, artifact, fingerprints, destination authority and session, then marks it consumed. Missing, replayed, concurrently consumed or mismatched evidence is a blocker; never silently select another handoff or fall back to a stale project copy. A `repair_to_audit` handoff is valid only for the original audit authority and original signed audit cycle.
 
 Before any release transition, resolve referential integrity in both directions: every certificate `event_id`, `handoff_id`, and `stage_trace_id` must exist and match the same work order, audit cycle, logical artifact, scope, and fingerprints; every handoff certificate or immutable repair-package reference must resolve to exactly one record. If the installed hub/ledger writer does not initialize, persist, and validate these structures deterministically, preserve them as versioned deliverable attachments, record the missing writer as a capability gap, and do not claim that the new lifecycle is machine-enforced.
 
@@ -93,10 +95,12 @@ Production-created chapter maps, source mappings, protected-dialogue lists, cogn
 2. source fidelity, deletion authority, new-plot prohibition, and episode boundaries;
 3. cognition, seven-field scene continuity, camera visibility, performance, rhythm, transitions, and timing;
 4. public-scene ordinary people, sound ecology, audiovisual matching, and same-scene continuity;
-5. every Seedance batch's blank-context independence, field completeness, duration, and model contract;
+5. every formal merged single-shot master's blank-context independence, field completeness, optional timing-stage closure, and target-model contract;
 6. prohibitions, formulas, statistics, residual issues, introduced issues, and final pass/fail.
 
 An audit verdict may be reused only as an auditor-issued certificate for an exactly unchanged artifact and exactly unchanged dependency fingerprints. If the user explicitly requests a fresh independent semantic audit, reuse extraction and parsing only and recompute the semantic verdict. Never accept a producer-issued certificate as an audit certificate.
+
+For an uncached fingerprint set, the independent authority must submit a `semantic_audit` under `semantic-audit-v2-compact-master`, bound to the exact canonical hash and reviewed shot count. It contains exactly eight unique layer records, each with its own status, summary and concrete evidence IDs; failed layers include targeted issues, evidence and repair actions, and the conclusion agrees with every layer. The service combines this submission with a freshly computed machine report. It may not regenerate any shot, projection, Seedance prompt, or batch during audit. A zero-issue machine report cannot synthesize or replace the semantic submission. Only an exact signed independent-audit cache hit under the same contract may omit it; v1 certificates are legacy history and cannot satisfy an active audit.
 
 ### Use content-addressed caches safely
 
@@ -113,13 +117,13 @@ Invalidate by impact, while preserving the R10 regression rules:
 - dialogue or story change invalidates the current beat, source mapping, protected dialogue, and cognition dependents;
 - action or gaze change invalidates the current shot, neighbors, and visibility chain;
 - position, direction, prop, door/window, action-progress, or light-direction change invalidates the continuous scene;
-- shot insertion/deletion invalidates downstream numbering, cumulative time, transitions, and batch mappings;
+- shot insertion/deletion invalidates downstream numbering, cumulative time, transitions, formulas, statistics, and export projections;
 - time or lighting change invalidates the continuous scene;
-- Seedance change invalidates the complete batch;
+- single-shot timing/model-contract change invalidates that formal master and its deterministic GPT projection;
 - episode boundary, cognition transition, scene topology, or core shot-plan change invalidates the affected scene or episode;
 - runtime, rule, schema, validator, script, dependency/environment, parser, or target-model change invalidates every dependent certificate and triggers the full defined regression suites.
 
-Unchanged auditor-issued shot/scene certificates may support impact regression only when their sub-fingerprints and upstream dependencies are unchanged. Always rerun global source coverage, episode entry/exit, cognition, total duration, numbering, formulas, statistics, and batch mapping before a final verdict.
+Unchanged auditor-issued shot/scene certificates may support impact regression only when their sub-fingerprints and upstream dependencies are unchanged. Always rerun global source coverage, episode entry/exit, cognition, total duration, numbering, formulas, statistics, exact ten-column order, and retired-field absence before a final verdict.
 
 ### Separate content checks from system regression
 
@@ -129,7 +133,7 @@ Run the full suites when the runtime, rule, schema, validator, script, dependenc
 
 ### Record comparable stage timing
 
-For production, independent audit, and repair, record one trace ID and these stages when applicable: bootstrap/status, source read, canonicalization, planning, generation, validation, repair, export, and ledger/handoff. Each stage records start/end, duration, tool-call count, source characters, payload bytes, shot/batch count, cache hit/miss and reason, retry count, and error status. A parallel parent stage must not double-count child durations as wall-clock time.
+For production, independent audit, and repair, record one trace ID and the server-observable stages that actually ran: canonicalization, delta base/scope/merge, validation, deterministic export projection, repair, and ledger/handoff as applicable. Persist measured start/end or duration, payload and affected/preserved/final counts when the service truly observes them. New compact routes must expose `legacy_generation_calls=0`, `seedance_batches_generated=0`, and `model_authored_derived_chars=0`. A completed optimized flow exposes `fast_path_evidence` binding both production and independent-audit traces to the same canonical, handoff and certificate; if either trace is absent or mismatched, report `fast_path_incomplete`. Do not infer model tool-call count, source characters, retries, or planning/generation duration from server time. A parallel parent stage must not double-count child durations as wall-clock time. Server records must say `measurement_scope=server_only`; ChatGPT planning/generation and every unavailable metric must be listed in `unmeasured_stages`, not reported as measured zero.
 
 Use traces from the same locked source, boundary, rule version, hardware/service tier, and output contract when claiming an efficiency change. Performance is never allowed to override a failed quality gate.
 
@@ -140,7 +144,7 @@ Map every request to one operation in `project_agent_capabilities.json` and one 
 - `plan_only`: analyze or propose; do not change the source artifact.
 - `execute`: create or modify the requested artifact.
 - `audit_only`: complete all checks; do not repair.
-- `audit_and_repair`: audit, repair, impact regression, and final verification in one task.
+- `audit_and_repair`: one workflow chain whose initial `audit_only` work order is read-only; after a failed audit and explicit repair authorization, create a separate repair work order and return its successor to the original audit work order for impact regression and final verification.
 
 Treat “给方案、分析、建议、怎么改” as `plan_only`. Treat “生成、改写、修改、新增、删除、替换、合并、拆分、移动、修正后输出” as explicit execution authorization for the named scope. Do not extend authorization to unrelated episodes, files, characters, scenes, or rules.
 
@@ -148,18 +152,18 @@ If the request mixes planning and execution, lock the selected plan first. When 
 
 ## Run the universal task lifecycle
 
-1. Load and validate both shared files.
-2. Create one work order with request text, window key, operation, mode, targets, expected outputs, and authorization.
+1. Load the exact plugin project state, or validate both shared Library files only on a Library-backed/standalone route.
+2. Create one role-specific work order with request text, window key, operation, mode, targets, expected outputs, and authorization. An `audit_and_repair` request remains one workflow chain but uses an initial `audit_only` work order, then—only after failure and explicit authorization—a distinct repair work order; never place `storyboard_audit` and `storyboard_repair` under one role binding.
 3. Lock the authoritative source, latest artifact version, episode/scene/shot boundary, must-keep list, must-remove list, and protected scope. Resolve or create the single canonical fingerprint and verify any incoming handoff before content work.
 4. Resolve conflicts in this order: user’s current explicit instruction, current authoritative modified story, current source text, current approved project state, older reference versions.
 5. Perform the selected planning or execution workflow.
 6. Produce a new version by default. Preserve the original unless the user explicitly requests replacement of the same artifact.
 7. Validate every required downstream consumer and impact boundary.
-8. For storyboard output, run `production_preflight` before handoff. A separate `independent_audit` must complete the eight-layer audit and issue the release verdict. When repair is authorized, apply the structured repair package, regress the defined impact scope, and return the new fingerprinted version for independent verification.
+8. For storyboard output, choose the full route for a first draft, an invalidated scene/episode, or any dialogue/speaker change. Use the stable-UID delta route only for a same-count bounded visual or other non-cognitive execution change whose exact dialogue text, punctuation, order/segmentation, speaker identity, source mapping, cognition, and protected-dialogue evidence remain unchanged. Both routes run the same full production gates and issue only `production_preflight`. A separate `independent_audit` must complete the eight-layer audit and issue the release verdict. Only after a failed audit and explicit authorization may a third repair authority consume the structured repair package; it must return the new fingerprinted version to the original audit authority for verification.
 9. Record deliverables, versions, decisions, issue events, unresolved blockers, and capability gaps.
 10. Mark a clean task `awaiting_signoff`; archive only after human approval.
 
-Never claim completion when the work order, deliverable, issue ledger, or Library writeback is incomplete.
+Never claim completion when the required work order, deliverable, or issue-ledger update is incomplete. Require Library writeback only on a route that actually uses the shared Library files.
 
 ## Plan, create, and rewrite story content
 
@@ -229,11 +233,11 @@ Any approved story or script change must evaluate these downstream consumers:
 5. Scene-state ledger and spatial continuity.
 6. Shot plan, viewpoint, camera visibility, shot load, and rhythm.
 7. Formal storyboard content, dialogue, timing, numbering, and cumulative time.
-8. Seedance/i2v start state, action process, end state, camera, sound, environment, and light.
+8. Compact formal-master start state, action process, end state, camera, sound, environment, optional Seedance 2.5 timing stages, and four-part light contract.
 9. Character, scene, costume, prop, position, and lighting anchors.
 10. Keyframe prompts or generated frames.
 11. Voice, psychological audio, ambience, BGM cues, and transitions.
-12. Audit statistics, change notes, and production batches.
+12. Audit statistics, change notes, and exact ten-column export projection.
 
 When the authoritative input is a novel chapter, also propagate and validate the complete-read proof, chapter event map, causal graph, character state changes, protected-dialogue mappings, source treatment ledger, adaptation budget, beat plan, and previous/next boundary context. Any upstream change that alters an event, causal link, cognition transition, or protected line invalidates the dependent beats and shots.
 
@@ -241,15 +245,15 @@ Regenerate only the affected units plus boundary neighbors when the upstream str
 
 ### Addition
 
-Insert the new beat into the script, establish start/end state, generate the required shots and independent Seedance batches, update numbering or stable insertion IDs, recalculate duration, and audit both boundaries.
+Insert the new beat into the script, establish start/end state, generate only the required 27-field shots, update numbering or stable insertion IDs, recalculate duration, project the ten-column export, and audit both boundaries.
 
 ### Modification
 
-Replace the affected content, remove old residue, update cognition and state, regenerate affected shots and production prompts, and regress dependent neighbors.
+Replace the affected content, remove old residue, update cognition and state, regenerate affected compact shots only, deterministically refresh the export projection, and regress dependent neighbors.
 
 ### Deletion
 
-Delete obsolete script and storyboard material, remove its source and batch mappings, bridge the preceding and following states, update timing and numbering policy, and verify no stale reference remains.
+Delete obsolete script and storyboard material, remove its source mapping, bridge the preceding and following states, update timing, numbering and export projection, and verify no stale reference remains.
 
 ### Replacement
 
@@ -257,20 +261,20 @@ Treat as one atomic change: lock the old target, insert the approved new chain, 
 
 ### Merge, split, or move
 
-Recalculate dialogue capacity, shot load, rhythm, source coverage, continuity, numbering, and batch independence. Do not preserve an invalid shot structure merely to reduce editing.
+Recalculate dialogue capacity, shot load, rhythm, source coverage, continuity, numbering, and compact-master blank-context executability. Do not preserve an invalid shot structure merely to reduce editing.
 
 ## Produce visual, video, audio, and delivery assets
 
 - Build character, scene, costume, prop, position, and light anchors before image or video generation.
-- For every public-flow scene, load `public_scene_ecology.md` before formal shot or production-prompt generation. Propagate ordinary-person density, location-appropriate roles, staggered actions, foreground/midground/background placement, concrete near/mid/far environmental sound, dialogue ducking, and audiovisual source matching into formal shots, keyframe-visible sound sources, and independent Seedance batches. An empty public scene requires a visible empty-state description plus a plot-grounded reason.
-- Build a separate visual-texture lock before keyframe, scene-frame, or i2v prompting. For every ancient-costume live-action prompt, load `songyun_humanist_cinematography.md` as the mandatory visual master and apply its real-camera texture, sourced-light method, restrained color logic, lens/depth selection, humanist composition, prompt order, and negative restrictions. For every night or low-light ancient-costume prompt, additionally load `ancient_night_cinematography.md` and apply its motivated practical/ambient sources, distance falloff, half-lit readable faces, transparent shadows, restrained warm/cool color, night-specific lens/depth selection, low-light film texture, continuity, and negative restrictions. Adapt concrete values to the era, time, weather, place, mood, and real light sources. Project aspect ratio, sourced light, visibility, continuity, and reference anchors always override any example value.
+- For every public-flow scene, load `public_scene_ecology.md` before formal shot or keyframe projection. Write ordinary-person density, location-appropriate roles, staggered actions, spatial placement, concrete near/mid/far environmental sound, dialogue ducking, and audiovisual source matching once in the formal-master atoms; deterministically preserve keyframe-visible sound sources. An empty public scene requires a visible empty-state description plus a plot-grounded reason.
+- Build a separate visual-texture lock before formal-master video execution or keyframe/scene-frame projection. For every ancient-costume live-action formal master or visual projection, load `songyun_humanist_cinematography.md` as the mandatory visual master and apply its real-camera texture, sourced-light method, restrained color logic, lens/depth selection, humanist composition, projection order, and negative restrictions. For every night or low-light ancient-costume formal master or visual projection, additionally load `ancient_night_cinematography.md` and apply its motivated practical/ambient sources, distance falloff, half-lit readable faces, transparent shadows, restrained warm/cool color, night-specific lens/depth selection, low-light film texture, continuity, and negative restrictions. Adapt concrete values to the era, time, weather, place, mood, and real light sources. Project aspect ratio, sourced light, visibility, continuity, and reference anchors always override any example value.
 - Generate keyframe prompts with the established real short-drama screenshot style and negative restrictions. Use an image-generation tool when the user requests images and the required references are available.
-- Keep each Seedance 2.5 batch independent from GPT history and other batches. Export the 10-column mother-template field as `Seedance 2.5独立正式执行分镜`. Keep the stable production range at 4–15 seconds; an explicit long-scene mode may use the officially supported upper limit only after a separate load, timestamp, and continuity review.
-- Design BGM after picture lock from the whole-scene emotional key, narrative function, time motion, frequency space, and audible scene image. Keep BGM out of Seedance prompts.
+- Treat `正式分镜母版·字段合并` as the only blank-context executable single-shot master. `画面内容` alone carries action, expression, exact dialogue, delivery, listener reaction and optional Seedance 2.5 stages; `音色` stays independent. Export no Seedance column, no batch sheet, and no background-generated video prompt.
+- Design BGM after picture lock from the whole-scene emotional key, narrative function, time motion, frequency space, and audible scene image. Keep BGM out of the formal single-shot execution master.
 - Design dialogue delivery with sound strength, rhythm, breath, pause, emphasis, and ending tone.
 - Treat public-scene ambience as a mandatory production layer rather than optional decoration. Reject generic-only “环境声/街道嘈杂声”, anonymous extras with clear full dialogue, modern or era-incompatible sound sources, and same-scene crowd/audio continuity jumps.
-- Convert or export files through the appropriate document or spreadsheet workflow while preserving the canonical field order and formulas.
-- Split production into traceable episode, scene, shot, keyframe, i2v, voice, ambience, and BGM packages.
+- Convert or export files through the appropriate document or spreadsheet workflow while preserving the 27-field atomic order, exact ten-column projection and formulas.
+- Split production into traceable episode, scene, shot, keyframe, voice, ambience, and BGM packages. For an explicit downstream i2v delivery, pass the committed `正式分镜母版·字段合并` directly and create only the required transport metadata or adapter on demand; never create or persist a competing video narrative, Seedance text, or batch artifact.
 
 ## Audit, repair, and learn
 
@@ -278,7 +282,7 @@ Use `agent_runtime.md` for issue event structure, recurrence escalation, concise
 
 - Audit-only tasks never modify artifacts.
 - Audit-and-repair work orders close within two preferred and three maximum rounds, but keep authorities distinct: independent audit establishes the immutable issue baseline, repair creates a new artifact version, and independent audit verifies that new version.
-- Prefer the certificate-bound `commit_storyboard_patch` path only when every requested change is a non-structural field replacement on a stable shot ID and the exact independent-audit certificate names that issue. The service must compare-and-set the base canonical hash, enforce the work-order protected scope, reject stale rules/source/boundary/artifact fingerprints, save a new full artifact, and run the complete validator. Episode/scene boundaries, cognition, source evidence, shot order/identity/timing, scene topology, or core shot-plan changes require scene/episode rebuild. A patch pass is production preflight, not the independent final verdict.
+- Prefer the certificate-bound `commit_storyboard_patch` path only when every requested repair is a non-structural field replacement on a stable shot UID and the exact independent-audit certificate names that issue. Use production-authorized `commit_storyboard_delta` only for a user-directed, same-identity/same-count visual or other non-cognitive execution change with refreshed shot-bound evidence. Delta must preserve exact dialogue text, punctuation, order/segmentation, and speaker identity; any dialogue or speaker change requires full `commit_storyboard` for the complete affected scene or episode because delta cannot replace source mapping, cognition, or protected-dialogue evidence. Psychological audio, insertion/deletion/movement/split/merge/renumbering, source mapping, cognition, boundary or topology changes also require the full affected scene/episode route. Structural audit repair must consume its immutable package and use full `commit_storyboard`. The service must compare-and-set base hashes, enforce stable UID boundaries and protected scope where applicable, save a new full artifact, and run the complete validator. Production, patch, delta, and repair preflight are never the independent final verdict.
 - Record every repair result as original issue resolved, residual, or introduced.
 - A second consecutive recurrence requires root-cause repair; a third requires upstream rebuild.
 - Never activate a formal rule or validator automatically.

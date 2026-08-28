@@ -45,6 +45,26 @@
       "deprecated": "同一问题无限局部补丁",
       "replacement": "R10-PG1.SYSTEMIC_ESCALATION",
       "reason": "第2轮根因修复，第3轮及以后回退对应上游产物重建"
+    },
+    {
+      "deprecated": "人物调度/动作与表演/台词/发声方式/标点语气/心理音轨属性/生成批次作为新版本独立字段",
+      "replacement": "R10.1.COMPACT_27_FIELDS",
+      "reason": "动作、表情、精确对白、六维发声、标点效果、听者反应和时间阶段只在画面内容写一次；音色独立保留"
+    },
+    {
+      "deprecated": "Seedance 2.5独立正式执行分镜列、生成批次工作表及top-level batches",
+      "replacement": "R10.1.SINGLE_EXECUTION_MASTER",
+      "reason": "正式分镜母版·字段合并成为唯一单镜执行母版；旧格式只读迁移，新版本不回写"
+    },
+    {
+      "deprecated": "4—15秒Seedance生成批次包装",
+      "replacement": "R10.1.SINGLE_SHOT_DURATION",
+      "reason": "正式镜按自身剧情时长执行；Seedance 2.5可选阶段最多3段并覆盖单镜时长，不再为4秒下限重复包装"
+    },
+    {
+      "deprecated": "生产、审计、修复或缓存后台预生成Seedance提示词",
+      "replacement": "R10.1.NO_BACKGROUND_DUPLICATE_GENERATION",
+      "reason": "只存27字段原子canonical；GPT为导出时确定性投影，审计不得再次生成内容"
     }
   ]
 }

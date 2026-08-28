@@ -20,13 +20,18 @@ _SAFE_METRIC_KEYS = {
     "item_count",
     "kind",
     "limit",
+    "legacy_generation_calls",
+    "materialization_passes",
+    "model_authored_derived_chars",
     "not_modified",
     "offset",
     "page_count",
     "range_count",
     "returned_chars",
     "row_count",
+    "seedance_batches_generated",
     "shot_count",
+    "duplicate_generated_bytes",
     "truncated",
     "unit",
 }
@@ -43,6 +48,7 @@ _SAFE_TEXT_VALUES = {
     "ok",
     "pass",
     "not_modified",
+    "compact_master_v1",
 }
 
 

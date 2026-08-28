@@ -52,7 +52,7 @@ def task(
             "must_remove": ["旧动作链"]
         },
         "protected_scope": ["EP01-EP07", "EP09以后"],
-        "expected_outputs": ["修正版剧本", "受影响分镜", "独立Seedance批次"],
+        "expected_outputs": ["修正版剧本", "compact canonical", "正式母版导出"],
         "authorization": authorization,
     }
 
@@ -122,6 +122,8 @@ def test_new_hub_and_registry() -> None:
     summary = agent.summarize(hub)
     assert_true(summary["capability_count"] >= 30, "full Agent must expose broad capability registry")
     assert_true(summary["capability_status_counts"]["supported"] >= 20, "supported capability count")
+    assert_true(hub["policy"]["compact_master_version"] == "0.5.0", "hub must pin compact master 0.5.0")
+    assert_true(hub["policy"]["background_seedance_generation"] is False, "background Seedance must stay disabled")
 
 
 def test_plan_only_never_mutates() -> None:
@@ -154,11 +156,12 @@ def test_change_impact_propagates_all_layers() -> None:
     result = agent.create_change_request(hub, change(operation_names=["replace", "move"]))
     required = set(result["required_downstream_updates"])
     expected = {
-        "source_ledger", "cognition_matrix", "scene_state_ledger", "formal_storyboard",
-        "seedance_batches", "keyframe_assets", "voice_audio_bgm", "production_batches",
+        "source_ledger", "cognition_matrix", "scene_state_ledger", "compact_canonical",
+        "formal_master_export", "keyframe_assets", "voice_audio_bgm", "on_demand_production_package",
         "stale_reference_scan", "boundary_bridge", "causal_continuity",
     }
     assert_true(expected <= required, "script change must propagate to every downstream layer")
+    assert_true("seedance_batches" not in required, "impact propagation must not recreate Seedance batches")
 
 
 def test_destructive_change_without_approval_waits() -> None:
@@ -314,6 +317,49 @@ def test_conditional_capabilities_are_explicit() -> None:
     capabilities = agent.capability_map(hub)
     assert_true(capabilities["keyframe_image"]["status"] == "conditional", "image generation conditions explicit")
     assert_true(capabilities["format_convert"]["status"] == "conditional", "format tool conditions explicit")
+    assert_true(capabilities["production_batch"]["status"] == "supported", "explicit on-demand production remains supported")
+    assert_true("seedance_create" not in capabilities, "background Seedance workflow is retired")
+
+
+def test_storyboard_window_roles_and_compact_gate() -> None:
+    hub = fresh()
+    production = agent.create_work_order(hub, task("WO-PROD", "storyboard_change", "execute", "explicit_execute"))
+    audit = agent.create_work_order(hub, task("WO-AUDIT", "storyboard_audit", "audit_only", "read_only"))
+    repair = agent.create_work_order(hub, task("WO-REPAIR", "storyboard_repair", "audit_and_repair", "explicit_execute"))
+    by_id = {row["work_order_id"]: row for row in hub["work_orders"]}
+    assert_true(by_id["WO-PROD"]["server_actor_role"] == "production", "production role isolated")
+    assert_true(by_id["WO-AUDIT"]["server_actor_role"] == "independent_audit", "audit role isolated")
+    assert_true(by_id["WO-AUDIT"]["mutates_source"] is False, "independent audit is read-only")
+    assert_true(by_id["WO-REPAIR"]["server_actor_role"] == "repair", "repair role isolated")
+    assert_true(by_id["WO-REPAIR"]["repair_activation_condition"] == "independent_audit_fail_and_explicit_authorization", "repair stays conditional")
+    assert_true(by_id["WO-REPAIR"]["repair_return_role"] == "independent_audit", "repair returns to original audit authority")
+    for result in (production, audit, repair):
+        assert_true("compact_master_single_shot_integrity" in result["required_validation_gates"], "compact master gate required")
+
+
+def test_background_seedance_outputs_are_rejected() -> None:
+    hub = fresh()
+    request = task()
+    request["expected_outputs"] = ["compact canonical", "独立Seedance批次"]
+    try:
+        agent.create_work_order(hub, request)
+    except ValueError as exc:
+        assert_true("forbids background" in str(exc), "forbidden output must name background generation")
+    else:
+        raise AssertionError("new workflow must reject independent Seedance batches")
+
+
+def test_persisted_seedance_deliverable_is_rejected() -> None:
+    hub = fresh()
+    agent.create_work_order(hub, task())
+    record = deliverable()
+    record["artifact_type"] = "seedance_batches"
+    try:
+        agent.record_deliverable(hub, record)
+    except ValueError as exc:
+        assert_true("forbids persisted" in str(exc), "persisted duplicate generation must be rejected")
+    else:
+        raise AssertionError("Seedance batch deliverable must fail")
 
 
 TESTS: list[tuple[str, Callable[[], None]]] = [
@@ -335,6 +381,9 @@ TESTS: list[tuple[str, Callable[[], None]]] = [
     ("incomplete_source_lock_rejected", test_incomplete_source_lock_rejected),
     ("unrelated_task_cannot_own_change_request", test_unrelated_task_cannot_own_change_request),
     ("conditional_capabilities_are_explicit", test_conditional_capabilities_are_explicit),
+    ("storyboard_window_roles_and_compact_gate", test_storyboard_window_roles_and_compact_gate),
+    ("background_seedance_outputs_are_rejected", test_background_seedance_outputs_are_rejected),
+    ("persisted_seedance_deliverable_is_rejected", test_persisted_seedance_deliverable_is_rejected),
 ]
 
 

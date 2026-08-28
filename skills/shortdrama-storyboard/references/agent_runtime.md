@@ -35,11 +35,23 @@ Use this fixed audit category order:
 3. 空间连续
 4. 表演链
 5. 镜头节奏
-6. Seedance独立执行
+6. 正式母版单镜执行完整性
 7. 禁项与声音
 8. 统计闭合
 
-公共场景人物密度、地点角色、错峰动作、空间层次、具体环境声、对白避让、声画来源和Seedance复现均归入第7类“禁项与声音”；同场人流跳变同时在第3类“空间连续”记录。
+公共场景人物密度、地点角色、错峰动作、空间层次、具体环境声、对白避让、声画来源和正式母版复现均归入第7类“禁项与声音”；同场人流跳变同时在第3类“空间连续”记录。
+
+`Seedance独立执行` is a legacy input alias only. Normalize it immediately to `正式母版单镜执行完整性`, record the applied alias in the event, and never persist or report the legacy label as a current audit category.
+
+## Keep compact generation single-source
+
+- Pin the project hub to `compact_master_version=0.5.0` and `background_seedance_generation=false`.
+- Pin newly issued independent-audit certificates and cache identities to `semantic-audit-v2-compact-master`; v1 is legacy history only and cannot authorize release or cache reuse.
+- Store only the R10.1 compact canonical. Compile the formal ten-column master and GPT keyframe projection deterministically when explicitly requested; do not persist generated copies in canonical.
+- Do not create `seedance_batches`, `独立Seedance批次`, a standalone Seedance execution column, or any background video prompt job.
+- Keep explicit on-demand video-model execution available through an authorized production request. It consumes the verified formal single-shot master and must not write a duplicate prompt or batch back into canonical.
+- Script and storyboard changes propagate to `compact_canonical` and `formal_master_export`, then invalidate dependent anchors, keyframes, audio cues, and explicit on-demand production packages as required.
+- Production writes and performs only `production_preflight`; independent audit remains read-only and is the only authority for a final audit conclusion. Repair activates only after an independent-audit failure plus explicit authorization, and its new artifact returns to the original independent-audit authority.
 
 The Agent computes the issue key from project, episode, logical file, error code, shot IDs, field, and issue type. Do not use mutable evidence text or content version as the only identity; the same defect must remain traceable after a repair changes the file.
 

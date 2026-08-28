@@ -43,6 +43,7 @@ def public_fixture() -> dict[str, Any]:
         "独立执行提示词": "古代市集中等人流，从明确全景起始状态开始；女主前行，行人、摊贩、顾客和脚夫按各自节奏行动；近中远声源明确，禁止BGM、字幕、现代物件和复制人群。",
     })
     run_golden_tests.inject_pg1_fixture_evidence(obj)
+    run_golden_tests.upgrade_fixture_to_compact(obj)
     return obj
 
 
@@ -63,15 +64,9 @@ def build_continuity_fixture() -> dict[str, Any]:
     second = copy.deepcopy(obj["shots"][0])
     second["镜头编号"] = "S002"
     second["累计时长"] = 8.0
-    second["生成批次"] = "B02"
-    second["人物调度"] = second["人物调度"].replace("中等人流", "密集人流")
+    second["空间站位描述"] = second["空间站位描述"].replace("中等人流", "密集人流")
     second["画面内容"] = second["画面内容"].replace("中等人流", "密集人流")
     obj["shots"].append(second)
-    second_batch = copy.deepcopy(obj["batches"][0])
-    second_batch["批次编号"] = "B02"
-    second_batch["覆盖镜头"] = ["S002"]
-    second_batch["场景"] = "古代市集，密集人流"
-    obj["batches"].append(second_batch)
     obj["total_duration"] = 8.0
     run_golden_tests.inject_pg1_fixture_evidence(obj)
     return obj
@@ -83,7 +78,7 @@ def main() -> int:
     cases.append(("valid_public_scene", public_fixture(), None, "pass"))
 
     generic = public_fixture()
-    generic["shots"][0]["人物调度"] = "女主走过闹市，路人来往"
+    generic["shots"][0]["空间站位描述"] = "女主走过闹市，路人来往"
     generic["shots"][0]["画面内容"] = "古代闹市，女主从人群中经过"
     generic["shots"][0]["环境动态"] = "路人自然移动"
     cases.append(("generic_crowd_fails", generic, "E-PUBLIC-CROWD-001", "fail"))
@@ -93,14 +88,12 @@ def main() -> int:
     cases.append(("generic_audio_fails", generic_audio, "E-PUBLIC-AUDIO-001", "fail"))
 
     no_ducking = public_fixture()
-    no_ducking["shots"][0]["台词"] = "让开。"
+    no_ducking["shots"][0]["画面内容"] += "；【女主】让开。；声音压低，语速短促，呼吸收紧，开口前停顿，重音落在让字，尾音下压收住；句号收束，命令语气"
     no_ducking["shots"][0]["音色"] = "年轻女声，清晰克制"
-    no_ducking["shots"][0]["发声方式"] = "声音压低，语速短促，呼吸收紧，开口前停顿，重音落在让字，尾音下压收住"
-    no_ducking["shots"][0]["标点语气"] = "句号收束，命令语气"
     cases.append(("dialogue_without_ducking_fails", no_ducking, "E-PUBLIC-AUDIO-001", "fail"))
 
     missing_people = public_fixture()
-    missing_people["shots"][0]["人物调度"] = "女主独自走过街道"
+    missing_people["shots"][0]["空间站位描述"] = "女主独自走过街道"
     missing_people["shots"][0]["画面内容"] = "古代街道，女主独自前行"
     missing_people["shots"][0]["环境动态"] = "风吹幌子"
     missing_people["shots"][0]["生成限制"] = "禁止额外角色、字幕、BGM和现代物件"
@@ -114,23 +107,19 @@ def main() -> int:
     modern_sound["shots"][0]["环境音效"] += "，远处汽车喇叭"
     cases.append(("modern_sound_fails", modern_sound, "E-PUBLIC-AVSYNC-001", "fail"))
 
-    batch_mismatch = public_fixture()
-    batch_mismatch["batches"][0]["声音"] = "环境声；禁止BGM"
-    batch_mismatch["batches"][0]["环境动态"] = "场景动态连续"
-    batch_mismatch["batches"][0]["起始画面"] = "女主站在场景中央"
-    batch_mismatch["batches"][0]["动作过程"] = "女主向前行走"
-    batch_mismatch["batches"][0]["独立执行提示词"] = "女主向前行走，禁止BGM和字幕"
-    cases.append(("seedance_ecology_mismatch_fails", batch_mismatch, "E-PUBLIC-AVSYNC-001", "fail"))
+    duplicate_batch = public_fixture()
+    duplicate_batch["batches"] = [{"批次编号": "B01"}]
+    cases.append(("duplicate_batch_fails", duplicate_batch, "E-DUPLICATE-GENERATION-001", "fail"))
 
     valid_empty = public_fixture()
-    valid_empty["shots"][0]["人物调度"] = "女主独自穿过宵禁后的空街"
+    valid_empty["shots"][0]["空间站位描述"] = "女主独自穿过宵禁后的空街"
     valid_empty["shots"][0]["画面内容"] = "古代街道因宵禁已经清场，店门紧闭，街上无人"
     valid_empty["shots"][0]["环境动态"] = "宵禁后的空街只有风吹幌子"
     valid_empty["shots"][0]["生成限制"] = "禁止字幕、BGM、现代物件和无依据新增路人"
     cases.append(("motivated_empty_scene_passes", valid_empty, None, "pass"))
 
     unexplained_empty = public_fixture()
-    unexplained_empty["shots"][0]["人物调度"] = "女主独自穿过空街"
+    unexplained_empty["shots"][0]["空间站位描述"] = "女主独自穿过空街"
     unexplained_empty["shots"][0]["画面内容"] = "古代空街，店门紧闭，街上无人"
     unexplained_empty["shots"][0]["环境动态"] = "空街只有风吹幌子"
     unexplained_empty["shots"][0]["生成限制"] = "禁止字幕、BGM和现代物件"

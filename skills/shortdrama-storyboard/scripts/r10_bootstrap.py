@@ -194,7 +194,7 @@ def verify_bundled(self_test: bool) -> dict:
         "conflicts": 30,
         "task_cards": 30,
         "validators": 49,
-        "error_codes": 63,
+        "error_codes": 66,
         "atomic_rules": 154,
         "templates": 48,
         "golden_tests": 73,
@@ -205,7 +205,7 @@ def verify_bundled(self_test: bool) -> dict:
         "required_evidence_blocks": len(policy.get("required_evidence_blocks", [])),
         "state_vector_fields": len(policy.get("state_vector_fields", [])),
         "performance_chain_fields": len(policy.get("performance_chain_fields", [])),
-        "i2v_required_batch_fields": len(policy.get("i2v_required_batch_fields", [])),
+        "compact_master_execution_evidence": len(policy.get("compact_master_execution_evidence", [])),
         "audit_layers": len(policy.get("audit_layer_order", [])),
     }
     expected_preventive = {
@@ -213,7 +213,7 @@ def verify_bundled(self_test: bool) -> dict:
         "required_evidence_blocks": 10,
         "state_vector_fields": 7,
         "performance_chain_fields": 7,
-        "i2v_required_batch_fields": 10,
+        "compact_master_execution_evidence": 10,
         "audit_layers": 8,
     }
     errors = []
@@ -232,6 +232,12 @@ def verify_bundled(self_test: bool) -> dict:
         errors.append(f"structural counts={structural_counts!r}")
     if preventive_counts != expected_preventive:
         errors.append(f"preventive counts={preventive_counts!r}")
+    expected_audit_layers = [
+        "源文对白", "机位可见性", "空间连续", "表演链", "镜头节奏",
+        "正式母版单镜执行完整性", "禁项与声音", "统计闭合",
+    ]
+    if policy.get("audit_layer_order") != expected_audit_layers:
+        errors.append(f"audit layer order={policy.get('audit_layer_order')!r}")
 
     golden = None
     public_scene_tests = None

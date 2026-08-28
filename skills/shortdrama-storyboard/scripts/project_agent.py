@@ -19,6 +19,7 @@ SCHEMA_VERSION = "R10-PROJECT-AGENT-1"
 RUNTIME_VERSION = "V16.3-148-R10-StableRuntime"
 WORKFLOW_REVISION = "R10-PG1"
 AGENT_MODE = "full_safe"
+COMPACT_MASTER_VERSION = "0.5.0"
 MODES = {"plan_only", "execute", "audit_only", "audit_and_repair"}
 AUTHORIZATIONS = {"read_only", "plan_only", "explicit_execute", "pending"}
 CHANGE_OPERATIONS = {"add", "modify", "delete", "replace", "merge", "split", "move"}
@@ -26,12 +27,19 @@ DESTRUCTIVE_CHANGE_OPERATIONS = {"delete", "replace", "merge", "move"}
 MUTATING_OPERATIONS = {
     "script_create", "script_rewrite", "script_change", "dialogue_rewrite",
     "storyboard_create", "storyboard_regenerate", "storyboard_change", "storyboard_repair",
-    "seedance_create", "anchor_management", "keyframe_prompt", "keyframe_image",
+    "anchor_management", "keyframe_prompt", "keyframe_image",
     "audio_bgm", "voice_design", "format_convert", "production_batch", "archive",
 }
 CHANGE_PARENT_OPERATIONS = {
     "script_rewrite", "script_change", "dialogue_rewrite", "change_impact",
     "storyboard_regenerate", "storyboard_change", "storyboard_repair",
+}
+STORYBOARD_AUTHORITY_MATRIX = {
+    "storyboard_create": ("execute", "explicit_execute"),
+    "storyboard_regenerate": ("execute", "explicit_execute"),
+    "storyboard_change": ("execute", "explicit_execute"),
+    "storyboard_audit": ("audit_only", "read_only"),
+    "storyboard_repair": ("audit_and_repair", "explicit_execute"),
 }
 STATES = {
     "intake", "scope_locked", "proposal_ready", "awaiting_approval", "approved",
@@ -56,7 +64,7 @@ ALLOWED_TRANSITIONS = {
 
 STORYBOARD_GATES = [
     "source_coverage", "camera_visibility", "spatial_continuity", "performance_chain",
-    "shot_rhythm", "seedance_independence", "prohibitions_audio", "statistics",
+    "shot_rhythm", "compact_master_single_shot_integrity", "prohibitions_audio", "statistics",
 ]
 SCRIPT_GATES = [
     "source_coverage", "character_cognition", "story_logic", "episode_boundary",
@@ -64,6 +72,12 @@ SCRIPT_GATES = [
 ]
 VISUAL_GATES = ["anchor_consistency", "camera_visibility", "spatial_continuity", "output_integrity"]
 GENERAL_GATES = ["scope_lock", "output_integrity", "impact_regression"]
+FORBIDDEN_BACKGROUND_OUTPUTS = {
+    "seedance_batches",
+    "独立Seedance批次",
+    "Seedance 2.5独立正式执行分镜",
+    "生成批次",
+}
 
 
 def utc_now() -> str:
@@ -135,6 +149,11 @@ def new_hub(project_name: str, project_id: str | None = None, timestamp: str | N
             "human_signoff_required_for_archive": True,
             "formal_rule_auto_mutation": False,
             "unavailable_capability_must_be_recorded": True,
+            "compact_master_version": COMPACT_MASTER_VERSION,
+            "background_seedance_generation": False,
+            "production_audit_separation_required": True,
+            "repair_activation_condition": "independent_audit_fail_and_explicit_authorization",
+            "repair_returns_to_independent_audit": True,
         },
         "capability_registry": load_capability_registry(),
         "project_state": {
@@ -182,7 +201,7 @@ def capability_map(hub: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def required_validation_gates(operation: str) -> list[str]:
-    if operation.startswith("storyboard_") or operation == "seedance_create":
+    if operation.startswith("storyboard_") or operation == "production_batch":
         return STORYBOARD_GATES
     if operation.startswith("script_") or operation in {"dialogue_rewrite", "episode_plan", "rewrite_plan"}:
         return SCRIPT_GATES
@@ -213,6 +232,14 @@ def validate_work_order_request(request: Any, hub: dict[str, Any]) -> list[str]:
     for field in ["targets", "protected_scope", "expected_outputs"]:
         if field in request and not isinstance(request.get(field), list):
             errors.append(f"{field} must be an array")
+    expected_outputs = request.get("expected_outputs")
+    if isinstance(expected_outputs, list):
+        forbidden_outputs = sorted({str(value) for value in expected_outputs} & FORBIDDEN_BACKGROUND_OUTPUTS)
+        if forbidden_outputs:
+            errors.append(
+                "R10.1 workflow forbids background or persisted Seedance outputs: "
+                f"{forbidden_outputs}; request an explicit on-demand video execution package instead"
+            )
     if "source_lock" in request and not isinstance(request.get("source_lock"), dict):
         errors.append("source_lock must be an object")
     elif isinstance(request.get("source_lock"), dict):
@@ -229,6 +256,20 @@ def validate_work_order_request(request: Any, hub: dict[str, Any]) -> list[str]:
         errors.append("plan_only mode requires plan_only or read_only authorization")
     if request.get("mode") in {"execute", "audit_and_repair"} and request.get("authorization") == "read_only":
         errors.append("mutating mode cannot use read_only authorization")
+    operation = request.get("operation")
+    if operation in STORYBOARD_AUTHORITY_MATRIX:
+        expected_mode, expected_authorization = STORYBOARD_AUTHORITY_MATRIX[operation]
+        # A pending production/repair request may be registered for explicit
+        # approval, but it remains non-executable.  Authority-sensitive service
+        # calls enforce the exact authorization before any artifact mutation.
+        allowed_authorizations = {expected_authorization}
+        if expected_authorization == "explicit_execute":
+            allowed_authorizations.add("pending")
+        if request.get("mode") != expected_mode or request.get("authorization") not in allowed_authorizations:
+            errors.append(
+                "storyboard authority matrix requires "
+                f"mode={expected_mode} and authorization={expected_authorization} for {operation}"
+            )
     return errors
 
 
@@ -246,6 +287,19 @@ def _initial_status(request: dict[str, Any], hub: dict[str, Any]) -> str:
     return "awaiting_approval"
 
 
+def _server_role_for_work_order(operation: str) -> str:
+    if operation == "storyboard_audit":
+        return "independent_audit"
+    if operation == "storyboard_repair":
+        return "repair"
+    return "production"
+
+
+def _local_binding(prefix: str, work_order_id: str) -> str:
+    digest = hashlib.sha256(f"{prefix}:{work_order_id}".encode("utf-8")).hexdigest()[:20]
+    return f"{prefix}-{digest}"
+
+
 def create_work_order(hub: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     errors = validate_work_order_request(request, hub)
     if errors:
@@ -254,6 +308,16 @@ def create_work_order(hub: dict[str, Any], request: dict[str, Any]) -> dict[str,
     if existing is not None:
         return {"status": "duplicate", "work_order_id": existing["work_order_id"], "work_order_status": existing["status"]}
     work_order = copy.deepcopy(request)
+    work_order.setdefault("server_actor_role", _server_role_for_work_order(str(request["operation"])))
+    work_order.setdefault(
+        "server_window_binding_id",
+        _local_binding("WIN", str(request["work_order_id"])),
+    )
+    work_order.setdefault(
+        "server_actor_binding_id",
+        _local_binding("ACT", str(request["work_order_id"])),
+    )
+    work_order.setdefault("transport_session_fingerprint", None)
     work_order.update({
         "status": _initial_status(request, hub),
         "internal_round": 0,
@@ -266,6 +330,9 @@ def create_work_order(hub: dict[str, Any], request: dict[str, Any]) -> dict[str,
         "blockers": [],
         "updated_at": request["timestamp"],
     })
+    if request["operation"] == "storyboard_repair":
+        work_order["repair_activation_condition"] = hub["policy"]["repair_activation_condition"]
+        work_order["repair_return_role"] = "independent_audit"
     if request["mode"] == "plan_only":
         work_order["mutates_source"] = False
     hub["work_orders"].append(work_order)
@@ -324,14 +391,14 @@ def _impact_matrix(target_type: str, operations: list[dict[str, Any]]) -> list[s
     if target_type in {"script", "script_and_storyboard"}:
         updates.update({
             "episode_beats", "source_ledger", "cognition_matrix", "must_include_exclude",
-            "scene_state_ledger", "shot_plan", "formal_storyboard", "seedance_batches",
-            "anchors", "keyframe_assets", "voice_audio_bgm", "production_batches",
+            "scene_state_ledger", "shot_plan", "compact_canonical", "formal_master_export",
+            "anchors", "keyframe_assets", "voice_audio_bgm", "on_demand_production_package",
         })
     if target_type in {"storyboard", "script_and_storyboard"}:
         updates.update({
-            "scene_state_ledger", "shot_plan", "formal_storyboard", "seedance_batches",
+            "scene_state_ledger", "shot_plan", "compact_canonical", "formal_master_export",
             "shot_numbering", "cumulative_timing", "anchors", "keyframe_assets",
-            "voice_audio_bgm", "production_batches",
+            "voice_audio_bgm", "on_demand_production_package",
         })
     operation_names = {item["operation"] for item in operations}
     if operation_names & {"delete", "replace", "merge", "move"}:
@@ -397,6 +464,8 @@ def record_deliverable(hub: dict[str, Any], record: dict[str, Any]) -> dict[str,
         raise ValueError(f"deliverable missing fields: {missing}")
     if record["status"] not in {"draft", "validated", "final"}:
         raise ValueError("deliverable status must be draft, validated, or final")
+    if str(record.get("artifact_type")) in FORBIDDEN_BACKGROUND_OUTPUTS:
+        raise ValueError("R10.1 forbids persisted Seedance batch deliverables; use explicit on-demand video execution")
     work_order = _find_work_order(hub, record["work_order_id"])
     existing = next((item for item in hub["deliverables"] if item["deliverable_id"] == record["deliverable_id"]), None)
     if existing is not None:
@@ -571,6 +640,11 @@ def validate_hub(hub: Any) -> list[str]:
         "impact_regression_required": True,
         "human_signoff_required_for_archive": True,
         "formal_rule_auto_mutation": False,
+        "compact_master_version": COMPACT_MASTER_VERSION,
+        "background_seedance_generation": False,
+        "production_audit_separation_required": True,
+        "repair_activation_condition": "independent_audit_fail_and_explicit_authorization",
+        "repair_returns_to_independent_audit": True,
     }
     for field, value in policy_expected.items():
         if policy.get(field) != value:
@@ -590,7 +664,9 @@ def validate_hub(hub: Any) -> list[str]:
             continue
         for field in [
             "work_order_id", "operation", "mode", "authorization", "status", "internal_round",
-            "mutates_source", "validation", "deliverable_ids", "change_request_ids", "state_history",
+            "server_actor_role", "server_window_binding_id", "server_actor_binding_id",
+            "transport_session_fingerprint", "mutates_source", "validation", "deliverable_ids",
+            "change_request_ids", "state_history",
         ]:
             if field not in work_order:
                 errors.append(f"work_orders[{index}] missing field: {field}")
@@ -602,6 +678,21 @@ def validate_hub(hub: Any) -> list[str]:
             errors.append(f"work order {work_order_id} has unsupported operation")
         if work_order.get("mode") == "plan_only" and work_order.get("mutates_source") is not False:
             errors.append(f"work order {work_order_id} mutates source in plan_only mode")
+        forbidden_outputs = sorted(
+            {str(value) for value in work_order.get("expected_outputs", [])}
+            & FORBIDDEN_BACKGROUND_OUTPUTS
+        )
+        if forbidden_outputs:
+            errors.append(f"work order {work_order_id} requests forbidden background outputs: {forbidden_outputs}")
+        if work_order.get("operation") in STORYBOARD_AUTHORITY_MATRIX:
+            expected_role = _server_role_for_work_order(str(work_order.get("operation")))
+            if work_order.get("server_actor_role") != expected_role:
+                errors.append(f"work order {work_order_id} violates production/audit/repair role separation")
+        if work_order.get("operation") == "storyboard_repair":
+            if work_order.get("repair_activation_condition") != policy_expected["repair_activation_condition"]:
+                errors.append(f"work order {work_order_id} lacks conditional repair activation")
+            if work_order.get("repair_return_role") != "independent_audit":
+                errors.append(f"work order {work_order_id} must return to independent_audit")
         if not isinstance(work_order.get("internal_round"), int) or not 0 <= work_order.get("internal_round", -1) <= 3:
             errors.append(f"work order {work_order_id} has invalid internal_round")
         if work_order.get("status") == "archived":
@@ -636,6 +727,12 @@ def validate_hub(hub: Any) -> list[str]:
             if value in seen:
                 errors.append(f"duplicate {id_field}: {value}")
             seen.add(value)
+            if (
+                collection_name == "deliverables"
+                and isinstance(item, dict)
+                and str(item.get("artifact_type")) in FORBIDDEN_BACKGROUND_OUTPUTS
+            ):
+                errors.append(f"deliverable {value} persists a forbidden Seedance batch")
     return errors
 
 
@@ -655,6 +752,8 @@ def summarize(hub: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": hub.get("schema_version"),
         "project_name": hub.get("project_name"),
+        "compact_master_version": hub.get("policy", {}).get("compact_master_version"),
+        "background_seedance_generation": hub.get("policy", {}).get("background_seedance_generation"),
         "capability_count": sum(capability_status_counts.values()),
         "capability_status_counts": capability_status_counts,
         "capability_group_counts": group_counts,

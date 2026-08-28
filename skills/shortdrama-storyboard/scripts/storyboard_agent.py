@@ -24,10 +24,13 @@ AUDIT_CATEGORIES = [
     "空间连续",
     "表演链",
     "镜头节奏",
-    "Seedance独立执行",
+    "正式母版单镜执行完整性",
     "禁项与声音",
     "统计闭合",
 ]
+LEGACY_AUDIT_CATEGORY_ALIASES = {
+    "Seedance独立执行": "正式母版单镜执行完整性",
+}
 TASK_TYPES = {"generation_audit", "audit", "audit_repair", "repair_regression", "bootstrap_import"}
 RESULTS = {"pass", "fail_current", "blocked"}
 SEVERITIES = {"fail", "warn", "info", "blocking", "error"}
@@ -164,7 +167,8 @@ def validate_event(event: Any, max_rounds: int = 3) -> list[str]:
         for field in issue_required:
             if field not in issue or issue[field] in (None, ""):
                 errors.append(f"issue[{index}] missing field: {field}")
-        if issue.get("category") not in AUDIT_CATEGORIES:
+        category = issue.get("category")
+        if category not in AUDIT_CATEGORIES and category not in LEGACY_AUDIT_CATEGORY_ALIASES:
             errors.append(f"issue[{index}] unsupported category: {issue.get('category')!r}")
         if issue.get("severity") not in SEVERITIES:
             errors.append(f"issue[{index}] unsupported severity: {issue.get('severity')!r}")
@@ -321,6 +325,9 @@ def _issue_dedup_key(ledger: dict[str, Any], event: dict[str, Any], issue: dict[
 
 def _normalize_issue(issue: dict[str, Any]) -> dict[str, Any]:
     normalized = copy.deepcopy(issue)
+    normalized["category"] = LEGACY_AUDIT_CATEGORY_ALIASES.get(
+        str(issue.get("category")), str(issue.get("category"))
+    )
     normalized["status"] = ISSUE_STATUS_ALIASES[issue["status"]]
     normalized["shot_ids"] = [str(value) for value in issue.get("shot_ids", [])]
     normalized["blocking"] = bool(issue.get("blocking", issue.get("severity") in {"fail", "blocking", "error"}))
@@ -412,7 +419,16 @@ def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str,
         return {"status": "duplicate", "event_id": raw_event["event_id"], "summary": summarize(ledger)}
 
     event = copy.deepcopy(raw_event)
+    legacy_aliases = sorted({
+        str(issue.get("category"))
+        for issue in event.get("issues", [])
+        if isinstance(issue, dict) and issue.get("category") in LEGACY_AUDIT_CATEGORY_ALIASES
+    })
     event["issues"] = [_normalize_issue(issue) for issue in event["issues"]]
+    if legacy_aliases:
+        event["legacy_aliases_applied"] = {
+            value: LEGACY_AUDIT_CATEGORY_ALIASES[value] for value in legacy_aliases
+        }
     scope_key = _scope_key(ledger, event)
     event["scope_key"] = scope_key
     ledger["counters"]["event_sequence"] += 1

@@ -13,7 +13,14 @@ from jsonschema import Draft202012Validator
 
 from shortdrama_mcp.app import create_mcp
 from shortdrama_mcp.auth import request_namespace
+from shortdrama_mcp.canonical import (
+    COMPACT_SHOT_FIELDS,
+    LEGACY_DERIVED_SHOT_FIELDS,
+    LEGACY_REMOVED_SHOT_FIELDS,
+)
 from shortdrama_mcp.config import Settings
+from shortdrama_mcp.delta import ensure_shot_uids
+from shortdrama_mcp.materializer import materialize_storyboard
 import shortdrama_mcp.service as service_module
 
 
@@ -24,12 +31,63 @@ import sys
 
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 from run_golden_tests import inject_pg1_fixture_evidence  # noqa: E402
+from semantic_audit_helpers import inject_semantic_audit
 
 
-def valid_storyboard() -> dict[str, Any]:
+def legacy_storyboard() -> dict[str, Any]:
+    """Return the frozen R10.0 fixture only for explicit import migration tests."""
+
     suite = json.loads((SKILL_ROOT / "references" / "golden_tests.json").read_text(encoding="utf-8"))
     value = copy.deepcopy(suite["fixtures"]["valid_base"])
     inject_pg1_fixture_evidence(value)
+    value["prevention_evidence"]["audit_layers"][5] = "正式母版单镜执行完整性"
+    return value
+
+
+def valid_storyboard() -> dict[str, Any]:
+    """Return one R10.1 compact master with no persisted duplicate outputs."""
+
+    value = materialize_storyboard(legacy_storyboard())
+    value["schema_version"] = "R10.1"
+    value["schema_profile"] = "compact_master_v1"
+    value["field_order"] = list(COMPACT_SHOT_FIELDS)
+    value.pop("batches", None)
+    value.pop("mother_template_columns", None)
+    for shot in value["shots"]:
+        legacy_cut = shot.pop("切镜转场提示词", None)
+        if not shot.get("切镜/转场提示词"):
+            shot["切镜/转场提示词"] = legacy_cut or "手停在门框时切到桌面信件"
+        shot["空间站位描述"] = (
+            "同一室内清晨；女主位于左前门边，桌与信件在画面右中部，"
+            "闭合木窗在左后，仅出现有源人物与道具。"
+        )
+        shot["起始状态"] = (
+            "女主站在门外朝向桌面，右手已扶门框，视线尚未落到信件；"
+            "木门半开，桌面信件未移动。"
+        )
+        shot["画面内容"] = (
+            "[0.0–0.8s] 女主推门进入画面，右手扶住门框；"
+            "[0.8–3.3s] 她停在桌前，肩膀缓慢落下，目光转向桌面信件，"
+            "嘴角自然放松，本镜无对白；"
+            "[3.3–4.0s] 她保持视线落点和稳定呼吸，手停在门框，动作收束。"
+        )
+        shot["音色"] = "不适用：本镜无对白"
+        shot["心理音轨"] = (
+            "不适用：本镜无心理音轨；不张嘴、不驱动口型、不生成字幕、不计入对白时长。"
+        )
+        for field in LEGACY_REMOVED_SHOT_FIELDS | LEGACY_DERIVED_SHOT_FIELDS:
+            shot.pop(field, None)
+        internal = {
+            field: shot[field]
+            for field in ("shot_uid", "episode_id", "scene_uid")
+            if shot.get(field) not in (None, "")
+        }
+        compact = {field: shot.get(field) for field in COMPACT_SHOT_FIELDS}
+        compact.update(internal)
+        shot.clear()
+        shot.update(compact)
+    inject_pg1_fixture_evidence(value)
+    value["prevention_evidence"]["audit_layers"][5] = "正式母版单镜执行完整性"
     return value
 
 
@@ -72,6 +130,7 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         self.temp.cleanup()
 
     async def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        arguments = inject_semantic_audit(self.service, self.settings, name, arguments)
         result = await self.server.call_tool(name, arguments)
         self.assertFalse(result.is_error, _result_text(result))
         self.assertIsNotNone(result.structured_content)
@@ -80,6 +139,7 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
     async def rejection_text(self, name: str, arguments: dict[str, Any]) -> str:
         """Normalize MCP ToolError and structured rejections for stable assertions."""
 
+        arguments = inject_semantic_audit(self.service, self.settings, name, arguments)
         try:
             result = await self.server.call_tool(name, arguments)
         except Exception as exc:  # MCPServer raises ToolError for tool-side ValueError.
@@ -120,7 +180,7 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
                 "must_keep": ["剧情、对白、人物认知与空间连续"],
                 "must_remove": [],
                 "protected_scope": protected_scope or [],
-                "expected_outputs": ["正式分镜", "Seedance批次"],
+                "expected_outputs": ["正式分镜", "正式生产母版"],
                 "window_key": window_key,
             },
         )
@@ -251,7 +311,15 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(record["artifact_id"], committed["artifact_id"])
-        self.assertEqual(storyboard["shots"], valid_storyboard()["shots"])
+        expected_storyboard, identity_manifest = ensure_shot_uids(valid_storyboard())
+        expected_storyboard = materialize_storyboard(expected_storyboard)
+        self.assertEqual(storyboard["shots"], expected_storyboard["shots"])
+        self.assertNotIn("batches", storyboard)
+        self.assertEqual(len(identity_manifest["shot_uids"]), len(storyboard["shots"]))
+        self.assertTrue(all(shot.get("shot_uid") for shot in storyboard["shots"]))
+        for shot in storyboard["shots"]:
+            self.assertFalse(LEGACY_REMOVED_SHOT_FIELDS.intersection(shot))
+            self.assertFalse(LEGACY_DERIVED_SHOT_FIELDS.intersection(shot))
         self.assertEqual(
             committed["data"]["canonical_sha256"],
             service_module.canonical_storyboard_sha256(storyboard),
@@ -420,8 +488,8 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(certificate["certificate_type"], "runtime_full_regression")
         self.assertEqual(certificate["tests"]["golden_tests"]["test_pass_count"], 73)
         self.assertEqual(certificate["tests"]["public_scene_tests"]["test_pass_count"], 11)
-        self.assertEqual(certificate["tests"]["agent_tests"]["test_pass_count"], 14)
-        self.assertEqual(certificate["tests"]["project_agent_tests"]["test_pass_count"], 18)
+        self.assertEqual(certificate["tests"]["agent_tests"]["test_pass_count"], 16)
+        self.assertEqual(certificate["tests"]["project_agent_tests"]["test_pass_count"], 21)
 
         with patch.object(
             service_module.r10_bootstrap,
@@ -580,9 +648,9 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         result = await self.rejection_text("commit_storyboard_patch", arguments)
         self.assertIn("full_rebuild_required", result)
 
-    async def test_storyboard_patch_runs_final_full_table_validation(self) -> None:
+    async def test_storyboard_patch_runs_full_production_validation(self) -> None:
         project_id, work_order_id, committed, audited = await self._prepare_patch_base(
-            project_name="补丁全表终验测试"
+            project_name="补丁完整生产校验测试"
         )
         arguments = self._patch_arguments(project_id, work_order_id, committed, audited)
         original_validator = service_module.validate_storyboard.validate_project
@@ -594,6 +662,8 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             result = await self.call("commit_storyboard_patch", arguments)
 
         self.assertEqual(result["status"], "pass")
+        self.assertTrue(result["data"]["full_production_validation"])
+        # Compatibility alias for 0.3.x callers; not an independent-audit verdict.
         self.assertTrue(result["data"]["final_full_validation"])
         self.assertEqual(result["data"]["report"]["issues"], [])
         self.assertEqual(
@@ -617,7 +687,14 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             self.service._project_schema, "immutable_repair_package", issued
         )
         self.service._validate_schema_record(
-            self.service._project_schema, "handoff_manifest", audit_to_repair
+            self.service._project_schema,
+            "handoff_manifest",
+            self.service.store.get_project_record(
+                self.namespace,
+                project_id,
+                kind="handoffs",
+                record_id=audit_to_repair["handoff_id"],
+            ),
         )
         self.assertEqual(
             audit_to_repair["immutable_repair_package_id"],
@@ -651,7 +728,14 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             self.service._project_schema, "immutable_repair_package", consumed
         )
         self.service._validate_schema_record(
-            self.service._project_schema, "handoff_manifest", repair_to_audit
+            self.service._project_schema,
+            "handoff_manifest",
+            self.service.store.get_project_record(
+                self.namespace,
+                project_id,
+                kind="handoffs",
+                record_id=repair_to_audit["handoff_id"],
+            ),
         )
         hub = self.service.store.load_hub(self.namespace, project_id)
         Draft202012Validator(self.service._project_schema).validate(hub)
@@ -767,7 +851,7 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("protected_scope_violation", rejection)
 
-    async def test_storyboard_patch_rejects_seedance_topology_reference(self) -> None:
+    async def test_storyboard_patch_rejects_removed_batch_topology_reference(self) -> None:
         project_id, work_order_id, committed, audited = await self._prepare_patch_base(
             project_name="补丁拓扑字段测试"
         )
