@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
-import json
 import os
 import tempfile
 import threading
@@ -12,7 +10,7 @@ from pathlib import Path
 
 from shortdrama_mcp.app import create_mcp
 from shortdrama_mcp.config import Settings
-from shortdrama_mcp.file_io import _validate_zip_archive, storyboard_to_xlsx
+from shortdrama_mcp.file_io import _validate_zip_archive, extract_xlsx, storyboard_to_xlsx
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -21,15 +19,13 @@ SKILL_ROOT = PLUGIN_ROOT / "skills" / "shortdrama-storyboard"
 import sys
 
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
-from run_golden_tests import inject_pg1_fixture_evidence  # noqa: E402
 from test_public_scene_ecology import public_fixture  # noqa: E402
+from semantic_audit_helpers import inject_semantic_audit, semantic_audit_for_artifact
+from test_efficiency import valid_storyboard as compact_valid_storyboard
 
 
 def valid_storyboard() -> dict:
-    suite = json.loads((SKILL_ROOT / "references" / "golden_tests.json").read_text(encoding="utf-8"))
-    value = copy.deepcopy(suite["fixtures"]["valid_base"])
-    inject_pg1_fixture_evidence(value)
-    return value
+    return compact_valid_storyboard()
 
 
 class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
@@ -47,6 +43,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         self.temp.cleanup()
 
     async def call(self, name: str, arguments: dict) -> dict:
+        arguments = inject_semantic_audit(self.service, self.settings, name, arguments)
         result = await self.server.call_tool(name, arguments)
         self.assertFalse(result.is_error, result.content)
         self.assertIsNotNone(result.structured_content)
@@ -64,7 +61,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_contracts_and_file_params(self) -> None:
         tools = await self.server.list_tools()
-        self.assertEqual(len(tools), 13)
+        self.assertEqual(len(tools), 14)
         by_name = {tool.name: tool.model_dump(by_alias=True, exclude_none=True) for tool in tools}
         self.assertEqual(by_name["get_agent_status"]["annotations"]["readOnlyHint"], True)
         self.assertEqual(by_name["audit_storyboard"]["annotations"]["readOnlyHint"], False)
@@ -155,7 +152,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
                 "must_keep": [],
                 "must_remove": [],
                 "protected_scope": [],
-                "expected_outputs": ["正式分镜", "Seedance批次"],
+                "expected_outputs": ["正式分镜", "正式生产母版"],
                 "window_key": "test-storyboard",
             },
         )
@@ -185,6 +182,24 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(repaired["status"], "pass")
         self.assertEqual(repaired["data"]["report"]["issues"], [])
+        with self.assertRaisesRegex(Exception, "semantic_audit_required"):
+            await self.server.call_tool(
+                "audit_storyboard",
+                {"project_id": project_id, "artifact_id": repaired["artifact_id"]},
+            )
+        invalid_semantic = semantic_audit_for_artifact(
+            self.service, self.settings, project_id, repaired["artifact_id"]
+        )
+        invalid_semantic["layers"][0]["evidence_ids"] = ["foo:bar"]
+        with self.assertRaisesRegex(Exception, "evidence kind must be one of"):
+            await self.server.call_tool(
+                "audit_storyboard",
+                {
+                    "project_id": project_id,
+                    "artifact_id": repaired["artifact_id"],
+                    "semantic_audit": invalid_semantic,
+                },
+            )
         independent = await self.call(
             "audit_storyboard",
             {"project_id": project_id, "artifact_id": repaired["artifact_id"]},
@@ -192,6 +207,11 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(independent["status"], "pass")
         self.assertEqual(independent["data"]["audit"]["status"], "recorded")
         self.assertFalse(independent["data"]["cache_hit"])
+        self.assertEqual(
+            independent["data"]["production_trace_id"], repaired["trace_id"]
+        )
+        self.assertEqual(independent["data"]["audit_trace_id"], independent["trace_id"])
+        self.assertFalse(independent["data"]["fast_path_evidence"]["cache_hit"])
         repeated = await self.call(
             "audit_storyboard",
             {"project_id": project_id, "artifact_id": repaired["artifact_id"]},
@@ -211,7 +231,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
             {
                 "project_id": project_id,
                 "operation": "storyboard_create",
-                "mode": "audit_and_repair",
+                "mode": "execute",
                 "authorization": "explicit_execute",
                 "request_text": "检查古代市集普通人物和环境音并修正",
                 "targets": ["市集场景"],
@@ -221,7 +241,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
                 "must_keep": ["主角动作"],
                 "must_remove": ["泛称环境声"],
                 "protected_scope": [],
-                "expected_outputs": ["正式分镜", "Seedance批次"],
+                "expected_outputs": ["正式分镜", "正式生产母版"],
                 "window_key": "test-public-ecology",
             },
         )
@@ -257,6 +277,25 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_file_import_and_workbook_roundtrip(self) -> None:
         project_id = await self.create_project("文件导入测试")
+        intake = await self.call(
+            "begin_project_task",
+            {
+                "project_id": project_id,
+                "operation": "project_intake",
+                "mode": "execute",
+                "authorization": "explicit_execute",
+                "request_text": "导入用户提供的正式分镜来源文件",
+                "targets": ["测试分镜.xlsx"],
+                "authoritative_source": "用户上传文件",
+                "latest_version": "current",
+                "target_boundary": "全文件",
+                "must_keep": [],
+                "must_remove": [],
+                "protected_scope": [],
+                "expected_outputs": ["来源文件与提取结果"],
+                "window_key": "test-source-intake",
+            },
+        )
         workbook = storyboard_to_xlsx(valid_storyboard(), {"issues": []})
 
         class Handler(BaseHTTPRequestHandler):
@@ -281,6 +320,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
                 "import_source_file",
                 {
                     "project_id": project_id,
+                    "work_order_id": intake["work_order_id"],
                     "file": {
                         "download_url": f"http://127.0.0.1:{httpd.server_port}/fixture.xlsx",
                         "file_id": "file_test_fixture",
@@ -298,9 +338,10 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "project_id": project_id,
                     "artifact_id": imported["artifact_id"],
-                    "section": "分镜",
+                    "section": "正式生产母版",
                     "offset": 0,
                     "limit": 10,
+                    "automatic_bulk": False,
                 },
             )
             self.assertFalse(read.is_error, read.content)
@@ -320,10 +361,17 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         storyboard["shots"][0]["画面内容"] = '=HYPERLINK("https://example.test","打开")'
         workbook = storyboard_to_xlsx(storyboard, {"issues": []})
         loaded = load_workbook(BytesIO(workbook), data_only=False, read_only=True)
-        sheet = loaded["分镜"]
+        sheet = loaded["正式生产母版"]
         headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
-        content_index = headers.index("画面内容") + 1
-        self.assertTrue(str(sheet.cell(2, content_index).value).startswith("'="))
+        content_index = headers.index("正式分镜母版·字段合并") + 1
+        projected = str(sheet.cell(2, content_index).value)
+        self.assertFalse(projected.startswith(("=", "+", "-", "@")))
+        self.assertIn("画面内容：=HYPERLINK", projected)
+        canonical = extract_xlsx(workbook)["canonical_storyboard"]
+        self.assertEqual(
+            canonical["shots"][0]["画面内容"],
+            '=HYPERLINK("https://example.test","打开")',
+        )
 
         archive_stream = BytesIO()
         with ZipFile(archive_stream, "w", ZIP_DEFLATED) as archive:
