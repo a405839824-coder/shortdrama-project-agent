@@ -1,7 +1,7 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.3.0",
-  "description": "Chinese short-drama chapter intake, canonical handoff, independent audit, safe incremental repair, Seedance 2.5, and production workflow agent.",
+  "version": "0.5.0",
+  "description": "Chinese short-drama production with an R10.1 compact master, canonical delta commits, independent audit, conditional repair, and zero duplicate background prompt generation.",
   "author": {
     "name": "Storyboard Project Agent"
   },
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10-PG1 全流程执行短剧项目：完整章节理解、剧情取舍与节拍规划、分镜生成与变更、公共场景人物和环境音生态、Seedance 2.5独立执行、生产到独立审计的canonical交接、全表审计及受证书约束的局部修复。",
+    "longDescription": "按 R10.1 compact-master 全流程执行短剧项目：完整章节理解、剧情取舍与节拍规划、全量或受保护范围的增量分镜、公共场景人物和环境音生态、正式母版单镜执行完整性、生产与独立审计双窗口常驻，以及审计失败后才启用的证书约束修复窗口。canonical仅保存27个语义字段，不预生成或保存独立Seedance批次。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [
@@ -30,11 +30,8 @@
     "logo": "./assets/icon.svg",
     "defaultPrompt": [
       "创建一个新的短剧项目，并告诉我还缺哪些输入。",
-      "完整读取我上传的小说章节，先建立剧情地图和取舍台账，再生成正式分镜。",
-      "审计我上传的分镜文件，自动修正全部问题后再简洁汇报。",
-      "读取生产交接包，独立审计后只修复证书确认的非结构字段，并执行全表终验。",
-      "按我的修改要求重写剧本，并同步更新受影响的分镜与生产批次。",
-      "检查公共场景的普通人物、环境音和Seedance声画生态，修正后保存。"
+      "在生产窗口完整读取授权原文，只生成受影响的语义原子并提交生产预检；不要在本窗口审计。",
+      "在独立审计窗口只审计精确生产交接包；首次审计提交八层语义证据，失败后等待我授权独立修复。"
     ],
     "brandColor": "#1F6F5F"
   }
