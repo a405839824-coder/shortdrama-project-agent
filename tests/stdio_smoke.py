@@ -35,7 +35,7 @@ async def inspect_bundled_server() -> dict:
 
 def main() -> int:
     inspection = asyncio.run(inspect_bundled_server())
-    passed = inspection["tool_count"] == 13 and not inspection["status_call_is_error"]
+    passed = inspection["tool_count"] == 14 and not inspection["status_call_is_error"]
     print(json.dumps({"status": "pass" if passed else "fail", "inspection": inspection}, ensure_ascii=False, indent=2))
     return 0 if passed else 1
 

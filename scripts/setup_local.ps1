@@ -7,4 +7,3 @@ $VenvPython = Join-Path $PluginRoot ".venv\Scripts\python.exe"
 & $VenvPython -m pip install --upgrade pip
 & $VenvPython -m pip install -r (Join-Path $PluginRoot "requirements.txt")
 Write-Host "本地环境已建立：$PluginRoot\.venv"
-

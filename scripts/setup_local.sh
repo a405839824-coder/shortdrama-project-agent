@@ -9,4 +9,3 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 "${PLUGIN_ROOT}/.venv/bin/python" -m pip install -r "${PLUGIN_ROOT}/requirements.txt"
 
 echo "本地环境已建立：${PLUGIN_ROOT}/.venv"
-

@@ -55,7 +55,7 @@ class PackagingTests(unittest.IsolatedAsyncioTestCase):
             local.validate()
             server, _service = create_mcp(local)
             tools = await server.list_tools()
-            self.assertEqual(len(tools), 13)
+            self.assertEqual(len(tools), 14)
             for tool in tools:
                 descriptor = tool.model_dump(by_alias=True, exclude_none=True)
                 self.assertEqual(descriptor["_meta"]["securitySchemes"][0]["type"], "oauth2")

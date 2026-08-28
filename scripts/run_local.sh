@@ -17,4 +17,3 @@ export SHORTDRAMA_AUTH_MODE="${SHORTDRAMA_AUTH_MODE:-none}"
 export SHORTDRAMA_DATA_DIR="${SHORTDRAMA_DATA_DIR:-${PLUGIN_ROOT}/data}"
 
 exec "${PYTHON_BIN}" "${PLUGIN_ROOT}/server/main.py" --http
-
