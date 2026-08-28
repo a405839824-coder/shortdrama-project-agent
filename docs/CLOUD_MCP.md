@@ -29,7 +29,7 @@
 ## ChatGPT 连接
 
 1. 在 ChatGPT Developer mode 新建 MCP 连接，URL 必须包含 `/mcp`。
-2. 完成 OAuth 登录并检查 13 个工具及其读写注解。
+2. 完成 OAuth 登录并检查 14 个工具及其读写注解。
 3. 复制地址栏中的 `plugin_asdk_app...` ID。
 4. 运行 `scripts/configure_chatgpt_connection.py`。
 5. 安装本地插件包，或按工作区流程发布私有插件。

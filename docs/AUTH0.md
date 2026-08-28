@@ -34,4 +34,3 @@ OAUTH_SCOPES=storyboard:read,storyboard:write
 - ChatGPT 能发现 Auth0 授权服务器元数据并完成浏览器登录。
 - issuer、audience、签名、期限或 scope 任一不符时拒绝调用。
 - 两个 Auth0 用户的项目命名空间完全隔离。
-
