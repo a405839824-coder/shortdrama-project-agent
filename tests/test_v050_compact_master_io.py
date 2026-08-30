@@ -162,9 +162,8 @@ class CompactMaterializerTests(unittest.TestCase):
         self.assertEqual(list(row), MOTHER_TEMPLATE_COLUMNS)
         self.assertTrue(
             row[FORMAL_MERGED_FIELD].startswith(
-                "镜头序号：EP06-004（3.6s；累计12.2s）\n"
-                "功能类型：礼数致歉\n"
-                "场景连续性ID：E06-S01-XIANGYA-MAIN-HALL-MORNING"
+                "镜头序号：EP06-004（3.6s；累计12.2s）\n\n"
+                "镜头类型：中近景｜可见主体：苏清柳；邹氏肩缘；荣婶儿"
             )
         )
         self.assertIn("光源来源：", row[FORMAL_MERGED_FIELD])
@@ -497,16 +496,12 @@ class CompactMaterializerTests(unittest.TestCase):
 
         for visible in (
             "左前主门开启",
-            "苏清柳抬眼",
-            "她手指收住",
-            "肩背随呼吸收紧",
             "窗纸轻动",
             "帘角摆动",
-            "【参考图锚点】绛红衣饰固定",
+            "绛红衣饰固定",
             "画内匾额“香雅院”清晰可见",
             "禁止字幕",
             "人物看镜头",
-            "保留木门与湿衣可见",
         ):
             self.assertIn(visible, gpt)
         for removed in (
@@ -523,6 +518,10 @@ class CompactMaterializerTests(unittest.TestCase):
             "问句前半平稳",
             "角色对白",
             "动作声",
+            "保留木门与湿衣可见",
+            "苏清柳抬眼",
+            "她手指收住",
+            "肩背随呼吸收紧",
             "环境声",
             "脚步",
             "开口",
