@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:shortdrama-storyboard:r10.1-compact-master",
   "title": "R10.1 Chinese Short Drama Compact Storyboard Master",
-  "description": "模型只提交一次语义原子；正式分镜母版与GPT关键帧由服务端按需编译。画面内容同时承载动作、表演、对白、发声和可选的Seedance 2.5单镜头时间阶段，不再生成独立批次。",
+  "description": "模型只提交一次语义原子；R10-SPC-1正式分镜母版与GPT关键帧由服务端按需编译。画面内容同时承载动作、表演、对白、发声和恰好三个Seedance 2.5单镜头时间阶段，不再生成独立批次。",
   "type": "object",
   "required": [
     "project_version",
@@ -106,7 +106,16 @@
         "原文支撑句"
       ]
     },
-    "source_lock": {"type": "object"},
+    "source_lock": {
+      "type": "object",
+      "required": ["output_contract", "target_model", "aspect_ratio"],
+      "properties": {
+        "output_contract": {"const": "R10-SPC-1"},
+        "target_model": {"const": "Seedance 2.5"},
+        "aspect_ratio": {"const": "9:16"}
+      },
+      "additionalProperties": true
+    },
     "shots": {
       "type": "array",
       "minItems": 1,
@@ -151,7 +160,7 @@
         "shot_uid": {"type": "string", "minLength": 1, "description": "服务端持久化的不可变镜头身份。"},
         "scene_uid": {"type": "string", "minLength": 1},
         "episode_id": {"type": "string", "minLength": 1},
-        "镜头编号": {"type": ["string", "number"]},
+        "镜头编号": {"type": "string", "pattern": "^EP\\d{2}-\\d{3}$", "description": "新写显示编号；稳定身份仍由shot_uid承担。"},
         "时长": {"type": "number", "exclusiveMinimum": 0},
         "累计时长": {"type": "number", "minimum": 0},
         "功能类型": {"type": ["string", "number"]},
@@ -162,15 +171,15 @@
         "起始状态": {"type": "string", "minLength": 1, "description": "独立说明镜头开始瞬间的位置、朝向、姿态、视线、道具与表演状态。"},
         "机位": {"type": ["string", "number"]},
         "运镜方式": {"type": "string", "minLength": 1, "description": "移动镜头在同一字段写明速度、运镜主体和叙事功能。"},
-        "画面内容": {"type": "string", "minLength": 1, "description": "描述本镜头内人物怎么做、怎么说、表情动作、听者反应和镜尾状态；对白使用【角色】对白；发声六维与标点语气也写在此字段。可写1至3个连续、不重叠、覆盖完整时长的时间段。"},
+        "画面内容": {"type": "string", "minLength": 1, "description": "按R10-SPC-1恰好写三个【0.0—x.x秒】阶段：刺激/起始反应、核心动作或角色说道：“精确对白”、镜尾反应/切点；发声六维、口型、视线、听者错峰反应与最终状态也写在此字段。"},
         "音色": {"type": "string", "minLength": 1, "description": "保留为独立字段；无对白时写不适用及原因。"},
         "心理音轨": {"type": ["string", "number"]},
         "环境音效": {"type": ["string", "number"]},
         "环境动态": {"type": ["string", "number"]},
-        "光影": {"type": ["string", "number"]},
-        "光源来源": {"type": ["string", "number"]},
-        "光源方向": {"type": ["string", "number"]},
-        "色温倾向": {"type": ["string", "number"]},
+        "光影": {"type": "string", "minLength": 1, "description": "主要受光主体、面部明暗、关键道具、高光与暗部材质关系。"},
+        "光源来源": {"type": "string", "minLength": 1, "description": "本镜实际采用的场内主光和弱补光来源，不写二选一候选。"},
+        "光源方向": {"type": "string", "minLength": 1, "description": "画面方向、高度、斜落路径、暗侧补光与纵深衰减。"},
+        "色温倾向": {"type": "string", "minLength": 1, "description": "定性暖冷空间关系、肤色与材质本色；禁止Kelvin/K数值和空泛单词。"},
         "生成限制": {"type": ["string", "number"]},
         "转场类型": {"type": ["string", "number"]},
         "切镜/转场提示词": {"type": ["string", "number"]},
@@ -228,5 +237,6 @@
   ],
   "x-version": "V16.3-148-R10-StableRuntime",
   "x-workflow-revision": "R10-PG1",
-  "x-schema-profile": "compact_master_v1"
+  "x-schema-profile": "compact_master_v1",
+  "x-output-contract": "R10-SPC-1"
 }
