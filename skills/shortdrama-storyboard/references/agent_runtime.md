@@ -46,6 +46,7 @@ Use this fixed audit category order:
 ## Keep compact generation single-source
 
 - Pin the project hub to `compact_master_version=0.5.0` and `background_seedance_generation=false`.
+- Pin every new formal storyboard write/export to `source_lock.output_contract=R10-SPC-1`; keep the v0.5.0 canonical architecture but use the strict EP numbering, episode-local cumulative time, exact three-stage Seedance 2.5 picture content, `正式分镜母版` fifth-column label, qualitative light fields, and GPT projection exclusions in `strict_prompt_contract.md`.
 - Pin newly issued independent-audit certificates and cache identities to `semantic-audit-v2-compact-master`; v1 is legacy history only and cannot authorize release or cache reuse.
 - Store only the R10.1 compact canonical. Compile the formal ten-column master and GPT keyframe projection deterministically when explicitly requested; do not persist generated copies in canonical.
 - Do not create `seedance_batches`, `独立Seedance批次`, a standalone Seedance execution column, or any background video prompt job.
