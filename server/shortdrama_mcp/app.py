@@ -90,7 +90,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     server = MCPServer(
         name="shortdrama-project-agent",
         title="分镜项目 Agent",
-        description="R10.1 compact-master short-drama service with canonical delta commits, independent audit, conditional repair, and public-scene ecology",
+        description="R10.1 compact-master short-drama service with the R10-SPC-1 strict prompt/export contract, canonical delta commits, independent audit, conditional repair, and public-scene ecology",
         version=__version__,
         instructions=(
             "先调用get_agent_status，再创建或确认项目并调用begin_project_task。"
@@ -101,6 +101,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "街道、市集、酒楼、城门等公共场景必须写普通人物密度、地点角色、错峰动作和空间层次，并写具体近中远环境声、对白避让和声画来源；有因空场除外。"
             "正式母版单镜必须在空白上下文中完整复现同一组公共人物、环境声生态、空间站位、起始状态和时间阶段。"
             "禁止后台生成或保存独立Seedance批次；正式母版画面内容就是单镜执行真源，GPT关键帧仅在导出时确定性编译。"
+            "新写分镜必须遵守R10-SPC-1：EP##-###编号、单集累计重置、每镜恰好三个Seedance 2.5时间阶段，第五列表头为正式分镜母版。"
             "只有独立审计失败且用户明确授权后，独立repair窗口才可使用签名修复包；非结构字段可用commit_storyboard_patch局部修复，边界、认知、原文、编号和时长变化必须执行绑定修复包的完整重建。"
             "修复后仍执行完整生产校验并交回原独立审计窗口复核；最多三轮，只有原审计窗口确认零残留、零新增才可称通过。"
             "正式归档必须同时具备精确版本的独立审计通过证书和signoff_task人工签核。"

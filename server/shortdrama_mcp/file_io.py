@@ -470,7 +470,7 @@ def workbook_to_storyboard(
         shots = _compact_shots_from_mother_sheet(mother_sheet)
         total_duration = metadata.get("total_duration")
         if total_duration in (None, "") and shots:
-            total_duration = shots[-1].get("累计时长", 0)
+            total_duration = sum(float(shot.get("时长") or 0) for shot in shots)
         return {
             "project_version": metadata.get(
                 "project_version",
@@ -535,7 +535,7 @@ def workbook_to_storyboard(
                         row[field] = identity[field]
     total_duration = metadata.get("total_duration")
     if total_duration in (None, "") and shots:
-        total_duration = shots[-1].get("累计时长", 0)
+        total_duration = sum(float(shot.get("时长") or 0) for shot in shots)
     legacy = {
         "project_version": metadata.get(
             "project_version",
