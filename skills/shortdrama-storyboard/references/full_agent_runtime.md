@@ -18,6 +18,8 @@ Use this policy with `V16.3-148-R10-StableRuntime`, `R10-PG1`, and the issue pol
 
 In MCP plugin mode, the authenticated plugin store for the exact `project_id` is the operational source of truth. Use its hub, work orders, deliverables, handoffs, audit events and issue ledger through the tools; do not separately fetch or rewrite the global Library copies for an ordinary content task. This avoids duplicate reads and conflicting state while preserving the same machine gates.
 
+An older valid plugin certificate does not certify R10-SPC-1 unless status explicitly advertises that output contract. Such a service may still coordinate project state, but its workbook/projection is not deliverable as current output. When the canonical is available, run the bundled deterministic R10-SPC-1 validation/export adapter and persist a compliant successor; otherwise record the exact plugin capability gap and stop without claiming the Agent update reached the server exporter.
+
 Resolve these exact Library titles only for standalone skill operation, explicit shared-ledger work, system/rule architecture updates, or final archival synchronization:
 
 - `分镜项目Agent_项目中枢.json`: current project state, work orders, change requests, deliverables, decisions, capability gaps, and version history.
@@ -95,7 +97,7 @@ Production-created chapter maps, source mappings, protected-dialogue lists, cogn
 2. source fidelity, deletion authority, new-plot prohibition, and episode boundaries;
 3. cognition, seven-field scene continuity, camera visibility, performance, rhythm, transitions, and timing;
 4. public-scene ordinary people, sound ecology, audiovisual matching, and same-scene continuity;
-5. every formal merged single-shot master's blank-context independence, field completeness, optional timing-stage closure, and target-model contract;
+5. every formal single-shot master's blank-context independence, field completeness, R10-SPC-1 exact three-stage closure, and target-model contract;
 6. prohibitions, formulas, statistics, residual issues, introduced issues, and final pass/fail.
 
 An audit verdict may be reused only as an auditor-issued certificate for an exactly unchanged artifact and exactly unchanged dependency fingerprints. If the user explicitly requests a fresh independent semantic audit, reuse extraction and parsing only and recompute the semantic verdict. Never accept a producer-issued certificate as an audit certificate.
@@ -233,7 +235,7 @@ Any approved story or script change must evaluate these downstream consumers:
 5. Scene-state ledger and spatial continuity.
 6. Shot plan, viewpoint, camera visibility, shot load, and rhythm.
 7. Formal storyboard content, dialogue, timing, numbering, and cumulative time.
-8. Compact formal-master start state, action process, end state, camera, sound, environment, optional Seedance 2.5 timing stages, and four-part light contract.
+8. R10-SPC-1 formal-master start state, three mandatory Seedance 2.5 stages, action/dialogue process, end state, camera, sound, environment, and four-part qualitative light contract.
 9. Character, scene, costume, prop, position, and lighting anchors.
 10. Keyframe prompts or generated frames.
 11. Voice, psychological audio, ambience, BGM cues, and transitions.
@@ -269,12 +271,12 @@ Recalculate dialogue capacity, shot load, rhythm, source coverage, continuity, n
 - For every public-flow scene, load `public_scene_ecology.md` before formal shot or keyframe projection. Write ordinary-person density, location-appropriate roles, staggered actions, spatial placement, concrete near/mid/far environmental sound, dialogue ducking, and audiovisual source matching once in the formal-master atoms; deterministically preserve keyframe-visible sound sources. An empty public scene requires a visible empty-state description plus a plot-grounded reason.
 - Build a separate visual-texture lock before formal-master video execution or keyframe/scene-frame projection. For every ancient-costume live-action formal master or visual projection, load `songyun_humanist_cinematography.md` as the mandatory visual master and apply its real-camera texture, sourced-light method, restrained color logic, lens/depth selection, humanist composition, projection order, and negative restrictions. For every night or low-light ancient-costume formal master or visual projection, additionally load `ancient_night_cinematography.md` and apply its motivated practical/ambient sources, distance falloff, half-lit readable faces, transparent shadows, restrained warm/cool color, night-specific lens/depth selection, low-light film texture, continuity, and negative restrictions. Adapt concrete values to the era, time, weather, place, mood, and real light sources. Project aspect ratio, sourced light, visibility, continuity, and reference anchors always override any example value.
 - Generate keyframe prompts with the established real short-drama screenshot style and negative restrictions. Use an image-generation tool when the user requests images and the required references are available.
-- Treat `正式分镜母版·字段合并` as the only blank-context executable single-shot master. `画面内容` alone carries action, expression, exact dialogue, delivery, listener reaction and optional Seedance 2.5 stages; `音色` stays independent. Export no Seedance column, no batch sheet, and no background-generated video prompt.
+- Treat `正式分镜母版` as the only blank-context executable single-shot master. `画面内容` alone carries action, expression, exact dialogue, delivery, listener reaction and exactly three `【0.0—x.x秒】` Seedance 2.5 stages; `音色` stays independent. New display IDs use `EP##-###`, cumulative time resets per episode, and the formal cell follows `strict_prompt_contract.md`. Export no Seedance column, no batch sheet, and no background-generated video prompt.
 - Design BGM after picture lock from the whole-scene emotional key, narrative function, time motion, frequency space, and audible scene image. Keep BGM out of the formal single-shot execution master.
 - Design dialogue delivery with sound strength, rhythm, breath, pause, emphasis, and ending tone.
 - Treat public-scene ambience as a mandatory production layer rather than optional decoration. Reject generic-only “环境声/街道嘈杂声”, anonymous extras with clear full dialogue, modern or era-incompatible sound sources, and same-scene crowd/audio continuity jumps.
 - Convert or export files through the appropriate document or spreadsheet workflow while preserving the 27-field atomic order, exact ten-column projection and formulas.
-- Split production into traceable episode, scene, shot, keyframe, voice, ambience, and BGM packages. For an explicit downstream i2v delivery, pass the committed `正式分镜母版·字段合并` directly and create only the required transport metadata or adapter on demand; never create or persist a competing video narrative, Seedance text, or batch artifact.
+- Split production into traceable episode, scene, shot, keyframe, voice, ambience, and BGM packages. For an explicit downstream i2v delivery, pass the committed `正式分镜母版` directly and create only the required transport metadata or adapter on demand; never create or persist a competing video narrative, Seedance text, or batch artifact.
 
 ## Audit, repair, and learn
 
