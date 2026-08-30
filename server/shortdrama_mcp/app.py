@@ -39,15 +39,41 @@ def _annotations(*, read_only: bool, destructive: bool = False, open_world: bool
     )
 
 
-def _transport_session_id(ctx: Context) -> str | None:
-    """Read the server-owned MCP connection id without trusting HTTP headers."""
+def _window_session_id(ctx: Context) -> str | None:
+    """Return a host-observed window id without trusting model arguments or headers.
+
+    ChatGPT's Streamable HTTP calls may be stateless, so a transport connection
+    id is not guaranteed to exist. ChatGPT instead injects the anonymized
+    conversation id in the request `_meta["openai/session"]` envelope. Keep a
+    transport-session fallback for stateful non-ChatGPT MCP clients.
+    """
 
     try:
-        connection = getattr(ctx.request_context.session, "_connection", None)
-        value = getattr(connection, "session_id", None)
+        meta = ctx.request_context.meta
+        value = meta.get("openai/session") if meta else None
+    except (AttributeError, TypeError, ValueError):
+        value = None
+    if isinstance(value, str):
+        value = value.strip()
+        if value and len(value) <= 512:
+            return f"openai:{value}"
+
+    try:
+        direct = getattr(ctx, "session_id", None)
     except (AttributeError, ValueError):
-        return None
-    return str(value) if value else None
+        direct = None
+    if direct:
+        return f"mcp:{direct}"
+
+    try:
+        session = ctx.request_context.session
+        connection = getattr(session, "connection", None) or getattr(
+            session, "_connection", None
+        )
+        fallback = getattr(connection, "session_id", None)
+    except (AttributeError, ValueError):
+        fallback = None
+    return f"mcp:{fallback}" if fallback else None
 
 
 def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
@@ -163,7 +189,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             protected_scope=protected_scope,
             expected_outputs=expected_outputs,
             window_key=window_key,
-            request_session_id=_transport_session_id(ctx),
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.tool(
@@ -192,7 +218,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             work_order_id=work_order_id,
             file=file,
             source_role=source_role,
-            request_session_id=_transport_session_id(ctx),
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.tool(
@@ -391,7 +417,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             structured_data=structured_data,
             source_artifact_id=source_artifact_id,
             change_summary=change_summary,
-            request_session_id=_transport_session_id(ctx),
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.tool(
@@ -425,7 +451,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             file_name=file_name,
             source_artifact_id=source_artifact_id,
             repair_package_id=repair_package_id,
-            request_session_id=_transport_session_id(ctx),
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.tool(
@@ -486,7 +512,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             ),
             top_level_updates=None,
             file_name=file_name,
-            request_session_id=_transport_session_id(ctx),
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.tool(
@@ -525,7 +551,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             operations=[item.model_dump() for item in operations],
             impact_scope=impact_scope,
             file_name=file_name,
-            request_session_id=_transport_session_id(ctx),
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.tool(
@@ -565,7 +591,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                 if semantic_audit is not None
                 else None
             ),
-            request_session_id=_transport_session_id(ctx),
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.tool(
