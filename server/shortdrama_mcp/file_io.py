@@ -32,6 +32,7 @@ from .materializer import (
     COMPACT_SHOT_FIELDS,
     FORMAL_MERGED_FIELD,
     GPT_KEYFRAME_FIELD,
+    LEGACY_FORMAL_MERGED_FIELD,
     LEGACY_STANDALONE_FIELDS,
     MOTHER_TEMPLATE_COLUMNS,
     formal_mother_template_rows,
@@ -410,7 +411,10 @@ def _parse_function_scene_cell(value: Any) -> tuple[str, str]:
 def _compact_shots_from_mother_sheet(sheet: dict[str, Any]) -> list[dict[str, Any]]:
     shots: list[dict[str, Any]] = []
     for source in sheet.get("rows", []):
-        shot = _parse_labeled_cell(source.get(FORMAL_MERGED_FIELD))
+        shot = _parse_labeled_cell(
+            source.get(FORMAL_MERGED_FIELD)
+            or source.get(LEGACY_FORMAL_MERGED_FIELD)
+        )
         shot["镜头编号"] = source.get("分镜序号")
         shot["时长"] = source.get("时长")
         shot["累计时长"] = source.get("累计时长")
@@ -450,7 +454,15 @@ def workbook_to_storyboard(
         (
             sheet
             for sheet in sheets
-            if list(sheet.get("headers", [])) == list(MOTHER_TEMPLATE_COLUMNS)
+            if tuple(sheet.get("headers", [])) in {
+                tuple(MOTHER_TEMPLATE_COLUMNS),
+                tuple(
+                    LEGACY_FORMAL_MERGED_FIELD
+                    if header == FORMAL_MERGED_FIELD
+                    else header
+                    for header in MOTHER_TEMPLATE_COLUMNS
+                ),
+            }
         ),
         None,
     )
@@ -674,6 +686,7 @@ def _write_table(workbook: Workbook, title: str, headers: list[str], rows: list[
             "台词",
             "发声方式",
             "独立执行提示词",
+            "正式分镜母版",
             "正式分镜母版·字段合并",
             "GPT关键帧生成指令",
             "Seedance 2.5独立正式执行分镜",
