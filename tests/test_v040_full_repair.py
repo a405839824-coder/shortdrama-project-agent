@@ -12,7 +12,10 @@ from shortdrama_mcp.auth import request_namespace
 from shortdrama_mcp.config import Settings
 
 from test_v040_architecture import three_shot_storyboard
-from semantic_audit_helpers import inject_semantic_audit
+from semantic_audit_helpers import (
+    failing_semantic_audit_for_artifact,
+    inject_semantic_audit,
+)
 
 
 class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
@@ -87,7 +90,6 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
             "performance_chains",
         ):
             evidence[field] = evidence[field][:1]
-        broken["shots"][0]["光源来源"] = ""
         return broken
 
     async def _prepare_failed_audit_chain(self) -> None:
@@ -114,12 +116,28 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
                 "file_name": "结构性待修复基线.xlsx",
             },
         )
-        self.assertEqual(self.committed["status"], "fail_current")
+        self.assertEqual(self.committed["status"], "production_preflight_pass")
+        semantic_failure = failing_semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            self.project_id,
+            str(self.committed["artifact_id"]),
+            shot_id="S001",
+            field="画面内容",
+            error_code="E-SHOTLOAD-001",
+            issue_id="shots[1].episode_structure_incomplete",
+            evidence=(
+                "独立审计按锁定的EP01-EP03边界复核，确认当前单镜只覆盖第一剧情阶段，"
+                "缺少后两阶段，必须完整重建受影响边界。"
+            ),
+            repair_action="按锁定边界完整重建三镜，并执行完整生产回归。",
+        )
         self.audited = await self.call(
             "audit_storyboard",
             {
                 "project_id": self.project_id,
                 "artifact_id": self.committed["artifact_id"],
+                "semantic_audit": semantic_failure,
             },
         )
         self.assertEqual(self.audited["status"], "fail_current")
@@ -147,7 +165,7 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         repaired = await self.call("commit_storyboard", self.full_arguments())
-        self.assertEqual(repaired["status"], "pass")
+        self.assertEqual(repaired["status"], "production_preflight_pass")
         self.assertTrue(repaired["data"]["structural_repair"])
         self.assertEqual(repaired["data"]["repair_transaction_state"], "committed")
         self.assertEqual(repaired["data"]["repair_package"]["status"], "consumed")
@@ -229,7 +247,7 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_consumed_package_cannot_be_replayed(self) -> None:
         first = await self.call("commit_storyboard", self.full_arguments())
-        self.assertEqual(first["status"], "pass")
+        self.assertEqual(first["status"], "production_preflight_pass")
         replay = await self.rejection("commit_storyboard", self.full_arguments())
         self.assertIn("repair_package_unavailable", replay)
         base_meta, _base_path = self.service.store.get_artifact(
@@ -263,14 +281,21 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(metadata.get("successor_artifact_id"))
         self.assertFalse(metadata.get("active_successor_claim"))
         self.assertEqual(metadata["successor_transaction"]["state"], "aborted")
-        handoff_id = failed["data"]["handoff_artifact_id"]
-        handoff = self.service.store.get_project_record(
-            self.namespace,
-            self.project_id,
-            kind="handoffs",
-            record_id=handoff_id,
+        self.assertFalse(failed["data"]["artifact_created"])
+        self.assertFalse(failed["data"]["handoff_created"])
+        repair_handoffs = [
+            row
+            for row in self.service.store.list_project_records(
+                self.namespace, self.project_id, kind="handoffs"
+            )
+            if row.get("handoff_type") == "repair_to_audit"
+            and row.get("immutable_repair_package_id") == self.package_id
+        ]
+        self.assertEqual(
+            repair_handoffs,
+            [],
+            "failed full validation must not export or create a repair handoff",
         )
-        self.assertEqual(handoff["status"], "rejected")
 
     async def test_final_cas_failure_compensates_package_and_rejects_handoff(
         self,

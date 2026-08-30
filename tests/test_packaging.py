@@ -13,6 +13,7 @@ from unittest.mock import patch
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from shortdrama_mcp import __version__
 from shortdrama_mcp.app import create_mcp
 from shortdrama_mcp.auth import JwtTokenVerifier
 from shortdrama_mcp.config import Settings
@@ -32,6 +33,8 @@ class PackagingTests(unittest.IsolatedAsyncioTestCase):
     async def test_manifest_paths_and_cloud_security_schemes(self) -> None:
         manifest = json.loads((PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "shortdrama-project-agent")
+        self.assertEqual(__version__, "0.5.4")
+        self.assertEqual(manifest["version"], __version__)
         for key in ("skills", "mcpServers"):
             self.assertTrue((PLUGIN_ROOT / manifest[key]).exists(), key)
         bundled_mcp = json.loads((PLUGIN_ROOT / manifest["mcpServers"]).read_text(encoding="utf-8"))

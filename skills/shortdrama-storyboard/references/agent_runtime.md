@@ -45,14 +45,14 @@ Use this fixed audit category order:
 
 ## Keep compact generation single-source
 
-- Pin the project hub to `compact_master_version=0.5.0` and `background_seedance_generation=false`.
-- Pin every new formal storyboard write/export to `source_lock.output_contract=R10-SPC-1`; keep the v0.5.0 canonical architecture but use the strict EP numbering, episode-local cumulative time, exact three-stage Seedance 2.5 picture content, `正式分镜母版` fifth-column label, qualitative light fields, and GPT projection exclusions in `strict_prompt_contract.md`.
+- Pin the project hub to `compact_master_version=0.5.4` and `background_seedance_generation=false`.
+- Pin every new formal storyboard write/export to `source_lock.output_contract=R10-SPC-1`; keep the v0.5 canonical architecture under the active 0.5.4 rule patch, using strict EP numbering, episode-local cumulative time, exact three-stage Seedance 2.5 picture content, `正式分镜母版` fifth-column label, qualitative light fields, per-shot `9:16竖屏`, static GPT projection, and THG-01–THG-12 in `strict_prompt_contract.md`.
 - Pin newly issued independent-audit certificates and cache identities to `semantic-audit-v2-compact-master`; v1 is legacy history only and cannot authorize release or cache reuse.
 - Store only the R10.1 compact canonical. Compile the formal ten-column master and GPT keyframe projection deterministically when explicitly requested; do not persist generated copies in canonical.
 - Do not create `seedance_batches`, `独立Seedance批次`, a standalone Seedance execution column, or any background video prompt job.
 - Keep explicit on-demand video-model execution available through an authorized production request. It consumes the verified formal single-shot master and must not write a duplicate prompt or batch back into canonical.
 - Script and storyboard changes propagate to `compact_canonical` and `formal_master_export`, then invalidate dependent anchors, keyframes, audio cues, and explicit on-demand production packages as required.
-- Production writes and performs only `production_preflight`; independent audit remains read-only and is the only authority for a final audit conclusion. Repair activates only after an independent-audit failure plus explicit authorization, and its new artifact returns to the original independent-audit authority.
+- Production writes and performs only `production_preflight`; its immutable workbook keeps `PENDING_AUDIT`/`未签发结论` with null counts and trace. Independent audit remains read-only and is the only authority that may create a new immutable signed-audit-overlay artifact/successor workbook with a final audit conclusion; it never edits the production XLSX in place. Repair activates only after an independent-audit failure plus explicit authorization, and its new artifact returns to the original independent-audit authority.
 
 The Agent computes the issue key from project, episode, logical file, error code, shot IDs, field, and issue type. Do not use mutable evidence text or content version as the only identity; the same defect must remain traceable after a repair changes the file.
 

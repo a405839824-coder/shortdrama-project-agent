@@ -1,7 +1,7 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.3",
-  "description": "Chinese short-drama production with the R10-SPC-1 strict single-shot contract, an R10.1 compact master, opt-in no-API performance diagnostics, canonical delta commits, independent audit, conditional repair, and zero duplicate background prompt generation.",
+  "version": "0.5.4",
+  "description": "Chinese short-drama production with the R10-SPC-1 strict single-shot contract, twelve pre-export template hard gates, an R10.1 compact master, opt-in no-API performance diagnostics, canonical delta commits, independent audit, conditional repair, and zero duplicate background prompt generation.",
   "author": {
     "name": "Storyboard Project Agent"
   },
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目：画面内容恰好三段，光影四项独立，正式Excel第五列固定为正式分镜母版，GPT关键帧仅保留静帧视觉信息；支持完整章节理解、全量或受保护范围的增量分镜、双窗口独立审计、证书约束修复，以及按需启用的无API五阶段性能诊断。canonical仅保存27个语义字段，不预生成或保存独立Seedance批次。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目：画面内容恰好三段，光影四项独立，正式Excel第五列固定为正式分镜母版，GPT关键帧仅保留静帧视觉信息；导出前执行逐镜9:16、转场去重、静态关键帧、无跨镜代指、对白/人数/机位/状态/道具/时长/回读一致性和审计权限十二项硬门禁。支持完整章节理解、全量或受保护范围的增量分镜、双窗口独立审计、证书约束修复，以及按需启用的无API五阶段性能诊断。canonical仅保存27个语义字段，不预生成或保存独立Seedance批次。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [

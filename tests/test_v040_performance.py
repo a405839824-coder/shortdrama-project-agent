@@ -169,7 +169,7 @@ class CompactMasterPerformanceContracts(unittest.IsolatedAsyncioTestCase):
                 "file_name": "三集性能基线.xlsx",
             },
         )
-        self.assertEqual(committed["status"], "pass")
+        self.assertEqual(committed["status"], "production_preflight_pass")
         audited = await self.call(
             "audit_storyboard",
             {"project_id": project_id, "artifact_id": committed["artifact_id"]},
@@ -219,7 +219,7 @@ class CompactMasterPerformanceContracts(unittest.IsolatedAsyncioTestCase):
                 "file_name": "EP02增量性能版.xlsx",
             },
         )
-        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["status"], "production_preflight_pass")
         self.assertEqual(result["data"]["measurement_scope"], "server_only")
         self.assertIn("chatgpt_model_generation", result["data"]["unmeasured_stages"])
 

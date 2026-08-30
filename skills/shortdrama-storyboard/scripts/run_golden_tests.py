@@ -29,6 +29,20 @@ DEPRECATED_SHOT_FIELDS = [
 ]
 
 
+def normalize_fixture_generation_limit(value: str) -> str:
+    """Upgrade a proven legacy negative BGM list without changing intent."""
+
+    text = value.replace("BGM", "额外配乐")
+    if "额外配乐" not in text or "禁止额外配乐" in text:
+        return text
+    text = text.replace("额外配乐", "")
+    text = re.sub(r"[、，,]{2,}", "、", text)
+    text = re.sub(r"禁止[、，,与和]+", "禁止", text)
+    text = re.sub(r"[、，,与和]+(?=[；;。]|$)", "", text)
+    text = text.strip(" ；;，,。")
+    return f"{text}；禁止额外配乐" if text else "禁止额外配乐"
+
+
 def project_root() -> Path:
     here = Path(__file__).resolve().parent
     return here.parent
@@ -132,6 +146,13 @@ def upgrade_fixture_to_compact(obj: dict[str, Any]) -> None:
         psych_attr = str(shot.get("心理音轨属性") or "")
         if psych and not psych.startswith(("无", "不适用")) and psych_attr:
             shot["心理音轨"] = f"{psych}；{psych_attr}"
+        if isinstance(shot.get("生成限制"), str):
+            # New writes use the unambiguous Chinese phrase.  Keep active BGM
+            # requests in other fields untouched so the negative fixture still
+            # proves the literal-token hard gate.
+            shot["生成限制"] = normalize_fixture_generation_limit(
+                shot["生成限制"]
+            )
         for field in DEPRECATED_SHOT_FIELDS:
             shot.pop(field, None)
 
@@ -157,6 +178,10 @@ def inject_pg1_fixture_evidence(obj: dict[str, Any]) -> None:
         "光源方向": "画面左侧至右侧",
     }
     for index, shot in enumerate(shots, 1):
+        if isinstance(shot, dict) and isinstance(shot.get("生成限制"), str):
+            shot["生成限制"] = normalize_fixture_generation_limit(
+                shot["生成限制"]
+            )
         shot_id = str(shot.get("镜头编号"))
         support = str(shot.get("原文支撑句") or shot.get("覆盖原文") or f"测试源文{index}")
         source_ledger.append({
@@ -180,8 +205,10 @@ def inject_pg1_fixture_evidence(obj: dict[str, Any]) -> None:
             "shot_id": shot_id,
             "core_function": str(shot.get("功能类型") or "动作推进"),
             "viewpoint_count": 1,
+            "main_camera_count": 1,
             "camera_position": str(shot.get("机位") or "平视正侧45度"),
             "main_action_stage": str(shot.get("画面内容") or "人物完成当前动作阶段"),
+            "main_action_stage_count": 1,
             "transition_function": "动作因果",
             "is_detail_shot": is_detail,
             "detail_shot_function": "展示关键信息" if is_detail else "不适用：非特写",
@@ -217,7 +244,7 @@ def inject_pg1_fixture_evidence(obj: dict[str, Any]) -> None:
         "shot_plan": shot_plan,
         "performance_chains": performance_chains,
         "audio_workflow": {
-            "seedance_bgm_policy": "禁止BGM",
+            "seedance_bgm_policy": "禁止额外配乐",
             "bgm_cue_stage": "画面锁定后独立设计",
             "scene_emotional_key": "服从当前剧情节拍",
             "dialogue_ducking": "对白优先，音乐后期避让",

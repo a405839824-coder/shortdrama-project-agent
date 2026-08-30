@@ -33,6 +33,9 @@
       "SHOT_GRANULARITY",
       "PERFORMANCE_CHAIN",
     "COMPACT_MASTER_INDEPENDENCE",
+      "TEMPLATE_HARD_GATES",
+      "XLSX_ROUND_TRIP",
+      "AUDIT_OVERLAY_GUARD",
       "CANONICAL_AUTHORITY",
       "FULL_OR_DELTA_ROUTE",
       "STABLE_UID_SCOPE_AND_CAS",
@@ -51,8 +54,9 @@
       "错误码/通过证据",
       "重跑结论",
       "G0-G13十四道门禁证据（小说条件门可N/A并附理由）",
+      "THG-01至THG-12全部通过；任一失败不得导出或commit",
       "唯一canonical及全量指纹",
-      "production_preflight不得冒充独立审计",
+      "production_preflight不得冒充独立审计，审计overlay只能为PENDING_AUDIT/未签发结论且计数和trace为空",
       "生产到审计交接包",
       "已有canonical的局部变更必须验证稳定UID、CAS、保护范围和左右边界",
       "生产delta必须逐项确认精确对白、标点、顺序/分句与说话人完全不变；任一对白/说话人增删改必须完整重建受影响场景或分集",
@@ -60,7 +64,8 @@
     "精确27字段原子顺序与十列导出",
     "画面内容只写一次动作、表情、对白、发声与听者反应，音色独立，四项光线必填",
     "不得生成或持久化batches、Seedance列、生成批次表或后台重复提示词",
-    "阶段计时及legacy_generation_calls/seedance_batches_generated/model_authored_derived_chars均为0"
+    "阶段计时及legacy_generation_calls/seedance_batches_generated/model_authored_derived_chars均为0",
+    "逐镜生成限制/正式母版/GPT各含9:16竖屏，GPT静态投影、BGM字面量零命中、对白与多行XLSX反向哈希一致"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -73,7 +78,7 @@
       "证据",
       "问题与修复",
       "最终状态",
-      "production_preflight结论",
+      "production_preflight结论与PENDING_AUDIT审计overlay",
       "待独立审计的handoff清单",
     "阶段计时",
     "compact canonical、正式母版和GPT导出投影"
@@ -120,6 +125,9 @@
       "CANONICAL_AUTHORITY",
       "RUNTIME_TEST_CERTIFICATE_VERIFY",
       "PREVENTIVE_GATES",
+      "TEMPLATE_HARD_GATES",
+      "XLSX_ROUND_TRIP_VERIFY",
+      "AUDIT_OVERLAY_VERIFY",
       "INDEPENDENT_AUDIT",
       "LAYERED_AUDIT",
       "QUALITY_METRICS",
@@ -133,8 +141,9 @@
       "错误码/通过证据",
       "重跑结论",
       "G0-G13十四道门禁证据（小说条件门可N/A并附理由）",
+      "THG-01至THG-12独立重算，含静态GPT、转场去重、状态/道具、时长容量及多行XLSX一致性",
       "handoff和canonical指纹验证",
-      "生产结论不得复用",
+      "生产结论不得复用；生产审计overlay必须为PENDING_AUDIT且不得预填PASS/0问题",
       "handoff不得重放，repair返回必须由原审计工单/窗口/会话消费",
     "八层独立重算且不得在审计中再生成镜头、Seedance或导出正文",
     "新签发证书必须使用semantic-audit-v2-compact-master；v1只作历史记录且不得命中缓存或放行",
@@ -1275,6 +1284,8 @@
     "LEGACY_READ_ONLY_MIGRATION",
     "COMPACT_MASTER",
     "DETERMINISTIC_EXPORT_PROJECTION",
+      "TEMPLATE_HARD_GATES",
+      "XLSX_ROUND_TRIP",
       "SOURCE"
     ],
     "forbidden_skip_items": [
@@ -1284,7 +1295,9 @@
       "错误码/通过证据",
     "重跑结论",
     "旧字段和batches只读迁移且新版本零回写",
-    "27字段原子canonical及精确十列输出"
+    "27字段原子canonical及精确十列输出",
+    "多行对白在canonical→投影→XLSX→反向解析后字符数与UTF-8 NFC+LF哈希一致",
+    "生产审计overlay保持PENDING_AUDIT且计数/trace为空"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1333,6 +1346,9 @@
     "FIELD_ORDER",
     "COMPACT_MASTER",
     "DETERMINISTIC_EXPORT_PROJECTION",
+      "TEMPLATE_HARD_GATES",
+      "XLSX_ROUND_TRIP",
+      "AUDIT_OVERLAY_GUARD",
       "FILE_QA"
     ],
     "forbidden_skip_items": [
@@ -1342,7 +1358,9 @@
       "错误码/通过证据",
     "重跑结论",
     "十列名称和顺序精确一致",
-    "无Seedance列、无生成批次表、无后台预生成"
+    "无Seedance列、无生成批次表、无后台预生成",
+    "THG-01至THG-12全部通过，逐镜生成限制/正式母版/GPT各含9:16竖屏且GPT仅静态投影",
+    "多行对白反向解析哈希一致；独立审计前只写PENDING_AUDIT并清空计数与trace"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1450,6 +1468,8 @@
     "COMPACT_MASTER",
     "NO_BACKGROUND_DUPLICATE_GENERATION",
       "MIRROR_SYNC",
+      "TEMPLATE_HARD_GATES",
+      "NEGATIVE_AND_FIXED_REGRESSION",
       "FUNCTIONAL_TEST"
     ],
     "forbidden_skip_items": [
@@ -1458,9 +1478,11 @@
       "具体证据",
       "错误码/通过证据",
     "重跑结论",
-    "49 validators与G0-G13完整保留",
+    "49 validators、66 error codes、G0-G13与THG-01至THG-12完整保留",
     "旧字段只读迁移且新版本禁止回写",
-    "后台Seedance/批次生成计数为0"
+    "后台Seedance/批次生成计数为0",
+    "每个历史错误负向样本必须FAIL且修复正例必须PASS；多行XLSX round-trip纳入回归",
+    "规则、模板、验证器、插件与活跃文档统一标记0.5.4"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1517,6 +1539,9 @@
       "RUNTIME_TEST_CERTIFICATE_VERIFY",
       "INDEPENDENT_AUDIT",
       "PREVENTIVE_GATES",
+      "TEMPLATE_HARD_GATES",
+      "XLSX_ROUND_TRIP_VERIFY",
+      "AUDIT_OVERLAY_VERIFY",
       "LAYERED_AUDIT",
       "QUALITY_METRICS",
       "CACHE_POLICY",
@@ -1529,7 +1554,8 @@
       "错误码/通过证据",
     "重跑结论",
     "27字段原子、画面内容唯一语义写入、音色独立、四项光线必填",
-    "审计不得再生成Seedance、批次或导出正文"
+    "THG-01至THG-12逐项核验；逐镜9:16、静态GPT、转场去重、状态/道具、容量和多行投影一致性不得跳过",
+    "审计不得再生成Seedance、批次或改写原生产正文；只能基于已验证的PENDING_AUDIT生产工件创建带trace/指纹的不可变签名overlay新工件/后继工作簿"
     ],
     "minimum_input_required": [
       "用户任务范围",

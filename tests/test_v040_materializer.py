@@ -210,7 +210,7 @@ class FullCommitCompactMasterIntegrationTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        self.assertEqual(committed["status"], "pass")
+        self.assertEqual(committed["status"], "production_preflight_pass")
         canonical, record = self.service._storyboard_from_artifact(
             self.namespace, project_id, str(committed["artifact_id"])
         )

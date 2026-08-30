@@ -59,6 +59,27 @@
     "rule_candidates": {"type": "array", "items": {"$ref": "#/$defs/rule_candidate"}},
     "promotion_history": {"type": "array"},
     "human_signoffs": {"type": "array"},
+    "authority_reopens": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "scope_key",
+          "authority",
+          "reason",
+          "trigger_event_id",
+          "timestamp"
+        ],
+        "properties": {
+          "scope_key": {"type": "string", "minLength": 1},
+          "authority": {"const": "independent_audit"},
+          "reason": {"type": "string", "minLength": 1},
+          "trigger_event_id": {"type": "string", "minLength": 1},
+          "timestamp": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
     "historical_patterns": {"type": "array"}
   },
   "$defs": {
@@ -309,6 +330,30 @@
           "properties": {
             "status": {"enum": ["pass", "fail_current"]},
             "summary": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        "audit_summary": {
+          "type": "object",
+          "required": [
+            "initial_issue_count",
+            "residual_issue_count",
+            "introduced_issue_count",
+            "blocking_issue_count",
+            "final_status",
+            "audit_trace_id",
+            "canonical_sha256",
+            "artifact_raw_sha256"
+          ],
+          "properties": {
+            "initial_issue_count": {"type": "integer", "minimum": 0},
+            "residual_issue_count": {"type": "integer", "minimum": 0},
+            "introduced_issue_count": {"type": "integer", "minimum": 0},
+            "blocking_issue_count": {"type": "integer", "minimum": 0},
+            "final_status": {"enum": ["pass", "fail_current", "blocked"]},
+            "audit_trace_id": {"type": "string", "minLength": 1},
+            "canonical_sha256": {"$ref": "#/$defs/sha256"},
+            "artifact_raw_sha256": {"$ref": "#/$defs/sha256"}
           },
           "additionalProperties": false
         },

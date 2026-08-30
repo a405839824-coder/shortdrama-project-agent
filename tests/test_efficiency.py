@@ -5,11 +5,13 @@ import json
 import os
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
+from openpyxl import load_workbook
 
 from shortdrama_mcp.app import create_mcp
 from shortdrama_mcp.auth import request_namespace
@@ -31,7 +33,10 @@ import sys
 
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 from run_golden_tests import inject_pg1_fixture_evidence  # noqa: E402
-from semantic_audit_helpers import inject_semantic_audit
+from semantic_audit_helpers import (
+    failing_semantic_audit_for_artifact,
+    inject_semantic_audit,
+)
 
 
 def legacy_storyboard() -> dict[str, Any]:
@@ -95,7 +100,7 @@ def valid_storyboard() -> dict[str, Any]:
         shot["光源方向"] = "主光由画面左上向右下斜落，右前反射光弱补暗侧，向室内纵深逐级衰减。"
         shot["色温倾向"] = "中性微暖晨光；肤色自然，衣料、木构与纸张保持低饱和本色。"
         shot["生成限制"] = (
-            "9:16真人古装短剧；单镜单一主机位、单一核心动作阶段；"
+            "9:16竖屏；单镜单一主机位、单一核心动作阶段；"
             "禁止字幕、水印、额外配乐、现代物件、人物看镜头、同步反应、复制脸、"
             "上下黑边、无来源光、重HDR、塑料皮肤与海报摆拍。"
         )
@@ -511,9 +516,12 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         certificate = checked["data"]["runtime_test_certificate"]
         self.assertEqual(certificate["certificate_type"], "runtime_full_regression")
         self.assertEqual(certificate["tests"]["golden_tests"]["test_pass_count"], 73)
+        self.assertEqual(
+            certificate["tests"]["strict_prompt_tests"]["test_pass_count"], 25
+        )
         self.assertEqual(certificate["tests"]["public_scene_tests"]["test_pass_count"], 11)
         self.assertEqual(certificate["tests"]["agent_tests"]["test_pass_count"], 16)
-        self.assertEqual(certificate["tests"]["project_agent_tests"]["test_pass_count"], 21)
+        self.assertEqual(certificate["tests"]["project_agent_tests"]["test_pass_count"], 22)
 
         with patch.object(
             service_module.r10_bootstrap,
@@ -551,6 +559,76 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             {"project_id": project_id, "artifact_id": committed["artifact_id"]},
         )
         self.assertEqual(audited["status"], "pass")
+        certificate = audited["data"]["certificate"]
+        audit_summary = certificate["audit_summary"]
+        self.assertEqual(audit_summary["residual_issue_count"], 0)
+        self.assertEqual(audit_summary["introduced_issue_count"], 0)
+        self.assertEqual(audit_summary["blocking_issue_count"], 0)
+        self.assertEqual(audit_summary["final_status"], "pass")
+        self.assertEqual(audit_summary["audit_trace_id"], audited["data"]["audit_trace_id"])
+        self.assertEqual(
+            audit_summary["canonical_sha256"], audited["data"]["canonical_sha256"]
+        )
+        self.assertRegex(audit_summary["artifact_raw_sha256"], r"^[0-9a-f]{64}$")
+        record, _ = self.service.store.get_artifact(
+            self.namespace, project_id, committed["artifact_id"]
+        )
+        self.assertEqual(record["metadata"]["independent_audit_status"], "PASS")
+        self.assertEqual(record["metadata"]["audit_status"], "PASS")
+        self.assertEqual(record["metadata"]["issue_count"], 0)
+        audited_workbook = audited["data"]["audited_workbook"]
+        self.assertEqual(
+            record["metadata"]["independent_audit_overlay_artifact_id"],
+            audited_workbook["artifact_id"],
+        )
+        overlay_record, overlay_path = self.service.store.get_artifact(
+            self.namespace,
+            project_id,
+            audited_workbook["artifact_id"],
+        )
+        self.assertEqual(overlay_record["artifact_type"], "storyboard_audit_overlay")
+        overlay_book = load_workbook(overlay_path, data_only=False, read_only=True)
+        audit_sheet = overlay_book["00_范围与审计"]
+        audit_text = "\n".join(
+            str(cell.value)
+            for row in audit_sheet.iter_rows()
+            for cell in row
+            if cell.value not in (None, "")
+        )
+        overlay_book.close()
+        self.assertIn("独立审计已签发", audit_text)
+        self.assertIn("PASS", audit_text)
+        self.assertIn(certificate["certificate_id"], audit_text)
+        self.assertIn(certificate["audit_trace_id"], audit_text)
+        self.assertIn(audit_summary["canonical_sha256"], audit_text)
+        self.assertIn(audit_summary["artifact_raw_sha256"], audit_text)
+        hub = self.service.store.load_hub(self.namespace, project_id)
+        producer_order = next(
+            row
+            for row in hub["work_orders"]
+            if row["work_order_id"] == work_order_id
+        )
+        self.assertEqual(producer_order["status"], "passed")
+        self.assertEqual(
+            producer_order["verified_independent_audit_certificate_id"],
+            certificate["certificate_id"],
+        )
+        deliverable = next(
+            row
+            for row in hub["deliverables"]
+            if row["deliverable_id"] == committed["artifact_id"]
+        )
+        self.assertEqual(deliverable["status"], "validated")
+        self.assertEqual(
+            hub["project_state"]["latest_artifacts"]["storyboard"]["deliverable_id"],
+            audited_workbook["artifact_id"],
+        )
+        overlay_deliverable = next(
+            row
+            for row in hub["deliverables"]
+            if row["deliverable_id"] == audited_workbook["artifact_id"]
+        )
+        self.assertEqual(overlay_deliverable["status"], "validated")
         signed = await self.call(
             "signoff_task",
             {
@@ -574,14 +652,45 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
     ) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
         project_id = await self.create_project(project_name)
         create_work_order = await self.begin_storyboard_task(project_id, window_key=f"{project_name}-create")
-        broken = valid_storyboard()
-        broken["shots"][0]["光源来源"] = ""
-        committed = await self.commit_fixture(project_id, create_work_order, broken, file_name="待修分镜.xlsx")
-        self.assertEqual(committed["status"], "fail_current")
+        machine_clean = valid_storyboard()
+        # This value remains structurally valid, so production preflight must
+        # persist and hand off the artifact.  The left/right source conflict is
+        # intentionally a semantic finding made only by the independent audit.
+        machine_clean["shots"][0]["光源来源"] = "右侧木格窗透入的日光"
+        committed = await self.commit_fixture(
+            project_id,
+            create_work_order,
+            machine_clean,
+            file_name="待修分镜.xlsx",
+        )
+        self.assertEqual(committed["status"], "production_preflight_pass")
+        self.assertEqual(committed["data"]["report"]["issues"], [])
+        self.assertIsNotNone(committed["artifact_id"])
+        semantic_failure = failing_semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            project_id,
+            str(committed["artifact_id"]),
+            shot_id="S001",
+            field="光源来源",
+            error_code="E-TEMPLATE-008",
+            issue_id="shots[1].light_source_semantic_mismatch",
+            evidence=(
+                "独立审计核对场景锁后确认唯一自然光来自画面左侧木格窗；"
+                "当前光源来源写为右侧，与光源方向和场景事实不一致。"
+            ),
+            repair_action="把光源来源修正为左侧木格窗透入的日光并完整回归。",
+        )
         audited = await self.call(
             "audit_storyboard",
-            {"project_id": project_id, "artifact_id": committed["artifact_id"]},
+            {
+                "project_id": project_id,
+                "artifact_id": committed["artifact_id"],
+                "semantic_audit": semantic_failure,
+            },
         )
+        self.assertEqual(audited["status"], "fail_current")
+        self.assertIsNotNone(audited["data"]["repair_package"])
         repair_work_order = await self.begin_storyboard_task(
             project_id,
             operation="storyboard_repair",
@@ -600,7 +709,7 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         *,
         expected_hash: str | None = None,
         field: str = "光源来源",
-        value: str = "窗纸透入的日光",
+        value: str = "左侧木格窗透入的日光",
     ) -> dict[str, Any]:
         certificate = audited["data"]["certificate"]
         return {
@@ -618,7 +727,7 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
                     # Only the certificate row whose exact location is
                     # EP01-001.光源来源 may authorize this field replacement.
                     "issue_ids": ["E-TEMPLATE-008"],
-                    "reason": "修复独立审计确认的缺失光源，不改变剧情、认知或空间边界",
+                    "reason": "修复独立审计确认的光源语义错位，不改变剧情、认知或空间边界",
                 }
             ],
             "impact_scope": ["EP01-001"],
@@ -685,7 +794,7 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         ) as validator:
             result = await self.call("commit_storyboard_patch", arguments)
 
-        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["status"], "production_preflight_pass")
         self.assertTrue(result["data"]["full_production_validation"])
         # Compatibility alias for 0.3.x callers; not an independent-audit verdict.
         self.assertTrue(result["data"]["final_full_validation"])
@@ -697,7 +806,10 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(validator.call_count, 1)
         validated_storyboard = validator.call_args.args[0]
         self.assertEqual(len(validated_storyboard["shots"]), len(valid_storyboard()["shots"]))
-        self.assertEqual(validated_storyboard["shots"][0]["光源来源"], "窗纸透入的日光")
+        self.assertEqual(
+            validated_storyboard["shots"][0]["光源来源"],
+            "左侧木格窗透入的日光",
+        )
 
     async def test_repair_package_is_signed_consumed_and_bidirectionally_linked(self) -> None:
         project_id, work_order_id, committed, audited = await self._prepare_patch_base(
@@ -796,16 +908,129 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("repair_package_required", rejection)
 
+    async def test_failed_production_preflight_has_zero_publication_side_effects(self) -> None:
+        project_id = await self.create_project("预检失败零发布副作用测试")
+        work_order_id = await self.begin_storyboard_task(
+            project_id,
+            window_key="preflight-zero-side-effects-create",
+        )
+        invalid = valid_storyboard()
+        invalid["shots"][0]["光源来源"] = ""
+        before_artifacts = self.service.store.list_artifacts(
+            self.namespace, project_id
+        )
+        before_hub = self.service.store.load_hub(self.namespace, project_id)
+        original_export = service_module._export_compact_storyboard
+
+        with patch.object(
+            service_module,
+            "_export_compact_storyboard",
+            wraps=original_export,
+        ) as exporter:
+            rejected = await self.commit_fixture(
+                project_id,
+                work_order_id,
+                invalid,
+                file_name="不得生成的失败预检.xlsx",
+            )
+
+        self.assertEqual(rejected["status"], "fail_current")
+        self.assertIsNone(rejected["artifact_id"])
+        self.assertIsNone(rejected["download_url"])
+        self.assertFalse(rejected["data"]["artifact_created"])
+        self.assertFalse(rejected["data"]["handoff_created"])
+        self.assertEqual(
+            rejected["data"]["telemetry"]["output_payload_bytes"], 0
+        )
+        self.assertEqual(exporter.call_count, 0, "failed preflight must not export XLSX")
+
+        after_artifacts = self.service.store.list_artifacts(
+            self.namespace, project_id
+        )
+        after_hub = self.service.store.load_hub(self.namespace, project_id)
+        self.assertEqual(
+            [row["artifact_id"] for row in after_artifacts],
+            [row["artifact_id"] for row in before_artifacts],
+        )
+        self.assertEqual(after_hub.get("deliverables", []), before_hub.get("deliverables", []))
+        self.assertEqual(after_hub.get("handoffs", []), before_hub.get("handoffs", []))
+
+        # A later valid commit must still allocate the first storyboard
+        # version, proving the rejected attempt consumed no version number.
+        retry_work_order_id = await self.begin_storyboard_task(
+            project_id,
+            window_key="preflight-zero-side-effects-retry",
+        )
+        committed = await self.commit_fixture(
+            project_id,
+            retry_work_order_id,
+            valid_storyboard(),
+            file_name="首个有效分镜.xlsx",
+        )
+        self.assertEqual(committed["status"], "production_preflight_pass")
+        record, _path = self.service.store.get_artifact(
+            self.namespace,
+            project_id,
+            str(committed["artifact_id"]),
+        )
+        self.assertEqual(record["version"], "v1")
+
     async def test_production_preflight_never_marks_storyboard_work_order_passed(self) -> None:
         project_id = await self.create_project("生产预检不得终审测试")
         work_order_id = await self.begin_storyboard_task(project_id)
         committed = await self.commit_fixture(project_id, work_order_id, valid_storyboard())
-        self.assertEqual(committed["status"], "pass")
+        self.assertEqual(committed["status"], "production_preflight_pass")
         hub = self.service.store.load_hub(self.namespace, project_id)
         work_order = next(row for row in hub["work_orders"] if row["work_order_id"] == work_order_id)
         self.assertEqual(work_order["status"], "validating")
         self.assertTrue(work_order["awaiting_independent_audit"])
         self.assertFalse(committed["data"]["validation"]["final_verdict"])
+        record, _ = self.service.store.get_artifact(
+            self.namespace, project_id, committed["artifact_id"]
+        )
+        self.assertEqual(
+            record["metadata"]["production_preflight_status"],
+            "production_preflight_pass",
+        )
+        self.assertEqual(record["metadata"]["production_preflight_issue_count"], 0)
+        self.assertEqual(record["metadata"]["independent_audit_status"], "PENDING_AUDIT")
+        self.assertEqual(record["metadata"]["audit_status"], "PENDING_AUDIT")
+        self.assertIsNone(record["metadata"]["issue_count"])
+        certificate = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="certificates",
+            record_id=record["metadata"]["production_certificate_id"],
+        )
+        self.assertEqual(
+            certificate["preflight_status"], "production_preflight_pass"
+        )
+        self.assertEqual(certificate["preflight_issue_count"], 0)
+        self.assertEqual(
+            certificate["independent_audit_status"], "PENDING_AUDIT"
+        )
+        self.assertNotIn("result", certificate)
+        self.assertNotIn("issue_count", certificate)
+        handoff = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="handoffs",
+            record_id=record["metadata"]["handoff_id"],
+        )
+        self.assertEqual(
+            handoff["production_preflight_status"],
+            "production_preflight_pass",
+        )
+        self.assertEqual(handoff["independent_audit_status"], "PENDING_AUDIT")
+        self.assertNotIn("production_result", handoff)
+        self.assertNotIn("issue_count", handoff)
+        deliverable = next(
+            row
+            for row in hub["deliverables"]
+            if row["deliverable_id"] == committed["artifact_id"]
+        )
+        self.assertEqual(deliverable["status"], "draft")
+        self.assertNotIn("storyboard", hub["project_state"]["latest_artifacts"])
 
     async def test_same_transport_session_cannot_self_sign_independent_audit(self) -> None:
         project_id = await self.create_project("同会话自签阻断测试")

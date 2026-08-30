@@ -12,7 +12,10 @@ from shortdrama_mcp.canonical import stable_json_hash
 from shortdrama_mcp.config import Settings
 
 
-from semantic_audit_helpers import inject_semantic_audit
+from semantic_audit_helpers import (
+    failing_semantic_audit_for_artifact,
+    inject_semantic_audit,
+)
 from test_efficiency import valid_storyboard
 
 
@@ -160,7 +163,7 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
                 "file_name": "三集基线.xlsx",
             },
         )
-        self.assertEqual(committed["status"], "pass")
+        self.assertEqual(committed["status"], "production_preflight_pass")
         audited = await self.call(
             "audit_storyboard",
             {"project_id": project_id, "artifact_id": committed["artifact_id"]},
@@ -225,7 +228,7 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
             self.namespace, project_id, str(committed["artifact_id"])
         )
         result = await self.call("commit_storyboard_delta", arguments)
-        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["status"], "production_preflight_pass")
         manifest = result["data"]["delta_manifest"]
         self.assertTrue(manifest["untouched_semantic_hashes_verified"])
         self.assertEqual(manifest["untouched_shot_count"], 2)
@@ -385,7 +388,7 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
                 "file_name": "稳定身份全量版.xlsx",
             },
         )
-        self.assertEqual(committed["status"], "pass")
+        self.assertEqual(committed["status"], "production_preflight_pass")
         final, record = self.service._storyboard_from_artifact(
             self.namespace, project_id, str(committed["artifact_id"])
         )
@@ -456,7 +459,7 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
         evidence = broken["prevention_evidence"]
         for field in ("source_ledger", "scene_state_ledger", "shot_plan", "performance_chains"):
             evidence[field] = evidence[field][:1]
-        broken["shots"][0]["光源来源"] = ""
+        broken["shots"][0]["光源来源"] = "右侧木格窗透入的日光"
         committed = await self.call(
             "commit_storyboard",
             {
@@ -466,10 +469,26 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
                 "file_name": "待审计修复.xlsx",
             },
         )
-        self.assertEqual(committed["status"], "fail_current")
+        self.assertEqual(committed["status"], "production_preflight_pass")
+        semantic_failure = failing_semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            project_id,
+            str(committed["artifact_id"]),
+            shot_id="S001",
+            field="光源来源",
+            error_code="E-TEMPLATE-008",
+            issue_id="shots[1].light_source_semantic_mismatch",
+            evidence="场景锁定光源位于画面左侧，当前右侧窗光为独立审计确认的语义错位。",
+            repair_action="把光源来源修正为左侧木格窗透入的日光。",
+        )
         audited = await self.call(
             "audit_storyboard",
-            {"project_id": project_id, "artifact_id": committed["artifact_id"]},
+            {
+                "project_id": project_id,
+                "artifact_id": committed["artifact_id"],
+                "semantic_audit": semantic_failure,
+            },
         )
         self.assertEqual(audited["status"], "fail_current")
         original_audit_order = audited["data"]["audit_work_order_id"]
@@ -507,9 +526,9 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
                         "op": "replace_field",
                         "shot_id": "EP01-001",
                         "field": "光源来源",
-                        "value": "窗纸透入的日光",
+                        "value": "左侧木格窗透入的日光",
                         "issue_ids": ["E-TEMPLATE-008"],
-                        "reason": "只修复证书确认的光源缺失",
+                        "reason": "只修复证书确认的光源语义错位",
                     }
                 ],
                 "impact_scope": ["EP01-001"],

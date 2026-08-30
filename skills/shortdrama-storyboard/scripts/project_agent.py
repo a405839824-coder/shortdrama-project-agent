@@ -19,7 +19,7 @@ SCHEMA_VERSION = "R10-PROJECT-AGENT-1"
 RUNTIME_VERSION = "V16.3-148-R10-StableRuntime"
 WORKFLOW_REVISION = "R10-PG1"
 AGENT_MODE = "full_safe"
-COMPACT_MASTER_VERSION = "0.5.0"
+COMPACT_MASTER_VERSION = "0.5.4"
 MODES = {"plan_only", "execute", "audit_only", "audit_and_repair"}
 AUTHORIZATIONS = {"read_only", "plan_only", "explicit_execute", "pending"}
 CHANGE_OPERATIONS = {"add", "modify", "delete", "replace", "merge", "split", "move"}
@@ -40,6 +40,12 @@ STORYBOARD_AUTHORITY_MATRIX = {
     "storyboard_change": ("execute", "explicit_execute"),
     "storyboard_audit": ("audit_only", "read_only"),
     "storyboard_repair": ("audit_and_repair", "explicit_execute"),
+}
+STORYBOARD_PRODUCTION_OPERATIONS = {
+    "storyboard_create",
+    "storyboard_regenerate",
+    "storyboard_change",
+    "storyboard_repair",
 }
 STATES = {
     "intake", "scope_locked", "proposal_ready", "awaiting_approval", "approved",
@@ -514,6 +520,21 @@ def record_validation(hub: dict[str, Any], record: dict[str, Any]) -> dict[str, 
         and int(record["introduced_issue_count"]) == 0
         and not record["blockers"]
     )
+    if (
+        clean
+        and work_order.get("operation") in STORYBOARD_PRODUCTION_OPERATIONS
+        and not str(
+            work_order.get("verified_independent_audit_certificate_id") or ""
+        ).strip()
+    ):
+        # A standalone caller-authored PASS/zero-count record is only a
+        # production claim.  Keep the production order validating until the
+        # trusted service has verified and bound an independent certificate.
+        work_order["validation"]["status"] = "pending"
+        work_order["awaiting_independent_audit"] = True
+        raise ValueError(
+            "independent_audit_required: storyboard production validation needs a verified independent audit certificate"
+        )
     validation_record = copy.deepcopy(record)
     validation_record["missing_gates"] = missing_gates
     validation_record["failed_gates"] = failed_gates
@@ -549,6 +570,16 @@ def transition_work_order(
         raise ValueError("validation requires at least one recorded deliverable")
     if target_state == "passed" and work_order["validation"]["status"] != "pass":
         raise ValueError("passed state requires a clean validation record")
+    if (
+        target_state == "passed"
+        and work_order.get("operation") in STORYBOARD_PRODUCTION_OPERATIONS
+        and not str(
+            work_order.get("verified_independent_audit_certificate_id") or ""
+        ).strip()
+    ):
+        raise ValueError(
+            "independent_audit_required: storyboard production cannot pass without a verified independent audit certificate"
+        )
     now = _timestamp(timestamp)
     work_order["status"] = target_state
     work_order["updated_at"] = now
@@ -570,6 +601,15 @@ def signoff_work_order(
     work_order = _find_work_order(hub, work_order_id)
     if work_order["status"] != "awaiting_signoff":
         raise ValueError("human sign-off requires awaiting_signoff state")
+    if (
+        work_order.get("operation") in STORYBOARD_PRODUCTION_OPERATIONS
+        and not str(
+            work_order.get("verified_independent_audit_certificate_id") or ""
+        ).strip()
+    ):
+        raise ValueError(
+            "independent_audit_required: storyboard production cannot sign off or archive without a verified independent audit certificate"
+        )
     now = _timestamp(timestamp)
     if decision == "approve":
         prior = work_order["status"]

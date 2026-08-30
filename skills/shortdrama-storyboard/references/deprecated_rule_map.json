@@ -52,9 +52,9 @@
       "reason": "动作、表情、精确对白、六维发声、标点效果、听者反应和时间阶段只在画面内容写一次；音色独立保留"
     },
     {
-      "deprecated": "Seedance 2.5独立正式执行分镜列、生成批次工作表及top-level batches",
+      "deprecated": "Seedance 2.5独立正式执行分镜列、生成批次工作表、top-level batches，以及只在项目元数据保存9:16而不写入单镜",
       "replacement": "R10.1.SINGLE_EXECUTION_MASTER",
-      "reason": "R10-SPC-1正式分镜母版成为唯一单镜执行母版；旧列名和旧格式只读迁移，新版本不回写"
+      "reason": "R10-SPC-1正式分镜母版成为唯一单镜执行母版；旧列名和旧格式只读迁移，新版本不回写；每镜生成限制、正式母版和GPT投影各显式保留一次干净的`9:16竖屏`"
     },
     {
       "deprecated": "4—15秒Seedance生成批次包装",
@@ -62,9 +62,9 @@
       "reason": "正式镜按自身剧情时长执行；R10-SPC-1 Seedance 2.5恰好3段并覆盖单镜时长，不再为4秒下限重复包装"
     },
     {
-      "deprecated": "生产、审计、修复或缓存后台预生成Seedance提示词",
+      "deprecated": "生产、审计、修复或缓存后台预生成Seedance提示词；在正式母版/GPT投影保留BGM字面量；独立审计前预填PASS或0问题",
       "replacement": "R10.1.NO_BACKGROUND_DUPLICATE_GENERATION",
-      "reason": "只存27字段原子canonical；GPT为导出时确定性投影，审计不得再次生成内容"
+      "reason": "只存27字段原子canonical；GPT为导出时确定性静态投影，正式/GPT中用`禁止额外配乐`替代BGM字面量；生产审计overlay默认`PENDING_AUDIT`且生产XLSX不可变，独立审计只能生成签名overlay新工件/后继工作簿"
     }
   ]
 }
