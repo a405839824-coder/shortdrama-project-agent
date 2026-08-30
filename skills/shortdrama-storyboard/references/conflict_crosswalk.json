@@ -258,7 +258,7 @@
     "conflict_id": "C-018",
     "conflict_pair": "27字段原子canonical vs 重复派生正文",
     "higher_priority_rule": "原子canonical与唯一执行母版",
-    "decision": "canonical只存27字段原子；正式合并母版与GPT关键帧仅在导出时确定性投影，禁止持久化Seedance/批次副本或后台预生成",
+    "decision": "canonical只存27字段原子；R10-SPC-1正式分镜母版与GPT关键帧仅在导出时确定性投影，禁止持久化Seedance/批次副本或后台预生成",
     "reason": "同一语义只写一次，既避免版本分叉，也直接减少模型重复生成。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
@@ -450,6 +450,24 @@
     "linked_error_codes": [
       "E-PUBLIC-ECOLOGY-001",
       "E-PUBLIC-CROWD-001"
+    ],
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "conflict_id": "C-031",
+    "conflict_pair": "旧版可选自然时间阶段与旧第五列表头 vs R10-SPC-1严格三阶段与正式分镜母版",
+    "higher_priority_rule": "R10-SPC-1当前输出契约",
+    "decision": "旧成品只读保留；所有新生成、重建、修正和导出统一使用EP编号、集内累计、恰好三个一位小数标准时间阶段及第五列正式分镜母版",
+    "reason": "可选或自然阶段无法稳定核验单镜闭合，旧表头又会使后续批次继续复制已删除格式。",
+    "exception_allowed": true,
+    "exception_condition": "只允许读取未进入新生产或修正流程的历史成品；一旦继续生产必须迁移为R10-SPC-1新版本。",
+    "user_authorization_required": false,
+    "output_status_if_violated": "fail_current",
+    "linked_error_codes": [
+      "E-TIMELINE-001",
+      "E-FIELDORDER-001",
+      "E-LIGHT-001",
+      "E-DEPRECATED-FIELD-001"
     ],
     "version": "V16.3-148-R10-StableRuntime"
   }

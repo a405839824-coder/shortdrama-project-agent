@@ -36,7 +36,7 @@ EXPECTED_COMPACT_COLUMNS = [
     "时长",
     "累计时长",
     "功能类型/场景连续性ID",
-    "正式分镜母版·字段合并",
+    "正式分镜母版",
     "GPT关键帧生成指令",
     "参考图锚定",
     "覆盖原文",
@@ -101,8 +101,9 @@ class CompactMasterMaterializerTests(unittest.TestCase):
         base, identity = ensure_shot_uids(valid_storyboard())
         shot = copy.deepcopy(base["shots"][0])
         shot["画面内容"] = (
-            "[0.0–0.8s] 女主推门；[0.8–3.3s] 她停步后确认桌上的新信件；"
-            "[3.3–4.0s] 她保持视线与稳定呼吸。"
+            "【0.0—0.8秒】女主推门；"
+            "【0.8—3.3秒】她停步后确认桌上的新信件，本镜无对白；"
+            "【3.3—4.0秒】她保持视线与稳定呼吸。"
         )
         performance = copy.deepcopy(base["prevention_evidence"]["performance_chains"][0])
         performance["body_or_breath"] = "停步后呼吸轻收，再随视线确认恢复稳定"

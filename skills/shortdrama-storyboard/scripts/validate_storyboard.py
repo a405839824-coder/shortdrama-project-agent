@@ -2,8 +2,8 @@
 """R10.1 compact-master validator for Chinese short-drama storyboard JSON.
 
 The validator is intentionally deterministic. It validates the compact
-27-field contract, the optional single-shot timeline, and the learned method
-modules without regenerating any derived prompt or independent batch.
+27-field contract, the R10-SPC-1 strict single-shot prompt contract, and the
+learned method modules without regenerating any independent batch.
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from typing import Any
 VERSION = "V16.3-148-R10-StableRuntime"
 SCHEMA_VERSION = "R10.1"
 WORKFLOW_PROFILE = "R10-PG1"
+STRICT_OUTPUT_CONTRACT = "R10-SPC-1"
 
 COMPACT_SHOT_FIELDS = [
     "镜头编号", "时长", "累计时长", "功能类型", "场景连续性ID", "镜头类型", "可见主体",
@@ -27,7 +28,7 @@ COMPACT_SHOT_FIELDS = [
     "转场类型", "切镜/转场提示词", "参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句",
 ]
 COMPACT_MOTHER_COLUMNS = [
-    "分镜序号", "时长", "累计时长", "功能类型/场景连续性ID", "正式分镜母版·字段合并",
+    "分镜序号", "时长", "累计时长", "功能类型/场景连续性ID", "正式分镜母版",
     "GPT关键帧生成指令", "参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句",
 ]
 DEPRECATED_SHOT_FIELDS = {
@@ -46,7 +47,8 @@ DEPRECATED_LABEL_SCAN_FIELDS = {
     "光影", "光源来源", "光源方向", "色温倾向", "生成限制", "转场类型", "切镜/转场提示词",
 }
 PERSISTED_DERIVED_FIELDS = {
-    "正式分镜母版·字段合并", "GPT关键帧生成指令", "Seedance 2.5独立正式执行分镜", "Seedance 2.0独立正式执行分镜",
+    "正式分镜母版", "正式分镜母版·字段合并", "GPT关键帧生成指令",
+    "Seedance 2.5独立正式执行分镜", "Seedance 2.0独立正式执行分镜",
 }
 COMPACT_TOP_LEVEL_FIELDS = {
     "project_version", "schema_version", "schema_profile", "workflow_profile",
@@ -95,13 +97,39 @@ TIMELINE_RANGE_RE = re.compile(
     r"(?P<start>\d+(?:\.\d+)?)\s*(?:-|–|—|~|～|至|到)\s*(?P<end>\d+(?:\.\d+)?)\s*(?:秒|s)",
     re.I,
 )
-DIALOGUE_TAG_RE = re.compile(r"【(?P<speaker>[^】\n]{1,30})】\s*(?P<line>[^【\n｜|；;]+)")
+STRICT_TIMELINE_STAGE_RE = re.compile(
+    r"【(?P<start>\d+\.\d)—(?P<end>\d+\.\d)秒】(?P<body>.*?)(?=【\d+\.\d—\d+\.\d秒】|\Z)",
+    re.S,
+)
+EP_SHOT_ID_RE = re.compile(r"^EP(?P<episode>\d{2})-(?P<shot>\d{3})$")
+LEGACY_DIALOGUE_TAG_RE = re.compile(
+    r"【(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})】\s*[“\"]?(?P<line>[^【\n｜|；;”\"]+)[”\"]?"
+)
+INTEGRATED_DIALOGUE_RE = re.compile(
+    r"说道[：:]?\s*[“\"](?P<line>[^”\"\n]+)[”\"]"
+)
+FORBIDDEN_PROMPT_PHRASE_RE = re.compile(
+    r"9\s*[:：]\s*16\s*竖屏(?:真人古装短剧(?:截图质感|单帧)?)?"
+)
+KELVIN_RE = re.compile(r"(?:\d{3,5}\s*(?:K|k|开尔文))|Kelvin", re.I)
+COLOR_RELATION_RE = re.compile(r"暖|冷|中性")
+COLOR_MATERIAL_RE = re.compile(r"前景|中景|后景|背景|空间|主区|暗部|高光|肤色|面部|皮肤|衣料|木|纸|本色|低饱和|色偏")
+LIGHT_SUBJECT_RE = re.compile(r"主体|人物|面部|眼神|手部|道具|高光|暗部|受光|明暗|皮肤|衣料|木构")
+LIGHT_SOURCE_RE = re.compile(r"窗|门|日光|晨光|天光|烛|灯|火|月光|反射光|补光|廊|庭院|水面|雪面")
+LIGHT_DIRECTION_RE = re.compile(r"画面左|画面右|左侧|右侧|左前|右前|左后|右后|上方|下方|前方|后方")
+LIGHT_PATH_RE = re.compile(r"斜落|斜照|投向|落向|补面|衰减|递减|纵深|暗侧|明侧")
+
+FORMAL_MASTER_FIELD_ORDER = [
+    "空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "音色", "心理音轨",
+    "环境音效", "环境动态", "光影", "光源来源", "光源方向", "色温倾向", "生成限制",
+    "转场类型", "切镜/转场提示词",
+]
 
 VOICE_DIMENSION_PATTERNS = {
     "声音强弱": re.compile(r"声音|音量|放轻|压低|变亮|变稳|抬高"),
-    "语速节奏": re.compile(r"语速|一字一句|断断续续|咬字"),
+    "语速节奏": re.compile(r"语速|一字一句|断断续续|咬字|平稳|从容|急促|缓慢|利落"),
     "呼吸状态": re.compile(r"呼吸|气息|吸气"),
-    "停顿位置": re.compile(r"停顿|停一下|开口前|句中|关键词前|卡住"),
+    "停顿位置": re.compile(r"停顿|短停|停一下|开口前|句中|关键词前|卡住"),
     "重音位置": re.compile(r"重音|加重|强调|咬重"),
     "尾音变化": re.compile(r"尾音|上扬|下压|发虚|放柔|拉长|落下|收住"),
 }
@@ -230,7 +258,7 @@ def _forbidden_extension_paths(value: Any, location: str = "canonical_extension"
 
 
 def is_none_value(value: Any) -> bool:
-    text = str(value or "").strip()
+    text = str(value or "").strip().rstrip("。.;；")
     return not text or text in {"无", "不适用", "N/A", "none", "None"} or text.startswith("不适用：")
 
 
@@ -339,14 +367,14 @@ def _pause_budget(dialogue: str) -> float:
 
 
 def extract_dialogues(picture_content: Any) -> list[tuple[str, str]]:
-    """Extract the sole canonical dialogue representation: ``【角色】对白``.
-
-    The line ends at the next field separator/newline.  Trailing performance
-    prose is trimmed after the first sentence-ending punctuation so duration
-    checks never count the merged delivery instructions as spoken text.
-    """
+    """Extract integrated R10-SPC-1 dialogue and legacy read-only tags."""
     rows: list[tuple[str, str]] = []
-    for match in DIALOGUE_TAG_RE.finditer(str(picture_content or "")):
+    text = str(picture_content or "")
+    for match in INTEGRATED_DIALOGUE_RE.finditer(text):
+        line = match.group("line").strip()
+        if line:
+            rows.append(("角色", line))
+    for match in LEGACY_DIALOGUE_TAG_RE.finditer(text):
         line = match.group("line").strip()
         sentence = re.match(r"(.+?[。！？?!](?:[。！？?!…])?)", line)
         if sentence:
@@ -356,14 +384,31 @@ def extract_dialogues(picture_content: Any) -> list[tuple[str, str]]:
     return rows
 
 
-def _validate_timeline(text: str, duration: float) -> list[str]:
-    """Return concrete faults for an optional 1–3 segment single-shot timeline."""
-    segments = [(float(m.group("start")), float(m.group("end"))) for m in TIMELINE_RANGE_RE.finditer(text)]
+def _validate_timeline(text: str, duration: float, *, strict: bool = False) -> list[str]:
+    """Return concrete timeline faults; R10-SPC-1 requires exactly three stages."""
+    strict_matches = list(STRICT_TIMELINE_STAGE_RE.finditer(text))
+    if strict:
+        faults: list[str] = []
+        broad_segments = list(TIMELINE_RANGE_RE.finditer(text))
+        if len(strict_matches) != 3:
+            faults.append(f"R10-SPC-1时间阶段必须恰好3段，当前标准阶段为{len(strict_matches)}段")
+        if len(broad_segments) != len(strict_matches):
+            faults.append("存在未使用全角方括号、中文长横、一位小数或“秒”单位的非标准时间段")
+        if len(strict_matches) != 3:
+            return faults
+        segments = [(float(m.group("start")), float(m.group("end"))) for m in strict_matches]
+        for index, match in enumerate(strict_matches, 1):
+            if not match.group("body").strip():
+                faults.append(f"第{index}段为空")
+    else:
+        segments = [(float(m.group("start")), float(m.group("end"))) for m in TIMELINE_RANGE_RE.finditer(text)]
+        if not segments:
+            return []
+        faults = []
+        if len(segments) > 3:
+            faults.append(f"时间段数量为{len(segments)}，最多3段")
     if not segments:
-        return []
-    faults: list[str] = []
-    if len(segments) > 3:
-        faults.append(f"时间段数量为{len(segments)}，最多3段")
+        return faults
     tolerance = 0.02
     if abs(segments[0][0]) > tolerance:
         faults.append(f"首段必须从0秒开始，当前{segments[0][0]:g}秒")
@@ -380,6 +425,88 @@ def _validate_timeline(text: str, duration: float) -> list[str]:
     if segments and abs(segments[-1][1] - duration) > tolerance:
         faults.append(f"末段必须覆盖至镜头时长{duration:g}秒，当前止于{segments[-1][1]:g}秒")
     return faults
+
+
+def _format_seconds(value: Any) -> str:
+    return f"{_as_number(value):.1f}"
+
+
+def project_formal_master(shot: dict[str, Any]) -> str:
+    """Compile the exact fifth-column R10-SPC-1 formal master cell."""
+    paragraphs = [
+        f"镜头序号：{shot.get('镜头编号', '')}（{_format_seconds(shot.get('时长'))}s；累计{_format_seconds(shot.get('累计时长'))}s）",
+        f"镜头类型：{shot.get('镜头类型', '')}｜可见主体：{shot.get('可见主体', '')}",
+    ]
+    paragraphs.extend(f"{field}：{shot.get(field, '')}" for field in FORMAL_MASTER_FIELD_ORDER)
+    return "\n\n".join(paragraphs)
+
+
+def _visual_only_clauses(value: Any) -> str:
+    """Remove audio/dialogue clauses from a deterministic static projection."""
+    result = re.sub(r"【\d+\.\d—\d+\.\d秒】", "", str(value or ""))
+    result = re.sub(
+        r"[\u3400-\u9fffA-Za-z·]{1,20}说道[：:]?\s*[“\"][^”\"\n]+[”\"]",
+        "",
+        result,
+    )
+    result = re.sub(
+        r"【(?!\d+\.\d—|参考图锚点)[^】\n]{1,20}】\s*[“\"]?[^。！？!?；;\n]*[”\"]?",
+        "",
+        result,
+    )
+    forbidden = re.compile(
+        r"对白|台词|说道|口型|音色|音量|语速|重音|尾音|环境音|声源|"
+        r"脚步|衣料|呼吸|听见|画外音|配乐|BGM|鸟声|鸟鸣|虫鸣|风声|"
+        r"水声|声线|声音|声响|发声|开口|问句|陈述句|感叹句|时间码"
+    )
+    visible: list[str] = []
+    for major in re.split(r"[；;\n]", result):
+        minor_visible = []
+        for minor in re.split(r"[，,、]|并伴随|同时伴随|伴随", major):
+            clause = minor.strip(" 。；;")
+            if not clause or forbidden.search(clause):
+                continue
+            minor_visible.append(clause)
+        if minor_visible:
+            visible.append("，".join(minor_visible))
+    return "；".join(visible).strip("；。 ")
+
+
+def project_gpt_keyframe(shot: dict[str, Any]) -> str:
+    """Compile the visual-only sixth-column projection from the same canonical."""
+    start_state = _visual_only_clauses(shot.get("起始状态")) or "人物保持本镜开场的可见站位、朝向、姿态与道具状态"
+    environment = _visual_only_clauses(shot.get("环境动态")) or "场景内可见物保持真实、克制的自然状态"
+    anchor = str(shot.get("参考图锚定") or "无")
+    return (
+        "真人古装短剧，真实摄影机拍摄质感；"
+        f"镜头类型与主体：{shot.get('镜头类型', '')}，{shot.get('可见主体', '')}；"
+        f"空间站位：{_visual_only_clauses(shot.get('空间站位描述'))}；"
+        f"定格状态：{start_state}；"
+        f"摄影机：{_visual_only_clauses(shot.get('机位'))}；"
+        f"光影：{_visual_only_clauses(shot.get('光影'))}；"
+        f"光源来源：{_visual_only_clauses(shot.get('光源来源'))}；"
+        f"光源方向：{_visual_only_clauses(shot.get('光源方向'))}；"
+        f"色彩：{_visual_only_clauses(shot.get('色温倾向'))}；"
+        f"环境可见状态：{environment}；"
+        f"参考图锚定：{_visual_only_clauses(anchor)}；"
+        "单一稳定视觉时刻，禁止字幕、水印、现代物件、人物看镜头、复制脸、上下黑边、无来源光、重HDR、塑料皮肤与海报摆拍。"
+    )
+
+
+def project_export_row(shot: dict[str, Any]) -> dict[str, Any]:
+    """Return one exact ten-column export row without persisting projections."""
+    return {
+        "分镜序号": shot.get("镜头编号", ""),
+        "时长": shot.get("时长", ""),
+        "累计时长": shot.get("累计时长", ""),
+        "功能类型/场景连续性ID": f"{shot.get('功能类型', '')}｜{shot.get('场景连续性ID', '')}",
+        "正式分镜母版": project_formal_master(shot),
+        "GPT关键帧生成指令": project_gpt_keyframe(shot),
+        "参考图锚定": shot.get("参考图锚定", ""),
+        "覆盖原文": shot.get("覆盖原文", ""),
+        "原文依据类型": shot.get("原文依据类型", ""),
+        "原文支撑句": shot.get("原文支撑句", ""),
+    }
 
 
 def _missing_fields(obj: Any, fields: list[str]) -> list[str]:
@@ -1160,6 +1287,21 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
     source_lock_fields = ["上集终点", "本集起点", "本集计划终点", "下一集起点", "禁止重复", "禁止提前"]
     if not isinstance(source_lock, dict) or any(is_empty(source_lock.get(f)) for f in source_lock_fields):
         issues.append(_issue(catalog, "E-SOURCE-001", "source_lock", "Source Lock缺失或核心边界字段不完整。"))
+    strict_contract = isinstance(source_lock, dict) and source_lock.get("output_contract") == STRICT_OUTPUT_CONTRACT
+    if strict_contract:
+        expected_contract_lock = {
+            "output_contract": STRICT_OUTPUT_CONTRACT,
+            "target_model": "Seedance 2.5",
+            "aspect_ratio": "9:16",
+        }
+        for field, expected in expected_contract_lock.items():
+            if source_lock.get(field) != expected:
+                issues.append(_issue(
+                    catalog,
+                    "E-TEMPLATE-008",
+                    f"source_lock.{field}",
+                    f"R10-SPC-1契约锁必须为{expected!r}，当前={source_lock.get(field)!r}",
+                ))
 
     raw_shots = obj.get("shots")
     if not isinstance(raw_shots, list) or not raw_shots:
@@ -1171,6 +1313,8 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
     normalized_shots: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     scene_groups: dict[str, list[tuple[int, dict[str, Any]]]] = defaultdict(list)
+    episode_running: dict[str, float] = defaultdict(float)
+    strict_duration_sum = 0.0
 
     for index, raw in enumerate(raw_shots, 1):
         location = f"shots[{index}]"
@@ -1219,6 +1363,14 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         if shot_id in seen_ids:
             issues.append(_issue(catalog, "E-TEMPLATE-008", f"{location}.镜头编号", f"重复镜头编号：{shot_id}"))
         seen_ids.add(shot_id)
+        ep_match = EP_SHOT_ID_RE.fullmatch(shot_id)
+        if strict_contract and not ep_match:
+            issues.append(_issue(
+                catalog,
+                "E-TEMPLATE-008",
+                f"{location}.镜头编号",
+                f"R10-SPC-1显示编号必须符合EP##-###，当前={shot_id!r}",
+            ))
 
         try:
             duration = float(shot.get("时长", 0))
@@ -1226,15 +1378,29 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
             duration = 0.0
             issues.append(_issue(catalog, "E-STAT-001", f"{location}.时长", "时长不是数字。"))
         try:
-            float(shot.get("累计时长", 0))
+            cumulative = float(shot.get("累计时长", 0))
         except (TypeError, ValueError):
+            cumulative = 0.0
             issues.append(_issue(catalog, "E-STAT-001", f"{location}.累计时长", "累计时长不是数字。"))
+        if strict_contract:
+            strict_duration_sum += duration
+            if ep_match:
+                episode_key = ep_match.group("episode")
+                episode_running[episode_key] += duration
+                expected_cumulative = episode_running[episode_key]
+                if abs(cumulative - expected_cumulative) > 0.01:
+                    issues.append(_issue(
+                        catalog,
+                        "E-STAT-001",
+                        f"{location}.累计时长",
+                        f"R10-SPC-1按单集累计应为{expected_cumulative:.1f}s，当前={cumulative:.1f}s",
+                    ))
 
         shot_type = str(shot.get("镜头类型", ""))
         visible = str(shot.get("可见主体", ""))
         image_content = str(shot.get("画面内容", ""))
         combined_performance = image_content
-        timeline_faults = _validate_timeline(image_content, duration)
+        timeline_faults = _validate_timeline(image_content, duration, strict=strict_contract)
         if timeline_faults:
             issues.append(_issue(
                 catalog,
@@ -1242,6 +1408,24 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                 f"{location}.画面内容",
                 "；".join(timeline_faults),
             ))
+        if strict_contract:
+            legacy_dialogue = LEGACY_DIALOGUE_TAG_RE.search(image_content)
+            if legacy_dialogue:
+                issues.append(_issue(
+                    catalog,
+                    "E-DEPRECATED-FIELD-001",
+                    f"{location}.画面内容",
+                    f"R10-SPC-1禁止旧对白标签：{legacy_dialogue.group(0)!r}；改为‘角色说道：“完整对白。”’。",
+                ))
+            prompt_text = " ".join(str(shot.get(field, "")) for field in DEPRECATED_LABEL_SCAN_FIELDS)
+            forbidden_prompt = FORBIDDEN_PROMPT_PHRASE_RE.search(prompt_text)
+            if forbidden_prompt:
+                issues.append(_issue(
+                    catalog,
+                    "E-DEPRECATED-FIELD-001",
+                    location,
+                    f"R10-SPC-1提示词仍含已删除的9:16固定短语：{forbidden_prompt.group(0)!r}",
+                ))
         invisible_context = _has_any(f"{shot_type} {visible}", INVISIBLE_SHOT_TERMS) and not _has_any(visible, FACE_VISIBLE_TERMS)
         if invisible_context:
             bad = [term for term in FACE_TERMS if term in combined_performance]
@@ -1301,6 +1485,29 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         color_temp = str(shot.get("色温倾向", ""))
         if any(is_none_value(value) for value in (light, light_source, light_direction, color_temp)) or (light.strip() in VAGUE_TERMS):
             issues.append(_issue(catalog, "E-LIGHT-001", f"{location}.光影", f"光影四项必须完整：光影={light!r}, 光源={light_source!r}, 方向={light_direction!r}, 色温={color_temp!r}"))
+        if strict_contract:
+            light_faults = []
+            if not LIGHT_SUBJECT_RE.search(light):
+                light_faults.append("光影未说明受光主体、面部/道具可读性或高光暗部材质")
+            if not LIGHT_SOURCE_RE.search(light_source):
+                light_faults.append("光源来源未写场内实际采用的有源主光或弱补光")
+            if "或" in light_source or "或" in light_direction or re.search(r"视情况|可选|二选一", f"{light_source} {light_direction}"):
+                light_faults.append("光源来源/方向含二选一或候选表述")
+            if not LIGHT_DIRECTION_RE.search(light_direction) or not LIGHT_PATH_RE.search(light_direction):
+                light_faults.append("光源方向未同时写明画面侧向/高度、落光路径或纵深衰减")
+            if KELVIN_RE.search(color_temp):
+                light_faults.append("色温倾向禁止Kelvin/K数值")
+            if not COLOR_RELATION_RE.search(color_temp) or not COLOR_MATERIAL_RE.search(color_temp):
+                light_faults.append("色温倾向必须写定性暖冷关系及空间/肤色/材质本色")
+            if color_temp.strip() in {"暖中性", "中性微暖", "偏暖", "偏冷", "冷暖对比", "电影感"}:
+                light_faults.append("色温倾向只有空泛色调标签")
+            if light_faults:
+                issues.append(_issue(
+                    catalog,
+                    "E-LIGHT-001",
+                    f"{location}.光影/光源来源/光源方向/色温倾向",
+                    "；".join(light_faults),
+                ))
         if "底光" in f"{light} {light_source}" and _has_any(str(shot.get("功能类型", "")), ["甜宠", "温情", "浪漫", "关系"]):
             issues.append(_issue(catalog, "E-LIGHT-002", f"{location}.光影", "普通关系/浪漫镜使用底光，需改为有源且有剧情必要的光效。", severity="warning"))
 
@@ -1309,9 +1516,11 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         if dialogue_rows:
             if is_none_value(shot.get("音色")):
                 issues.append(_issue(catalog, "E-VOICE-001", f"{location}.音色", "带对白镜必须保留独立音色字段。"))
-            delivery = image_content
+            delivery = f"{image_content} {shot.get('音色', '')}"
             dimensions = [name for name, pattern in VOICE_DIMENSION_PATTERNS.items() if pattern.search(delivery)]
-            if core_emotion and len(dimensions) < 6:
+            if strict_contract and len(dimensions) < 6:
+                issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容/音色", f"R10-SPC-1对白发声只覆盖 {len(dimensions)}/6 项：{dimensions}"))
+            elif core_emotion and len(dimensions) < 6:
                 issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容", f"核心情绪对白的发声说明只覆盖 {len(dimensions)}/6 项：{dimensions}"))
             elif len(dimensions) < 4:
                 issues.append(_issue(catalog, "E-VOICE-002", f"{location}.画面内容", f"普通对白的发声说明只覆盖 {len(dimensions)}/6 项：{dimensions}", severity="warning"))
@@ -1323,6 +1532,14 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
             min_duration = cjk_len(dialogue) / 2.8 + _pause_budget(dialogue)
             if duration + 1e-9 < min_duration:
                 issues.append(_issue(catalog, "E-DIALOGUE-003", f"{location}.画面内容", f"{cjk_len(dialogue)}个对白汉字 + 停顿预算需至少{min_duration:.2f}s，镜头仅{duration:.2f}s。"))
+            if strict_contract:
+                if "口型与对白一致" not in image_content:
+                    issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容", "R10-SPC-1可见对白未写“口型与对白一致”。"))
+                if "不看镜头" not in image_content:
+                    issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "R10-SPC-1对白人物未明确不看镜头。"))
+                visible_people = [part for part in re.split(r"[、，,；;]", visible) if part.strip()]
+                if len(visible_people) > 1 and not re.search(r"错开|晚约|随后|不抢反应|先.{0,20}再|依次|晚半拍|延迟", image_content):
+                    issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "多人对白镜未写听者错峰反应。"))
 
         psych = str(shot.get("心理音轨", ""))
         if not is_none_value(psych):
@@ -1350,9 +1567,10 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
     if normalized_shots and obj.get("total_duration") is not None:
         try:
             expected_total = float(obj.get("total_duration"))
-            actual_total = float(normalized_shots[-1].get("累计时长", 0))
+            actual_total = strict_duration_sum if strict_contract else float(normalized_shots[-1].get("累计时长", 0))
             if abs(expected_total - actual_total) > 0.01:
-                issues.append(_issue(catalog, "E-STAT-001", "total_duration", f"总时长{expected_total}与末镜累计{actual_total}不一致。"))
+                basis = "全部镜头时长之和" if strict_contract else "末镜累计"
+                issues.append(_issue(catalog, "E-STAT-001", "total_duration", f"总时长{expected_total}与{basis}{actual_total}不一致。"))
         except (TypeError, ValueError):
             issues.append(_issue(catalog, "E-STAT-001", "total_duration", "总时长不是数字。"))
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 VERSION = "V16.3-148-R10-StableRuntime"
 WORKFLOW_REVISION = "R10-PG1"
+OUTPUT_CONTRACT = "R10-SPC-1"
 PRIORITY = [
     "安全合规",
     "源文忠实",
@@ -98,16 +99,22 @@ def run_project(project: Path, self_test: bool) -> dict:
             "stderr": proc.stderr,
         }
     report.update({"mode": "project", "project_root": str(project), "exit_code": proc.returncode})
+    report["output_contract"] = OUTPUT_CONTRACT
     if report.get("version") != VERSION or proc.returncode != 0:
         report["status"] = "fail"
         report.setdefault("error_code", "E-BOOTSTRAP-001")
     if self_test:
+        strict_prompt_tests = run_test_script(skill_root(), "test_strict_prompt_contract.py")
         public_scene_tests = run_test_script(skill_root(), "test_public_scene_ecology.py")
         agent_tests = run_test_script(skill_root(), "run_agent_tests.py")
         project_agent_tests = run_test_script(skill_root(), "run_project_agent_tests.py")
+        report["strict_prompt_tests"] = strict_prompt_tests
         report["public_scene_tests"] = public_scene_tests
         report["agent_tests"] = agent_tests
         report["project_agent_tests"] = project_agent_tests
+        if strict_prompt_tests.get("status") != "pass" or strict_prompt_tests.get("exit_code") != 0:
+            report["status"] = "fail"
+            report.setdefault("error_code", "E-BOOTSTRAP-001")
         if public_scene_tests.get("status") != "pass" or public_scene_tests.get("exit_code") != 0:
             report["status"] = "fail"
             report.setdefault("error_code", "E-BOOTSTRAP-001")
@@ -141,10 +148,12 @@ def verify_bundled(self_test: bool) -> dict:
         refs / "project_agent_capabilities.json",
         refs / "project_agent_schema.json",
         refs / "jimeng_timing_policy.md",
+        refs / "strict_prompt_contract.md",
         refs / "novel_to_storyboard_intake.md",
         refs / "public_scene_ecology.md",
         root / "scripts" / "validate_storyboard.py",
         root / "scripts" / "run_golden_tests.py",
+        root / "scripts" / "test_strict_prompt_contract.py",
         root / "scripts" / "test_public_scene_ecology.py",
         root / "scripts" / "storyboard_agent.py",
         root / "scripts" / "run_agent_tests.py",
@@ -157,6 +166,7 @@ def verify_bundled(self_test: bool) -> dict:
             "status": "fail",
             "mode": "bundled_reference",
             "version": VERSION,
+            "output_contract": OUTPUT_CONTRACT,
             "error_code": "E-BOOTSTRAP-001",
             "missing": missing,
         }
@@ -191,7 +201,7 @@ def verify_bundled(self_test: bool) -> dict:
         "golden_tests": len(read_json(refs / "golden_tests.json").get("tests", [])),
     }
     expected_structural = {
-        "conflicts": 30,
+        "conflicts": 31,
         "task_cards": 30,
         "validators": 49,
         "error_codes": 66,
@@ -240,16 +250,20 @@ def verify_bundled(self_test: bool) -> dict:
         errors.append(f"audit layer order={policy.get('audit_layer_order')!r}")
 
     golden = None
+    strict_prompt_tests = None
     public_scene_tests = None
     agent_tests = None
     project_agent_tests = None
     if self_test and not errors:
         golden = run_test_script(root, "run_golden_tests.py")
+        strict_prompt_tests = run_test_script(root, "test_strict_prompt_contract.py")
         public_scene_tests = run_test_script(root, "test_public_scene_ecology.py")
         agent_tests = run_test_script(root, "run_agent_tests.py")
         project_agent_tests = run_test_script(root, "run_project_agent_tests.py")
         if golden.get("exit_code") != 0 or golden.get("status") != "pass":
             errors.append("functional golden tests failed")
+        if strict_prompt_tests.get("exit_code") != 0 or strict_prompt_tests.get("status") != "pass":
+            errors.append("R10-SPC-1 strict prompt tests failed")
         if public_scene_tests.get("exit_code") != 0 or public_scene_tests.get("status") != "pass":
             errors.append("public-scene ecology tests failed")
         if agent_tests.get("exit_code") != 0 or agent_tests.get("status") != "pass":
@@ -262,6 +276,7 @@ def verify_bundled(self_test: bool) -> dict:
         "mode": "bundled_reference",
         "version": VERSION,
         "workflow_revision": WORKFLOW_REVISION,
+        "output_contract": OUTPUT_CONTRACT,
         "global_priority": PRIORITY,
         "knowledge_counts": counts,
         "structural_counts": structural_counts,
@@ -271,6 +286,8 @@ def verify_bundled(self_test: bool) -> dict:
     }
     if golden is not None:
         output["golden_tests"] = golden
+    if strict_prompt_tests is not None:
+        output["strict_prompt_tests"] = strict_prompt_tests
     if public_scene_tests is not None:
         output["public_scene_tests"] = public_scene_tests
     if agent_tests is not None:

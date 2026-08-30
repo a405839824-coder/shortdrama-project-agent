@@ -98,7 +98,8 @@ EVIDENCE_BINDING_FIELDS = {
 }
 
 DIALOGUE_TAG_RE = re.compile(
-    r"【(?P<speaker>[^】\n]{1,30})】\s*(?P<line>[^【\n｜|；;]+)"
+    r"【(?!\d+\.\d—\d+\.\d秒】)(?P<speaker>[^】\n]{1,30})】"
+    r"\s*(?P<line>[^【\n｜|；;]+)"
 )
 QUOTED_TEXT_RE = re.compile(
     r"“(?P<cn_double>[^”\n]+)”|"
@@ -161,8 +162,9 @@ def changed_shot_fields(before: dict[str, Any], after: dict[str, Any]) -> set[st
 def _dialogue_signature(picture_content: Any) -> dict[str, list[tuple[str, str]] | list[str]]:
     """Return deterministic spoken-text evidence embedded in 画面内容.
 
-    R10.1's canonical form uses ``【角色】对白``.  Quoted legacy prose is
-    included conservatively so a speaker/text change cannot reuse stale
+    R10-SPC-1 uses ``【0.0—x.x秒】`` stage brackets and integrated
+    ``角色说道：“对白。”`` speech; the stage brackets are never speakers.
+    Quoted legacy prose is included conservatively so a speaker/text change cannot reuse stale
     source-mapping, protected-dialogue, or cognition evidence through delta.
     Ordinary unquoted visible-action edits remain eligible for the bounded
     execution route.

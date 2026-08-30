@@ -80,8 +80,17 @@ class ProjectReuseAndFullScopeTests(unittest.IsolatedAsyncioTestCase):
         base = three_shot_storyboard()
         episodes = (5, 6, 8)
         for index, episode in enumerate(episodes):
+            shot_id = f"EP{episode:02d}-001"
             base["shots"][index]["episode_id"] = f"EP{episode:02d}"
+            base["shots"][index]["镜头编号"] = shot_id
             base["shots"][index]["场景连续性ID"] = f"EP{episode:02d}-SC01"
+            base["shots"][index]["累计时长"] = 4
+            evidence = base["prevention_evidence"]
+            evidence["source_ledger"][index]["target_shots"] = [shot_id]
+            evidence["scene_state_ledger"][index]["scene_id"] = f"EP{episode:02d}-SC01"
+            evidence["scene_state_ledger"][index]["shot_id"] = shot_id
+            evidence["shot_plan"][index]["shot_id"] = shot_id
+            evidence["performance_chains"][index]["shot_id"] = shot_id
         create = await self.call(
             "begin_project_task",
             {
@@ -124,9 +133,9 @@ class ProjectReuseAndFullScopeTests(unittest.IsolatedAsyncioTestCase):
 
         modified = copy.deepcopy(base)
         modified["shots"][0]["画面内容"] = (
-            "[0.0–0.8s] EP05人物停步；[0.8–3.3s] 她越权说："
+            "【0.0—0.8秒】EP05人物停步；【0.8—3.3秒】她越权说："
             "【女主】这是未经授权的新台词。口型与发声一致；"
-            "[3.3–4.0s] 她收住尾音并保持站位。"
+            "【3.3—4.0秒】她收住尾音并保持站位。"
         )
         modified["shots"][0]["音色"] = "克制低声，重音清楚"
         cases.append(("第06集", modified))
@@ -135,7 +144,7 @@ class ProjectReuseAndFullScopeTests(unittest.IsolatedAsyncioTestCase):
         extra = copy.deepcopy(added["shots"][-1])
         extra.pop("shot_uid", None)
         extra.pop("scene_uid", None)
-        extra["镜头编号"] = "S004"
+        extra["镜头编号"] = "EP08-002"
         extra["场景连续性ID"] = "EP08-SC02"
         added["shots"].append(extra)
         cases.append(("第06-07集", added))

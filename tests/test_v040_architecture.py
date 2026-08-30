@@ -22,20 +22,21 @@ def three_shot_storyboard() -> dict[str, Any]:
     shots: list[dict[str, Any]] = []
     for index in range(1, 4):
         shot = copy.deepcopy(template_shot)
-        shot_id = f"S{index:03d}"
+        episode_id = f"EP{index:02d}"
+        shot_id = f"{episode_id}-001"
         shot.update(
             {
                 "镜头编号": shot_id,
-                "累计时长": index * 4,
-                "场景连续性ID": f"SC{index:02d}",
+                "累计时长": 4,
+                "场景连续性ID": f"{episode_id}-SC01",
                 "画面内容": (
-                    f"[0.0–0.8s] 第{index}个连续剧情动作开始，女主停在既定站位；"
-                    f"[0.8–3.3s] 女主转动视线并看向桌面信件，完成本镜表演，本镜无对白；"
-                    f"[3.3–4.0s] 她保持视线、站位与稳定呼吸，动作收束。"
+                    f"【0.0—0.8秒】第{index}个连续剧情动作开始，女主停在既定站位；"
+                    f"【0.8—3.3秒】女主转动视线并看向桌面信件，完成本镜表演，本镜无对白；"
+                    f"【3.3—4.0秒】她保持视线、站位与稳定呼吸，动作收束。"
                 ),
                 "覆盖原文": f"第{index}个剧情动作。",
                 "原文支撑句": f"第{index}个剧情动作。",
-                "episode_id": f"EP{index:02d}",
+                "episode_id": episode_id,
             }
         )
         shots.append(shot)
@@ -49,7 +50,7 @@ def three_shot_storyboard() -> dict[str, Any]:
             "source_text": f"第{index}个剧情动作。",
             "speaker": "叙述",
             "treatment": "保留",
-            "target_shots": [f"S{index:03d}"],
+            "target_shots": [f"EP{index:02d}-001"],
             "authorization": "不适用：未删除",
         }
         for index in range(1, 4)
@@ -57,15 +58,15 @@ def three_shot_storyboard() -> dict[str, Any]:
     evidence["scene_state_ledger"] = [
         {
             **copy.deepcopy(evidence["scene_state_ledger"][0]),
-            "scene_id": f"SC{index:02d}",
-            "shot_id": f"S{index:03d}",
+            "scene_id": f"EP{index:02d}-SC01",
+            "shot_id": f"EP{index:02d}-001",
         }
         for index in range(1, 4)
     ]
     evidence["shot_plan"] = [
         {
             **copy.deepcopy(evidence["shot_plan"][0]),
-            "shot_id": f"S{index:03d}",
+            "shot_id": f"EP{index:02d}-001",
             "main_action_stage": f"第{index}个连续剧情动作，女主看向桌面信件",
         }
         for index in range(1, 4)
@@ -73,7 +74,7 @@ def three_shot_storyboard() -> dict[str, Any]:
     evidence["performance_chains"] = [
         {
             **copy.deepcopy(evidence["performance_chains"][0]),
-            "shot_id": f"S{index:03d}",
+            "shot_id": f"EP{index:02d}-001",
         }
         for index in range(1, 4)
     ]
@@ -186,9 +187,9 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
         identities = manifest["shot_uids"]
         replacement_shot = copy.deepcopy(storyboard["shots"][1])
         replacement_shot["画面内容"] = (
-            "[0.0–0.8s] EP02女主在原位先停步；"
-            "[0.8–3.3s] 她再确认桌上信件，因果、认知与表演连续，本镜无对白；"
-            "[3.3–4.0s] 她保持视线与稳定呼吸。"
+            "【0.0—0.8秒】EP02女主在原位先停步；"
+            "【0.8—3.3秒】她再确认桌上信件，因果、认知与表演连续，本镜无对白；"
+            "【3.3—4.0秒】她保持视线与稳定呼吸。"
         )
         performance = copy.deepcopy(
             storyboard["prevention_evidence"]["performance_chains"][1]
@@ -480,10 +481,10 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
                 "mode": "audit_and_repair",
                 "authorization": "explicit_execute",
                 "request_text": "消费审计包修复光源字段",
-                "targets": ["S001"],
+                "targets": ["EP01-001"],
                 "authoritative_source": "独立审计证书",
                 "latest_version": "current",
-                "target_boundary": "S001",
+                "target_boundary": "EP01-001",
                 "must_keep": ["全部剧情与拓扑"],
                 "must_remove": [],
                 "protected_scope": [],
@@ -504,14 +505,14 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
                 "operations": [
                     {
                         "op": "replace_field",
-                        "shot_id": "S001",
+                        "shot_id": "EP01-001",
                         "field": "光源来源",
                         "value": "窗纸透入的日光",
                         "issue_ids": ["E-TEMPLATE-008"],
                         "reason": "只修复证书确认的光源缺失",
                     }
                 ],
-                "impact_scope": ["S001"],
+                "impact_scope": ["EP01-001"],
                 "file_name": "修复后.xlsx",
             },
         )
