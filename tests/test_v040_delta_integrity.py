@@ -57,7 +57,7 @@ class DeltaMergeIntegrityTests(unittest.TestCase):
         self.assertTrue(merged["shots"][1]["scene_uid"])
 
         extra = copy.deepcopy(shot)
-        extra["镜头编号"] = "S002B"
+        extra["镜头编号"] = "EP02-001B"
         with self.assertRaisesRegex(ValueError, "delta_structural_change_requires_full_commit"):
             merge_storyboard_delta(
                 base,
@@ -100,8 +100,8 @@ class DeltaMergeIntegrityTests(unittest.TestCase):
     def test_performance_and_scene_changes_require_complete_affected_evidence(self) -> None:
         base, uid, shot = delta_parts()
         shot["画面内容"] = (
-            "[0.0–0.8s] 人物在原位停步；[0.8–3.3s] 她收紧呼吸，再抬眼确认信件位置，"
-            "眉眼和肩颈随动作变化，本镜无对白；[3.3–4.0s] 她保持视线，动作收束。"
+            "【0.0—0.8秒】人物在原位停步；【0.8—3.3秒】她收紧呼吸，再抬眼确认信件位置，"
+            "眉眼和肩颈随动作变化，本镜无对白；【3.3—4.0秒】她保持视线，动作收束。"
         )
         shot["起始状态"] = "人物仍在原位，呼吸已收紧，视线尚未抬向信件"
         with self.assertRaisesRegex(ValueError, "delta_evidence_missing"):
@@ -133,9 +133,9 @@ class DeltaMergeIntegrityTests(unittest.TestCase):
     def test_dialogue_or_speaker_delta_requires_full_commit(self) -> None:
         base, uid, shot = delta_parts()
         shot["画面内容"] = (
-            "[0.0–0.8s] 人物先接住对方视线；[0.8–3.3s] 她压低声音说："
+            "【0.0—0.8秒】人物先接住对方视线；【0.8—3.3秒】她压低声音说："
             "【女主】这是新的台词。口型、呼吸停顿与重音一致；"
-            "[3.3–4.0s] 她收住尾音并保持原站位。"
+            "【3.3—4.0秒】她收住尾音并保持原站位。"
         )
         shot["音色"] = "压低、克制，声量中等，重音清楚"
         with self.assertRaisesRegex(
@@ -305,12 +305,12 @@ class DeltaProtectedScopeTests(unittest.IsolatedAsyncioTestCase):
         }
 
     async def test_exact_field_and_range_field_protection_block_actual_change(self) -> None:
-        exact = await self.prepare(["S002.画面内容"])
+        exact = await self.prepare(["EP02-001.画面内容"])
         rejected = await self.rejection("commit_storyboard_delta", exact)
         self.assertIn("protected_scope_violation", rejected)
-        self.assertIn("S002.画面内容", rejected)
+        self.assertIn("EP02-001.画面内容", rejected)
 
-        ranged = await self.prepare(["S001-S003.画面内容"])
+        ranged = await self.prepare(["EP02-001—EP02-003.画面内容"])
         rejected = await self.rejection("commit_storyboard_delta", ranged)
         self.assertIn("protected_scope_violation", rejected)
 
@@ -334,8 +334,9 @@ class DeltaProtectedScopeTests(unittest.IsolatedAsyncioTestCase):
     async def test_dialogue_delta_rejection_has_no_artifact_or_version_side_effect(self) -> None:
         arguments = await self.prepare([])
         arguments["replacement_shots"][0]["画面内容"] = (
-            "[0.0–1.0s] 女主保持原站位并抬眼；"
-            "[1.0–4.0s] 【女主】这句对白必须走完整提交。"
+            "【0.0—1.0秒】女主保持原站位并抬眼；"
+            "【1.0—3.3秒】【女主】这句对白必须走完整提交；"
+            "【3.3—4.0秒】女主收住尾音并保持站位。"
         )
         project_id = str(arguments["project_id"])
         artifacts_before = copy.deepcopy(
