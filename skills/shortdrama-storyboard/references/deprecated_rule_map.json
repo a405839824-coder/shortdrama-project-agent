@@ -54,12 +54,12 @@
     {
       "deprecated": "Seedance 2.5独立正式执行分镜列、生成批次工作表及top-level batches",
       "replacement": "R10.1.SINGLE_EXECUTION_MASTER",
-      "reason": "正式分镜母版·字段合并成为唯一单镜执行母版；旧格式只读迁移，新版本不回写"
+      "reason": "R10-SPC-1正式分镜母版成为唯一单镜执行母版；旧列名和旧格式只读迁移，新版本不回写"
     },
     {
       "deprecated": "4—15秒Seedance生成批次包装",
       "replacement": "R10.1.SINGLE_SHOT_DURATION",
-      "reason": "正式镜按自身剧情时长执行；Seedance 2.5可选阶段最多3段并覆盖单镜时长，不再为4秒下限重复包装"
+      "reason": "正式镜按自身剧情时长执行；R10-SPC-1 Seedance 2.5恰好3段并覆盖单镜时长，不再为4秒下限重复包装"
     },
     {
       "deprecated": "生产、审计、修复或缓存后台预生成Seedance提示词",
