@@ -1,6 +1,6 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Chinese short-drama production with the R10-SPC-1 strict single-shot contract, an R10.1 compact master, canonical delta commits, independent audit, conditional repair, and zero duplicate background prompt generation.",
   "author": {
     "name": "Storyboard Project Agent"
