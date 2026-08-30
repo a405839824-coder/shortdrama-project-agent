@@ -53,7 +53,20 @@ def valid_storyboard() -> dict[str, Any]:
     value["field_order"] = list(COMPACT_SHOT_FIELDS)
     value.pop("batches", None)
     value.pop("mother_template_columns", None)
-    for shot in value["shots"]:
+    value.setdefault("source_lock", {}).update(
+        {
+            "output_contract": "R10-SPC-1",
+            "target_model": "Seedance 2.5",
+            "aspect_ratio": "9:16",
+        }
+    )
+    running = 0.0
+    for index, shot in enumerate(value["shots"], 1):
+        shot["镜头编号"] = f"EP01-{index:03d}"
+        shot["episode_id"] = "EP01"
+        shot["场景连续性ID"] = "EP01-SC01"
+        running += float(shot.get("时长") or 0)
+        shot["累计时长"] = running
         legacy_cut = shot.pop("切镜转场提示词", None)
         if not shot.get("切镜/转场提示词"):
             shot["切镜/转场提示词"] = legacy_cut or "手停在门框时切到桌面信件"
@@ -66,14 +79,25 @@ def valid_storyboard() -> dict[str, Any]:
             "木门半开，桌面信件未移动。"
         )
         shot["画面内容"] = (
-            "[0.0–0.8s] 女主推门进入画面，右手扶住门框；"
-            "[0.8–3.3s] 她停在桌前，肩膀缓慢落下，目光转向桌面信件，"
+            "【0.0—0.8秒】女主推门进入画面，右手扶住门框；"
+            "【0.8—3.3秒】她停在桌前，肩膀缓慢落下，目光转向桌面信件，"
             "嘴角自然放松，本镜无对白；"
-            "[3.3–4.0s] 她保持视线落点和稳定呼吸，手停在门框，动作收束。"
+            "【3.3—4.0秒】她保持视线落点和稳定呼吸，手停在门框，动作收束。"
         )
         shot["音色"] = "不适用：本镜无对白"
         shot["心理音轨"] = (
             "不适用：本镜无心理音轨；不张嘴、不驱动口型、不生成字幕、不计入对白时长。"
+        )
+        shot["光影"] = (
+            "女主面部与桌面信件保持自然明暗层次；高光不过曝，暗部保留皮肤、衣料和木构质感。"
+        )
+        shot["光源来源"] = "左侧闭合木格窗透入自然晨光，右前浅色墙面提供弱反射补光。"
+        shot["光源方向"] = "主光由画面左上向右下斜落，右前反射光弱补暗侧，向室内纵深逐级衰减。"
+        shot["色温倾向"] = "中性微暖晨光；肤色自然，衣料、木构与纸张保持低饱和本色。"
+        shot["生成限制"] = (
+            "9:16真人古装短剧；单镜单一主机位、单一核心动作阶段；"
+            "禁止字幕、水印、额外配乐、现代物件、人物看镜头、同步反应、复制脸、"
+            "上下黑边、无来源光、重HDR、塑料皮肤与海报摆拍。"
         )
         for field in LEGACY_REMOVED_SHOT_FIELDS | LEGACY_DERIVED_SHOT_FIELDS:
             shot.pop(field, None)
@@ -588,16 +612,16 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             "operations": [
                 {
                     "op": "replace_field",
-                    "shot_id": "S001",
+                    "shot_id": "EP01-001",
                     "field": field,
                     "value": value,
                     # Only the certificate row whose exact location is
-                    # S001.光源来源 may authorize this field replacement.
+                    # EP01-001.光源来源 may authorize this field replacement.
                     "issue_ids": ["E-TEMPLATE-008"],
                     "reason": "修复独立审计确认的缺失光源，不改变剧情、认知或空间边界",
                 }
             ],
-            "impact_scope": ["S001"],
+            "impact_scope": ["EP01-001"],
             "file_name": "待修分镜_补丁修复版.xlsx",
         }
 
@@ -618,7 +642,7 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_storyboard_patch_cannot_modify_work_order_protected_scope(self) -> None:
         project_id, work_order_id, committed, audited = await self._prepare_patch_base(
             project_name="补丁保护范围测试",
-            protected_scope=["S001"],
+            protected_scope=["EP01-001"],
         )
         arguments = self._patch_arguments(project_id, work_order_id, committed, audited)
         result = await self.rejection_text("commit_storyboard_patch", arguments)
@@ -843,7 +867,8 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_storyboard_patch_blocks_shot_range_protected_scope(self) -> None:
         project_id, work_order_id, committed, audited = await self._prepare_patch_base(
-            project_name="补丁范围保护测试", protected_scope=["S001-S010"]
+            project_name="补丁范围保护测试",
+            protected_scope=["EP01-001—EP01-010"],
         )
         rejection = await self.rejection_text(
             "commit_storyboard_patch",
