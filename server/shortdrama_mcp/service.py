@@ -13,6 +13,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 
+from . import __version__
 from .canonical import (
     COMPACT_MATERIALIZER_CONTRACT,
     COMPACT_SCHEMA_PROFILE,
@@ -124,6 +125,34 @@ WRITE_READY_WORK_ORDER_STATUSES = {"approved", "scope_locked", "executing", "fai
 
 AUDIT_CLASS_PRODUCTION_PREFLIGHT = "production_preflight"
 AUDIT_CLASS_INDEPENDENT = "independent_audit"
+
+PERFORMANCE_DIAGNOSTIC_STAGES = (
+    "task_started",
+    "inputs_ready",
+    "plan_ready",
+    "canonical_ready",
+    "delivery_ready",
+)
+PERFORMANCE_DIAGNOSTIC_GAPS = {
+    "inputs_ready": "source_and_context",
+    "plan_ready": "storyboard_planning",
+    "canonical_ready": "canonical_authorship",
+    "delivery_ready": "commit_export_and_delivery",
+}
+PERFORMANCE_DIAGNOSTIC_ROUTES = {
+    "production": {"full_rebuild", "episode_delta", "unknown"},
+    "independent_audit": {"first_independent_audit", "repeat_audit", "unknown"},
+    "repair": {"audit_repair", "unknown"},
+}
+PERFORMANCE_DIAGNOSTIC_REASONING_MODES = {
+    "light",
+    "medium",
+    "high",
+    "extra_high",
+    "max",
+    "unknown",
+}
+PERFORMANCE_DIAGNOSTIC_WINDOW_TYPES = {"fresh", "continued", "unknown"}
 
 # A local patch may repair presentation/execution detail, but it must never be
 # used to smuggle a story, boundary, timing, identity, cognition, or source
@@ -1661,6 +1690,7 @@ class StoryboardService:
         report = r10_bootstrap.verify_bundled(self_test=full_self_test) if full_self_test else self.bootstrap
         projects = self.store.list_projects(namespace)
         data: dict[str, Any] = {
+            "plugin_version": __version__,
             "runtime": report,
             "output_contract": STRICT_OUTPUT_CONTRACT,
             "target_model": "Seedance 2.5",
@@ -1670,6 +1700,12 @@ class StoryboardService:
             "execution_available": report.get("status") == "pass",
             "deployment_mode": self.settings.deployment_mode,
             "auth_mode": self.settings.auth_mode,
+            "performance_diagnostics": {
+                "available": True,
+                "tool": "mark_performance_stage",
+                "measurement_scope": "tool_bracketed_chat",
+                "ordinary_runs_add_markers": False,
+            },
         }
         summary = "Agent可执行" if report.get("status") == "pass" else "Agent阻塞"
         if project_id:
@@ -1691,12 +1727,542 @@ class StoryboardService:
             data["recent_telemetry"] = self.store.list_project_records(
                 namespace, project_id, kind="telemetry"
             )[:20]
+            data["recent_performance_diagnostics"] = self.store.list_project_records(
+                namespace, project_id, kind="diagnostics"
+            )[:10]
             data["runtime_test_certificate_valid"] = bool(
                 runtime_certificate is not None and runtime_certificate.get("result") == "pass"
             )
             data["runtime_test_certificate"] = runtime_certificate
             summary += f"｜项目{hub.get('project_name')}｜开放问题{data['issues'].get('open_issue_count', 0)}"
         return ToolResponse(status=str(report.get("status")), summary=summary, project_id=project_id, data=data)
+
+    def _resolve_performance_diagnostic_links(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        window_role: str,
+        related_trace_ids: list[str],
+        related_artifact_id: str | None,
+    ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any] | None]:
+        """Resolve only project-scoped IDs; never accept prompt or source text."""
+
+        artifact_summary: dict[str, Any] | None = None
+        if related_artifact_id:
+            artifact, _path = self.store.get_artifact(
+                namespace, project_id, related_artifact_id
+            )
+            artifact_summary = {
+                "artifact_id": artifact.get("artifact_id"),
+                "artifact_type": artifact.get("artifact_type"),
+                "fingerprint": artifact.get("fingerprint"),
+            }
+
+        resolved: list[dict[str, Any]] = []
+        unresolved: list[str] = []
+        for trace_id in related_trace_ids:
+            try:
+                trace = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="telemetry",
+                    record_id=trace_id,
+                )
+            except ValueError:
+                unresolved.append(trace_id)
+                continue
+            trace_role = str(trace.get("window_role") or "")
+            if trace_role and trace_role != window_role:
+                raise ValueError(
+                    "diagnostic_trace_role_mismatch: linked trace belongs to another authority"
+                )
+            trace_artifact_id = str(trace.get("artifact_id") or "")
+            if (
+                related_artifact_id
+                and trace_artifact_id
+                and trace_artifact_id != related_artifact_id
+            ):
+                raise ValueError(
+                    "diagnostic_trace_artifact_mismatch: linked trace and artifact differ"
+                )
+            resolved.append(
+                {
+                    "trace_id": str(trace.get("trace_id") or trace_id),
+                    "operation": str(trace.get("operation") or "unknown"),
+                    "duration_ms": round(float(trace.get("duration_ms") or 0), 3),
+                    "measurement_scope": str(
+                        trace.get("measurement_scope") or "server_only"
+                    ),
+                    "artifact_id": trace.get("artifact_id"),
+                    "cache_hit": bool(trace.get("cache_hit", False)),
+                }
+            )
+        return resolved, unresolved, artifact_summary
+
+    def _performance_diagnostic_comparison(
+        self,
+        namespace: str,
+        project_id: str,
+        current: dict[str, Any],
+    ) -> dict[str, Any]:
+        config = current.get("configuration") or {}
+        current_mode = str(config.get("reasoning_mode") or "unknown")
+        if current_mode == "unknown":
+            return {
+                "status": "unavailable",
+                "reason": "reasoning_mode_not_declared",
+                "causal_claim_allowed": False,
+            }
+        candidates = []
+        for record in self.store.list_project_records(
+            namespace, project_id, kind="diagnostics"
+        ):
+            if (
+                record.get("diagnostic_run_id") == current.get("diagnostic_run_id")
+                or record.get("status") != "complete"
+            ):
+                continue
+            other = record.get("configuration") or {}
+            if (
+                str(other.get("reasoning_mode") or "unknown") == current_mode
+                or str(other.get("reasoning_mode") or "unknown") == "unknown"
+            ):
+                continue
+            matching_keys = (
+                "route",
+                "window_type",
+                "episode_count",
+                "expected_shot_count",
+            )
+            if any(other.get(key) != config.get(key) for key in matching_keys):
+                continue
+            candidates.append(record)
+        if not candidates:
+            return {
+                "status": "needs_controlled_pair",
+                "reason": "no_completed_run_with_matching_scope_and_different_reasoning_mode",
+                "causal_claim_allowed": False,
+                "next_test": (
+                    "在相同源文件、集数、镜头数、窗口类型、缓存状态和输出合同下，"
+                    "只切换思考模式再运行一次"
+                ),
+            }
+        previous = candidates[0]
+        previous_report = previous.get("report") or {}
+        current_total = int(
+            (current.get("checkpoints") or [{}])[-1].get("elapsed_from_start_ms") or 0
+        )
+        previous_total = int(previous_report.get("total_tool_bracketed_ms") or 0)
+        return {
+            "status": "observational_pair_available",
+            "causal_claim_allowed": False,
+            "current_run_id": current.get("diagnostic_run_id"),
+            "current_reasoning_mode": current_mode,
+            "current_total_ms": current_total,
+            "comparison_run_id": previous.get("diagnostic_run_id"),
+            "comparison_reasoning_mode": (previous.get("configuration") or {}).get(
+                "reasoning_mode"
+            ),
+            "comparison_total_ms": previous_total,
+            "observed_difference_ms": current_total - previous_total,
+            "interpretation": (
+                "这是同范围观察差值；只有重复多次并控制缓存、窗口和负载后，"
+                "才能把差异主要归因于思考模式"
+            ),
+        }
+
+    def _build_performance_diagnostic_report(
+        self,
+        namespace: str,
+        project_id: str,
+        record: dict[str, Any],
+    ) -> dict[str, Any]:
+        checkpoints = list(record.get("checkpoints") or [])
+        stage_gaps: dict[str, int] = {}
+        for checkpoint in checkpoints[1:]:
+            gap_name = PERFORMANCE_DIAGNOSTIC_GAPS.get(str(checkpoint.get("stage")))
+            if gap_name:
+                stage_gaps[gap_name] = int(checkpoint.get("gap_from_previous_ms") or 0)
+        total_ms = int(checkpoints[-1].get("elapsed_from_start_ms") or 0) if checkpoints else 0
+        resolved_by_id: dict[str, dict[str, Any]] = {}
+        unresolved: list[str] = []
+        for checkpoint in checkpoints:
+            for trace in checkpoint.get("resolved_plugin_traces") or []:
+                resolved_by_id[str(trace.get("trace_id") or "")] = trace
+            unresolved.extend(str(value) for value in checkpoint.get("unresolved_trace_ids") or [])
+        resolved_by_id.pop("", None)
+        plugin_server_ms = round(
+            sum(float(trace.get("duration_ms") or 0) for trace in resolved_by_id.values()),
+            3,
+        )
+        plugin_share = (
+            round(plugin_server_ms * 100.0 / total_ms, 3) if total_ms > 0 else None
+        )
+        dominant_stage = max(stage_gaps, key=stage_gaps.get) if stage_gaps else None
+        dominant_ms = stage_gaps.get(dominant_stage, 0) if dominant_stage else 0
+        if plugin_share is None:
+            plugin_finding = "没有可解析的服务端trace，不能判断插件占比"
+            plugin_evidence = "unmeasured"
+        elif plugin_share < 20:
+            plugin_finding = "已解析的插件服务端时间不是本次主要观察瓶颈"
+            plugin_evidence = "measured"
+        elif plugin_share >= 50:
+            plugin_finding = "插件服务端时间占比较高，需要继续下钻具体服务端阶段"
+            plugin_evidence = "measured"
+        else:
+            plugin_finding = "插件服务端时间有显著占比，但不是唯一耗时来源"
+            plugin_evidence = "measured"
+        planning_ms = stage_gaps.get("storyboard_planning", 0)
+        authorship_ms = stage_gaps.get("canonical_authorship", 0)
+        comparison = self._performance_diagnostic_comparison(
+            namespace, project_id, record
+        )
+        warnings = []
+        if plugin_server_ms > total_ms and total_ms >= 0:
+            warnings.append(
+                "linked_plugin_trace_duration_exceeds_bracket: verify that only traces from this run were linked"
+            )
+        if unresolved:
+            warnings.append(
+                "some_related_trace_ids_are_not_persisted_server_telemetry"
+            )
+        return {
+            "diagnostic_run_id": record.get("diagnostic_run_id"),
+            "measurement_scope": "tool_bracketed_chat",
+            "clock_source": "server_receive_time",
+            "exact_end_to_end": False,
+            "total_tool_bracketed_ms": total_ms,
+            "stage_gaps_ms": stage_gaps,
+            "dominant_observed_stage": dominant_stage,
+            "dominant_observed_stage_ms": dominant_ms,
+            "resolved_plugin_trace_count": len(resolved_by_id),
+            "resolved_plugin_server_ms": plugin_server_ms,
+            "plugin_share_of_bracketed_percent": plugin_share,
+            "unresolved_trace_ids": list(dict.fromkeys(unresolved)),
+            "attribution": [
+                {
+                    "factor": "plugin_server",
+                    "evidence": plugin_evidence,
+                    "finding": plugin_finding,
+                },
+                {
+                    "factor": "chatgpt_model_orchestration_interval",
+                    "evidence": "tool_bracketed_gap",
+                    "finding": (
+                        f"最大可观察区间为{dominant_stage or 'unknown'}，{dominant_ms}毫秒；"
+                        "该区间可能包含规划、隐藏思考、文本生成、客户端传输和工具编排，"
+                        "无API时不能再精确拆分"
+                    ),
+                },
+                {
+                    "factor": "storyboard_workflow_rules",
+                    "evidence": "tool_bracketed_gap",
+                    "planning_interval_ms": planning_ms,
+                    "authorship_interval_ms": authorship_ms,
+                    "finding": (
+                        "规划区间大于成稿区间，流程/规则准备值得优先做A/B"
+                        if planning_ms > authorship_ms
+                        else "成稿区间不小于规划区间，优先检查模型生成体量和思考模式"
+                    ),
+                },
+                {
+                    "factor": "reasoning_mode",
+                    "evidence": comparison.get("status"),
+                    "finding": comparison,
+                },
+            ],
+            "unmeasured_stages": [
+                "before_task_started_marker",
+                "provider_queue_latency",
+                "hidden_reasoning_substeps",
+                "token_generation_count_and_rate",
+                "client_network_and_render_substages",
+                "final_answer_after_delivery_ready_marker",
+            ],
+            "quality_contract_unchanged": {
+                "output_contract": "R10-SPC-1",
+                "canonical_atomic_field_count": 27,
+                "per_shot_spatial_environment_lighting_and_generation_limits": True,
+                "lighting_fields": ["光影", "光源来源", "光源方向", "色温倾向"],
+                "background_seedance_generation": False,
+                "seedance_batches_generated": 0,
+                "model_authored_derived_chars": 0,
+            },
+            "warnings": warnings,
+        }
+
+    def mark_performance_stage(
+        self,
+        namespace: str,
+        *,
+        project_id: str,
+        work_order_id: str,
+        action: str,
+        stage: str,
+        diagnostic_run_id: str | None = None,
+        reasoning_mode: str = "unknown",
+        window_type: str = "unknown",
+        route: str = "unknown",
+        episode_count: int = 0,
+        expected_shot_count: int = 0,
+        observed_shot_count: int = 0,
+        observed_character_count: int = 0,
+        related_trace_ids: list[str] | None = None,
+        related_artifact_id: str | None = None,
+        request_session_id: str | None = None,
+    ) -> ToolResponse:
+        """Persist content-free checkpoints around a native ChatGPT run.
+
+        The server timestamps receipt of each marker.  It does not accept
+        caller-authored timestamps, prompt text, dialogue, source excerpts, or
+        hidden-reasoning claims, so the resulting report remains useful even
+        when the caller cannot use the OpenAI API.
+        """
+
+        self._require_runtime()
+        if action not in {"start", "mark", "finish"}:
+            raise ValueError("diagnostic_action_invalid")
+        if stage not in PERFORMANCE_DIAGNOSTIC_STAGES:
+            raise ValueError("diagnostic_stage_invalid")
+        expected_action = (
+            "start"
+            if stage == PERFORMANCE_DIAGNOSTIC_STAGES[0]
+            else "finish"
+            if stage == PERFORMANCE_DIAGNOSTIC_STAGES[-1]
+            else "mark"
+        )
+        if action != expected_action:
+            raise ValueError(
+                f"diagnostic_action_stage_mismatch: {stage} requires {expected_action}"
+            )
+        if reasoning_mode not in PERFORMANCE_DIAGNOSTIC_REASONING_MODES:
+            raise ValueError("diagnostic_reasoning_mode_invalid")
+        if window_type not in PERFORMANCE_DIAGNOSTIC_WINDOW_TYPES:
+            raise ValueError("diagnostic_window_type_invalid")
+        numeric_values = {
+            "episode_count": (episode_count, 1_000),
+            "expected_shot_count": (expected_shot_count, 100_000),
+            "observed_shot_count": (observed_shot_count, 100_000),
+            "observed_character_count": (observed_character_count, 100_000_000),
+        }
+        for field, (value, maximum) in numeric_values.items():
+            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= maximum:
+                raise ValueError(f"diagnostic_metric_invalid: {field}")
+        trace_ids = [str(value).strip() for value in (related_trace_ids or [])]
+        if (
+            len(trace_ids) > 16
+            or any(not value or len(value) > 128 for value in trace_ids)
+            or len(set(trace_ids)) != len(trace_ids)
+        ):
+            raise ValueError("diagnostic_trace_ids_invalid")
+
+        hub = self.store.load_hub(namespace, project_id)
+        work_order = _find_work_order(hub, work_order_id)
+        role = str(work_order.get("server_actor_role") or "")
+        if work_order.get("operation") not in STORYBOARD_OPERATIONS | {"storyboard_audit"}:
+            raise ValueError("diagnostic_storyboard_work_order_required")
+        if role not in PERFORMANCE_DIAGNOSTIC_ROUTES:
+            raise ValueError("diagnostic_window_role_invalid")
+        self._assert_storyboard_authority(work_order, role)
+        self._assert_work_order_session(namespace, work_order, request_session_id)
+        if route not in PERFORMANCE_DIAGNOSTIC_ROUTES.get(role, set()):
+            raise ValueError("diagnostic_route_role_mismatch")
+        resolved, unresolved, artifact_summary = self._resolve_performance_diagnostic_links(
+            namespace,
+            project_id,
+            window_role=role,
+            related_trace_ids=trace_ids,
+            related_artifact_id=related_artifact_id,
+        )
+        now_ms = time.time_ns() // 1_000_000
+        observed_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
+            "+00:00", "Z"
+        )
+        request_signature = {
+            "related_trace_ids": trace_ids,
+            "related_artifact_id": related_artifact_id,
+            "observed_shot_count": observed_shot_count,
+            "observed_character_count": observed_character_count,
+        }
+
+        if action == "start":
+            if diagnostic_run_id:
+                raise ValueError("diagnostic_run_id_must_be_omitted_on_start")
+            run_id = _new_id("DGN")
+            checkpoint = {
+                "sequence": 0,
+                "stage": stage,
+                "observed_at": observed_at,
+                "observed_epoch_ms": now_ms,
+                "elapsed_from_start_ms": 0,
+                "gap_from_previous_ms": 0,
+                "metrics": {
+                    "observed_shot_count": observed_shot_count,
+                    "observed_character_count": observed_character_count,
+                },
+                "request_signature": request_signature,
+                "resolved_plugin_traces": resolved,
+                "unresolved_trace_ids": unresolved,
+                "artifact": artifact_summary,
+            }
+            record = {
+                "diagnostic_run_id": run_id,
+                "status": "running",
+                "work_order_id": work_order_id,
+                "window_role": role,
+                "transport_session_fingerprint": self._session_fingerprint(
+                    namespace, request_session_id
+                ),
+                "measurement_scope": "tool_bracketed_chat",
+                "clock_source": "server_receive_time",
+                "configuration": {
+                    "reasoning_mode": reasoning_mode,
+                    "window_type": window_type,
+                    "route": route,
+                    "episode_count": episode_count,
+                    "expected_shot_count": expected_shot_count,
+                },
+                "started_at": observed_at,
+                "started_epoch_ms": now_ms,
+                "checkpoints": [checkpoint],
+                "content_retention": "ids_enums_counts_only",
+                **NO_DUPLICATE_GENERATION_EVIDENCE,
+            }
+            persisted = self.store.save_project_record(
+                namespace,
+                project_id,
+                kind="diagnostics",
+                record_id=run_id,
+                value=record,
+            )
+            return ToolResponse(
+                status="diagnostic_started",
+                summary="无API性能诊断已开始｜下一阶段 inputs_ready",
+                project_id=project_id,
+                work_order_id=work_order_id,
+                trace_id=run_id,
+                data={
+                    "diagnostic_run_id": run_id,
+                    "measurement_scope": "tool_bracketed_chat",
+                    "checkpoint": checkpoint,
+                    "next_stage": "inputs_ready",
+                    "record_integrity_signed": self.store.project_record_is_signed(
+                        persisted
+                    ),
+                },
+            )
+
+        if not diagnostic_run_id:
+            raise ValueError("diagnostic_run_id_required")
+        duplicate = False
+        completed: dict[str, Any] | None = None
+        checkpoint: dict[str, Any] | None = None
+        with self.store.mutate_project_record(
+            namespace,
+            project_id,
+            kind="diagnostics",
+            record_id=diagnostic_run_id,
+        ) as record:
+            if record.get("work_order_id") != work_order_id or record.get("window_role") != role:
+                raise ValueError("diagnostic_work_order_binding_mismatch")
+            expected_session = record.get("transport_session_fingerprint")
+            actual_session = self._session_fingerprint(namespace, request_session_id)
+            if expected_session and expected_session != actual_session:
+                raise ValueError("diagnostic_window_session_mismatch")
+            checkpoints = record.get("checkpoints")
+            if not isinstance(checkpoints, list) or not checkpoints:
+                raise ValueError("diagnostic_record_invalid")
+            last = checkpoints[-1]
+            if last.get("stage") == stage:
+                if last.get("request_signature") != request_signature:
+                    raise ValueError("diagnostic_stage_replay_conflict")
+                duplicate = True
+                checkpoint = copy.deepcopy(last)
+                if record.get("status") == "complete":
+                    completed = copy.deepcopy(record)
+            else:
+                if record.get("status") != "running":
+                    raise ValueError("diagnostic_run_already_complete")
+                expected_index = len(checkpoints)
+                if (
+                    expected_index >= len(PERFORMANCE_DIAGNOSTIC_STAGES)
+                    or PERFORMANCE_DIAGNOSTIC_STAGES[expected_index] != stage
+                ):
+                    next_stage = (
+                        PERFORMANCE_DIAGNOSTIC_STAGES[expected_index]
+                        if expected_index < len(PERFORMANCE_DIAGNOSTIC_STAGES)
+                        else "none"
+                    )
+                    raise ValueError(
+                        f"diagnostic_stage_out_of_order: expected {next_stage}, got {stage}"
+                    )
+                started_ms = int(record.get("started_epoch_ms") or now_ms)
+                previous_ms = int(last.get("observed_epoch_ms") or started_ms)
+                checkpoint = {
+                    "sequence": expected_index,
+                    "stage": stage,
+                    "observed_at": observed_at,
+                    "observed_epoch_ms": now_ms,
+                    "elapsed_from_start_ms": max(0, now_ms - started_ms),
+                    "gap_from_previous_ms": max(0, now_ms - previous_ms),
+                    "metrics": {
+                        "observed_shot_count": observed_shot_count,
+                        "observed_character_count": observed_character_count,
+                    },
+                    "request_signature": request_signature,
+                    "resolved_plugin_traces": resolved,
+                    "unresolved_trace_ids": unresolved,
+                    "artifact": artifact_summary,
+                }
+                checkpoints.append(checkpoint)
+                record["updated_at"] = observed_at
+                if action == "finish":
+                    record["status"] = "complete"
+                    record["finished_at"] = observed_at
+                    record["report"] = self._build_performance_diagnostic_report(
+                        namespace, project_id, record
+                    )
+                    completed = copy.deepcopy(record)
+
+        assert checkpoint is not None
+        if completed is not None:
+            report = completed.get("report") or self._build_performance_diagnostic_report(
+                namespace, project_id, completed
+            )
+            return ToolResponse(
+                status="diagnostic_complete",
+                summary=(
+                    f"无API性能诊断完成｜总计{report.get('total_tool_bracketed_ms', 0)}毫秒｜"
+                    f"最大区间{report.get('dominant_observed_stage') or 'unknown'}"
+                ),
+                project_id=project_id,
+                work_order_id=work_order_id,
+                artifact_id=related_artifact_id,
+                trace_id=diagnostic_run_id,
+                data={
+                    "diagnostic_run_id": diagnostic_run_id,
+                    "idempotent_replay": duplicate,
+                    "report": report,
+                },
+            )
+        next_index = int(checkpoint.get("sequence") or 0) + 1
+        next_stage = PERFORMANCE_DIAGNOSTIC_STAGES[next_index]
+        return ToolResponse(
+            status="diagnostic_checkpointed",
+            summary=f"诊断阶段已记录｜{stage}｜下一阶段 {next_stage}",
+            project_id=project_id,
+            work_order_id=work_order_id,
+            trace_id=diagnostic_run_id,
+            data={
+                "diagnostic_run_id": diagnostic_run_id,
+                "measurement_scope": "tool_bracketed_chat",
+                "idempotent_replay": duplicate,
+                "checkpoint": checkpoint,
+                "next_stage": next_stage,
+            },
+        )
+
 
     def create_project(self, namespace: str, project_name: str) -> ToolResponse:
         self._require_runtime()

@@ -1,11 +1,11 @@
-# 分镜项目 Agent 0.5.2
+# 分镜项目 Agent 0.5.3
 
 这是一个“技能 + MCP 执行服务”的完整工具型插件。ChatGPT 负责理解、生成与改写内容，MCP 负责项目状态、文件导入、版本化提交、全表审计、修复回归、跨聊天问题台账和人工签核。没有真实工具调用时，插件规则禁止声称“已经执行”。
 
 ## 当前状态
 
 - 本地 MCP：可运行，Streamable HTTP 端点为 `/mcp`
-- 工具：14 个，覆盖项目、工单、自动批量文件读取、变更、剧本/方案、全量与增量分镜、独立审计、受控局部修复、验证、能力缺口和签核
+- 工具：15 个，覆盖项目、工单、按需启用的无API五阶段性能诊断、自动批量文件读取、变更、剧本/方案、全量与增量分镜、独立审计、受控局部修复、验证、能力缺口和签核
 - ChatGPT 会话绑定：云端 authority 工单使用工具调用 `_meta["openai/session"]` 的匿名会话标识；有状态非 ChatGPT 客户端保留 MCP transport session 回退。所有 execute/audit/repair authority 工单在创建时即验证绑定并返回 `session_binding_status`
 - R10 运行时：`R10.1` 紧凑母版 Schema，工作流保持 `R10-PG1`；底层规则运行时标识为 `V16.3-148-R10-StableRuntime`
 - 小说转分镜：完整章节读取→剧情地图→取舍台账→人物状态/认知→对白保护→时长预算→节拍→100%覆盖审计
@@ -21,6 +21,7 @@
 - 窗口架构：生产与独立审计为两个常驻独立 authority；只有审计失败且用户授权修复时才启用第三个 repair authority，修复结果必须返回原审计 authority 复核
 - 增量提速：已有分镜的同身份、同数量、对白与人物认知不变的局部执行变化使用 `commit_storyboard_delta`，只传受影响的完整 27 字段镜头及边界；服务端校验稳定 UID、CAS、保护范围，合并未变化镜头后仍执行完整 R10.1 全表生产校验并生成独立审计 handoff。任何对白或说话人变化、心理音轨、插删移、拆并、重编号或上游证据失效，都重建完整受影响场景/分集
 - 停止后台重复生成：canonical 不持久化正式母版、GPT投影、独立 Seedance 文本或批次；导出器只对最终 canonical 执行一次正式母版和GPT投影，不在生产、审计、修复、缓存预热或后台任务中再次扩写语义
+- 无API耗时诊断：只有用户明确要求时才调用 `mark_performance_stage`，按 `task_started → inputs_ready → plan_ready → canonical_ready → delivery_ready` 记录服务器收件检查点，区分工具调用间隔与插件 `server_only` 耗时；普通生产不增加这五次调用
 - 真实独立审计：首次或指纹变化后的 `audit_storyboard` 必须提交绑定精确 canonical 的八层 `semantic_audit` 证据；服务端把它与新鲜机器报告合并，不能再由机器零报错自动合成独立语义通过。仅精确独立审计缓存命中可省略
 - 安全修复：非结构字段使用证书约束 patch；结构、边界、认知、原文证据、镜头顺序/时长或核心计划变化必须使用绑定同一修复包的完整场景/分集重建。生产 delta 不能借给 repair 绕过证书；repair 不能签发最终结论，也不能替代独立审计
 - 云端：已锁定 Railway + Railway 自动域名 + Auth0，并补齐部署、持久卷、预检和验收配置
@@ -65,7 +66,7 @@ ChatGPT 不能直接访问普通的 `localhost`。先保持本地服务运行，
 1. ChatGPT → Settings → Security and login → 打开 Developer mode。
 2. 打开 ChatGPT Plugins，点加号。
 3. 选择 Tunnel，或填写完整 HTTPS 地址，例如 `https://你的测试域名/mcp`。
-4. 创建连接，确认能发现 14 个工具。
+4. 创建连接，确认能发现 15 个工具。
 5. 从浏览器地址复制 `plugin_asdk_app...` 技术 ID。
 6. 在本目录运行：
 
@@ -95,7 +96,7 @@ ChatGPT 不能直接访问普通的 `localhost`。先保持本地服务运行，
 
 每个角色都应先调用 `get_agent_status`，再分别建立角色专属工单并执行。判断是否真的走完优化流程，要同时看到同一 artifact/canonical 绑定的生产 `trace_id` 和独立审计 `trace_id`，以及 handoff 与 certificate；缺少任一追踪只能记为 `fast_path_incomplete`。只有文字说明而没有这些标识，等于没有执行。
 
-0.5.0 数据契约、旧项目迁移、窗口提示词和 A/B 性能验收口径见 [docs/UPGRADE_0.5.0.md](docs/UPGRADE_0.5.0.md)。旧版说明 [docs/UPGRADE_0.4.0.md](docs/UPGRADE_0.4.0.md) 仅作为历史兼容记录，不再代表新写入格式。
+0.5.3 无API五阶段计时、思考模式A/B边界和零质量回退见 [docs/UPGRADE_0.5.3.md](docs/UPGRADE_0.5.3.md)。0.5.0 数据契约和旧项目迁移见 [docs/UPGRADE_0.5.0.md](docs/UPGRADE_0.5.0.md)；0.4.0说明仅作历史兼容记录。
 
 ## 云端 MCP
 
@@ -118,6 +119,7 @@ Railway 逐步执行单见 [docs/RAILWAY_DEPLOY.md](docs/RAILWAY_DEPLOY.md)；�
 - 相同 canonical、源文、边界、规则、验证器和审计类别时才允许复用同类审计；生产预检永远不能替代首次独立审计。
 - 长章节默认自动批量读取，单次总正文最多 16,000 字符；连续令牌必须无重叠、无缺口，条件读取命中时不重新解析正文。调用方可显式关闭自动批量以兼容旧流程。
 - 服务端 trace 明确标记 `measurement_scope=server_only`；无法观测的 ChatGPT 规划/生成时长标记为未测量，绝不把数秒工具耗时冒充聊天总耗时。
+- 显式诊断的五阶段记录标记 `measurement_scope=tool_bracketed_chat`，可定位最大观察区间，但不能在无API时精确拆分模型排队、隐藏思考、令牌速率、客户端传输或最终渲染。
 - 修改后必须全链路回归；残留问题或新增问题不为零时，不能输出 PASS。
 - 公共场景只写“人群/路人/环境声/街道嘈杂声”、匿名群演完整台词、时代错位声源，或正式母版未完整复现声画生态时，`commit_storyboard`会返回阻塞错误。
 - 人工签核只能由用户明确批准后调用，Agent 不能替用户签字。

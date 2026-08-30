@@ -43,7 +43,15 @@
 - Delta changes reduce authored/transferred content, not validators: the model authors each semantic fact once in the 27-field compact record; actions, expressions, dialogue, delivery, listener reaction and the required three Seedance 2.5 stages exist only in `画面内容`, while `音色` and the four lighting fields remain explicit. The server computes episode-local cumulative timing/batch statistics and projects the R10-SPC-1 formal cell plus GPT keyframe instruction only at export, runs all validators and G0–G13, and hands the compact artifact to all eight audit layers.
 - Production, audit, repair, cache warm-up, and background jobs must never pre-generate or persist Seedance text, `batches`, a Seedance column, or a generated-batch sheet. Legacy forms are read-only migration inputs; new versions never write retired fields back.
 - Automatic 16,000-character bulk reads reduce long-source tool-call count while preserving exact-order, no-gap reconstruction.
-- Tool traces cover MCP server time only. Report ChatGPT planning/generation as unmeasured unless a real end-to-end replay measured it; never infer total chat duration from a fast server trace.
+- Tool traces cover MCP server time only. Report ChatGPT planning/generation as unmeasured unless the user explicitly requested the 0.5.3 no-API diagnostic and a complete five-checkpoint `mark_performance_stage` run exists. That diagnostic reports `tool_bracketed_chat`, not exact end-to-end time; never infer total chat duration from a fast server trace.
+
+### Explicit no-API diagnostic exception
+
+- Load `no_api_performance_diagnostics.md` only for a user-requested native ChatGPT timing investigation. Ordinary production, audit and repair must not pay for five extra marker calls.
+- After the role-specific work order exists, record exactly `task_started → inputs_ready → plan_ready → canonical_ready → delivery_ready`. Use only server timestamps, IDs, enums and bounded counts; never submit source, prompts, dialogue, shot text, credentials, user identity or hidden reasoning.
+- Link the persisted production/audit/import telemetry IDs actually returned by this run. Their duration remains `server_only`; the gaps between diagnostic markers are `tool_bracketed_chat` and may contain model work, client transport and orchestration.
+- A single run locates the dominant observed interval but cannot prove a thinking-mode effect. Compare reasoning modes only with a user-authorized matched run that keeps source, scope, route, shot count, cache state, window type and R10-SPC-1 deliverables fixed.
+- Diagnostics do not authorize removal of per-shot `空间站位描述`, environment, sound, performance/dialogue, `生成限制`, or any of the four lighting fields; all validators, gates and independent audit layers remain active.
 
 ### Fast-safe call discipline
 
@@ -54,6 +62,7 @@
 - A clean independent audit normally needs `get_agent_status` → one read-only audit work order → one `audit_storyboard` call against the signed handoff. On a cache miss, the audit chat reviews the canonical and supplies the eight-layer semantic evidence in that call while the service independently recomputes machine validators; on an exact cache hit the prior signed evidence is reused. The chat must not regenerate shots, repeat production preflight, or expand the complete workbook into prose.
 - A failed audit may add the conditional repair chain only after authorization: one repair work order → one package-bound patch/full commit → one return audit in the original audit window. Do not keep an idle third window or pre-generate repair content.
 - Keep intermediate chat updates brief and return IDs/hashes instead of echoing complete canonical rows. If the safe route needs extra reads or retries, record the concrete cache miss, fingerprint change, missing input, validator failure, or transport error that caused them.
+- Do not call `mark_performance_stage` on this ordinary fast-safe route. It is an opt-in diagnostic wrapper, not a required production dependency.
 
 ## Cross-chat continuity
 
