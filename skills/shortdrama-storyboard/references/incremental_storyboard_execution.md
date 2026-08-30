@@ -1,4 +1,4 @@
-# Incremental storyboard execution protocol 0.5.0 compact master
+# Incremental storyboard execution protocol 0.5.4 compact master
 
 Use this reference for an existing storyboard version when the requested work can be limited to named episodes, scenes, shots, or audit-confirmed repair targets. It defines execution authority and incremental assembly; it does not weaken any R10 content rule.
 
@@ -9,6 +9,7 @@ All paths in this protocol preserve these invariants:
 - one final canonical object per artifact version;
 - the existing 49 content validators;
 - the ordered G0–G13 preventive gates;
+- the THG-01–THG-12 template hard gates and actual multiline XLSX round-trip;
 - the complete eight-layer independent audit;
 - 100% coverage for core events, causal links, character-state changes, protected dialogue, and source treatment when chapter intake applies;
 - zero blocking, residual, or introduced issues before a clean final verdict;
@@ -60,7 +61,7 @@ Use the smallest safe route, not the smallest payload at any cost.
 | Audit-confirmed boundary, cognition, source, shot identity/order/timing, scene-topology, or core-plan issue limited to an affected scene or episode | Repair full `commit_storyboard` for the complete affected scene/episode with the exact repair package |
 | Stale base, unresolved boundary, insufficient authorization, fingerprint mismatch, or protected-scope conflict | Block; do not fall back silently |
 
-An affected-scene or affected-episode repair rebuild may still be limited conceptually to that project scope, but the 0.5.0 repair authority submits it through the package-bound full commit route. “Full rebuild required” means rebuilding the complete affected semantic unit and its boundaries, not automatically regenerating unrelated episodes.
+An affected-scene or affected-episode repair rebuild may still be limited conceptually to that project scope, but the 0.5.4 repair authority submits it through the package-bound full commit route. “Full rebuild required” means rebuilding the complete affected semantic unit and its boundaries, not automatically regenerating unrelated episodes.
 
 Fall back to a full commit when the server cannot prove a closed impact boundary, preserve outside-scope semantics, or deterministically rebuild all affected consumers.
 
@@ -86,13 +87,13 @@ Reject a stale or mismatched base. Never rebase a model-authored delta silently 
 
 ### Delta scope contract
 
-A 0.5.0 delta manifest records affected base shot IDs/UIDs, replacement IDs/UIDs, untouched-shot count and semantic-hash verification, evidence rows refreshed, computed timing/statistics, export projection version, legacy migration count, payload sizes/reduction, and internal merge/export duration. It contains no batch IDs or batch metrics. The request and persisted artifact metadata separately bind the exact base artifact/canonical, scope hash, target and left/right guards; the final result carries the server trace and successor handoff.
+A 0.5.4 delta manifest records affected base shot IDs/UIDs, replacement IDs/UIDs, untouched-shot count and semantic-hash verification, evidence rows refreshed, computed timing/statistics, export projection version, legacy migration count, payload sizes/reduction, and internal merge/export duration. It contains no batch IDs or batch metrics. The request and persisted artifact metadata separately bind the exact base artifact/canonical, scope hash, target and left/right guards; the final result carries the server trace and successor handoff.
 
 Outside the authorized semantic scope, every atomic shot hash must remain identical. The delta route does not accept top-level source, cognition, coverage, chapter, scene-state, protected-dialogue, or other evidence replacement; if any such evidence must change, use the full route. Because exact dialogue is merged into `画面内容` while these upstream evidence sets cannot be replaced by delta, the service must conservatively reject every dialogue or speaker change, even when the caller claims that source mapping or cognition is unchanged. Boundary neighbors are read-only guards and cannot be changed by delta.
 
 For every delta replacement, exact dialogue text, punctuation, order/segmentation, and speaker identity must match the base. Any addition, deletion, rewrite, reorder, split/merge, or speaker reassignment requires the full route for the complete affected scene or episode so source mapping, cognition, protected dialogue, performance chains, and coverage can be rebuilt together. Within an unchanged shot identity and shot count, visual action, expression, camera/movement, listener reaction, delivery that does not change dialogue or cognition, and other non-cognitive execution facts may use delta only when the caller supplies fresh complete shot-bound evidence for every affected atom. `音色` remains independent. Psychological audio remains on the full route because the delta contract has no shot-keyed cognition proof.
 
-For an eligible same-identity replacement, the 0.5.0 service may deterministically change only episode-local cumulative duration, batch total duration, formula/statistics results, the exact R10-SPC-1 ten-column workbook projection, and directly redundant shot-plan bindings. The canonical stores neither `正式分镜母版` nor `GPT关键帧生成指令`; they are export-only projections. It also stores no `batches`, Seedance text, Seedance column, or generated-batch sheet. Dialogue/speaker changes and insert, delete, move, split, merge, or renumber operations use the full route. A computed change does not authorize unrelated story, dialogue, cognition, performance, camera, sound, lighting or source-mapping content.
+For an eligible same-identity replacement, the 0.5.4 service may deterministically change only episode-local cumulative duration, batch total duration, formula/statistics results, the exact R10-SPC-1 ten-column workbook projection, and directly redundant shot-plan bindings. The canonical stores neither `正式分镜母版` nor `GPT关键帧生成指令`; they are export-only projections. It also stores no `batches`, Seedance text, Seedance column, or generated-batch sheet. Dialogue/speaker changes and insert, delete, move, split, merge, or renumber operations use the full route. A computed change does not authorize unrelated story, dialogue, cognition, performance, camera, sound, lighting or source-mapping content.
 
 ## Store atoms once and project only at export
 
@@ -102,12 +103,12 @@ Each shot uses exactly 27 atoms in this order: `镜头编号｜时长｜累计�
 
 `画面内容` is the sole atom for visible action, performance, exact dialogue, six-dimensional delivery, punctuation effect, listener reaction, breath/end state and the three required R10-SPC-1 Seedance 2.5 single-shot timing stages. `空间站位描述`, `起始状态`, and `音色` remain separate. `光影`, `光源来源`, `光源方向`, and `色温倾向` are four mandatory independent atoms; color temperature is qualitative and contains no Kelvin/K value, while source and direction contain no alternative-choice wording. The retired standalone fields are forbidden on new writes.
 
-The 0.5.0 deterministic outputs are limited to cumulative time, total duration, formulas/statistics, and two export-only projections:
+The 0.5.4 deterministic outputs are limited to cumulative time, total duration, formulas/statistics, and two export-only projections:
 
-- `正式分镜母版`, the only blank-context executable single-shot master, beginning with the exact EP ID/duration/cumulative line and paragraph order defined by `strict_prompt_contract.md`;
-- `GPT关键帧生成指令`, a visual-only projection with timing, dialogue, lip-sync and audio instructions removed.
+- `正式分镜母版`, the only blank-context executable single-shot master, beginning with the exact EP ID/duration/cumulative line and paragraph order defined by `strict_prompt_contract.md`; every shot's `生成限制` explicitly contains `9:16竖屏` and uses `禁止额外配乐` rather than the literal `BGM`;
+- `GPT关键帧生成指令`, beginning with `画幅：9:16竖屏` and projected only from the static whitelist, with timing, motion, transition, dialogue, lip-sync and audio instructions removed.
 
-The workbook projection has exactly ten columns: `分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`. No third long-text projection exists. New display IDs use `EP##-###`; cumulative time resets at each episode boundary while batch total duration remains the sum of all shot durations.
+The workbook projection has exactly ten columns: `分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`. No third long-text projection exists. New display IDs use `EP##-###`; cumulative time resets at each episode boundary while batch total duration remains the sum of all shot durations. Export is blocked until THG-01–THG-12 and the actual multiline XLSX round-trip pass.
 
 The exporter must not invent or reinterpret plot, dialogue, character knowledge, motivation, action, camera intent, performance, sound source, lighting, or continuity. If a required creative fact is absent, export fails and returns the task to semantic generation. Production, audit, repair, cache warm-up and background workers must not pre-generate or persist Seedance prompts or batches.
 
@@ -148,7 +149,7 @@ Production preflight, semantic preflight, compact canonicalization/export succes
 
 Every formal production, delta, audit, and repair result must return a `trace_id` that resolves to an immutable persisted trace for the same project, work order, role binding, audit cycle, artifact, and fingerprints. A completed optimized workflow must expose `fast_path_evidence` that resolves both the production trace and the independent-audit trace against the same canonical and handoff/certificate chain. Missing either trace is `fast_path_incomplete`.
 
-Every plugin trace declares `measurement_scope=server_only`: it measures MCP/service execution but not the model's reading, reasoning, or generation time. When the user explicitly requests a native ChatGPT no-API timing investigation, plugin 0.5.3 may additionally record the five ordered `mark_performance_stage` checkpoints defined in `no_api_performance_diagnostics.md`. That separate signed record declares `measurement_scope=tool_bracketed_chat`; it brackets work between tool calls but is not exact user-click-to-render end-to-end telemetry and never changes a plugin stage trace.
+Every plugin trace declares `measurement_scope=server_only`: it measures MCP/service execution but not the model's reading, reasoning, or generation time. When the user explicitly requests a native ChatGPT no-API timing investigation, plugin 0.5.3 or newer may additionally record the five ordered `mark_performance_stage` checkpoints defined in `no_api_performance_diagnostics.md`. That separate signed record declares `measurement_scope=tool_bracketed_chat`; it brackets work between tool calls but is not exact user-click-to-render end-to-end telemetry and never changes a plugin stage trace.
 
 Record applicable stages separately:
 
@@ -171,9 +172,9 @@ Trace data must never contain source prose, dialogue, prompt bodies, private dow
 1. Production locks source, scope, base canonical, boundaries, protection, and runtime certificate.
 2. It selects full or delta routing and generates only the required semantic content.
 3. The service compare-and-sets the base, merges by stable UID, validates the compact canonical, deterministically projects the ten-column workbook, exports a new version without Seedance/batch artifacts, and records the trace.
-4. Production issues `production_preflight` plus `production_to_audit`; it reports `待独立审计`.
+4. Production issues `production_preflight` plus `production_to_audit`; its immutable workbook reports `PENDING_AUDIT` / `待独立审计` with null issue counts and trace.
 5. The resident audit window verifies every fingerprint and independently recomputes all eight layers.
-6. If clean, the auditor issues the final certificate and waits for human sign-off. Repair is never activated.
+6. If clean, the auditor creates a new immutable signed-audit-overlay artifact/successor workbook with the final certificate and waits for human sign-off; it never edits the production XLSX in place. Repair is never activated.
 
 For an unchanged-runtime ordinary task, keep execution on the fast-safe path: verify the runtime certificate once, reuse only fingerprint-matched objective records, transfer only the semantic delta, and make the server perform complete validation/export. Do not inspect runtime source or rerun system regression suites. In the audit window, call the signed-handoff audit once and report its compact result; do not regenerate the storyboard, Seedance text, export rows, or echo all rows into chat. Any extra reread, retry or rebuild must have a recorded cache miss, fingerprint mismatch, missing semantic input, validator failure or transport error.
 

@@ -13,7 +13,10 @@ from shortdrama_mcp.config import Settings
 
 from test_efficiency import valid_storyboard
 from test_v040_architecture import three_shot_storyboard
-from semantic_audit_helpers import inject_semantic_audit
+from semantic_audit_helpers import (
+    failing_semantic_audit_for_artifact,
+    inject_semantic_audit,
+)
 
 
 class CandidatePublicationFaultTests(unittest.IsolatedAsyncioTestCase):
@@ -292,7 +295,7 @@ class CandidatePublicationFaultTests(unittest.IsolatedAsyncioTestCase):
             window_key="patch-create",
         )
         broken = valid_storyboard()
-        broken["shots"][0]["光源来源"] = ""
+        broken["shots"][0]["光源来源"] = "右侧木格窗透入的日光"
         base = await self.call(
             "commit_storyboard",
             {
@@ -302,9 +305,26 @@ class CandidatePublicationFaultTests(unittest.IsolatedAsyncioTestCase):
                 "file_name": "patch待修基线.xlsx",
             },
         )
+        self.assertEqual(base["status"], "production_preflight_pass")
+        semantic_failure = failing_semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            project_id,
+            str(base["artifact_id"]),
+            shot_id="S001",
+            field="光源来源",
+            error_code="E-TEMPLATE-008",
+            issue_id="shots[1].light_source_semantic_mismatch",
+            evidence="独立审计确认场景锁要求左侧窗光，当前右侧来源与其不一致。",
+            repair_action="仅将光源来源修正为左侧木格窗透入的日光。",
+        )
         audited = await self.call(
             "audit_storyboard",
-            {"project_id": project_id, "artifact_id": base["artifact_id"]},
+            {
+                "project_id": project_id,
+                "artifact_id": base["artifact_id"],
+                "semantic_audit": semantic_failure,
+            },
         )
         repair_order = await self.begin(
             project_id,
@@ -325,9 +345,9 @@ class CandidatePublicationFaultTests(unittest.IsolatedAsyncioTestCase):
                     "op": "replace_field",
                     "shot_id": "EP01-001",
                     "field": "光源来源",
-                    "value": "窗纸透入的日光",
+                    "value": "左侧木格窗透入的日光",
                     "issue_ids": ["E-TEMPLATE-008"],
-                    "reason": "修复独立审计确认的缺失光源",
+                    "reason": "修复独立审计确认的光源语义错位",
                 }
             ],
             "impact_scope": ["EP01-001"],

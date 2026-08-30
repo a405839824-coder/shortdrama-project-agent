@@ -181,7 +181,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
                 "source_artifact_id": first["artifact_id"],
             },
         )
-        self.assertEqual(repaired["status"], "pass")
+        self.assertEqual(repaired["status"], "production_preflight_pass")
         self.assertEqual(repaired["data"]["report"]["issues"], [])
         with self.assertRaisesRegex(Exception, "semantic_audit_required"):
             await self.server.call_tool(
@@ -222,7 +222,9 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(repeated["data"]["cache_hit"])
         status = await self.call("get_agent_status", {"project_id": project_id})
         self.assertTrue(status["data"]["state_valid"])
-        self.assertEqual(status["data"]["issues"]["event_count"], 3)
+        # The rejected preflight creates no artifact or audit event; only the
+        # successful production preflight and independent audit are recorded.
+        self.assertEqual(status["data"]["issues"]["event_count"], 2)
         self.assertEqual(status["data"]["issues"]["open_issue_count"], 0)
 
     async def test_public_scene_people_audio_gate_and_repair(self) -> None:
@@ -261,7 +263,9 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["status"], "fail_current")
         codes = {item["error_code"] for item in first["data"]["report"]["issues"]}
         self.assertIn("E-PUBLIC-AUDIO-001", codes)
-        self.assertIn("prohibitions_audio", first["data"]["validation"]["failed_gates"])
+        self.assertNotIn("validation", first["data"])
+        self.assertFalse(first["data"]["artifact_created"])
+        self.assertFalse(first["data"]["handoff_created"])
 
         repaired = await self.call(
             "commit_storyboard",
@@ -273,7 +277,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
                 "source_artifact_id": first["artifact_id"],
             },
         )
-        self.assertEqual(repaired["status"], "pass")
+        self.assertEqual(repaired["status"], "production_preflight_pass")
         self.assertEqual(repaired["data"]["report"]["issues"], [])
 
     async def test_file_import_and_workbook_roundtrip(self) -> None:

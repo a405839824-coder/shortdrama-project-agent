@@ -166,6 +166,8 @@ class CompactMaterializerTests(unittest.TestCase):
                 "镜头类型：中近景｜可见主体：苏清柳；邹氏肩缘；荣婶儿"
             )
         )
+        self.assertNotIn("功能类型：", row[FORMAL_MERGED_FIELD])
+        self.assertNotIn("场景连续性ID：", row[FORMAL_MERGED_FIELD])
         self.assertIn("光源来源：", row[FORMAL_MERGED_FIELD])
         self.assertIn("光源方向：", row[FORMAL_MERGED_FIELD])
         self.assertIn("色温倾向：", row[FORMAL_MERGED_FIELD])
@@ -502,6 +504,7 @@ class CompactMaterializerTests(unittest.TestCase):
             "画内匾额“香雅院”清晰可见",
             "禁止字幕",
             "人物看镜头",
+            "保留木门与湿衣可见",
         ):
             self.assertIn(visible, gpt)
         for removed in (
@@ -518,13 +521,17 @@ class CompactMaterializerTests(unittest.TestCase):
             "问句前半平稳",
             "角色对白",
             "动作声",
-            "保留木门与湿衣可见",
             "苏清柳抬眼",
             "她手指收住",
             "肩背随呼吸收紧",
             "环境声",
             "脚步",
             "开口",
+            # R10.1 keyframes are static whitelist projections.  Full action
+            # process text stays exclusively in the formal master.
+            "苏清柳抬眼",
+            "她手指收住",
+            "肩背随呼吸收紧",
         ):
             self.assertNotIn(removed, gpt)
 

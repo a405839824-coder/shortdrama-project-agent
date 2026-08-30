@@ -122,7 +122,7 @@ def test_new_hub_and_registry() -> None:
     summary = agent.summarize(hub)
     assert_true(summary["capability_count"] >= 30, "full Agent must expose broad capability registry")
     assert_true(summary["capability_status_counts"]["supported"] >= 20, "supported capability count")
-    assert_true(hub["policy"]["compact_master_version"] == "0.5.0", "hub must pin compact master 0.5.0")
+    assert_true(hub["policy"]["compact_master_version"] == "0.5.4", "hub must pin compact master 0.5.4")
     assert_true(hub["policy"]["background_seedance_generation"] is False, "background Seedance must stay disabled")
 
 
@@ -238,9 +238,36 @@ def test_dirty_validation_cannot_pass() -> None:
         raise AssertionError("dirty validation must block pass")
 
 
-def test_clean_flow_requires_human_signoff() -> None:
+def test_bare_storyboard_pass_stays_pending_audit() -> None:
     hub = fresh()
     agent.create_work_order(hub, task())
+    agent.transition_work_order(hub, "WO-001", "executing")
+    agent.record_deliverable(hub, deliverable())
+    agent.transition_work_order(hub, "WO-001", "validating")
+    try:
+        agent.record_validation(hub, clean_validation(hub))
+    except ValueError as exc:
+        assert_true(
+            "independent_audit_required" in str(exc),
+            "bare storyboard PASS must name the independent-audit requirement",
+        )
+    else:
+        raise AssertionError("bare storyboard PASS must not validate production")
+    work_order = hub["work_orders"][0]
+    assert_true(work_order["status"] == "validating", "production stays validating")
+    assert_true(
+        work_order["validation"]["status"] == "pending",
+        "production validation stays pending",
+    )
+    assert_true(
+        work_order["awaiting_independent_audit"] is True,
+        "production explicitly awaits independent audit",
+    )
+
+
+def test_non_storyboard_clean_flow_requires_human_signoff() -> None:
+    hub = fresh()
+    agent.create_work_order(hub, task(operation="script_change"))
     agent.transition_work_order(hub, "WO-001", "executing")
     agent.record_deliverable(hub, deliverable())
     agent.transition_work_order(hub, "WO-001", "validating")
@@ -374,7 +401,8 @@ TESTS: list[tuple[str, Callable[[], None]]] = [
     ("max_three_internal_rounds", test_max_three_internal_rounds),
     ("validation_requires_deliverable", test_validation_requires_deliverable),
     ("dirty_validation_cannot_pass", test_dirty_validation_cannot_pass),
-    ("clean_flow_requires_human_signoff", test_clean_flow_requires_human_signoff),
+    ("bare_storyboard_pass_stays_pending_audit", test_bare_storyboard_pass_stays_pending_audit),
+    ("non_storyboard_clean_flow_requires_human_signoff", test_non_storyboard_clean_flow_requires_human_signoff),
     ("latest_artifact_pointer_updates", test_latest_artifact_pointer_updates),
     ("capability_gap_is_proposal_only", test_capability_gap_is_proposal_only),
     ("unknown_operation_rejected", test_unknown_operation_rejected),

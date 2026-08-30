@@ -98,6 +98,7 @@ def new_ledger(project_name: str, project_id: str | None = None, timestamp: str 
         "rule_candidates": [],
         "promotion_history": [],
         "human_signoffs": [],
+        "authority_reopens": [],
         "historical_patterns": [],
     }
 
@@ -644,6 +645,44 @@ def signoff_scope(ledger: dict[str, Any], scope_key: str, decision: str, timesta
     ledger["human_signoffs"].append(record)
     ledger["updated_at"] = now
     return {"scope_key": scope_key, "closure_state": scope["closure_state"], "can_advance": scope["can_advance"]}
+
+
+def reopen_scope_for_independent_reaudit(
+    ledger: dict[str, Any],
+    scope_key: str,
+    trigger_event_id: str,
+    timestamp: str | None = None,
+) -> dict[str, Any]:
+    """Reopen a clean audit scope without fabricating a human decision."""
+
+    scope = next(
+        (
+            item
+            for item in ledger.get("scope_states", [])
+            if item.get("scope_key") == scope_key
+        ),
+        None,
+    )
+    if scope is None:
+        raise ValueError(f"unknown scope_key: {scope_key}")
+    if scope.get("closure_state") != "awaiting_human_signoff":
+        raise ValueError(
+            "independent re-audit may reopen only a clean scope awaiting human sign-off"
+        )
+    now = _timestamp(timestamp)
+    record = {
+        "scope_key": scope_key,
+        "authority": "independent_audit",
+        "reason": "fingerprint-invalidating explicit re-audit",
+        "trigger_event_id": str(trigger_event_id),
+        "timestamp": now,
+    }
+    scope["closure_state"] = "reopened_by_independent_reaudit"
+    scope["can_advance"] = False
+    scope["authority_reopen"] = copy.deepcopy(record)
+    ledger.setdefault("authority_reopens", []).append(record)
+    ledger["updated_at"] = now
+    return copy.deepcopy(record)
 
 
 def _rate(numerator: int | float, denominator: int | float) -> float | None:

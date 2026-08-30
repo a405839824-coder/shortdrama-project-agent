@@ -166,9 +166,9 @@
         "功能类型": {"type": ["string", "number"]},
         "场景连续性ID": {"type": ["string", "number"]},
         "镜头类型": {"type": ["string", "number"]},
-        "可见主体": {"type": ["string", "number"]},
+        "可见主体": {"type": ["string", "number"], "description": "THG-06：具名/主要可见人物不超过3人；公共场景普通人物在背景生态层另行记录，不计入主要人物数且不得抢戏。"},
         "空间站位描述": {"type": "string", "minLength": 1, "description": "独立说明空间拓扑、人物相对位置、门窗、道具和画面层次。"},
-        "起始状态": {"type": "string", "minLength": 1, "description": "独立说明镜头开始瞬间的位置、朝向、姿态、视线、道具与表演状态。"},
+        "起始状态": {"type": "string", "minLength": 1, "description": "THG-08：只说明镜头开始瞬间的位置、朝向、静态姿态、视线、道具与表演状态；不得预写本镜核心动作或其完成结果。"},
         "机位": {"type": ["string", "number"]},
         "运镜方式": {"type": "string", "minLength": 1, "description": "移动镜头在同一字段写明速度、运镜主体和叙事功能。"},
         "画面内容": {"type": "string", "minLength": 1, "description": "按R10-SPC-1恰好写三个【0.0—x.x秒】阶段：刺激/起始反应、核心动作或角色说道：“精确对白”、镜尾反应/切点；发声六维、口型、视线、听者错峰反应与最终状态也写在此字段。"},
@@ -180,9 +180,9 @@
         "光源来源": {"type": "string", "minLength": 1, "description": "本镜实际采用的场内主光和弱补光来源，不写二选一候选。"},
         "光源方向": {"type": "string", "minLength": 1, "description": "画面方向、高度、斜落路径、暗侧补光与纵深衰减。"},
         "色温倾向": {"type": "string", "minLength": 1, "description": "定性暖冷空间关系、肤色与材质本色；禁止Kelvin/K数值和空泛单词。"},
-        "生成限制": {"type": ["string", "number"]},
+        "生成限制": {"type": "string", "minLength": 1, "pattern": "9:16竖屏", "description": "THG-01：逐镜明确写入干净的9:16竖屏；正式母版/GPT中BGM字面量零命中，负面音乐限制统一写禁止额外配乐。"},
         "转场类型": {"type": ["string", "number"]},
-        "切镜/转场提示词": {"type": ["string", "number"]},
+        "切镜/转场提示词": {"type": "string", "minLength": 1, "description": "THG-02：禁止；；、。。及标点归一化后的相邻重复句；结构化转场只渲染一次。"},
         "参考图锚定": {"type": ["string", "number"]},
         "覆盖原文": {"type": ["string", "number"]},
         "原文依据类型": {"type": ["string", "number"]},
@@ -238,5 +238,15 @@
   "x-version": "V16.3-148-R10-StableRuntime",
   "x-workflow-revision": "R10-PG1",
   "x-schema-profile": "compact_master_v1",
-  "x-output-contract": "R10-SPC-1"
+  "x-output-contract": "R10-SPC-1",
+  "x-export-audit-policy": {
+    "production_status": "PENDING_AUDIT",
+    "production_label": "未签发结论",
+    "production_issue_counts": null,
+    "production_audit_trace_id": null,
+    "signed_overlay_authority": "independent_audit",
+    "content_hash_excludes_audit_overlay": true,
+    "production_workbook_immutable": true,
+    "signed_overlay_creates_successor_artifact": true
+  }
 }

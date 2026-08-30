@@ -33,7 +33,14 @@ from .delta import (
     merge_storyboard_delta,
     storyboard_identity_manifest,
 )
-from .file_io import download_openai_file, extract_file, preview_extracted, storyboard_to_xlsx
+from .file_io import (
+    _VerifiedAuditOverlay,
+    _seal_service_verified_audit_overlay,
+    download_openai_file,
+    extract_file,
+    preview_extracted,
+    storyboard_to_xlsx,
+)
 from .models import (
     OpenAIFile,
     SEMANTIC_AUDIT_LAYER_NAMES,
@@ -125,6 +132,8 @@ WRITE_READY_WORK_ORDER_STATUSES = {"approved", "scope_locked", "executing", "fai
 
 AUDIT_CLASS_PRODUCTION_PREFLIGHT = "production_preflight"
 AUDIT_CLASS_INDEPENDENT = "independent_audit"
+PRODUCTION_PREFLIGHT_PASS = "production_preflight_pass"
+PRODUCTION_PREFLIGHT_FAIL = "production_preflight_fail"
 
 PERFORMANCE_DIAGNOSTIC_STAGES = (
     "task_started",
@@ -325,11 +334,19 @@ def _assert_r10_spc1_output_contract(storyboard: dict[str, Any]) -> None:
 
 
 def _export_compact_storyboard(
-    storyboard: dict[str, Any], report: dict[str, Any]
+    storyboard: dict[str, Any],
+    report: dict[str, Any],
+    *,
+    audit_overlay: _VerifiedAuditOverlay | None = None,
 ) -> bytes:
     """Project a prepared canonical without running semantic migration again."""
 
-    return storyboard_to_xlsx(storyboard, report, assume_compact=True)
+    return storyboard_to_xlsx(
+        storyboard,
+        report,
+        assume_compact=True,
+        audit_overlay=audit_overlay,
+    )
 
 
 def build_audit_cache_key(
@@ -1614,8 +1631,9 @@ class StoryboardService:
                         "canonical_sha256",
                         "stage_trace_id",
                         "certificate_id",
-                        "production_result",
-                        "issue_count",
+                        "production_preflight_status",
+                        "production_preflight_issue_count",
+                        "independent_audit_status",
                         "created_at",
                     )
                     if handoff.get(key) is not None
@@ -1673,6 +1691,21 @@ class StoryboardService:
                 "created_at": selected.get("created_at"),
                 "audit_status": metadata.get("audit_status"),
                 "issue_count": metadata.get("issue_count"),
+                "production_preflight_status": metadata.get(
+                    "production_preflight_status"
+                ),
+                "production_preflight_issue_count": metadata.get(
+                    "production_preflight_issue_count"
+                ),
+                "independent_audit_status": metadata.get(
+                    "independent_audit_status", "PENDING_AUDIT"
+                ),
+                "independent_audit_certificate_id": metadata.get(
+                    "independent_audit_certificate_id"
+                ),
+                "independent_audit_trace_id": metadata.get(
+                    "independent_audit_trace_id"
+                ),
                 "authoritative_latest": bool(
                     authoritative_storyboard_id
                     and selected.get("artifact_id") == authoritative_storyboard_id
@@ -2796,11 +2829,20 @@ class StoryboardService:
         artifact_id: str,
         *,
         persist_recovered_canonical: bool = True,
+        require_bound_projection: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         record, payload_path = self.store.get_artifact(namespace, project_id, artifact_id)
         metadata = record.get("metadata", {})
         canonical_id = metadata.get("canonical_json_artifact_id")
         if canonical_id:
+            if require_bound_projection and metadata.get(
+                "recovered_without_canonical_sidecar"
+            ):
+                raise ValueError(
+                    "canonical_projection_migration_required: a workbook without "
+                    "a bound sidecar must be migrated and committed as a new "
+                    "PENDING_AUDIT successor before independent audit"
+                )
             canonical_record, canonical_path = self.store.get_artifact(
                 namespace, project_id, str(canonical_id)
             )
@@ -2823,6 +2865,14 @@ class StoryboardService:
 
         extracted, record, _path = self._load_extracted_or_payload(namespace, project_id, artifact_id)
         if extracted.get("kind") == "workbook":
+            if require_bound_projection and not extracted.get(
+                "canonical_sidecar_present"
+            ):
+                raise ValueError(
+                    "canonical_projection_migration_required: a workbook without "
+                    "a bound sidecar must be migrated and committed as a new "
+                    "PENDING_AUDIT successor before independent audit"
+                )
             storyboard = extracted.get("canonical_storyboard")
         elif extracted.get("kind") == "json":
             storyboard = extracted.get("value")
@@ -2866,6 +2916,9 @@ class StoryboardService:
                     "canonical_json_fingerprint": recovered["fingerprint"],
                     "canonical_sha256": canonical_hash,
                     "canonical_recovered": True,
+                    "recovered_without_canonical_sidecar": not bool(
+                        extracted.get("canonical_sidecar_present")
+                    ),
                 },
             )
         return storyboard, record
@@ -2887,8 +2940,13 @@ class StoryboardService:
         source_record, _source_path = self.store.get_artifact(
             namespace, project_id, source_artifact_id
         )
+        # A successful independent audit makes its signed XLSX overlay the
+        # authoritative latest storyboard.  The overlay is still a projection
+        # of the same bound canonical storyboard, so it must receive exactly
+        # the same episode-scope comparison as the producer workbook/JSON.
         if source_record.get("artifact_type") not in {
             "storyboard",
+            "storyboard_audit_overlay",
             "storyboard_json",
             "storyboard_json_recovered",
         }:
@@ -3008,6 +3066,7 @@ class StoryboardService:
         runtime_test_certificate_id: str | None = None,
         work_order_id: str | None = None,
         validation_role: str | None = None,
+        allow_reopen: bool = False,
     ) -> dict[str, Any]:
         root_artifact = self._root_artifact_id(namespace, project_id, artifact_record["artifact_id"])
         cycle_id = audit_cycle_id or f"AUD-{audit_class}-{root_artifact}"
@@ -3084,6 +3143,30 @@ class StoryboardService:
                     "status": status,
                 }
             )
+        if audit_round == 1:
+            initial_issue_count = len(issues)
+        else:
+            first_event = prior_events[0] if prior_events else {}
+            first_summary = first_event.get("audit_summary", {})
+            initial_issue_count = int(
+                first_summary.get(
+                    "initial_issue_count", len(first_event.get("issues", []))
+                )
+            )
+        residual_issue_count = sum(
+            issue.get("status") == "residual" for issue in issues
+        )
+        introduced_issue_count = sum(
+            issue.get("status") == "introduced" for issue in issues
+        )
+        blocking_issue_count = sum(bool(issue.get("blocking")) for issue in issues)
+        audit_summary = {
+            "initial_issue_count": initial_issue_count,
+            "residual_issue_count": residual_issue_count,
+            "introduced_issue_count": introduced_issue_count,
+            "blocking_issue_count": blocking_issue_count,
+            "final_status": "pass" if not issues else "fail_current",
+        }
         source_lock = storyboard.get("source_lock") or {}
         episode_id = str(
             source_lock.get("episode_id")
@@ -3115,6 +3198,7 @@ class StoryboardService:
             "result": "pass" if not issues else "fail_current",
             "checked_shot_count": len(storyboard.get("shots", [])),
             "issues": issues,
+            "audit_summary": audit_summary,
         }
         if audit_class == AUDIT_CLASS_INDEPENDENT:
             if not handoff_id or not stage_trace_id or not fingerprints or not work_order_id:
@@ -3150,6 +3234,27 @@ class StoryboardService:
                 }
             )
             self._validate_schema_record(self._ledger_schema, "audit_event", event)
+        if allow_reopen and audit_class == AUDIT_CLASS_INDEPENDENT and prior_events:
+            prior_scope_key = str(prior_events[-1].get("scope_key") or "")
+            prior_scope = next(
+                (
+                    item
+                    for item in ledger.get("scope_states", [])
+                    if item.get("scope_key") == prior_scope_key
+                ),
+                None,
+            )
+            if (
+                prior_scope_key
+                and isinstance(prior_scope, dict)
+                and prior_scope.get("closure_state") == "awaiting_human_signoff"
+            ):
+                storyboard_agent.reopen_scope_for_independent_reaudit(
+                    ledger,
+                    prior_scope_key,
+                    str(event["event_id"]),
+                    event["timestamp"],
+                )
         ingest = storyboard_agent.ingest_event(ledger, event)
         return {"status": "recorded", "event": event, "ingest": ingest}
 
@@ -3171,10 +3276,24 @@ class StoryboardService:
         production_work_order_id: str | None = None,
         audit_actor_binding_id: str | None = None,
         audit_session_fingerprint: str | None = None,
+        result_override: str | None = None,
     ) -> dict[str, Any]:
         certificate_id = _new_id("CERT")
         cache_key = self._cache_key_from_components(cache_components)
         clean = not report.get("issues")
+        audit_class = cache_components["audit_class"]
+        if audit_class == AUDIT_CLASS_INDEPENDENT:
+            result = result_override or ("pass" if clean else "fail_current")
+            if result not in {"pass", "fail_current", "blocked"}:
+                raise ValueError("audit certificate result override is invalid")
+        elif audit_class == AUDIT_CLASS_PRODUCTION_PREFLIGHT:
+            if result_override is not None:
+                raise ValueError(
+                    "production_preflight_result_override_forbidden: production cannot issue an audit verdict"
+                )
+            result = None
+        else:
+            raise ValueError(f"unsupported audit certificate class: {audit_class}")
         certificate = {
             "certificate_id": certificate_id,
             "certificate_type": cache_components["audit_class"],
@@ -3187,16 +3306,35 @@ class StoryboardService:
             "boundary_hash": cache_components["boundary"],
             "ruleset_version": cache_components["ruleset"],
             "validator_version": cache_components["validator"],
-            "audit_class": cache_components["audit_class"],
+            "audit_class": audit_class,
             "cache_key": cache_key,
             "cache_components": cache_components,
-            "result": "pass" if clean else "fail_current",
-            "issue_count": len(report.get("issues", [])),
             "checked_shot_count": int(report.get("shot_count", 0)),
             "report_sha256": sha256_bytes(_stable_json_bytes(report)),
             "report": copy.deepcopy(report),
         }
-        if cache_components["audit_class"] == AUDIT_CLASS_INDEPENDENT:
+        if audit_class == AUDIT_CLASS_PRODUCTION_PREFLIGHT:
+            # A production certificate is routing/preflight evidence only.  It
+            # deliberately exposes neither the generic audit verdict key
+            # ``result`` nor the generic final count key ``issue_count``.
+            certificate.update(
+                {
+                    "preflight_status": (
+                        PRODUCTION_PREFLIGHT_PASS
+                        if clean
+                        else PRODUCTION_PREFLIGHT_FAIL
+                    ),
+                    "preflight_issue_count": len(report.get("issues", [])),
+                    "independent_audit_status": "PENDING_AUDIT",
+                }
+            )
+        if audit_class == AUDIT_CLASS_INDEPENDENT:
+            certificate.update(
+                {
+                    "result": result,
+                    "issue_count": len(report.get("issues", [])),
+                }
+            )
             if (
                 not event_id
                 or not handoff_id
@@ -3229,6 +3367,14 @@ class StoryboardService:
                     "independent_audit_evidence_missing: semantic review is absent or unbound"
                 )
             fp = fingerprints
+            audit_summary = copy.deepcopy(report.get("audit_summary") or {})
+            audit_summary.update(
+                {
+                    "audit_trace_id": stage_trace_id,
+                    "canonical_sha256": cache_components["canonical"],
+                    "artifact_raw_sha256": fp["artifact_raw"],
+                }
+            )
             certificate.update(
                 {
                     "event_id": event_id,
@@ -3271,6 +3417,7 @@ class StoryboardService:
                     "semantic_conclusion": copy.deepcopy(
                         semantic_submission.get("conclusion")
                     ),
+                    "audit_summary": audit_summary,
                 }
             )
             self._validate_schema_record(
@@ -3283,6 +3430,66 @@ class StoryboardService:
             record_id=certificate_id,
             value=certificate,
         )
+
+    def _load_verified_independent_audit_certificate(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        certificate_id: str,
+        artifact_id: str,
+        canonical_sha256: str,
+        source_artifact_raw_sha256: str,
+    ) -> dict[str, Any]:
+        """Reload and bind the only authority allowed to populate an audit page."""
+
+        try:
+            certificate = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="certificates",
+                record_id=certificate_id,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "independent_audit_overlay_certificate_unknown_or_tampered"
+            ) from exc
+        if not self.store.project_record_is_signed(certificate):
+            raise ValueError(
+                "independent_audit_overlay_certificate_unsigned_or_tampered"
+            )
+        if str(certificate.get("certificate_id") or "") != certificate_id:
+            raise ValueError("independent_audit_overlay_certificate_identity_mismatch")
+        if (
+            certificate.get("certificate_type") != AUDIT_CLASS_INDEPENDENT
+            or certificate.get("audit_class") != AUDIT_CLASS_INDEPENDENT
+            or not self._valid_cache_identity(
+                certificate, AUDIT_CLASS_INDEPENDENT
+            )
+        ):
+            raise ValueError("independent_audit_overlay_certificate_class_invalid")
+        self._validate_schema_record(
+            self._ledger_schema, "independent_audit_certificate", certificate
+        )
+        if str(certificate.get("artifact_id") or "") != artifact_id:
+            raise ValueError("independent_audit_overlay_artifact_mismatch")
+        if str(certificate.get("canonical_sha256") or "") != canonical_sha256:
+            raise ValueError("independent_audit_overlay_canonical_mismatch")
+        fingerprints = certificate.get("fingerprints")
+        if (
+            not isinstance(fingerprints, dict)
+            or str(fingerprints.get("artifact_raw") or "")
+            != source_artifact_raw_sha256
+        ):
+            raise ValueError("independent_audit_overlay_source_artifact_mismatch")
+        report = certificate.get("report")
+        if (
+            not isinstance(report, dict)
+            or certificate.get("report_sha256")
+            != sha256_bytes(_stable_json_bytes(report))
+        ):
+            raise ValueError("independent_audit_overlay_report_fingerprint_mismatch")
+        return certificate
 
     @staticmethod
     def _certificate_summary(certificate: dict[str, Any]) -> dict[str, Any]:
@@ -3441,8 +3648,11 @@ class StoryboardService:
             "certificate_id": certificate["certificate_id"],
             "cache_key": certificate["cache_key"],
             "cache_components": certificate["cache_components"],
-            "production_result": certificate["result"],
-            "issue_count": certificate["issue_count"],
+            "production_preflight_status": certificate["preflight_status"],
+            "production_preflight_issue_count": certificate[
+                "preflight_issue_count"
+            ],
+            "independent_audit_status": "PENDING_AUDIT",
             "checked_shot_count": certificate["checked_shot_count"],
             "facts_reusable": True,
             "conclusion_reusable_for_independent_audit": False,
@@ -3603,13 +3813,19 @@ class StoryboardService:
             if deliverable is not None:
                 deliverable["publication_state"] = state
                 if state == "committed":
-                    deliverable["status"] = "validated"
-                    hub["project_state"]["latest_artifacts"]["storyboard"] = {
-                        "deliverable_id": deliverable["deliverable_id"],
-                        "file_name": deliverable["file_name"],
-                        "version": deliverable["version"],
-                        "fingerprint": deliverable["fingerprint"],
-                    }
+                    # CAS publication only makes the successor visible to the
+                    # independent auditor.  It is not validation authority and
+                    # must not publish a latest/validated storyboard itself.
+                    deliverable["status"] = "draft"
+                    latest = hub["project_state"]["latest_artifacts"].get(
+                        "storyboard"
+                    )
+                    if isinstance(latest, dict) and str(
+                        latest.get("deliverable_id") or ""
+                    ) == artifact_id:
+                        hub["project_state"]["latest_artifacts"].pop(
+                            "storyboard", None
+                        )
                 else:
                     deliverable["status"] = "draft"
                     latest = hub["project_state"]["latest_artifacts"].get(
@@ -4706,7 +4922,7 @@ class StoryboardService:
 
         report = response.data.get("report")
         if (
-            response.status != "pass"
+            response.status != PRODUCTION_PREFLIGHT_PASS
             or not response.artifact_id
             or not isinstance(report, dict)
             or bool(report.get("issues"))
@@ -5017,6 +5233,52 @@ class StoryboardService:
             report = validate_storyboard.validate_project(storyboard, mode="repair")
         validated_ns = time.perf_counter_ns()
         zero_issue = not report.get("issues")
+        if not zero_issue:
+            with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
+                live_order = _find_work_order(hub, work_order_id)
+                self._start_execution(hub, live_order)
+                if live_order.get("status") == "executing":
+                    project_agent.transition_work_order(
+                        hub, work_order_id, "failed_current"
+                    )
+                hub["project_state"]["current_stage"] = "failed_current"
+            telemetry = self._save_telemetry(
+                namespace,
+                project_id,
+                operation=telemetry_operation,
+                started_ns=started_ns,
+                stages_ms={
+                    **dict(telemetry_prestages_ms or {}),
+                    "materialize": (materialized_ns - materialize_started_ns)
+                    / 1_000_000,
+                    "validate": (validated_ns - materialized_ns) / 1_000_000,
+                },
+                artifact_id=None,
+                window_role=expected_role,
+                task_type="production_preflight",
+                shot_count=len(storyboard.get("shots", [])),
+                batch_count=0,
+                input_payload_bytes=submitted_payload_bytes,
+                output_payload_bytes=0,
+                materialization_passes=1,
+                cache_reason="preflight issues blocked export and persistence",
+            )
+            return ToolResponse(
+                status="fail_current",
+                summary=(
+                    f"生产预检未通过｜问题{len(report.get('issues', []))}项"
+                    "｜未导出、未提交、未建立审计交接"
+                ),
+                project_id=project_id,
+                work_order_id=work_order_id,
+                trace_id=str(telemetry["telemetry_id"]),
+                data={
+                    "report": report,
+                    "artifact_created": False,
+                    "handoff_created": False,
+                    "telemetry": telemetry,
+                },
+            )
         canonical_hash = canonical_storyboard_sha256(storyboard)
         source_fingerprint = self._source_fingerprint(
             namespace,
@@ -5041,6 +5303,10 @@ class StoryboardService:
         artifacts = self.store.list_artifacts(namespace, project_id)
         version = _artifact_version(artifacts, "storyboard")
         base_name = Path(slug_filename(file_name or f"正式分镜_{version}.xlsx")).stem
+        # Finish the deterministic projection and its reopen/round-trip checks
+        # before persisting either half of the canonical/XLSX pair.  A failed
+        # projection must not leave an orphan JSON artifact behind.
+        workbook_bytes = _export_compact_storyboard(storyboard, report)
         json_record = self.store.save_artifact_json(
             namespace,
             project_id,
@@ -5053,8 +5319,11 @@ class StoryboardService:
             metadata={
                 **successor_metadata,
                 **compact_contract_evidence(),
-                "audit_status": report.get("status"),
-                "issue_count": len(report.get("issues", [])),
+                "production_preflight_status": PRODUCTION_PREFLIGHT_PASS,
+                "production_preflight_issue_count": len(report.get("issues", [])),
+                "independent_audit_status": "PENDING_AUDIT",
+                "audit_status": "PENDING_AUDIT",
+                "issue_count": None,
                 "canonical_sha256": canonical_hash,
                 "source_fingerprint": source_fingerprint,
                 "boundary_hash": boundary_hash,
@@ -5071,7 +5340,6 @@ class StoryboardService:
                 "stable_batch_uid_count": len(identity_manifest.get("batch_uids", [])),
             },
         )
-        workbook_bytes = _export_compact_storyboard(storyboard, report)
         xlsx_record = self.store.save_artifact_bytes(
             namespace,
             project_id,
@@ -5092,8 +5360,11 @@ class StoryboardService:
                 "ruleset_version": self._ruleset_version,
                 "validator_version": self._validator_version(),
                 "production_preflight_cache_key": audit_cache_key,
-                "audit_status": report.get("status"),
-                "issue_count": len(report.get("issues", [])),
+                "production_preflight_status": PRODUCTION_PREFLIGHT_PASS,
+                "production_preflight_issue_count": len(report.get("issues", [])),
+                "independent_audit_status": "PENDING_AUDIT",
+                "audit_status": "PENDING_AUDIT",
+                "issue_count": None,
                 "issue_signatures": [
                     [str(issue.get("error_code")), str(issue.get("location"))]
                     for issue in report.get("issues", [])
@@ -5198,9 +5469,10 @@ class StoryboardService:
                     "file_name": xlsx_record["file_name"],
                     "version": version,
                     "fingerprint": xlsx_record["fingerprint"],
-                    "status": (
-                        "validated" if zero_issue and not successor_pending else "draft"
-                    ),
+                    # Production preflight can never validate a storyboard.
+                    # Keep the producer deliverable in the existing schema's
+                    # draft state until an independent audit signs it.
+                    "status": "draft",
                     "publication_state": (
                         "pending" if successor_pending else "committed"
                     ),
@@ -5226,7 +5498,7 @@ class StoryboardService:
             # issue final validation or advance the storyboard work order to
             # passed.  Only the independent audit path below may do that.
             validation_result = {
-                "status": "production_preflight_pass" if zero_issue else "production_preflight_fail",
+                "status": PRODUCTION_PREFLIGHT_PASS if zero_issue else PRODUCTION_PREFLIGHT_FAIL,
                 "final_verdict": False,
                 "gate_results": _gate_results(
                     work_order["required_validation_gates"], report.get("issues", [])
@@ -5264,7 +5536,7 @@ class StoryboardService:
                 f"生成完成｜{report.get('shot_count', 0)}镜｜总时长{storyboard.get('total_duration', 0)}s"
                 "｜生产预检通过｜待独立审计"
             )
-            status = "pass"
+            status = PRODUCTION_PREFLIGHT_PASS
         else:
             summary = f"未通过｜问题{len(report.get('issues', []))}项｜第{internal_round}/3轮"
             if internal_round >= 3:
@@ -5645,7 +5917,7 @@ class StoryboardService:
                 _successor_scope_hash=scope_hash,
                 _prepared_identity_manifest=prepared_identity_manifest,
             )
-            if response.status != "pass" or not response.artifact_id:
+            if response.status != PRODUCTION_PREFLIGHT_PASS or not response.artifact_id:
                 raise RuntimeError("delta final commit did not pass")
             candidate_ids = (
                 str(response.artifact_id),
@@ -6248,7 +6520,7 @@ class StoryboardService:
             invalid_result = "patch final full-table validation report is missing"
         elif not new_canonical_hash:
             invalid_result = "patch persisted canonical hash is missing"
-        elif response.status == "pass" and not report.get("issues") and (
+        elif response.status == PRODUCTION_PREFLIGHT_PASS and not report.get("issues") and (
             not isinstance(repair_to_audit_handoff, dict)
             or repair_to_audit_handoff.get("handoff_type") != "repair_to_audit"
             or repair_to_audit_handoff.get("immutable_repair_package_id")
@@ -6265,7 +6537,7 @@ class StoryboardService:
                     error.add_note(f"patch rollback warning: {cleanup_error}")
             raise error
 
-        if response.status == "pass" and not report.get("issues"):
+        if response.status == PRODUCTION_PREFLIGHT_PASS and not report.get("issues"):
             try:
                 consumed_package = self.store.finish_repair_package(
                     namespace,
@@ -6369,7 +6641,7 @@ class StoryboardService:
         )
         response.summary = (
             "局部修复已完成｜全表生产预检通过｜待独立终审"
-            if response.status == "pass"
+            if response.status == PRODUCTION_PREFLIGHT_PASS
             else response.summary
         )
         return response
@@ -6406,6 +6678,7 @@ class StoryboardService:
             project_id,
             artifact_id,
             persist_recovered_canonical=False,
+            require_bound_projection=True,
         )
         loaded_ns = time.perf_counter_ns()
         canonical_hash = canonical_storyboard_sha256(storyboard)
@@ -6557,7 +6830,54 @@ class StoryboardService:
                 runtime_test_certificate_id=str(runtime_test_certificate["certificate_id"]),
                 work_order_id=str(audit_work_order["work_order_id"]),
                 validation_role="independent_audit",
+                allow_reopen=force_machine_recheck,
             )
+        audit_blocked = audit_result.get("status") == "blocked"
+        if audit_blocked:
+            report.setdefault("issues", []).append(
+                {
+                    "error_code": "E-SYSTEMIC-001",
+                    "severity": "fail",
+                    "blocking": True,
+                    "location": "independent_audit.audit_cycle",
+                    "evidence": str(audit_result.get("reason") or "审计轮次已达上限"),
+                    "repair_action": "回退并重建上游结构后建立新的审计周期。",
+                }
+            )
+            event_summary = {
+                "initial_issue_count": len(report.get("issues", [])),
+                "residual_issue_count": len(report.get("issues", [])),
+                "introduced_issue_count": 0,
+                "blocking_issue_count": len(report.get("issues", [])),
+                "final_status": "blocked",
+            }
+        else:
+            event_summary = copy.deepcopy(
+                audit_result.get("event", {}).get("audit_summary") or {}
+            )
+        if event_summary:
+            event_summary.update(
+                {
+                    "audit_trace_id": stage_trace_id,
+                    "canonical_sha256": canonical_hash,
+                    "artifact_raw_sha256": fingerprints["artifact_raw"],
+                }
+            )
+            report["audit_summary"] = event_summary
+            thresholds = (
+                report.get("independent_evidence_matrix", {})
+                .get("quality_thresholds")
+            )
+            if isinstance(thresholds, dict):
+                thresholds["blocking_error_count"] = int(
+                    event_summary.get("blocking_issue_count", 0)
+                )
+                thresholds["residual_issue_count"] = int(
+                    event_summary.get("residual_issue_count", 0)
+                )
+                thresholds["introduced_issue_count"] = int(
+                    event_summary.get("introduced_issue_count", 0)
+                )
         if cached_certificate is None:
             certificate = self._persist_audit_certificate(
                 namespace,
@@ -6575,7 +6895,16 @@ class StoryboardService:
                 production_work_order_id=str(handoff["work_order_id"]),
                 audit_actor_binding_id=str(audit_work_order.get("server_actor_binding_id") or ""),
                 audit_session_fingerprint=audit_work_order.get("transport_session_fingerprint"),
+                result_override="blocked" if audit_blocked else None,
             )
+        certificate = self._load_verified_independent_audit_certificate(
+            namespace,
+            project_id,
+            certificate_id=str(certificate["certificate_id"]),
+            artifact_id=artifact_id,
+            canonical_sha256=canonical_hash,
+            source_artifact_raw_sha256=fingerprints["artifact_raw"],
+        )
         repair_package = None
         audit_to_repair_handoff = None
         if certificate.get("issue_count", 0):
@@ -6614,7 +6943,119 @@ class StoryboardService:
         else:
             issue_count = len(report.get("issues", []))
             status = "pass" if issue_count == 0 else "fail_current"
-            summary = "审计通过｜0个问题" if issue_count == 0 else f"审计未通过｜{issue_count}个问题"
+            if issue_count == 0:
+                summary = "审计通过｜阻塞错误0｜原问题残留0｜修改新增问题0"
+            else:
+                audit_counts = report.get("audit_summary") or {}
+                summary = (
+                    f"审计未通过｜共{issue_count}项"
+                    f"｜阻塞{int(audit_counts.get('blocking_issue_count', issue_count))}"
+                    f"｜残留{int(audit_counts.get('residual_issue_count', 0))}"
+                    f"｜新增{int(audit_counts.get('introduced_issue_count', 0))}"
+                )
+
+        # The production workbook remains immutable and truthfully retains its
+        # PENDING_AUDIT page.  Independent audit produces a new certificate-
+        # bound workbook whose visible overlay carries the signed conclusion,
+        # counts, trace and source fingerprint without changing canonical
+        # storyboard semantics.
+        certificate_summary = copy.deepcopy(certificate.get("audit_summary") or {})
+        overlay_status = str(certificate.get("result") or "fail_current").upper()
+        semantic_conclusion = certificate.get("semantic_conclusion")
+        overlay_conclusion = (
+            str(semantic_conclusion.get("summary"))
+            if isinstance(semantic_conclusion, dict)
+            and semantic_conclusion.get("summary")
+            else summary
+        )
+        audit_overlay_payload = {
+            "status": overlay_status,
+            "conclusion": overlay_conclusion,
+            "initial_issue_count": int(
+                certificate_summary.get("initial_issue_count", certificate.get("issue_count", 0))
+            ),
+            "residual_issue_count": int(
+                certificate_summary.get("residual_issue_count", 0)
+            ),
+            "introduced_issue_count": int(
+                certificate_summary.get("introduced_issue_count", 0)
+            ),
+            "blocking_issue_count": int(
+                certificate_summary.get(
+                    "blocking_issue_count", certificate.get("issue_count", 0)
+                )
+            ),
+            "audit_trace_id": str(certificate.get("audit_trace_id") or stage_trace_id),
+            "certificate_id": str(certificate["certificate_id"]),
+            "certificate_integrity_hmac": str(
+                certificate.get("integrity_hmac") or ""
+            ),
+            "canonical_sha256": str(certificate.get("canonical_sha256") or canonical_hash),
+            "source_artifact_raw_sha256": str(
+                (certificate.get("fingerprints") or {}).get("artifact_raw")
+                or fingerprints["artifact_raw"]
+            ),
+        }
+        audit_overlay = _seal_service_verified_audit_overlay(
+            audit_overlay_payload
+        )
+        signed_report = copy.deepcopy(certificate.get("report") or report)
+        audited_record = next(
+            (
+                candidate
+                for candidate in self.store.list_artifacts(namespace, project_id)
+                if candidate.get("artifact_type") == "storyboard_audit_overlay"
+                and candidate.get("metadata", {}).get(
+                    "independent_audit_certificate_id"
+                )
+                == certificate["certificate_id"]
+            ),
+            None,
+        )
+        if audited_record is None:
+            audited_bytes = _export_compact_storyboard(
+                storyboard,
+                signed_report,
+                audit_overlay=audit_overlay,
+            )
+            audited_record = self.store.save_artifact_bytes(
+                namespace,
+                project_id,
+                audited_bytes,
+                file_name=(
+                    f"{Path(str(record.get('file_name') or 'storyboard')).stem}"
+                    f"_独立审计_{overlay_status}.xlsx"
+                ),
+                artifact_type="storyboard_audit_overlay",
+                version=str(record.get("version") or "current"),
+                work_order_id=str(audit_work_order["work_order_id"]),
+                source_artifact_id=artifact_id,
+                metadata={
+                    **compact_contract_evidence(),
+                    "canonical_json_artifact_id": record.get("metadata", {}).get(
+                        "canonical_json_artifact_id"
+                    ),
+                    "canonical_json_fingerprint": record.get("metadata", {}).get(
+                        "canonical_json_fingerprint"
+                    ),
+                    "canonical_sha256": audit_overlay_payload["canonical_sha256"],
+                    "source_storyboard_artifact_id": artifact_id,
+                    "source_storyboard_raw_sha256": audit_overlay_payload[
+                        "source_artifact_raw_sha256"
+                    ],
+                    "independent_audit_status": overlay_status,
+                    "audit_status": overlay_status,
+                    "issue_count": int(certificate.get("issue_count", 0)),
+                    "independent_audit_certificate_id": certificate[
+                        "certificate_id"
+                    ],
+                    "independent_audit_trace_id": audit_overlay_payload[
+                        "audit_trace_id"
+                    ],
+                    "independent_audit_summary": certificate_summary,
+                    "signed_audit_overlay": True,
+                },
+            )
         telemetry = self._save_telemetry(
             namespace,
             project_id,
@@ -6645,7 +7086,10 @@ class StoryboardService:
                 ledger["audit_certificates"].append(copy.deepcopy(certificate))
             audit_order = _find_work_order(hub, str(audit_work_order["work_order_id"]))
             if audit_order["status"] == "executing":
-                if not audit_order.get("deliverable_ids"):
+                if not any(
+                    row.get("deliverable_id") == certificate["certificate_id"]
+                    for row in hub.get("deliverables", [])
+                ):
                     project_agent.record_deliverable(
                         hub,
                         {
@@ -6660,20 +7104,64 @@ class StoryboardService:
                             "source_versions": [artifact_id],
                         },
                     )
+                if not any(
+                    row.get("deliverable_id") == audited_record["artifact_id"]
+                    for row in hub.get("deliverables", [])
+                ):
+                    project_agent.record_deliverable(
+                        hub,
+                        {
+                            "deliverable_id": audited_record["artifact_id"],
+                            "work_order_id": audit_order["work_order_id"],
+                            "timestamp": utc_stamp(),
+                            "artifact_type": "storyboard_audit_overlay",
+                            "file_name": audited_record["file_name"],
+                            "version": str(audited_record.get("version") or "current"),
+                            "fingerprint": audited_record["fingerprint"],
+                            "status": "validated" if status == "pass" else "draft",
+                            "source_versions": [artifact_id],
+                        },
+                    )
                 project_agent.transition_work_order(hub, audit_order["work_order_id"], "validating")
             clean = status == "pass"
             if audit_order["status"] == "validating":
                 audit_order["validation"] = {
-                    "status": "pass" if clean else "fail",
+                    "status": (
+                        "pass" if clean else "blocked" if status == "blocked" else "fail"
+                    ),
                     "records": [{"certificate_id": certificate["certificate_id"]}],
                 }
                 project_agent.transition_work_order(
                     hub,
                     audit_order["work_order_id"],
-                    "passed" if clean else "failed_current",
+                    (
+                        "passed"
+                        if clean
+                        else "blocked" if status == "blocked" else "failed_current"
+                    ),
                 )
+            elif not clean and audit_order.get("status") in {
+                "passed",
+                "awaiting_signoff",
+            }:
+                # A fingerprint-invalidating re-audit is new authority.  Its
+                # FAIL must revoke the audit work order's earlier PASS as well
+                # as the producer/latest artifact state below.
+                audit_order["status"] = "failed_current"
+                audit_order["reopened_by_independent_audit"] = certificate[
+                    "certificate_id"
+                ]
+                audit_order["validation"] = {
+                    "status": "blocked" if status == "blocked" else "fail",
+                    "records": [
+                        {"certificate_id": certificate["certificate_id"]}
+                    ],
+                }
             producer_order = _find_work_order(hub, str(handoff["work_order_id"]))
             if clean and producer_order["status"] == "validating":
+                producer_order["verified_independent_audit_certificate_id"] = (
+                    certificate["certificate_id"]
+                )
                 final_validation = project_agent.record_validation(
                     hub,
                     {
@@ -6692,6 +7180,67 @@ class StoryboardService:
                 producer_order["awaiting_independent_audit"] = False
                 producer_order["independent_audit_certificate_id"] = certificate["certificate_id"]
                 producer_order["independent_audit_validation"] = final_validation
+            if clean:
+                producer_deliverable = next(
+                    (
+                        row
+                        for row in hub.get("deliverables", [])
+                        if row.get("deliverable_id") == artifact_id
+                    ),
+                    None,
+                )
+                if producer_deliverable is not None:
+                    producer_deliverable["status"] = "validated"
+                hub["project_state"]["latest_artifacts"]["storyboard"] = {
+                    "deliverable_id": audited_record["artifact_id"],
+                    "file_name": audited_record["file_name"],
+                    "version": str(audited_record.get("version") or "current"),
+                    "fingerprint": audited_record["fingerprint"],
+                }
+            else:
+                # A newer independent FAIL revokes any earlier authority for
+                # this exact producer artifact.  Do not leave a stale PASS
+                # overlay as the project's latest storyboard.
+                invalidated_deliverable_ids = {artifact_id}
+                for deliverable in hub.get("deliverables", []):
+                    source_versions = {
+                        str(value) for value in deliverable.get("source_versions", [])
+                    }
+                    if (
+                        str(deliverable.get("deliverable_id") or "") == artifact_id
+                        or artifact_id in source_versions
+                    ):
+                        deliverable["status"] = "draft"
+                        invalidated_deliverable_ids.add(
+                            str(deliverable.get("deliverable_id") or "")
+                        )
+                latest = hub["project_state"]["latest_artifacts"].get(
+                    "storyboard"
+                )
+                if isinstance(latest, dict) and str(
+                    latest.get("deliverable_id") or ""
+                ) in invalidated_deliverable_ids:
+                    hub["project_state"]["latest_artifacts"].pop(
+                        "storyboard", None
+                    )
+                producer_order["awaiting_independent_audit"] = True
+                producer_order.pop("independent_audit_certificate_id", None)
+                producer_order.pop(
+                    "verified_independent_audit_certificate_id", None
+                )
+                producer_order.pop("independent_audit_validation", None)
+                if producer_order.get("status") == "validating":
+                    project_agent.transition_work_order(
+                        hub, producer_order["work_order_id"], "failed_current"
+                    )
+                elif producer_order.get("status") in {"passed", "awaiting_signoff"}:
+                    # The state machine has no ordinary PASS->FAIL edge because
+                    # this is authority revocation, not a production action.
+                    producer_order["status"] = "failed_current"
+                    producer_order["reopened_by_independent_audit"] = (
+                        certificate["certificate_id"]
+                    )
+                hub["project_state"]["current_stage"] = "failed_current"
             matching_handoff = next(
                 (
                     row
@@ -6702,16 +7251,76 @@ class StoryboardService:
             )
             if matching_handoff is not None:
                 matching_handoff["status"] = "consumed"
+                if force_machine_recheck:
+                    certificate_history = [
+                        str(value)
+                        for value in matching_handoff.get(
+                            "audit_certificate_ids", []
+                        )
+                        if str(value)
+                    ]
+                    previous_certificate_id = str(
+                        matching_handoff.get("audit_certificate_id") or ""
+                    )
+                    if previous_certificate_id:
+                        certificate_history.append(previous_certificate_id)
+                    certificate_history.append(str(certificate["certificate_id"]))
+                    matching_handoff["audit_certificate_ids"] = list(
+                        dict.fromkeys(certificate_history)
+                    )
+                    matching_handoff["reaudit_count"] = max(
+                        0,
+                        len(matching_handoff["audit_certificate_ids"]) - 1,
+                    )
                 matching_handoff["audit_certificate_id"] = certificate["certificate_id"]
+        certified_summary = copy.deepcopy(certificate.get("audit_summary") or {})
+        independent_status = str(certificate.get("result") or "fail_current").upper()
+        metadata_update = {
+            "independent_audit_status": independent_status,
+            "audit_status": independent_status,
+            "issue_count": int(certificate.get("issue_count", 0)),
+            "independent_audit_certificate_id": certificate["certificate_id"],
+            # A cache hit creates a new request trace but reuses the original
+            # signed audit trace.  Metadata must remain certificate-bound.
+            "independent_audit_trace_id": str(
+                certificate.get("audit_trace_id") or stage_trace_id
+            ),
+            "independent_audit_summary": certified_summary,
+            "independent_audit_overlay_artifact_id": audited_record["artifact_id"],
+            "independent_audit_overlay_fingerprint": audited_record["fingerprint"],
+        }
+        record = self.store.update_artifact_metadata(
+            namespace,
+            project_id,
+            artifact_id,
+            metadata_update,
+        )
+        canonical_artifact_id = record.get("metadata", {}).get(
+            "canonical_json_artifact_id"
+        )
+        if canonical_artifact_id:
+            self.store.update_artifact_metadata(
+                namespace,
+                project_id,
+                str(canonical_artifact_id),
+                metadata_update,
+            )
         handoff = self.store.finish_handoff(
             namespace,
             project_id,
             str(handoff["handoff_id"]),
             consumer_work_order_id=str(audit_work_order["work_order_id"]),
             audit_certificate_id=str(certificate["certificate_id"]),
+            allow_reaudit=force_machine_recheck,
         )
         production_trace_id = str(handoff.get("stage_trace_id") or "")
         audit_trace_id = str(telemetry["telemetry_id"])
+        audited_download_url = self.store.signed_download_url(
+            namespace,
+            project_id,
+            audited_record["artifact_id"],
+            audited_record["file_name"],
+        )
         fast_path_evidence = {
             "cache_hit": cache_hit,
             "cache_reason": (
@@ -6751,6 +7360,14 @@ class StoryboardService:
                 "certificate": self._certificate_summary(certificate),
                 "repair_package": repair_package,
                 "audit_to_repair_handoff": self._handoff_summary(audit_to_repair_handoff),
+                "audited_workbook": {
+                    "artifact_id": audited_record["artifact_id"],
+                    "file_name": audited_record["file_name"],
+                    "fingerprint": audited_record["fingerprint"],
+                    "status": overlay_status,
+                    "source_artifact_id": artifact_id,
+                },
+                "audited_workbook_download_url": audited_download_url,
                 "telemetry_id": telemetry["telemetry_id"],
                 "telemetry": telemetry,
             },

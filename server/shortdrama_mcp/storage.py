@@ -657,6 +657,7 @@ class ProjectStore:
         *,
         consumer_work_order_id: str,
         audit_certificate_id: str,
+        allow_reaudit: bool = False,
     ) -> dict[str, Any]:
         clean_id = safe_id(handoff_id, "handoff_id")
         path = self.project_dir(namespace, project_id) / "handoffs" / f"{clean_id}.json"
@@ -670,6 +671,35 @@ class ProjectStore:
                     record.get("consumed_by_work_order_id") == consumer_work_order_id
                     and record.get("audit_certificate_id") == audit_certificate_id
                 ):
+                    return record
+                if (
+                    allow_reaudit
+                    and record.get("consumed_by_work_order_id")
+                    == consumer_work_order_id
+                ):
+                    certificate_history = [
+                        str(value)
+                        for value in record.get("audit_certificate_ids", [])
+                        if str(value)
+                    ]
+                    previous_certificate_id = str(
+                        record.get("audit_certificate_id") or ""
+                    )
+                    if previous_certificate_id:
+                        certificate_history.append(previous_certificate_id)
+                    certificate_history.append(audit_certificate_id)
+                    record["audit_certificate_ids"] = list(
+                        dict.fromkeys(certificate_history)
+                    )
+                    record["audit_certificate_id"] = audit_certificate_id
+                    record["reaudit_count"] = max(
+                        0, len(record["audit_certificate_ids"]) - 1
+                    )
+                    record["reaudited_at"] = utc_stamp()
+                    record["integrity_hmac"] = self._record_integrity_hmac(
+                        record
+                    )
+                    self.atomic_write_json(path, record)
                     return record
                 raise ValueError("handoff_state_conflict: handoff finalization differs")
             if (

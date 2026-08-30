@@ -12,7 +12,10 @@ from shortdrama_mcp.auth import request_namespace
 from shortdrama_mcp.config import Settings
 
 from test_efficiency import valid_storyboard
-from semantic_audit_helpers import semantic_audit_for_artifact
+from semantic_audit_helpers import (
+    failing_semantic_audit_for_artifact,
+    semantic_audit_for_artifact,
+)
 
 
 class V040ConditionalRepairSecurityTests(unittest.TestCase):
@@ -141,6 +144,7 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
         handoff_id: str,
         session_id: str | None,
         audit_cycle_id: str | None = None,
+        semantic_audit: dict[str, Any] | None = None,
     ) -> Any:
         return self.service.audit_storyboard(
             self.namespace,
@@ -149,7 +153,8 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
             audit_cycle_id=audit_cycle_id,
             work_order_id=audit_work_order_id,
             handoff_artifact_id=handoff_id,
-            semantic_audit=semantic_audit_for_artifact(
+            semantic_audit=semantic_audit
+            or semantic_audit_for_artifact(
                 self.service, self.settings, self.project_id, artifact_id
             ),
             request_session_id=session_id,
@@ -162,19 +167,32 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
             production_session, f"{label}-production"
         )
         broken = self._fixture(f"{label}-broken")
-        broken["shots"][0]["光源来源"] = ""
+        broken["shots"][0]["光源来源"] = "右侧木格窗透入的日光"
         committed = self._commit(
             production_work_order, broken, production_session, f"{label}-broken"
         )
-        self.assertEqual(committed.status, "fail_current")
+        self.assertEqual(committed.status, "production_preflight_pass")
         audit_work_order = self._begin_audit(
             str(committed.artifact_id), audit_session, f"{label}-audit"
+        )
+        semantic_failure = failing_semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            self.project_id,
+            str(committed.artifact_id),
+            shot_id="S001",
+            field="光源来源",
+            error_code="E-TEMPLATE-008",
+            issue_id="shots[1].light_source_semantic_mismatch",
+            evidence="独立审计确认场景锁要求左侧窗光，当前右侧来源与其冲突。",
+            repair_action="仅修正光源来源字段后执行完整回归。",
         )
         audited = self._audit(
             artifact_id=str(committed.artifact_id),
             audit_work_order_id=audit_work_order,
             handoff_id=str(committed.data["handoff"]["handoff_id"]),
             session_id=audit_session,
+            semantic_audit=semantic_failure,
         )
         self.assertEqual(audited.status, "fail_current")
         self.assertIsNotNone(audited.data.get("repair_package"))
@@ -187,9 +205,9 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
                 "op": "replace_field",
                 "shot_id": "EP01-001",
                 "field": "光源来源",
-                "value": "窗纸透入的日光",
+                "value": "左侧木格窗透入的日光",
                 "issue_ids": ["E-TEMPLATE-008"],
-                "reason": "只修复独立审计确认的缺失光源，不改变剧情或结构",
+                "reason": "只修复独立审计确认的光源语义错位，不改变剧情或结构",
             }
         ]
 

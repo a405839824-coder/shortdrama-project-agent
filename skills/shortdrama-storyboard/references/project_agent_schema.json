@@ -59,7 +59,7 @@
         "impact_regression_required": {"const": true},
         "human_signoff_required_for_archive": {"const": true},
         "formal_rule_auto_mutation": {"const": false},
-        "compact_master_version": {"const": "0.5.0"},
+        "compact_master_version": {"const": "0.5.4"},
         "background_seedance_generation": {"const": false}
       }
     },
@@ -215,6 +215,13 @@
           }
         },
         "audit_certificate_id": {"type": "string"},
+        "audit_certificate_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "reaudit_count": {"type": "integer", "minimum": 0},
+        "reaudited_at": {"type": "string", "minLength": 1},
         "immutable_repair_package_id": {"type": "string"},
         "return_to_audit_work_order_id": {"type": "string", "minLength": 1},
         "return_to_audit_window_binding_id": {"type": "string", "minLength": 1},

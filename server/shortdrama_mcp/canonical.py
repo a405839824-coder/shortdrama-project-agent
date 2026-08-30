@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, time
@@ -246,7 +247,10 @@ def _assert_top_level_persistence_contract(
 
 
 def _normalize_string(value: str) -> str:
-    return unicodedata.normalize("NFC", value)
+    return unicodedata.normalize(
+        "NFC",
+        value.replace("\r\n", "\n").replace("\r", "\n"),
+    )
 
 
 def normalize_json(value: Any) -> Any:
@@ -397,7 +401,7 @@ def compact_storyboard_canonical(
     compact_shots = result.get("shots")
     if not isinstance(compact_shots, list):
         raise ValueError("compact storyboard requires a shots array")
-    cumulative_by_episode: dict[str, float] = {}
+    episode_running: dict[str, float] = {}
     total_duration = 0.0
     for index, compact in enumerate(compact_shots):
         if not isinstance(compact, dict):
@@ -412,16 +416,36 @@ def compact_storyboard_canonical(
             raise ValueError(
                 f"compact storyboard shot[{index}].时长 must be finite and non-negative"
             )
+        if abs(duration * 10 - round(duration * 10)) > 1e-8:
+            raise ValueError(
+                f"compact storyboard shot[{index}].时长 must use 0.1-second precision"
+            )
         shot_id = str(compact.get("镜头编号") or "").strip()
-        episode_key = str(compact.get("episode_id") or "").strip()
-        if not episode_key and shot_id.startswith("EP") and "-" in shot_id:
-            episode_key = shot_id.split("-", 1)[0]
-        if not episode_key:
-            episode_key = "__legacy_single_episode__"
-        cumulative = round(cumulative_by_episode.get(episode_key, 0.0) + duration, 3)
-        cumulative_by_episode[episode_key] = cumulative
-        total_duration = round(total_duration + duration, 3)
-        compact["累计时长"] = int(cumulative) if cumulative.is_integer() else cumulative
+        display_match = re.match(r"^EP(?P<episode>\d{2})-\d{3}$", shot_id)
+        scene_match = re.match(
+            r"^(EP\d{2})(?:-|$)",
+            str(compact.get("场景连续性ID") or "").strip(),
+        )
+        episode_key = str(
+            (f"EP{display_match.group('episode')}" if display_match else "")
+            or (scene_match.group(1) if scene_match else "")
+            or compact.get("episode_id")
+            or result.get("episode_id")
+            or result.get("episode")
+            or result.get("分集")
+            or "__single_episode__"
+        )
+        episode_cumulative = round(
+            episode_running.get(episode_key, 0.0) + duration,
+            1,
+        )
+        episode_running[episode_key] = episode_cumulative
+        compact["累计时长"] = (
+            int(episode_cumulative)
+            if episode_cumulative.is_integer()
+            else episode_cumulative
+        )
+        total_duration = round(total_duration + duration, 1)
 
     result["schema_version"] = COMPACT_SCHEMA_VERSION
     result["schema_profile"] = COMPACT_SCHEMA_PROFILE

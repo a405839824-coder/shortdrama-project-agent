@@ -16,6 +16,7 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+import unicodedata
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -32,10 +33,10 @@ from .materializer import (
     COMPACT_SHOT_FIELDS,
     FORMAL_MERGED_FIELD,
     GPT_KEYFRAME_FIELD,
-    LEGACY_FORMAL_MERGED_FIELD,
     LEGACY_STANDALONE_FIELDS,
     MOTHER_TEMPLATE_COLUMNS,
     formal_mother_template_rows,
+    legacy_v050_mother_template_rows,
     migrate_legacy_shot,
     migrate_storyboard_to_compact,
 )
@@ -73,7 +74,65 @@ CANONICAL_SIDECAR_HEADERS = [
     "chunk_index",
     "chunk_count",
     "payload",
+    "projection_contract",
+    "projection_sha256",
+    "audit_page_sha256",
 ]
+LEGACY_CANONICAL_SIDECAR_HEADERS = CANONICAL_SIDECAR_HEADERS[:-3]
+CURRENT_PROJECTION_CONTRACT = "shortdrama-projector/0.5.4"
+LEGACY_PROJECTION_CONTRACT = "shortdrama-projector/0.5.0"
+
+
+_VERIFIED_AUDIT_OVERLAY_SEAL = object()
+
+
+class _VerifiedAuditOverlay:
+    """Opaque capability for a service-verified independent-audit overlay.
+
+    Workbook projection is also used by local library callers, so accepting a
+    plain mapping here would let arbitrary code turn a forged HMAC-looking
+    value into a visible PASS page.  Only the service path that has reloaded
+    and verified a persisted certificate may mint this internal capability.
+    """
+
+    __slots__ = ("_payload",)
+
+    def __init__(self, payload: dict[str, Any], *, seal: object) -> None:
+        if seal is not _VERIFIED_AUDIT_OVERLAY_SEAL:
+            raise TypeError(
+                "independent_audit_overlay_unverified: "
+                "a service-verified overlay capability is required"
+            )
+        self._payload = dict(payload)
+
+    def _as_dict(self) -> dict[str, Any]:
+        return dict(self._payload)
+
+
+def _seal_service_verified_audit_overlay(
+    payload: dict[str, Any],
+) -> _VerifiedAuditOverlay:
+    """Mint an internal overlay capability after service certificate checks."""
+
+    if not isinstance(payload, dict):
+        raise TypeError(
+            "independent_audit_overlay_unverified: payload must be a mapping"
+        )
+    return _VerifiedAuditOverlay(payload, seal=_VERIFIED_AUDIT_OVERLAY_SEAL)
+
+
+# The v0.5.1 workbook contract renames the merged formal-master column to the
+# shorter ``正式分镜母版`` label.  Keep the previously shipped label readable so
+# an intact v0.5.0 workbook does not become an unparseable legacy artifact.
+FORMAL_MASTER_FIELD_ALIASES = tuple(
+    dict.fromkeys(
+        (
+            FORMAL_MERGED_FIELD,
+            "正式分镜母版",
+            "正式分镜母版·字段合并",
+        )
+    )
+)
 
 
 def json_safe(value: Any) -> Any:
@@ -201,6 +260,35 @@ def _rows_from_sheet(sheet: Any) -> tuple[list[str], list[dict[str, Any]]]:
     return unique_headers, rows
 
 
+def _sheet_value_matrix(sheet: Any) -> list[list[Any]]:
+    """Return the complete used value range, including non-table columns."""
+
+    raw_rows = [list(row) for row in sheet.iter_rows(values_only=True)]
+    last_row = max(
+        (
+            index
+            for index, row in enumerate(raw_rows)
+            if any(value not in (None, "") for value in row)
+        ),
+        default=-1,
+    )
+    if last_row < 0:
+        return []
+    last_column = max(
+        (
+            index
+            for row in raw_rows[: last_row + 1]
+            for index, value in enumerate(row)
+            if value not in (None, "")
+        ),
+        default=-1,
+    )
+    return [
+        [json_safe(value) for value in row[: last_column + 1]]
+        for row in raw_rows[: last_row + 1]
+    ]
+
+
 def _json_cell(value: Any, fallback: Any) -> Any:
     if value in (None, ""):
         return fallback
@@ -232,7 +320,9 @@ def _canonical_positive_int(value: Any, field: str) -> int:
     return parsed
 
 
-def _canonical_storyboard_from_sidecar(sheets: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _canonical_storyboard_from_sidecar(
+    sheets: list[dict[str, Any]],
+) -> tuple[dict[str, Any], str, str | None, str | None] | None:
     sidecars = [sheet for sheet in sheets if sheet.get("name") == CANONICAL_SIDECAR_SHEET]
     if not sidecars:
         return None
@@ -240,7 +330,11 @@ def _canonical_storyboard_from_sidecar(sheets: list[dict[str, Any]]) -> dict[str
         raise _canonical_sidecar_error("duplicate reserved sidecar sheets")
 
     sidecar = sidecars[0]
-    if sidecar.get("headers") != CANONICAL_SIDECAR_HEADERS:
+    sidecar_headers = sidecar.get("headers")
+    if sidecar_headers not in (
+        CANONICAL_SIDECAR_HEADERS,
+        LEGACY_CANONICAL_SIDECAR_HEADERS,
+    ):
         raise _canonical_sidecar_error("sidecar header or marker is missing")
     rows = sidecar.get("rows")
     if not isinstance(rows, list):
@@ -254,6 +348,24 @@ def _canonical_storyboard_from_sidecar(sheets: list[dict[str, Any]]) -> dict[str
         raise _canonical_sidecar_error("unknown sidecar record type")
 
     manifest = manifests[0]
+    if sidecar_headers == CANONICAL_SIDECAR_HEADERS:
+        projection_contract = manifest.get("projection_contract")
+        if projection_contract != CURRENT_PROJECTION_CONTRACT:
+            raise _canonical_sidecar_error("projection contract marker mismatch")
+        projection_sha256 = manifest.get("projection_sha256")
+        if not isinstance(projection_sha256, str) or re.fullmatch(
+            r"[0-9a-f]{64}", projection_sha256
+        ) is None:
+            raise _canonical_sidecar_error("projection SHA-256 is malformed")
+        audit_page_sha256 = manifest.get("audit_page_sha256")
+        if not isinstance(audit_page_sha256, str) or re.fullmatch(
+            r"[0-9a-f]{64}", audit_page_sha256
+        ) is None:
+            raise _canonical_sidecar_error("audit page SHA-256 is malformed")
+    else:
+        projection_contract = LEGACY_PROJECTION_CONTRACT
+        projection_sha256 = None
+        audit_page_sha256 = None
     if manifest.get("marker") != CANONICAL_SIDECAR_MARKER:
         raise _canonical_sidecar_error("manifest marker mismatch")
     if manifest.get("format") != CANONICAL_SIDECAR_FORMAT:
@@ -269,6 +381,17 @@ def _canonical_storyboard_from_sidecar(sheets: list[dict[str, Any]]) -> dict[str
 
     payload_by_index: dict[int, str] = {}
     for chunk in chunks:
+        if (
+            sidecar_headers == CANONICAL_SIDECAR_HEADERS
+            and (
+                chunk.get("projection_contract") != projection_contract
+                or chunk.get("projection_sha256") != projection_sha256
+                or chunk.get("audit_page_sha256") != audit_page_sha256
+            )
+        ):
+            raise _canonical_sidecar_error(
+                "chunk projection contract manifest mismatch"
+            )
         if chunk.get("marker") != CANONICAL_SIDECAR_MARKER:
             raise _canonical_sidecar_error("chunk marker mismatch")
         if chunk.get("format") != CANONICAL_SIDECAR_FORMAT:
@@ -309,7 +432,12 @@ def _canonical_storyboard_from_sidecar(sheets: list[dict[str, Any]]) -> dict[str
         raise _canonical_sidecar_error("canonical payload is not valid UTF-8 JSON") from exc
     if not isinstance(canonical, dict):
         raise _canonical_sidecar_error("canonical storyboard root must be an object")
-    return canonical
+    return (
+        canonical,
+        str(projection_contract),
+        projection_sha256,
+        audit_page_sha256,
+    )
 
 
 def _metadata_from_sheets(sheets: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -366,13 +494,19 @@ def _parse_labeled_cell(value: Any) -> dict[str, str]:
             continue
         candidate = ""
         text = ""
-        if "：" in line:
-            candidate, text = line.split("：", 1)
-            candidate = candidate.strip()
+        labeled = re.match(r"^([^:：]+)\s*[:：]\s*(.*)$", line)
+        if labeled:
+            candidate = labeled.group(1).strip()
+            text = labeled.group(2)
         if candidate in accepted:
             current_label = candidate
             if text.strip():
-                parsed[current_label] = text.strip()
+                # A legacy formal cell may repeat a structural label for every
+                # dialogue or voice line.  Assignment here used to overwrite
+                # all earlier lines, which made XLSX -> canonical recovery
+                # silently lose dialogue. Preserve repeated atoms in order.
+                prior = parsed.get(current_label, "")
+                parsed[current_label] = f"{prior}\n{text.strip()}".strip()
             else:
                 parsed.setdefault(current_label, "")
             continue
@@ -408,13 +542,162 @@ def _parse_function_scene_cell(value: Any) -> tuple[str, str]:
     return function, scene
 
 
+def _normalized_mother_headers(headers: Any) -> list[str]:
+    normalized: list[str] = []
+    for value in list(headers or []):
+        header = str(value or "").strip()
+        normalized.append(
+            FORMAL_MERGED_FIELD
+            if header in FORMAL_MASTER_FIELD_ALIASES
+            else header
+        )
+    return normalized
+
+
+def _mother_sheet_candidates(sheets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    expected = _normalized_mother_headers(MOTHER_TEMPLATE_COLUMNS)
+    return [
+        sheet
+        for sheet in sheets
+        if _normalized_mother_headers(sheet.get("headers", [])) == expected
+    ]
+
+
+def _formal_master_cell(source: dict[str, Any]) -> Any:
+    for header in FORMAL_MASTER_FIELD_ALIASES:
+        if header in source:
+            return source.get(header)
+    return None
+
+
+def _projection_cell_identity(value: Any) -> str:
+    """Return the workbook-visible identity of one deterministic cell."""
+
+    visible = _cell_value(value)
+    if isinstance(visible, str):
+        visible = unicodedata.normalize(
+            "NFC",
+            visible.replace("\r\n", "\n").replace("\r", "\n"),
+        )
+    if visible in (None, ""):
+        visible = None
+    elif isinstance(visible, float) and visible.is_integer():
+        # Excel may return ``3`` for an authored ``3.0``.  The displayed and
+        # mathematical cell are identical, while strings and booleans remain
+        # type-distinct through JSON serialization.
+        visible = int(visible)
+    return json.dumps(
+        json_safe(visible),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def projection_rows_sha256(rows: list[dict[str, Any]]) -> str:
+    """Hash the exact ten-column projection under UTF-8 NFC + LF identity."""
+
+    identities = [
+        [_projection_cell_identity(row.get(header)) for header in MOTHER_TEMPLATE_COLUMNS]
+        for row in rows
+    ]
+    payload = json.dumps(
+        identities,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _visible_sheet_sha256(name: str, matrix: list[list[Any]]) -> str:
+    identities = {
+        "name": name,
+        "matrix": [
+            [_projection_cell_identity(value) for value in row]
+            for row in matrix
+        ],
+    }
+    payload = json.dumps(
+        identities,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _assert_visible_projection_matches(
+    sheets: list[dict[str, Any]],
+    canonical: dict[str, Any],
+) -> None:
+    """Verify the visible ten-column master against its canonical sidecar.
+
+    The hidden canonical is an integrity source, not permission to ignore the
+    user-facing workbook.  A stale or incorrectly generated visible projection
+    must therefore block import/audit even when the sidecar itself is intact.
+    """
+
+    expected_rows = formal_mother_template_rows(canonical, assume_compact=True)
+    _assert_visible_projection_rows_match(sheets, expected_rows)
+
+
+def _visible_projection_contract(sheets: list[dict[str, Any]]) -> str:
+    """Return ``current`` or ``legacy`` for the one compact mother sheet."""
+
+    candidates = _mother_sheet_candidates(sheets)
+    if len(candidates) != 1:
+        raise _canonical_sidecar_error(
+            "visible formal-master projection must contain exactly one ten-column sheet"
+        )
+    headers = [str(value or "").strip() for value in candidates[0].get("headers", [])]
+    return "current" if FORMAL_MERGED_FIELD in headers else "legacy"
+
+
+def _assert_visible_projection_rows_match(
+    sheets: list[dict[str, Any]],
+    expected_rows: list[dict[str, Any]],
+) -> None:
+    """Compare already-projected rows without compiling them a second time."""
+
+    candidates = _mother_sheet_candidates(sheets)
+    if len(candidates) != 1:
+        raise _canonical_sidecar_error(
+            "visible formal-master projection must contain exactly one ten-column sheet"
+        )
+    sheet = candidates[0]
+    actual_headers = list(sheet.get("headers", []))
+    expected_headers = list(MOTHER_TEMPLATE_COLUMNS)
+    actual_rows = list(sheet.get("rows", []))
+    if len(actual_rows) != len(expected_rows):
+        raise _canonical_sidecar_error(
+            "visible formal-master projection row count mismatch"
+        )
+
+    for row_index, (actual, expected) in enumerate(
+        zip(actual_rows, expected_rows),
+        start=2,
+    ):
+        for column_index, (actual_header, expected_header) in enumerate(
+            zip(actual_headers, expected_headers),
+            start=1,
+        ):
+            actual_value = actual.get(actual_header)
+            expected_value = expected.get(expected_header)
+            if _projection_cell_identity(actual_value) != _projection_cell_identity(
+                expected_value
+            ):
+                raise _canonical_sidecar_error(
+                    "visible formal-master projection mismatch at "
+                    f"row {row_index}, column {column_index}"
+                )
+
+
 def _compact_shots_from_mother_sheet(sheet: dict[str, Any]) -> list[dict[str, Any]]:
     shots: list[dict[str, Any]] = []
     for source in sheet.get("rows", []):
-        shot = _parse_labeled_cell(
-            source.get(FORMAL_MERGED_FIELD)
-            or source.get(LEGACY_FORMAL_MERGED_FIELD)
-        )
+        shot = _parse_labeled_cell(_formal_master_cell(source))
         shot["镜头编号"] = source.get("分镜序号")
         shot["时长"] = source.get("时长")
         shot["累计时长"] = source.get("累计时长")
@@ -440,8 +723,66 @@ def workbook_to_storyboard(
     *,
     migrate: bool = False,
 ) -> dict[str, Any] | None:
-    sidecar_storyboard = _canonical_storyboard_from_sidecar(sheets)
-    if sidecar_storyboard is not None:
+    sidecar_result = _canonical_storyboard_from_sidecar(sheets)
+    if sidecar_result is not None:
+        (
+            sidecar_storyboard,
+            projection_contract,
+            projection_sha256,
+            audit_page_sha256,
+        ) = sidecar_result
+        # v0.5.1 artifacts use the short formal-master header and current
+        # projector.  A v0.5.0 workbook uses the legacy header and is checked
+        # against a frozen read-only v0.5.0 projector.  The editable header is
+        # therefore never enough to bypass visible/canonical verification.
+        visible_contract = _visible_projection_contract(sheets)
+        expected_visible_contract = (
+            "current"
+            if projection_contract == CURRENT_PROJECTION_CONTRACT
+            else "legacy"
+        )
+        if visible_contract != expected_visible_contract:
+            raise _canonical_sidecar_error(
+                "visible header does not match signed projection contract"
+            )
+        if visible_contract == "current":
+            visible_names = [
+                str(sheet.get("name") or "")
+                for sheet in sheets
+                if sheet.get("name") != CANONICAL_SIDECAR_SHEET
+            ]
+            if sorted(visible_names) != sorted(
+                ["00_范围与审计", "正式生产母版"]
+            ):
+                raise _canonical_sidecar_error(
+                    "current workbook has unexpected visible sheets"
+                )
+            scope_sheet = next(
+                sheet for sheet in sheets if sheet.get("name") == "00_范围与审计"
+            )
+            actual_audit_page_sha256 = _visible_sheet_sha256(
+                "00_范围与审计",
+                list(scope_sheet.get("matrix") or []),
+            )
+            if actual_audit_page_sha256 != audit_page_sha256:
+                raise _canonical_sidecar_error(
+                    "visible audit page SHA-256 mismatch"
+                )
+            expected_rows = formal_mother_template_rows(sidecar_storyboard)
+            _assert_visible_projection_rows_match(sheets, expected_rows)
+        else:
+            expected_rows = legacy_v050_mother_template_rows(sidecar_storyboard)
+            _assert_visible_projection_rows_match(
+                sheets,
+                expected_rows,
+            )
+        if (
+            projection_sha256 is not None
+            and projection_rows_sha256(expected_rows) != projection_sha256
+        ):
+            raise _canonical_sidecar_error(
+                "canonical projection SHA-256 mismatch"
+            )
         # Audit callers must verify the artifact's original canonical bytes and
         # SHA before any migration. New-production callers opt into the one-way
         # compact migration explicitly.
@@ -450,27 +791,18 @@ def workbook_to_storyboard(
         return sidecar_storyboard
 
     metadata, evidence = _metadata_from_sheets(sheets)
-    mother_sheet = next(
-        (
-            sheet
-            for sheet in sheets
-            if tuple(sheet.get("headers", [])) in {
-                tuple(MOTHER_TEMPLATE_COLUMNS),
-                tuple(
-                    LEGACY_FORMAL_MERGED_FIELD
-                    if header == FORMAL_MERGED_FIELD
-                    else header
-                    for header in MOTHER_TEMPLATE_COLUMNS
-                ),
-            }
-        ),
-        None,
-    )
+    mother_sheets = _mother_sheet_candidates(sheets)
+    if len(mother_sheets) > 1:
+        raise ValueError("workbook contains duplicate formal-master sheets")
+    mother_sheet = mother_sheets[0] if mother_sheets else None
     if mother_sheet:
         shots = _compact_shots_from_mother_sheet(mother_sheet)
         total_duration = metadata.get("total_duration")
         if total_duration in (None, "") and shots:
-            total_duration = sum(float(shot.get("时长") or 0) for shot in shots)
+            total_duration = round(
+                sum(float(shot.get("时长") or 0) for shot in shots),
+                1,
+            )
         return {
             "project_version": metadata.get(
                 "project_version",
@@ -535,7 +867,10 @@ def workbook_to_storyboard(
                         row[field] = identity[field]
     total_duration = metadata.get("total_duration")
     if total_duration in (None, "") and shots:
-        total_duration = sum(float(shot.get("时长") or 0) for shot in shots)
+        total_duration = round(
+            sum(float(shot.get("时长") or 0) for shot in shots),
+            1,
+        )
     legacy = {
         "project_version": metadata.get(
             "project_version",
@@ -562,14 +897,24 @@ def extract_xlsx(data: bytes) -> dict[str, Any]:
     sheets = []
     for sheet in workbook.worksheets:
         headers, rows = _rows_from_sheet(sheet)
-        sheets.append({"name": sheet.title, "headers": headers, "row_count": len(rows), "rows": rows})
+        sheets.append({
+            "name": sheet.title,
+            "headers": headers,
+            "row_count": len(rows),
+            "rows": rows,
+            "matrix": _sheet_value_matrix(sheet),
+        })
     canonical = workbook_to_storyboard(sheets)
+    canonical_sidecar_present = any(
+        sheet.get("name") == CANONICAL_SIDECAR_SHEET for sheet in sheets
+    )
     public_sheets = [sheet for sheet in sheets if sheet.get("name") != CANONICAL_SIDECAR_SHEET]
     return {
         "kind": "workbook",
         "sheet_count": len(public_sheets),
         "sheets": public_sheets,
         "canonical_storyboard": canonical,
+        "canonical_sidecar_present": canonical_sidecar_present,
     }
 
 
@@ -686,7 +1031,6 @@ def _write_table(workbook: Workbook, title: str, headers: list[str], rows: list[
             "台词",
             "发声方式",
             "独立执行提示词",
-            "正式分镜母版",
             "正式分镜母版·字段合并",
             "GPT关键帧生成指令",
             "Seedance 2.5独立正式执行分镜",
@@ -698,7 +1042,12 @@ def _write_table(workbook: Workbook, title: str, headers: list[str], rows: list[
     return sheet
 
 
-def _write_canonical_sidecar(workbook: Workbook, storyboard: dict[str, Any]) -> None:
+def _write_canonical_sidecar(
+    workbook: Workbook,
+    storyboard: dict[str, Any],
+    projection_rows: list[dict[str, Any]],
+    audit_page_sha256: str,
+) -> None:
     canonical = json_safe(storyboard)
     if not isinstance(canonical, dict):
         raise ValueError("canonical storyboard root must be an object")
@@ -710,6 +1059,7 @@ def _write_canonical_sidecar(workbook: Workbook, storyboard: dict[str, Any]) -> 
         allow_nan=False,
     ).encode("utf-8")
     digest = hashlib.sha256(serialized).hexdigest()
+    projection_digest = projection_rows_sha256(projection_rows)
     encoded = base64.urlsafe_b64encode(serialized).decode("ascii")
     chunks = [
         encoded[offset : offset + CANONICAL_SIDECAR_CHUNK_CHARS]
@@ -730,6 +1080,9 @@ def _write_canonical_sidecar(workbook: Workbook, storyboard: dict[str, Any]) -> 
             None,
             len(chunks),
             None,
+            CURRENT_PROJECTION_CONTRACT,
+            projection_digest,
+            audit_page_sha256,
         ]
     )
     for index, chunk in enumerate(chunks, 1):
@@ -743,6 +1096,9 @@ def _write_canonical_sidecar(workbook: Workbook, storyboard: dict[str, Any]) -> 
                 index,
                 len(chunks),
                 f"{CANONICAL_SIDECAR_PAYLOAD_PREFIX}{chunk}",
+                CURRENT_PROJECTION_CONTRACT,
+                projection_digest,
+                audit_page_sha256,
             ]
         )
     sheet.sheet_state = "veryHidden"
@@ -752,28 +1108,178 @@ def _write_scope_audit_sheet(
     workbook: Workbook,
     storyboard: dict[str, Any],
     audit_report: dict[str, Any],
+    audit_overlay: _VerifiedAuditOverlay | None = None,
 ) -> Any:
     """Write the sample-compatible single visible scope/audit page."""
 
+    if audit_overlay is not None and not isinstance(
+        audit_overlay, _VerifiedAuditOverlay
+    ):
+        raise ValueError(
+            "independent_audit_overlay_unverified: plain mappings and caller-authored "
+            "certificate claims are not accepted"
+        )
+    overlay = audit_overlay._as_dict() if audit_overlay is not None else {}
+    signed = audit_overlay is not None
+    if signed:
+        required = {
+            "status",
+            "conclusion",
+            "initial_issue_count",
+            "residual_issue_count",
+            "introduced_issue_count",
+            "blocking_issue_count",
+            "audit_trace_id",
+            "certificate_id",
+            "certificate_integrity_hmac",
+            "canonical_sha256",
+            "source_artifact_raw_sha256",
+        }
+        missing = sorted(
+            key for key in required if overlay.get(key) in (None, "")
+        )
+        if missing:
+            raise ValueError(
+                "independent_audit_overlay_incomplete: " + ",".join(missing)
+            )
+        status = str(overlay["status"]).upper()
+        if status not in {"PASS", "FAIL_CURRENT", "BLOCKED"}:
+            raise ValueError("independent_audit_overlay_status_invalid")
+        for key in (
+            "initial_issue_count",
+            "residual_issue_count",
+            "introduced_issue_count",
+            "blocking_issue_count",
+        ):
+            if not isinstance(overlay.get(key), int) or int(overlay[key]) < 0:
+                raise ValueError(
+                    f"independent_audit_overlay_count_invalid: {key}"
+                )
+        for key in ("canonical_sha256", "source_artifact_raw_sha256"):
+            if not re.fullmatch(r"[0-9a-f]{64}", str(overlay[key])):
+                raise ValueError(
+                    f"independent_audit_overlay_fingerprint_invalid: {key}"
+                )
+        if status == "PASS" and any(
+            int(overlay[key])
+            for key in (
+                "residual_issue_count",
+                "introduced_issue_count",
+                "blocking_issue_count",
+            )
+        ):
+            raise ValueError(
+                "independent_audit_overlay_pass_requires_zero_open_issues"
+            )
+        report_issues = list(audit_report.get("issues") or [])
+        if status == "PASS" and report_issues:
+            raise ValueError(
+                "independent_audit_overlay_pass_report_has_issues"
+            )
+        if status in {"FAIL_CURRENT", "BLOCKED"} and not report_issues:
+            raise ValueError(
+                "independent_audit_overlay_failure_report_has_no_issues"
+            )
+        if status in {"FAIL_CURRENT", "BLOCKED"} and not any(
+            int(overlay[key])
+            for key in (
+                "initial_issue_count",
+                "residual_issue_count",
+                "introduced_issue_count",
+                "blocking_issue_count",
+            )
+        ):
+            raise ValueError(
+                "independent_audit_overlay_failure_requires_open_issues"
+            )
+        report_summary = audit_report.get("audit_summary")
+        if isinstance(report_summary, dict):
+            for key in (
+                "initial_issue_count",
+                "residual_issue_count",
+                "introduced_issue_count",
+                "blocking_issue_count",
+            ):
+                if key in report_summary and int(overlay[key]) != int(
+                    report_summary[key]
+                ):
+                    raise ValueError(
+                        f"independent_audit_overlay_report_count_mismatch: {key}"
+                    )
+            report_final = str(report_summary.get("final_status") or "").upper()
+            if report_final and report_final != status:
+                raise ValueError(
+                    "independent_audit_overlay_report_status_mismatch"
+                )
+    else:
+        status = "PENDING_AUDIT"
+
     sheet = workbook.create_sheet("00_范围与审计")
-    sheet.append(["00_范围与审计", None, None, None, None])
+    sheet.append(
+        [
+            (
+                f"00_范围与审计｜{status}｜独立审计已签发"
+                if signed
+                else "00_范围与审计｜PENDING_AUDIT｜待独立审计"
+            ),
+            None,
+            None,
+            None,
+            None,
+        ]
+    )
     sheet.append([])
     sheet.append(["范围字段", "值", None, None, None])
     scope_rows = [
+        ("independent_audit_status", status),
+        (
+            "independent_audit_conclusion",
+            overlay.get("conclusion")
+            if signed
+            else "待独立审计／未签发结论",
+        ),
+        ("initial_issue_count", overlay.get("initial_issue_count")),
+        ("residual_issue_count", overlay.get("residual_issue_count")),
+        ("introduced_issue_count", overlay.get("introduced_issue_count")),
+        ("blocking_issue_count", overlay.get("blocking_issue_count")),
+        ("audit_trace_id", overlay.get("audit_trace_id")),
+        ("certificate_id", overlay.get("certificate_id")),
+        (
+            "certificate_integrity_hmac",
+            overlay.get("certificate_integrity_hmac"),
+        ),
+        ("canonical_sha256", overlay.get("canonical_sha256")),
+        (
+            "source_artifact_raw_sha256",
+            overlay.get("source_artifact_raw_sha256"),
+        ),
         ("project_version", storyboard.get("project_version")),
         ("schema_version", storyboard.get("schema_version")),
         ("workflow_profile", storyboard.get("workflow_profile")),
         ("total_duration", storyboard.get("total_duration")),
-        ("source_lock", storyboard.get("source_lock", {})),
+        (
+            "production_evidence_location",
+            "canonical sidecar（生产证据不作为独立审计结论）",
+        ),
     ]
     for label, value in scope_rows:
         sheet.append([label, _cell_value(value), None, None, None])
-    for key, value in (storyboard.get("prevention_evidence") or {}).items():
-        sheet.append([f"prevention_evidence/{key}", _cell_value(value), None, None, None])
+
+    # ``source_lock`` and ``prevention_evidence`` are producer-authored
+    # canonical data.  They stay recoverable in the integrity-bound hidden
+    # sidecar, but are intentionally not echoed onto the visible audit page:
+    # otherwise a producer could inject PASS/zero-issue/certificate text before
+    # independent audit has issued any conclusion.
 
     sheet.append([])
     issue_header_row = sheet.max_row + 1
-    sheet.append(["错误码", "严重度", "位置", "证据", "修复动作"])
+    sheet.append([
+        "独立审计错误码" if signed else "生产预检错误码",
+        "严重度",
+        "位置",
+        "证据",
+        "修复动作",
+    ])
     issue_rows = [
         [
             issue.get("error_code"),
@@ -785,7 +1291,31 @@ def _write_scope_audit_sheet(
         for issue in audit_report.get("issues", [])
     ]
     if not issue_rows:
-        issue_rows = [["PASS", "info", "全表", "零问题", "无需修复"]]
+        if signed:
+            sentinel = (
+                "INDEPENDENT_AUDIT_PASS"
+                if status == "PASS"
+                else f"INDEPENDENT_AUDIT_{status}"
+            )
+            issue_rows = [[
+                sentinel,
+                "info" if status == "PASS" else "fail",
+                "全表",
+                (
+                    "独立审计证书已签发；残留0、新增0、阻塞0"
+                    if status == "PASS"
+                    else f"独立审计证书状态为{status}"
+                ),
+                "无需修复" if status == "PASS" else "按审计问题修复后重审",
+            ]]
+        else:
+            issue_rows = [[
+                "PENDING_AUDIT",
+                "info",
+                "全表",
+                "生产预检未发现阻塞项；不等于独立审计结论",
+                "等待独立审计签发结论",
+            ]]
     for row in issue_rows:
         sheet.append([_cell_value(value) for value in row])
 
@@ -810,27 +1340,69 @@ def storyboard_to_xlsx(
     audit_report: dict[str, Any],
     *,
     assume_compact: bool = False,
+    audit_overlay: _VerifiedAuditOverlay | None = None,
 ) -> bytes:
     # Export is a one-way compact projection. Legacy atom sheets, batch sheets,
     # model-authored derived prose and Seedance prompt copies are never emitted.
     compact = storyboard if assume_compact else migrate_storyboard_to_compact(storyboard)
     workbook = Workbook()
     workbook.remove(workbook.active)
-    _write_scope_audit_sheet(workbook, compact, audit_report)
+    scope_sheet = _write_scope_audit_sheet(
+        workbook,
+        compact,
+        audit_report,
+        audit_overlay=audit_overlay,
+    )
+    formal_rows = formal_mother_template_rows(compact, assume_compact=True)
     formal_sheet = _write_table(
         workbook,
         "正式生产母版",
         list(MOTHER_TEMPLATE_COLUMNS),
-        formal_mother_template_rows(compact, assume_compact=True),
+        formal_rows,
     )
     for index, width in enumerate((16, 9, 11, 23.5, 62, 60, 42, 20, 13, 46), 1):
         formal_sheet.column_dimensions[get_column_letter(index)].width = width
 
-    _write_canonical_sidecar(workbook, compact)
+    audit_page_sha256 = _visible_sheet_sha256(
+        scope_sheet.title,
+        _sheet_value_matrix(scope_sheet),
+    )
+    _write_canonical_sidecar(
+        workbook,
+        compact,
+        formal_rows,
+        audit_page_sha256,
+    )
 
     stream = io.BytesIO()
     workbook.save(stream)
-    return stream.getvalue()
+    payload = stream.getvalue()
+
+    # Re-open the serialized workbook before handing it to persistence.  This
+    # catches projection drift introduced by cell conversion, writer behavior,
+    # or a future exporter refactor while the canonical sidecar is still valid.
+    reopened = load_workbook(io.BytesIO(payload), data_only=False, read_only=True)
+    sheets = []
+    for sheet in reopened.worksheets:
+        headers, rows = _rows_from_sheet(sheet)
+        sheets.append(
+            {
+                "name": sheet.title,
+                "headers": headers,
+                "row_count": len(rows),
+                "rows": rows,
+                "matrix": _sheet_value_matrix(sheet),
+            }
+        )
+    reopened.close()
+    roundtrip_result = _canonical_storyboard_from_sidecar(sheets)
+    roundtrip = roundtrip_result[0] if roundtrip_result is not None else None
+    _assert_visible_projection_rows_match(sheets, formal_rows)
+    if roundtrip != json_safe(compact):
+        raise ValueError(
+            "canonical sidecar invalid: saved workbook canonical round-trip mismatch"
+        )
+    return payload
 
 
 def preview_extracted(value: dict[str, Any], section: str | None, offset: int, limit: int) -> dict[str, Any]:

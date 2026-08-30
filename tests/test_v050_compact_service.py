@@ -174,7 +174,10 @@ class CompactCanonicalContractTests(unittest.TestCase):
         ) as exporter:
             self.assertEqual(_export_compact_storyboard(prepared, {"issues": []}), b"xlsx")
         exporter.assert_called_once_with(
-            prepared, {"issues": []}, assume_compact=True
+            prepared,
+            {"issues": []},
+            assume_compact=True,
+            audit_overlay=None,
         )
 
     def test_old_audit_layer_name_reads_as_compact_layer(self) -> None:

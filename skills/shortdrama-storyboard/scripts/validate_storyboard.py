@@ -106,10 +106,143 @@ LEGACY_DIALOGUE_TAG_RE = re.compile(
     r"【(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})】\s*[“\"]?(?P<line>[^【\n｜|；;”\"]+)[”\"]?"
 )
 INTEGRATED_DIALOGUE_RE = re.compile(
-    r"说道[：:]?\s*[“\"](?P<line>[^”\"\n]+)[”\"]"
+    r"(?:^|[；;。！？!?，,、】])\s*(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})说道[：:]?\s*[“\"](?P<line>[^”\"\n]+)[”\"]"
+)
+REQUIRED_ASPECT_RATIO_PHRASE = "9:16竖屏"
+REQUIRED_ASPECT_RATIO_RE = re.compile(
+    r"(?<!\d)9:16竖屏(?=$|[\s；;，,。.])"
+)
+ANY_ASPECT_TOKEN_RE = re.compile(
+    r"(?<!\d)(?P<width>\d+)\s*(?P<separator>[:：/])\s*"
+    r"(?P<height>\d+(?:\.\d+)?)(?!\d)"
 )
 FORBIDDEN_PROMPT_PHRASE_RE = re.compile(
-    r"9\s*[:：]\s*16\s*竖屏(?:真人古装短剧(?:截图质感|单帧)?)?"
+    r"9\s*[:：]\s*16\s*竖屏真人古装短剧(?:截图质感|单帧)"
+)
+BGM_TOKEN_RE = re.compile(r"(?<![A-Za-z])BGM(?![A-Za-z])", re.I)
+NEGATIVE_MUSIC_CLAUSE_RE = re.compile(
+    r"(?:禁止|不要|不得|不使用|不生成|无)(?:任何)?(?:让)?"
+    r"(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)?\s*"
+    r"(?:BGM|背景音乐|额外配乐|配乐|音乐)"
+    r"(?:响起|播放|进入|渐入|切入|铺开|持续|开始)?",
+    re.I,
+)
+ACTIVE_MUSIC_DIRECTIVE_RE = re.compile(
+    r"(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)\s*(?:任何)?"
+    r"(?:BGM|背景音乐|额外配乐|配乐|音乐)|"
+    r"(?:BGM|背景音乐|额外配乐|配乐|音乐)\s*"
+    r"(?:响起|播放|进入|渐入|切入|铺开|持续|采用|使用|开始|为)",
+    re.I,
+)
+MUSIC_TERM_RE = re.compile(
+    r"(?<![A-Za-z])BGM(?![A-Za-z])|背景音乐|额外配乐|配乐|音乐",
+    re.I,
+)
+TRANSITION_EMPTY_SEPARATOR_RE = re.compile(r"[；;。]\s*[；;。]")
+CROSS_SHOT_TERMS = {
+    "承接上一镜", "延续之前", "保持关键帧", "保持上一关键帧", "按照上一张",
+    "沿用上一张", "同上", "继续原动作", "继续刚才", "保持上一镜", "承接关键帧",
+    "上一关键帧", "上一镜头", "前一镜", "前镜",
+    "下一镜",
+}
+KEYFRAME_FORBIDDEN_RE = re.compile(
+    r"(?:\d+(?:\.\d+)?\s*(?:秒|s)?\s*[-—–~至]\s*\d+(?:\.\d+)?\s*(?:秒|s)|"
+    r"(?:第\s*)?(?:\d+(?:\.\d+)?|[一二两三四五六七八九十半]+)"
+    r"\s*秒(?:后|前|时|内)?|"
+    r"(?<![A-Za-z0-9_-])\d+(?:\.\d+)?[sS](?:后|前|时|内)?"
+    r"(?![A-Za-z0-9_-])|一瞬后|"
+    r"硬切|切镜|转场|切至|切到|切换至|跳切|叠化|溶解|淡入|淡出|"
+    r"(?:画面|镜头)(?:转至|转到)|"
+    r"推镜|拉镜|跟镜|摇镜|移镜|升镜|降镜|环绕镜|"
+    r"由远及近|由近及远|"
+    r"(?:镜头|摄影机|摄像机)?(?:缓慢|快速|轻微|持续)?"
+    r"(?:前推|后拉|横移|上升|下降|摇摄|跟随|环绕)|"
+    r"(?:镜头|摄影机|摄像机|相机|画面)(?:向前|向后|向左|向右|"
+    r"朝前|朝后|朝左|朝右|缓缓|缓慢|慢慢|快速|轻微|持续|逐渐)*"
+    r"(?:推近|推进|拉远|后退|退开|摇动|摇摄|平移|横移|变焦|"
+    r"旋转|放大|缩小|跟随|环绕)|"
+    r"从(?:全景|中景|近景|特写)[^；。\n]{0,12}"
+    r"(?:移动|切换|变化|过渡)到(?:全景|中景|近景|特写)|"
+    r"(?:几秒|数秒|片刻|少顷)(?:后|前|之后|以前)|随后|接着|然后|"
+    r"(?:正在|开始|继续|逐渐|将要|即将)(?:缓缓|缓慢|慢慢)?"
+    r"(?:起身|转头|行走|抬手|收手|离开|进入|移动|飘动|递交|"
+    r"接取|说话|开口|摇晃|落下|抬眼|低头)|"
+    r"准备(?:开始|起身|转头|移动|说话|开口|递交|接取|离开|进入)|"
+    r"即将(?:开始|起身|转头|移动|说话|开口|递交|接取|离开|进入)|"
+    r"(?:嘴型|唇形|口唇)[^；。\n]{0,12}(?:同步|开合|说话)|"
+    r"(?:古琴|琴|雨|水|敲门|雷|钟|婴儿哭|哭|笑|喊|脚步|呼吸|"
+    r"衣料|器物|风|鸟|虫|叶)(?:声|鸣)|"
+    r"说道|对白|台词|口型|音色|语速|重音|尾音|环境音效|"
+    r"BGM|配乐|声音|声响|脚步声|呼吸声|衣料声)",
+    re.I,
+)
+
+KEYFRAME_TIMECODE_RE = re.compile(
+    r"(?:\[|【)?\s*\d+(?:\.\d+)?\s*(?:秒|s)?\s*[-—–~至]\s*"
+    r"\d+(?:\.\d+)?\s*(?:秒|s)\s*(?:\]|】|[:：])?",
+    re.I,
+)
+KEYFRAME_PROTECTED_VISUAL_LABEL_PATTERN = (
+    r"(?:参考图锚点|可见文字|画内文字|道具文字|"
+    r"匾额(?:文字)?|牌匾(?:文字)?|招牌(?:文字)?|题字)"
+)
+KEYFRAME_PROTECTED_VISUAL_FRAGMENT_RE = re.compile(
+    rf"(?:【{KEYFRAME_PROTECTED_VISUAL_LABEL_PATTERN}】[^；;\n，,]*|"
+    rf"(?:画内)?(?:匾额|牌匾|招牌|门牌|题字|"
+    rf"可见文字|画内文字|道具文字)"
+    rf"(?=[^；;\n，,]{{0,32}}(?:[“\"「『]|写着|写有|刻着|刻有|"
+    rf"题着|题有|印着|印有|可见文字|字样|清晰可见))"
+    rf"[^；;\n，,]*)"
+)
+KEYFRAME_BRACKETED_DIALOGUE_RE = re.compile(
+    r"【[^】\n]{1,40}】\s*[^。！？!?；;\n]*(?:[。！？!?；;]|$)"
+)
+KEYFRAME_QUOTED_DIALOGUE_RE = re.compile(r"[“\"「『][^”\"」』\n]*[”\"」』]")
+KEYFRAME_LABELED_DIALOGUE_RE = re.compile(
+    r"(?:精确)?(?:台词|对白)(?:文字|内容)?\s*[:：]\s*"
+    r"[^。！？!?；;\n]*(?:[。！？!?；;]|$)"
+)
+KEYFRAME_AUDIO_ONLY_CLAUSE_MARKERS = (
+    "口型", "说话时", "对白", "动作声", "环境声", "问句",
+    "陈述句", "感叹句", "对白节奏", "声音强弱", "语速节奏", "呼吸状态",
+    "停顿位置", "重音位置", "尾音变化", "声量", "语速", "停顿", "重音",
+    "尾音", "发声", "环境音", "音效", "配乐", "音乐", "BGM", "声音",
+    "鸟声", "脚步声", "呼吸声", "衣料声", "器物声", "叶声", "鸟鸣",
+    "虫鸣", "风声", "声线", "音轨", "音频",
+)
+KEYFRAME_AUDIO_SOURCE_CLAUSE_RE = re.compile(
+    r"(?:古琴|琴|雨|水|敲门|雷|钟|婴儿哭|哭|笑|喊|脚步|呼吸|"
+    r"衣料|器物|风|鸟|虫|叶)(?:声|鸣)"
+)
+MULTI_CAMERA_RE = re.compile(r"第二机位|另一机位|另一个机位|多机位|切至[^；。]{0,20}机位")
+VISIBLE_NON_CHARACTER_RE = re.compile(
+    r"人群|路人|群众|百姓|行人|摊贩|商贩|顾客|食客|茶客|脚夫|守卫|群演|背景人物|"
+    r"道具|手部|书页|信件|木盒|礼匣|茶盏|茶杯|门窗|环境|空间|前景|中景|后景"
+)
+START_RESULT_ACTION_PATTERNS = (
+    (re.compile(r"已(?:经)?(?:接过|接稳|拿到|持稳)[^；。]{0,12}(?:礼匣|木盒|茶盏|茶杯|道具)?"), re.compile(r"接过|接稳|接杯|接盏|交接|递交"), "接取结果已在起始状态完成"),
+    (re.compile(r"已(?:经)?(?:奉上|递出|递交)"), re.compile(r"奉上|奉茶|递出|递交"), "递交结果已在起始状态完成"),
+    (re.compile(r"已(?:经)?(?:揭盖|开盖|打开|开启)"), re.compile(r"揭盖|开盖|打开|开启"), "开启结果已在起始状态完成"),
+    (re.compile(r"已(?:经)?(?:浅啜|饮下|喝下|喝完)"), re.compile(r"浅啜|饮下|喝下|喝茶|举杯"), "饮用结果已在起始状态完成"),
+    (re.compile(r"已(?:经)?(?:落座|坐下|起身|站起|跨过|进入|离开|跪下|行礼)"), re.compile(r"落座|坐下|起身|站起|跨过|跨门槛|进入|离开|跪下|行礼"), "位移或姿态结果已在起始状态完成"),
+)
+ACTION_DURATION_PATTERNS = (
+    ("奉茶", re.compile(r"奉茶"), 0.8),
+    ("接杯", re.compile(r"接杯|接盏|接过[^；。]{0,8}(?:杯|盏)"), 0.8),
+    ("揭盖", re.compile(r"揭盖|开盖"), 0.5),
+    ("浅啜", re.compile(r"浅啜|饮茶|喝茶"), 1.0),
+    ("递交", re.compile(r"递交|递出|交接"), 0.8),
+    ("跨门槛", re.compile(r"跨(?:过)?门槛"), 1.0),
+    ("起落坐姿", re.compile(r"起身|坐下|落座|屈膝|跪下|行礼"), 0.8),
+    ("点头", re.compile(r"点头|颔首"), 0.35),
+    ("抬收手", re.compile(r"抬手|收手|指向"), 0.4),
+    ("头眼动作", re.compile(r"转头|抬眼|低头"), 0.3),
+)
+
+EXECUTION_SHOT_FIELDS = (
+    "镜头类型", "可见主体", "空间站位描述", "起始状态", "机位", "运镜方式",
+    "画面内容", "音色", "心理音轨", "环境音效", "环境动态", "光影", "光源来源",
+    "光源方向", "色温倾向", "生成限制", "转场类型", "切镜/转场提示词",
 )
 KELVIN_RE = re.compile(r"(?:\d{3,5}\s*(?:K|k|开尔文))|Kelvin", re.I)
 COLOR_RELATION_RE = re.compile(r"暖|冷|中性")
@@ -262,17 +395,33 @@ def is_none_value(value: Any) -> bool:
     return not text or text in {"无", "不适用", "N/A", "none", "None"} or text.startswith("不适用：")
 
 
-def _issue(catalog: dict[str, dict[str, Any]], code: str, location: str, evidence: str, repair: str | None = None, severity: str | None = None) -> dict[str, Any]:
+def _issue(
+    catalog: dict[str, dict[str, Any]],
+    code: str,
+    location: str,
+    evidence: str,
+    repair: str | None = None,
+    severity: str | None = None,
+    template_gate_id: str | None = None,
+    blocking: bool | None = None,
+) -> dict[str, Any]:
     spec = catalog.get(code, {})
     sev = severity or spec.get("severity", "fail")
-    return {
+    issue = {
         "error_code": code,
         "severity": sev,
-        "blocking": bool(spec.get("blocking", sev == "fail")),
+        "blocking": bool(
+            blocking
+            if blocking is not None
+            else (sev == "fail" if severity is not None else spec.get("blocking", sev == "fail"))
+        ),
         "location": location,
         "evidence": evidence,
         "repair_action": repair or spec.get("repair_action", "按R10规则修复后重跑。"),
     }
+    if template_gate_id:
+        issue["template_gate_id"] = template_gate_id
+    return issue
 
 
 def normalize_shot(raw: dict[str, Any], aliases: dict[str, str]) -> tuple[dict[str, Any], list[tuple[str, str]]]:
@@ -373,7 +522,7 @@ def extract_dialogues(picture_content: Any) -> list[tuple[str, str]]:
     for match in INTEGRATED_DIALOGUE_RE.finditer(text):
         line = match.group("line").strip()
         if line:
-            rows.append(("角色", line))
+            rows.append((match.group("speaker").strip(), line))
     for match in LEGACY_DIALOGUE_TAG_RE.finditer(text):
         line = match.group("line").strip()
         sentence = re.match(r"(.+?[。！？?!](?:[。！？?!…])?)", line)
@@ -428,78 +577,314 @@ def _validate_timeline(text: str, duration: float, *, strict: bool = False) -> l
 
 
 def _format_seconds(value: Any) -> str:
-    return f"{_as_number(value):.1f}"
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    text = re.sub(r"\s*(?:秒|s)$", "", text, flags=re.I).strip()
+    if re.fullmatch(r"[+-]?\d+(?:\.0+)?", text):
+        text = f"{float(text):.1f}"
+    return text
+
+
+def _projection_text(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    return str(value).strip()
+
+
+def _assert_active_timing_precision(shot: dict[str, Any]) -> None:
+    for field in ("时长", "累计时长"):
+        try:
+            numeric = float(shot.get(field))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"timing_precision_contract_violation: {field} must be numeric"
+            ) from exc
+        if abs(numeric * 10 - round(numeric * 10)) > 1e-8:
+            raise ValueError(
+                f"timing_precision_contract_violation: {field} must use "
+                "0.1-second precision"
+            )
+
+
+def _assert_generation_aspect_contract(value: Any) -> None:
+    text = str(value or "").strip()
+    malformed = sorted(
+        {
+            match.group(0)
+            for match in ANY_ASPECT_TOKEN_RE.finditer(text)
+            if (
+                match.group("width") != "9"
+                or match.group("separator") not in {":", "："}
+                or match.group("height") != "16"
+            )
+        }
+    )
+    remainder = re.sub(
+        r"(?<!\d)9\s*[:：]\s*16(?![\d.])\s*(?:"
+        r"竖屏真人古装短剧(?:截图质感|单帧)?|"
+        r"真人古装短剧(?:截图质感|单帧)?|竖屏)?",
+        "",
+        text,
+        flags=re.I,
+    )
+    residual_screen_terms = sorted(
+        {term for term in ("竖屏", "横屏", "方屏") if term in remainder}
+    )
+    if malformed or residual_screen_terms:
+        raise ValueError(
+            "aspect_ratio_contract_violation: per-shot execution must use "
+            f"9:16竖屏 only; malformed={malformed}, "
+            f"residual_screen_terms={residual_screen_terms}"
+        )
+
+
+def _assert_projected_aspect_contract(value: Any, *, projection: str) -> None:
+    text = _projection_text(value)
+    matches = list(ANY_ASPECT_TOKEN_RE.finditer(text))
+    malformed = [
+        match.group(0)
+        for match in matches
+        if (
+            match.group("width") != "9"
+            or match.group("separator") != ":"
+            or match.group("height") != "16"
+        )
+    ]
+    if (
+        text.count(REQUIRED_ASPECT_RATIO_PHRASE) != 1
+        or len(matches) != 1
+        or malformed
+        or any(term in text for term in ("横屏", "方屏"))
+    ):
+        raise ValueError(
+            f"aspect_ratio_projection_violation: {projection} must contain "
+            "exactly one 9:16竖屏 contract and no competing ratio"
+        )
+
+
+def _normalize_generation_limits(value: Any) -> str:
+    _assert_generation_aspect_contract(value)
+    text = str(value or "").strip()
+    active_music = _active_music_directive(text)
+    if active_music:
+        raise ValueError(
+            "generation_limit_audio_contract_violation: affirmative in-shot "
+            f"music directive is forbidden: {active_music!r}"
+        )
+    remainder = re.sub(
+        r"(?<!\d)9\s*[:：]\s*16(?![\d.])\s*(?:"
+        r"竖屏真人古装短剧(?:截图质感|单帧)?|"
+        r"真人古装短剧(?:截图质感|单帧)?|竖屏)?",
+        "",
+        text,
+        flags=re.I,
+    )
+    remainder, music_mentioned = _strip_negative_music_clauses(remainder)
+    remainder = re.sub(r"\s*[；;]\s*", "；", remainder)
+    remainder = re.sub(r"；{2,}", "；", remainder).strip(" ；;，,。")
+    parts = [REQUIRED_ASPECT_RATIO_PHRASE]
+    if remainder:
+        parts.append(remainder)
+    if music_mentioned:
+        parts.append("禁止额外配乐")
+    return "；".join(parts)
 
 
 def project_formal_master(shot: dict[str, Any]) -> str:
     """Compile the exact fifth-column R10-SPC-1 formal master cell."""
+    projected = dict(shot)
+    _assert_active_timing_precision(projected)
+    projected["生成限制"] = _normalize_generation_limits(
+        projected.get("生成限制")
+    )
     paragraphs = [
-        f"镜头序号：{shot.get('镜头编号', '')}（{_format_seconds(shot.get('时长'))}s；累计{_format_seconds(shot.get('累计时长'))}s）",
-        f"镜头类型：{shot.get('镜头类型', '')}｜可见主体：{shot.get('可见主体', '')}",
+        f"镜头序号：{_projection_text(projected.get('镜头编号'))}"
+        f"（{_format_seconds(projected.get('时长'))}s；"
+        f"累计{_format_seconds(projected.get('累计时长'))}s）",
+        f"镜头类型：{_projection_text(projected.get('镜头类型'))}｜"
+        f"可见主体：{_projection_text(projected.get('可见主体'))}",
     ]
-    paragraphs.extend(f"{field}：{shot.get(field, '')}" for field in FORMAL_MASTER_FIELD_ORDER)
-    return "\n\n".join(paragraphs)
+    paragraphs.extend(
+        f"{field}：{_projection_text(projected.get(field))}"
+        for field in FORMAL_MASTER_FIELD_ORDER
+    )
+    formal = "\n\n".join(paragraphs)
+    _assert_projected_aspect_contract(formal, projection="formal_master")
+    if BGM_TOKEN_RE.search(formal):
+        raise ValueError(
+            "formal_master_audio_contract_violation: BGM literal is forbidden"
+        )
+    active_music = _active_music_directive(formal)
+    if active_music:
+        raise ValueError(
+            "formal_master_audio_contract_violation: affirmative in-shot "
+            f"music directive is forbidden: {active_music!r}"
+        )
+    context_hits = sorted(term for term in CROSS_SHOT_TERMS if term in formal)
+    if context_hits:
+        raise ValueError(
+            "formal_master_context_violation: cross-shot references are "
+            "forbidden: " + ", ".join(context_hits)
+        )
+    return formal
 
 
-def _visual_only_clauses(value: Any) -> str:
-    """Remove audio/dialogue clauses from a deterministic static projection."""
-    result = re.sub(r"【\d+\.\d—\d+\.\d秒】", "", str(value or ""))
+def _protect_visual_text_fragments(value: Any) -> tuple[str, dict[str, str]]:
+    """Mirror the service's protection of explicitly visible text/anchor labels."""
+
+    protected: dict[str, str] = {}
+
+    def replace(match: re.Match[str]) -> str:
+        token = f"\ue000VISUAL{len(protected)}\ue001"
+        protected[token] = match.group(0)
+        return token
+
+    return (
+        KEYFRAME_PROTECTED_VISUAL_FRAGMENT_RE.sub(
+            replace,
+            _projection_text(value),
+        ),
+        protected,
+    )
+
+
+def _visual_only_clauses(value: Any, *, strip_dialogue: bool = False) -> str:
+    """Mirror the service's visible-only deterministic projection exactly."""
+    result = KEYFRAME_TIMECODE_RE.sub("", str(value or ""))
+    protected_visual: dict[str, str] = {}
+    if strip_dialogue:
+        result, protected_visual = _protect_visual_text_fragments(result)
+        result = KEYFRAME_QUOTED_DIALOGUE_RE.sub("", result)
+        result = KEYFRAME_BRACKETED_DIALOGUE_RE.sub("", result)
+        result = re.sub(r"【[^】\n]{1,40}】", "", result)
     result = re.sub(
-        r"[\u3400-\u9fffA-Za-z·]{1,20}说道[：:]?\s*[“\"][^”\"\n]+[”\"]",
+        r"(?:精确)?(?:台词|对白)\s*[:：]\s*[^。！？!?；;\n]*(?:[。！？!?；;]|$)",
         "",
         result,
     )
-    result = re.sub(
-        r"【(?!\d+\.\d—|参考图锚点)[^】\n]{1,20}】\s*[“\"]?[^。！？!?；;\n]*[”\"]?",
-        "",
-        result,
-    )
-    forbidden = re.compile(
-        r"对白|台词|说道|口型|音色|音量|语速|重音|尾音|环境音|声源|"
-        r"脚步|衣料|呼吸|听见|画外音|配乐|BGM|鸟声|鸟鸣|虫鸣|风声|"
-        r"水声|声线|声音|声响|发声|开口|问句|陈述句|感叹句|时间码"
-    )
-    visible: list[str] = []
+    visible_major: list[str] = []
     for major in re.split(r"[；;\n]", result):
-        minor_visible = []
-        for minor in re.split(r"[，,、]|并伴随|同时伴随|伴随", major):
-            clause = minor.strip(" 。；;")
-            if not clause or forbidden.search(clause):
+        visible_minor: list[str] = []
+        for minor in re.split(r"[，,、]|并且|并伴随|同时伴随|并有", major):
+            clause = minor.strip()
+            if not clause:
                 continue
-            minor_visible.append(clause)
-        if minor_visible:
-            visible.append("，".join(minor_visible))
-    return "；".join(visible).strip("；。 ")
+            clause = re.sub(
+                r"(?:低声|轻声|高声|平静地|克制地)?(?:开口)?"
+                r"(?:说|问|答|喊|道)\s*[:：]?\s*$",
+                "",
+                clause,
+            ).strip()
+            if not re.search(r"(?:尚未|没有|未曾|并未)开口\s*$", clause):
+                clause = re.sub(r"(?:开口|发声)\s*$", "", clause).strip()
+            if not clause:
+                continue
+            if any(
+                marker.casefold() in clause.casefold()
+                for marker in KEYFRAME_AUDIO_ONLY_CLAUSE_MARKERS
+            ):
+                continue
+            if KEYFRAME_AUDIO_SOURCE_CLAUSE_RE.search(clause):
+                continue
+            visible_minor.append(clause)
+        if visible_minor:
+            visible_major.append("，".join(visible_minor))
+    result = "；".join(visible_major)
+    result = re.sub(r"\s+", " ", result)
+    result = re.sub(r"([；;，,])\s*(?=[；;，,。])", "", result)
+    for token, fragment in protected_visual.items():
+        result = result.replace(token, fragment)
+    return result.strip(" \n；;，,。:：”\"")
 
 
 def project_gpt_keyframe(shot: dict[str, Any]) -> str:
     """Compile the visual-only sixth-column projection from the same canonical."""
-    start_state = _visual_only_clauses(shot.get("起始状态")) or "人物保持本镜开场的可见站位、朝向、姿态与道具状态"
-    environment = _visual_only_clauses(shot.get("环境动态")) or "场景内可见物保持真实、克制的自然状态"
-    anchor = str(shot.get("参考图锚定") or "无")
-    return (
-        "真人古装短剧，真实摄影机拍摄质感；"
-        f"镜头类型与主体：{shot.get('镜头类型', '')}，{shot.get('可见主体', '')}；"
-        f"空间站位：{_visual_only_clauses(shot.get('空间站位描述'))}；"
-        f"定格状态：{start_state}；"
-        f"摄影机：{_visual_only_clauses(shot.get('机位'))}；"
-        f"光影：{_visual_only_clauses(shot.get('光影'))}；"
-        f"光源来源：{_visual_only_clauses(shot.get('光源来源'))}；"
-        f"光源方向：{_visual_only_clauses(shot.get('光源方向'))}；"
-        f"色彩：{_visual_only_clauses(shot.get('色温倾向'))}；"
-        f"环境可见状态：{environment}；"
-        f"参考图锚定：{_visual_only_clauses(anchor)}；"
-        "单一稳定视觉时刻，禁止字幕、水印、现代物件、人物看镜头、复制脸、上下黑边、无来源光、重HDR、塑料皮肤与海报摆拍。"
+    fields = (
+        "镜头类型",
+        "可见主体",
+        "空间站位描述",
+        "起始状态",
+        "机位",
+        "环境动态",
+        "光影",
+        "光源来源",
+        "光源方向",
+        "色温倾向",
+        "参考图锚定",
+        "生成限制",
     )
+    scrubbed_fields = {
+        "空间站位描述",
+        "起始状态",
+        "机位",
+        "环境动态",
+        "参考图锚定",
+        "生成限制",
+    }
+    lines = ["GPT关键帧生成指令", f"画幅：{REQUIRED_ASPECT_RATIO_PHRASE}"]
+    for field in fields:
+        value = _projection_text(shot.get(field))
+        if field == "生成限制":
+            value = re.sub(
+                r"(?<!\d)9\s*[:：]\s*16(?![\d.])\s*(?:"
+                r"竖屏真人古装短剧(?:截图质感|单帧)?|"
+                r"真人古装短剧(?:截图质感|单帧)?|竖屏)?",
+                "",
+                _normalize_generation_limits(value),
+                flags=re.I,
+            )
+            value = re.sub(r"\s*[；;]\s*", "；", value)
+            value = re.sub(r"；{2,}", "；", value).strip(" ；;，,。")
+        if field in scrubbed_fields:
+            value = _visual_only_clauses(value, strip_dialogue=True)
+        if value:
+            lines.append(f"{field}：{value}")
+    prompt = "\n".join(lines)
+    _assert_projected_aspect_contract(prompt, projection="gpt_keyframe")
+    forbidden_hits = _keyframe_forbidden_hits(prompt)
+    context_hits = sorted(term for term in CROSS_SHOT_TERMS if term in prompt)
+    if forbidden_hits or context_hits:
+        raise ValueError(
+            "keyframe_static_contract_violation: "
+            + "; ".join(
+                part
+                for part in (
+                    "dynamic=" + ",".join(forbidden_hits)
+                    if forbidden_hits else "",
+                    "cross_shot=" + ",".join(context_hits)
+                    if context_hits else "",
+                )
+                if part
+            )
+        )
+    return prompt
 
 
 def project_export_row(shot: dict[str, Any]) -> dict[str, Any]:
     """Return one exact ten-column export row without persisting projections."""
+    function = _projection_text(shot.get("功能类型"))
+    scene = _projection_text(shot.get("场景连续性ID"))
+    function_scene = "\n".join(
+        row
+        for row in (
+            f"功能类型：{function}" if function else "",
+            f"场景连续性ID：{scene}" if scene else "",
+        )
+        if row
+    )
     return {
         "分镜序号": shot.get("镜头编号", ""),
         "时长": shot.get("时长", ""),
         "累计时长": shot.get("累计时长", ""),
-        "功能类型/场景连续性ID": f"{shot.get('功能类型', '')}｜{shot.get('场景连续性ID', '')}",
+        "功能类型/场景连续性ID": function_scene,
         "正式分镜母版": project_formal_master(shot),
         "GPT关键帧生成指令": project_gpt_keyframe(shot),
         "参考图锚定": shot.get("参考图锚定", ""),
@@ -507,6 +892,249 @@ def project_export_row(shot: dict[str, Any]) -> dict[str, Any]:
         "原文依据类型": shot.get("原文依据类型", ""),
         "原文支撑句": shot.get("原文支撑句", ""),
     }
+
+
+def _normalized_clause(value: Any) -> str:
+    return re.sub(
+        r"[\s，。；：、,.!?！？;:\-—–（）()\[\]【】“”\"']",
+        "",
+        str(value or ""),
+    ).casefold()
+
+
+def _transition_duplicate_faults(value: Any) -> list[str]:
+    text = str(value or "")
+    faults: list[str] = []
+    if TRANSITION_EMPTY_SEPARATOR_RE.search(text):
+        faults.append("出现连续空分隔符")
+    clauses = [item.strip() for item in re.split(r"[；;。\n]+", text) if item.strip()]
+    normalized = [_normalized_clause(item) for item in clauses]
+    for index in range(1, len(normalized)):
+        if normalized[index] and normalized[index] == normalized[index - 1]:
+            faults.append(f"相邻切镜短句重复：{clauses[index]!r}")
+    return faults
+
+
+def _visible_character_names(value: Any) -> list[str]:
+    names: list[str] = []
+    for raw in re.split(r"[、，,；;和与及+＋]", str(value or "")):
+        candidate = re.sub(r"[（(].*?[）)]", "", raw).strip()
+        candidate = re.sub(r"^(?:画面|前景|中景|后景|左侧|右侧|中央)", "", candidate).strip()
+        if not candidate or VISIBLE_NON_CHARACTER_RE.search(candidate):
+            continue
+        if candidate not in names:
+            names.append(candidate)
+    return names
+
+
+def _start_result_faults(start_state: Any, picture_content: Any) -> list[str]:
+    start = str(start_state or "")
+    picture = str(picture_content or "")
+    return [label for result_re, action_re, label in START_RESULT_ACTION_PATTERNS if result_re.search(start) and action_re.search(picture)]
+
+
+def _prop_state_faults(value: Any, *, strict: bool = False) -> list[str]:
+    faults: list[str] = []
+    if value in (None, "", "无", "不适用"):
+        return faults
+    if isinstance(value, dict):
+        for prop_id, raw_state in value.items():
+            if not isinstance(raw_state, dict):
+                faults.append(f"道具{prop_id!r}状态必须为holder/state对象")
+                continue
+            holder = raw_state.get("holder")
+            state = raw_state.get("state")
+            if isinstance(holder, list):
+                holders = [str(item).strip() for item in holder if str(item).strip()]
+            else:
+                holders = [item.strip() for item in re.split(r"[、/|｜]", str(holder or "")) if item.strip()]
+            if len(holders) != 1:
+                faults.append(f"道具{prop_id!r}同一时点持有人数量={len(holders)}：{holders}")
+            if is_empty(state):
+                faults.append(f"道具{prop_id!r}缺状态")
+        return faults
+    if isinstance(value, list):
+        seen: dict[str, str] = {}
+        for row in value:
+            if not isinstance(row, dict):
+                faults.append("道具状态行不是对象")
+                continue
+            prop_id = str(row.get("prop_id") or "").strip()
+            holder = str(row.get("holder") or "").strip()
+            if not prop_id or not holder:
+                faults.append(f"道具状态缺prop_id/holder：{row!r}")
+            elif prop_id in seen and seen[prop_id] != holder:
+                faults.append(f"道具{prop_id!r}同时属于{seen[prop_id]!r}和{holder!r}")
+            else:
+                seen[prop_id] = holder
+        return faults
+    if strict:
+        faults.append(
+            "R10-SPC-1道具状态必须使用prop_id/holder/state结构，不能使用自由文本"
+        )
+        return faults
+    pairs = re.findall(r"([^@；;，,]+)@([^；;，,]+)", str(value))
+    seen_text: dict[str, str] = {}
+    for prop_id, holder in pairs:
+        prop_id = prop_id.strip()
+        holder = holder.strip()
+        if prop_id in seen_text and seen_text[prop_id] != holder:
+            faults.append(f"道具{prop_id!r}同时属于{seen_text[prop_id]!r}和{holder!r}")
+        else:
+            seen_text[prop_id] = holder
+    return faults
+
+
+def _action_capacity_seconds(picture_content: Any) -> tuple[float, list[str]]:
+    text = str(picture_content or "")
+    text = re.sub(r"[\u3400-\u9fffA-Za-z·]{1,20}说道[：:]?\s*[“\"][^”\"\n]+[”\"]", "", text)
+    matched: list[str] = []
+    seconds = 0.0
+    for label, pattern, minimum in ACTION_DURATION_PATTERNS:
+        if pattern.search(text):
+            matched.append(label)
+            seconds += minimum
+    return seconds, matched
+
+
+def _keyframe_forbidden_hits(value: Any) -> list[str]:
+    return sorted({match.group(0) for match in KEYFRAME_FORBIDDEN_RE.finditer(str(value or ""))})
+
+
+def _active_music_directive(value: Any) -> str:
+    without_bans, _mentioned = _strip_negative_music_clauses(value)
+    instruction_text, _protected = _protect_visual_text_fragments(without_bans)
+    instruction_text = KEYFRAME_QUOTED_DIALOGUE_RE.sub("", instruction_text)
+    instruction_text = KEYFRAME_LABELED_DIALOGUE_RE.sub("", instruction_text)
+    match = ACTIVE_MUSIC_DIRECTIVE_RE.search(instruction_text)
+    if match:
+        return match.group(0)
+    match = MUSIC_TERM_RE.search(instruction_text)
+    return match.group(0) if match else ""
+
+
+def _strip_negative_music_clauses(value: Any) -> tuple[str, bool]:
+    text = str(value or "")
+    mentioned = False
+    parts = re.split(r"([；;。！？!?\n]+)", text)
+    for index in range(0, len(parts), 2):
+        original = parts[index]
+        if not MUSIC_TERM_RE.search(original):
+            continue
+        negative_prefix = re.match(
+            r"^\s*(?:禁止|不要|不得|不使用|不生成|无)(?:任何)?",
+            original,
+            flags=re.I,
+        )
+        clause, direct_count = NEGATIVE_MUSIC_CLAUSE_RE.subn("", original)
+        if direct_count:
+            mentioned = True
+            remainder = clause.strip(" 、，,与和且及以")
+            if remainder and negative_prefix and not re.match(
+                r"^\s*(?:禁止|不要|不得|不使用|不生成|无)",
+                remainder,
+                flags=re.I,
+            ):
+                clause = negative_prefix.group(0).strip() + remainder
+            else:
+                clause = remainder
+        if not MUSIC_TERM_RE.search(clause):
+            parts[index] = clause
+            continue
+        if negative_prefix is None:
+            parts[index] = clause
+            continue
+        if ACTIVE_MUSIC_DIRECTIVE_RE.search(clause):
+            parts[index] = clause
+            continue
+        clause = MUSIC_TERM_RE.sub("", clause)
+        clause = re.sub(
+            r"(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)\s*",
+            "",
+            clause,
+            flags=re.I,
+        )
+        clause = clause.strip(" 、，,与和且及以")
+        if clause and not re.match(
+            r"^\s*(?:禁止|不要|不得|不使用|不生成|无)",
+            clause,
+            flags=re.I,
+        ):
+            clause = negative_prefix.group(0).strip() + clause
+        parts[index] = clause
+        mentioned = True
+    cleaned = "".join(parts)
+    cleaned = re.sub(r"[、，,与和且及以]\s*(?=[；;。！？!?\n]|$)", "", cleaned)
+    cleaned = re.sub(r"([、，,])\s*[、，,]+", r"\1", cleaned)
+    return cleaned, mentioned
+
+
+def _validate_protected_dialogue_alignment(
+    obj: dict[str, Any],
+    shots: list[dict[str, Any]],
+    catalog: dict[str, dict[str, Any]],
+    *,
+    strict: bool = False,
+) -> list[dict[str, Any]]:
+    protected_rows: list[dict[str, Any]] = []
+    if isinstance(obj.get("protected_dialogue"), list):
+        protected_rows.extend(row for row in obj["protected_dialogue"] if isinstance(row, dict))
+    source_ingestion = obj.get("source_ingestion")
+    if isinstance(source_ingestion, dict) and isinstance(source_ingestion.get("protected_dialogue"), list):
+        protected_rows.extend(
+            row
+            for row in source_ingestion["protected_dialogue"]
+            if isinstance(row, dict)
+            and (strict or row.get("mapped_shot_uids") or row.get("target_shots"))
+        )
+    if not protected_rows:
+        return []
+
+    by_key: dict[str, dict[str, Any]] = {}
+    for shot in shots:
+        for key in (shot.get("镜头编号"), shot.get("shot_uid")):
+            if key not in (None, ""):
+                by_key[str(key)] = shot
+    issues: list[dict[str, Any]] = []
+    for index, row in enumerate(protected_rows, 1):
+        speaker = str(row.get("speaker") or "").strip()
+        text = str(row.get("text") or "").strip()
+        targets = row.get("mapped_shot_uids") or row.get("target_shots")
+        if isinstance(targets, list) and targets:
+            target_shots = [by_key[str(key)] for key in targets if str(key) in by_key]
+            unknown = [str(key) for key in targets if str(key) not in by_key]
+        else:
+            target_shots = shots
+            unknown = []
+        location = f"protected_dialogue[{index}]"
+        if unknown:
+            issues.append(_issue(
+                catalog,
+                "E-SOURCE-SELECT-001",
+                location,
+                f"保护对白映射到不存在的镜头：{unknown}",
+                template_gate_id="THG-05",
+            ))
+            continue
+        actual = [item for shot in target_shots for item in extract_dialogues(shot.get("画面内容"))]
+        if (speaker, text) in actual:
+            continue
+        same_text_speakers = sorted({actual_speaker for actual_speaker, actual_text in actual if actual_text == text})
+        same_speaker_texts = [actual_text for actual_speaker, actual_text in actual if actual_speaker == speaker]
+        if same_text_speakers:
+            evidence = f"保护对白说话人={speaker!r}，实际说话人={same_text_speakers}，文本与标点={text!r}"
+        elif same_speaker_texts:
+            evidence = f"保护对白必须逐字逐标点为{text!r}，{speaker!r}实际对白={same_speaker_texts}"
+        else:
+            evidence = f"保护对白未覆盖：speaker={speaker!r}, text={text!r}, 实际={actual}"
+        issues.append(_issue(
+            catalog,
+            "E-SOURCE-SELECT-001",
+            location,
+            evidence,
+            template_gate_id="THG-05",
+        ))
+    return issues
 
 
 def _missing_fields(obj: Any, fields: list[str]) -> list[str]:
@@ -1024,6 +1652,7 @@ def _validate_preventive_gates(
         "side_effect_rate_percent": None,
     }
     policy = rules.get("preventive_gate_policy", {})
+    strict_contract = isinstance(obj.get("source_lock"), dict) and obj["source_lock"].get("output_contract") == STRICT_OUTPUT_CONTRACT
     expected_profile = policy.get("profile", WORKFLOW_PROFILE)
     required = mode in {"audit", "repair", "archive"}
     evidence = obj.get("prevention_evidence")
@@ -1121,6 +1750,21 @@ def _validate_preventive_gates(
             missing = _missing_fields(row.get(label), state_fields)
             if missing:
                 issues.append(_issue(catalog, "E-CONTINUITY-001", f"scene_state:{shot_id}.{label}", f"状态向量缺字段：{missing}"))
+            prop_faults = _prop_state_faults(
+                row.get(label, {}).get("手持道具")
+                if isinstance(row.get(label), dict)
+                else None,
+                strict=strict_contract,
+            )
+            if prop_faults:
+                issues.append(_issue(
+                    catalog,
+                    "E-CONTINUITY-001",
+                    f"scene_state:{shot_id}.{label}.手持道具",
+                    "；".join(prop_faults),
+                    repair="同一道具同一时点只能有一个持有人，并明确状态；交接必须通过本镜start/end完成。",
+                    template_gate_id="THG-09",
+                ))
     previous: tuple[str, dict[str, Any]] | None = None
     for shot in shots:
         shot_id = str(shot.get("镜头编号"))
@@ -1134,8 +1778,18 @@ def _validate_preventive_gates(
             prior_end = previous_row.get("end_state", {})
             current_start = row.get("start_state", {})
             mismatches = {field: [prior_end.get(field), current_start.get(field)] for field in state_fields if prior_end.get(field) != current_start.get(field)}
-            if mismatches and is_none_value(row.get("transition_explanation")):
-                issues.append(_issue(catalog, "E-CONTINUITY-001", f"scene:{scene_id}:{previous_row.get('shot_id')}->{shot_id}", f"首尾状态不闭合：{mismatches}"))
+            prop_mismatch = "手持道具" in mismatches
+            if mismatches and (
+                prop_mismatch
+                or is_none_value(row.get("transition_explanation"))
+            ):
+                issues.append(_issue(
+                    catalog,
+                    "E-CONTINUITY-001",
+                    f"scene:{scene_id}:{previous_row.get('shot_id')}->{shot_id}",
+                    f"首尾状态不闭合：{mismatches}",
+                    template_gate_id="THG-09" if prop_mismatch else None,
+                ))
         previous = (scene_id, row)
 
     plans = evidence.get("shot_plan")
@@ -1151,6 +1805,19 @@ def _validate_preventive_gates(
         missing = _missing_fields(plan, ["core_function", "viewpoint_count", "camera_position", "main_action_stage", "transition_function"])
         if missing or _as_number(plan.get("viewpoint_count"), 99) > 1:
             issues.append(_issue(catalog, "E-SHOTLOAD-001", f"shot_plan:{shot_id}", f"缺字段={missing}; viewpoint_count={plan.get('viewpoint_count')!r}"))
+        if strict_contract:
+            camera_count = int(_as_number(plan.get("main_camera_count"), 0))
+            stage_count = int(_as_number(plan.get("main_action_stage_count"), 0))
+            if camera_count != 1 or stage_count != 1:
+                issues.append(_issue(
+                    catalog,
+                    "E-BATCH-004",
+                    f"shot_plan:{shot_id}",
+                    f"单镜必须恰好一个主机位和一个核心动作阶段；main_camera_count={camera_count}, main_action_stage_count={stage_count}",
+                    severity="fail",
+                    blocking=True,
+                    template_gate_id="THG-07",
+                ))
         if "特写" in str(shot.get("镜头类型", "")) or bool(plan.get("is_detail_shot")):
             if is_none_value(plan.get("detail_shot_function")):
                 issues.append(_issue(catalog, "E-SHOTFRAG-001", f"shot_plan:{shot_id}", "特写未说明剧情、信息或情绪功能。", severity="warning"))
@@ -1179,22 +1846,24 @@ def _validate_preventive_gates(
     if audio_missing or (isinstance(audio, dict) and "禁止" not in str(audio.get("seedance_bgm_policy"))) or (isinstance(audio, dict) and not _has_any(str(audio.get("bgm_cue_stage")), ["画面锁定后", "后期", "独立"])):
         issues.append(_issue(catalog, "E-AUDIO-STAGE-001", "prevention_evidence.audio_workflow", f"音频分层缺失或不合规：missing={audio_missing}, audio={audio!r}"))
 
-    forbidden_context_terms = policy.get("i2v_forbidden_context_terms", [])
+    forbidden_context_terms = sorted(set(policy.get("i2v_forbidden_context_terms", [])) | CROSS_SHOT_TERMS)
     independent_fields = ["空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "环境音效", "环境动态", "光影"]
     for index, shot in enumerate(shots, 1):
         location = f"shots[{index}]"
         missing = _missing_fields(shot, independent_fields)
         if missing:
             issues.append(_issue(catalog, "E-I2V-INDEP-002", location, f"紧凑母版无法空白上下文独立执行，缺字段：{missing}"))
-        master_text = " ".join(str(shot.get(field, "")) for field in independent_fields)
+        master_text = " ".join(str(shot.get(field, "")) for field in EXECUTION_SHOT_FIELDS)
         context_hits = [term for term in forbidden_context_terms if term in master_text]
         if context_hits:
             metrics["cross_context_term_count"] += len(context_hits)
-            issues.append(_issue(catalog, "E-I2V-INDEP-001", location, f"跨上下文代指：{context_hits}"))
-        prompt_without_bans = re.sub(r"(?:禁止|不要|不使用|无)(?:任何)?(?:BGM|背景音乐)", "", master_text, flags=re.I)
-        if re.search(r"加入\s*BGM|播放\s*BGM|配上\s*BGM|背景音乐(?:响起|播放|进入|渐入)", prompt_without_bans, flags=re.I):
-            issues.append(_issue(catalog, "E-AUDIO-STAGE-001", f"{location}.画面内容", "正式分镜母版要求在生成阶段加入BGM。"))
-
+            issues.append(_issue(
+                catalog,
+                "E-I2V-INDEP-001",
+                location,
+                f"跨上下文代指：{context_hits}",
+                template_gate_id="THG-04",
+            ))
     repair_history = evidence.get("repair_history")
     if mode == "repair" and (not isinstance(repair_history, list) or not repair_history):
         issues.append(_issue(catalog, "E-GATE-001", "prevention_evidence.repair_history", "repair模式必须记录至少一轮修正证据。"))
@@ -1382,6 +2051,22 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         except (TypeError, ValueError):
             cumulative = 0.0
             issues.append(_issue(catalog, "E-STAT-001", f"{location}.累计时长", "累计时长不是数字。"))
+        if abs(duration * 10 - round(duration * 10)) > 1e-8:
+            issues.append(_issue(
+                catalog,
+                "E-STAT-001",
+                f"{location}.时长",
+                f"镜头时长必须使用0.1秒粒度，当前={duration:g}s",
+                template_gate_id="THG-11",
+            ))
+        if abs(cumulative * 10 - round(cumulative * 10)) > 1e-8:
+            issues.append(_issue(
+                catalog,
+                "E-STAT-001",
+                f"{location}.累计时长",
+                f"累计时长必须使用0.1秒粒度，当前={cumulative:g}s",
+                template_gate_id="THG-11",
+            ))
         if strict_contract:
             strict_duration_sum += duration
             if ep_match:
@@ -1408,7 +2093,82 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                 f"{location}.画面内容",
                 "；".join(timeline_faults),
             ))
+        for field in EXECUTION_SHOT_FIELDS:
+            field_text = str(shot.get(field, ""))
+            bgm_match = BGM_TOKEN_RE.search(field_text)
+            active_music = _active_music_directive(field_text)
+            if bgm_match or active_music:
+                evidence = (
+                    f"单镜执行字段禁止出现BGM字面量，命中字段={field!r}"
+                    if bgm_match
+                    else f"单镜执行字段禁止主动配乐指令：{active_music!r}"
+                )
+                issues.append(_issue(
+                    catalog,
+                    "E-AUDIO-STAGE-001",
+                    f"{location}.{field}",
+                    evidence,
+                    repair="改写为‘禁止额外配乐’，音乐Cue仅在画面锁定后独立处理。",
+                    template_gate_id="THG-AUDIO",
+                ))
+            elif (
+                field == "生成限制"
+                and MUSIC_TERM_RE.search(field_text)
+                and "禁止额外配乐" not in field_text
+            ):
+                issues.append(_issue(
+                    catalog,
+                    "E-AUDIO-STAGE-001",
+                    f"{location}.{field}",
+                    "单镜负面音乐限制必须统一逐字写为‘禁止额外配乐’。",
+                    repair="把禁止/不得/无BGM或背景音乐等写法统一为‘禁止额外配乐’。",
+                    template_gate_id="THG-AUDIO",
+                ))
+        transition_faults = _transition_duplicate_faults(shot.get("切镜/转场提示词"))
+        if transition_faults:
+            issues.append(_issue(
+                catalog,
+                "E-DUPLICATE-GENERATION-001",
+                f"{location}.切镜/转场提示词",
+                "；".join(transition_faults),
+                repair="删除空分隔符并仅保留一次确定性切镜短句。",
+                template_gate_id="THG-02",
+            ))
         if strict_contract:
+            generation_limits = str(shot.get("生成限制", ""))
+            aspect_occurrences = len(REQUIRED_ASPECT_RATIO_RE.findall(generation_limits))
+            aspect_conflicts = sorted({
+                match.group(0)
+                for match in ANY_ASPECT_TOKEN_RE.finditer(generation_limits)
+                if (
+                    match.group("width") != "9"
+                    or match.group("separator") not in {":", "："}
+                    or match.group("height") != "16"
+                )
+            })
+            aspect_faults = []
+            if aspect_occurrences != 1:
+                aspect_faults.append(
+                    f"逐字短语{REQUIRED_ASPECT_RATIO_PHRASE!r}应恰好出现1次，当前={aspect_occurrences}"
+                )
+            if aspect_conflicts:
+                aspect_faults.append(f"存在冲突画幅={aspect_conflicts}")
+            screen_terms = [
+                term
+                for term in ("横屏", "方屏")
+                if term in generation_limits
+            ]
+            if screen_terms:
+                aspect_faults.append(f"出现冲突画面方向={screen_terms}")
+            if aspect_faults:
+                issues.append(_issue(
+                    catalog,
+                    "E-I2V-INDEP-002",
+                    f"{location}.生成限制",
+                    "；".join(aspect_faults),
+                    repair=f"只保留一次{REQUIRED_ASPECT_RATIO_PHRASE}并删除横屏或其他比例。",
+                    template_gate_id="THG-01",
+                ))
             legacy_dialogue = LEGACY_DIALOGUE_TAG_RE.search(image_content)
             if legacy_dialogue:
                 issues.append(_issue(
@@ -1424,7 +2184,84 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                     catalog,
                     "E-DEPRECATED-FIELD-001",
                     location,
-                    f"R10-SPC-1提示词仍含已删除的9:16固定短语：{forbidden_prompt.group(0)!r}",
+                    f"R10-SPC-1提示词仍含已删除的冗长9:16固定短语：{forbidden_prompt.group(0)!r}",
+                ))
+            visible_characters = _visible_character_names(visible)
+            if len(visible_characters) > 3:
+                issues.append(_issue(
+                    catalog,
+                    "E-VIS-001",
+                    f"{location}.可见主体",
+                    f"单镜可识别主要人物最多3人，当前={len(visible_characters)}：{visible_characters}",
+                    repair="拆镜或把非核心普通人物降为匿名背景生态。",
+                    template_gate_id="THG-06",
+                ))
+            start_faults = _start_result_faults(shot.get("起始状态"), image_content)
+            if start_faults:
+                issues.append(_issue(
+                    catalog,
+                    "E-CONTINUITY-001",
+                    f"{location}.起始状态/画面内容",
+                    "；".join(start_faults),
+                    repair="把起始状态回退到动作发生前，并将完成结果只保留在镜尾状态。",
+                    template_gate_id="THG-08",
+                ))
+            if MULTI_CAMERA_RE.search(f"{shot.get('机位', '')} {shot.get('运镜方式', '')} {image_content}"):
+                issues.append(_issue(
+                    catalog,
+                    "E-BATCH-004",
+                    f"{location}.机位/运镜方式/画面内容",
+                    "单镜出现第二机位、另一机位或隐形切机位。",
+                    severity="fail",
+                    blocking=True,
+                    template_gate_id="THG-07",
+                ))
+            try:
+                project_formal_master(shot)
+            except ValueError as exc:
+                message = str(exc)
+                if "aspect_ratio" in message:
+                    code, gate = "E-I2V-INDEP-002", "THG-01"
+                elif "audio_contract" in message:
+                    code, gate = "E-AUDIO-STAGE-001", "THG-AUDIO"
+                elif "transition_contract" in message:
+                    code, gate = "E-DUPLICATE-GENERATION-001", "THG-02"
+                elif "timing_precision" in message:
+                    code, gate = "E-STAT-001", "THG-11"
+                else:
+                    code, gate = "E-INTEGRATION-001", "THG-11"
+                issues.append(_issue(
+                    catalog,
+                    code,
+                    f"{location}.正式分镜母版",
+                    f"确定性正式母版投影失败：{message}",
+                    template_gate_id=gate,
+                ))
+            try:
+                gpt_projection = project_gpt_keyframe(shot)
+            except ValueError as exc:
+                message = str(exc)
+                if "aspect_ratio" in message:
+                    code, gate = "E-I2V-INDEP-002", "THG-01"
+                else:
+                    code, gate = "E-JIMENG-TIMING-001", "THG-03"
+                issues.append(_issue(
+                    catalog,
+                    code,
+                    f"{location}.GPT关键帧生成指令",
+                    f"确定性静态关键帧投影失败：{message}",
+                    template_gate_id=gate,
+                ))
+                gpt_projection = ""
+            keyframe_hits = _keyframe_forbidden_hits(gpt_projection)
+            if keyframe_hits:
+                issues.append(_issue(
+                    catalog,
+                    "E-JIMENG-TIMING-001",
+                    f"{location}.GPT关键帧生成指令",
+                    f"静态关键帧投影命中动态、时间、对白或声音指令：{keyframe_hits}",
+                    repair="只从静态起始状态、静态机位、光影、锚点和9:16生成限制重投影。",
+                    template_gate_id="THG-03",
                 ))
         invisible_context = _has_any(f"{shot_type} {visible}", INVISIBLE_SHOT_TERMS) and not _has_any(visible, FACE_VISIBLE_TERMS)
         if invisible_context:
@@ -1541,6 +2378,35 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                 if len(visible_people) > 1 and not re.search(r"错开|晚约|随后|不抢反应|先.{0,20}再|依次|晚半拍|延迟", image_content):
                     issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "多人对白镜未写听者错峰反应。"))
 
+        if strict_contract:
+            action_seconds, action_units = _action_capacity_seconds(image_content)
+            dialogue_seconds = cjk_len(dialogue) / 2.8 + _pause_budget(dialogue) if dialogue_rows else 0.0
+            pre_speech_breath_seconds = 0.2 if dialogue_rows else 0.0
+            listener_seconds = 0.3 if dialogue_rows and len(_visible_character_names(visible)) > 1 else 0.0
+            end_hold_seconds = 0.2
+            required_seconds = (
+                dialogue_seconds
+                + pre_speech_breath_seconds
+                + action_seconds
+                + listener_seconds
+                + end_hold_seconds
+            )
+            if duration + 1e-9 < required_seconds:
+                issues.append(_issue(
+                    catalog,
+                    "E-BATCH-003",
+                    f"{location}.时长/画面内容",
+                    "镜头容量不足："
+                    f"对白={dialogue_seconds:.2f}s，说话前呼吸={pre_speech_breath_seconds:.2f}s，"
+                    f"动作={action_seconds:.2f}s({action_units})，"
+                    f"听者反应={listener_seconds:.2f}s，镜尾稳定={end_hold_seconds:.2f}s，"
+                    f"最低={required_seconds:.2f}s，当前={duration:.2f}s。",
+                    repair="延长镜头、删除非核心动作或按原子动作阶段拆镜。",
+                    severity="fail",
+                    blocking=True,
+                    template_gate_id="THG-10",
+                ))
+
         psych = str(shot.get("心理音轨", ""))
         if not is_none_value(psych):
             safety = f"{psych} {shot.get('生成限制', '')} {image_content}"
@@ -1552,6 +2418,13 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         scene_id = str(shot.get("场景连续性ID", ""))
         if scene_id:
             scene_groups[scene_id].append((index, shot))
+
+    issues.extend(_validate_protected_dialogue_alignment(
+        obj,
+        normalized_shots,
+        catalog,
+        strict=strict_contract,
+    ))
 
     for scene_id, items in scene_groups.items():
         if len(items) < 2:
@@ -1567,10 +2440,9 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
     if normalized_shots and obj.get("total_duration") is not None:
         try:
             expected_total = float(obj.get("total_duration"))
-            actual_total = strict_duration_sum if strict_contract else float(normalized_shots[-1].get("累计时长", 0))
+            actual_total = sum(_as_number(shot.get("时长")) for shot in normalized_shots)
             if abs(expected_total - actual_total) > 0.01:
-                basis = "全部镜头时长之和" if strict_contract else "末镜累计"
-                issues.append(_issue(catalog, "E-STAT-001", "total_duration", f"总时长{expected_total}与{basis}{actual_total}不一致。"))
+                issues.append(_issue(catalog, "E-STAT-001", "total_duration", f"总时长{expected_total}与全部镜头时长之和{actual_total}不一致。"))
         except (TypeError, ValueError):
             issues.append(_issue(catalog, "E-STAT-001", "total_duration", "总时长不是数字。"))
 

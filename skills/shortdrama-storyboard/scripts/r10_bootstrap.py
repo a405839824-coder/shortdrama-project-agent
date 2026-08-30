@@ -149,7 +149,6 @@ def verify_bundled(self_test: bool) -> dict:
         refs / "project_agent_schema.json",
         refs / "jimeng_timing_policy.md",
         refs / "strict_prompt_contract.md",
-        refs / "no_api_performance_diagnostics.md",
         refs / "novel_to_storyboard_intake.md",
         refs / "public_scene_ecology.md",
         root / "scripts" / "validate_storyboard.py",
@@ -224,7 +223,7 @@ def verify_bundled(self_test: bool) -> dict:
         "required_evidence_blocks": 10,
         "state_vector_fields": 7,
         "performance_chain_fields": 7,
-        "compact_master_execution_evidence": 10,
+        "compact_master_execution_evidence": 11,
         "audit_layers": 8,
     }
     errors = []
