@@ -242,8 +242,8 @@ class CandidatePublicationFaultTests(unittest.IsolatedAsyncioTestCase):
         identities = read["data"]["shot_identity_manifest"]["shot_uids"]
         replacement_shot = copy.deepcopy(storyboard["shots"][1])
         replacement_shot["画面内容"] = (
-            "[0.0–0.8s] 女主在原位停步；[0.8–3.3s] 她确认桌上信件，"
-            "因果、认知与表演连续，本镜无对白；[3.3–4.0s] 她保持视线与稳定呼吸。"
+            "【0.0—0.8秒】女主在原位停步；【0.8—3.3秒】她确认桌上信件，"
+            "因果、认知与表演连续，本镜无对白；【3.3—4.0秒】她保持视线与稳定呼吸。"
         )
         performance = copy.deepcopy(
             storyboard["prevention_evidence"]["performance_chains"][1]
@@ -323,14 +323,14 @@ class CandidatePublicationFaultTests(unittest.IsolatedAsyncioTestCase):
             "operations": [
                 {
                     "op": "replace_field",
-                    "shot_id": "S001",
+                    "shot_id": "EP01-001",
                     "field": "光源来源",
                     "value": "窗纸透入的日光",
                     "issue_ids": ["E-TEMPLATE-008"],
                     "reason": "修复独立审计确认的缺失光源",
                 }
             ],
-            "impact_scope": ["S001"],
+            "impact_scope": ["EP01-001"],
             "file_name": "patch故障候选.xlsx",
         }
 
