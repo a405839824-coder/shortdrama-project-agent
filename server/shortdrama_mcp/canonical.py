@@ -82,6 +82,7 @@ LEGACY_DERIVED_TOP_LEVEL_FIELDS = frozenset(
         "生成批次",
         "mother_template_columns",
         "formal_mother_template_rows",
+        "正式分镜母版",
         "正式分镜母版·字段合并",
         "GPT关键帧生成指令",
         "Seedance 2.5独立执行提示词",
@@ -120,6 +121,7 @@ LEGACY_REMOVED_SHOT_FIELDS = frozenset(
 )
 LEGACY_DERIVED_SHOT_FIELDS = frozenset(
     {
+        "正式分镜母版",
         "正式分镜母版·字段合并",
         "GPT关键帧生成指令",
         "Seedance 2.5独立执行提示词",
@@ -395,7 +397,8 @@ def compact_storyboard_canonical(
     compact_shots = result.get("shots")
     if not isinstance(compact_shots, list):
         raise ValueError("compact storyboard requires a shots array")
-    cumulative = 0.0
+    cumulative_by_episode: dict[str, float] = {}
+    total_duration = 0.0
     for index, compact in enumerate(compact_shots):
         if not isinstance(compact, dict):
             raise ValueError(f"compact storyboard shot[{index}] must be an object")
@@ -409,12 +412,22 @@ def compact_storyboard_canonical(
             raise ValueError(
                 f"compact storyboard shot[{index}].时长 must be finite and non-negative"
             )
-        cumulative = round(cumulative + duration, 3)
+        shot_id = str(compact.get("镜头编号") or "").strip()
+        episode_key = str(compact.get("episode_id") or "").strip()
+        if not episode_key and shot_id.startswith("EP") and "-" in shot_id:
+            episode_key = shot_id.split("-", 1)[0]
+        if not episode_key:
+            episode_key = "__legacy_single_episode__"
+        cumulative = round(cumulative_by_episode.get(episode_key, 0.0) + duration, 3)
+        cumulative_by_episode[episode_key] = cumulative
+        total_duration = round(total_duration + duration, 3)
         compact["累计时长"] = int(cumulative) if cumulative.is_integer() else cumulative
 
     result["schema_version"] = COMPACT_SCHEMA_VERSION
     result["schema_profile"] = COMPACT_SCHEMA_PROFILE
-    result["total_duration"] = int(cumulative) if cumulative.is_integer() else cumulative
+    result["total_duration"] = (
+        int(total_duration) if total_duration.is_integer() else total_duration
+    )
     successor = {
         field: result[field]
         for field in result
