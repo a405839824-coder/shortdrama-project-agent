@@ -6,7 +6,8 @@ import re
 from typing import Any, Iterable
 
 
-FORMAL_MERGED_FIELD = "正式分镜母版·字段合并"
+FORMAL_MERGED_FIELD = "正式分镜母版"
+LEGACY_FORMAL_MERGED_FIELD = "正式分镜母版·字段合并"
 GPT_KEYFRAME_FIELD = "GPT关键帧生成指令"
 
 # Kept as an import-compatible legacy symbol. Compact-master canonicals never
@@ -130,6 +131,7 @@ LEGACY_STANDALONE_FIELDS = {
 
 PERSISTED_DERIVED_FIELDS = {
     FORMAL_MERGED_FIELD,
+    LEGACY_FORMAL_MERGED_FIELD,
     GPT_KEYFRAME_FIELD,
     SEEDANCE_EXECUTION_FIELD,
     "Seedance 2.5独立执行分镜",
@@ -483,6 +485,38 @@ def _visual_only_picture_content(value: str) -> str:
     return _visual_only_text(value, strip_dialogue=True)
 
 
+def _visual_only_clauses(value: Any) -> str:
+    """Remove timing, dialogue and audio clauses from a static projection."""
+
+    result = _TIMECODE_RE.sub("", _text(value))
+    result = re.sub(
+        r"[\u3400-\u9fffA-Za-z·]{1,20}说道[：:]?\s*[“\"][^”\"\n]+[”\"]",
+        "",
+        result,
+    )
+    result = re.sub(
+        r"【(?!\d+\.\d—|参考图锚点)[^】\n]{1,20}】\s*[“\"]?[^。！？!?；;\n]*[”\"]?",
+        "",
+        result,
+    )
+    forbidden = re.compile(
+        r"对白|台词|说道|口型|音色|音量|语速|重音|尾音|环境音|声源|"
+        r"脚步|衣料|呼吸|听见|画外音|配乐|BGM|鸟声|鸟鸣|虫鸣|风声|"
+        r"水声|声线|声音|声响|发声|开口|问句|陈述句|感叹句|时间码"
+    )
+    visible: list[str] = []
+    for major in re.split(r"[；;\n]", result):
+        minor_visible = []
+        for minor in re.split(r"[，,、]|并伴随|同时伴随|伴随", major):
+            clause = minor.strip(" 。；;")
+            if not clause or forbidden.search(clause):
+                continue
+            minor_visible.append(clause)
+        if minor_visible:
+            visible.append("，".join(minor_visible))
+    return "；".join(visible).strip("；。 ")
+
+
 def compile_formal_merged_field(
     shot: dict[str, Any],
     *,
@@ -501,14 +535,19 @@ def compile_formal_merged_field(
         timing = f"（{duration}；累计{cumulative}）"
     elif duration:
         timing = f"（{duration}）"
-    lines = [f"镜头序号：{shot_id}{timing}" if shot_id else "镜头序号："]
-    function_scene = _function_scene_cell(compact)
-    if function_scene:
-        lines.append(function_scene)
-    body = _labeled_lines(compact, FORMAL_MERGED_ATOMIC_FIELDS)
-    if body:
-        lines.append(body)
-    return "\n".join(lines)
+    paragraphs = [
+        f"镜头序号：{shot_id}{timing}" if shot_id else "镜头序号：",
+        (
+            f"镜头类型：{_text(compact.get('镜头类型'))}"
+            f"｜可见主体：{_text(compact.get('可见主体'))}"
+        ),
+    ]
+    paragraphs.extend(
+        f"{field}：{_text(compact.get(field))}"
+        for field in FORMAL_MERGED_ATOMIC_FIELDS
+        if field not in {"镜头类型", "可见主体"}
+    )
+    return "\n\n".join(paragraphs)
 
 
 def compile_gpt_keyframe_instruction(
@@ -521,18 +560,28 @@ def compile_gpt_keyframe_instruction(
     if not isinstance(shot, dict):
         raise ValueError("materialization_shot_invalid: shot must be an object")
     compact = shot if assume_compact else migrate_legacy_shot(shot)
-    return _labeled_lines(
-        compact,
-        GPT_KEYFRAME_ATOMIC_FIELDS,
-        heading="GPT关键帧生成指令",
-        transforms={
-            field: (
-                _visual_only_picture_content
-                if field == "画面内容"
-                else _visual_only_text
-            )
-            for field in GPT_KEYFRAME_ATOMIC_FIELDS
-        },
+    start_state = _visual_only_clauses(compact.get("起始状态")) or (
+        "人物保持本镜开场的可见站位、朝向、姿态与道具状态"
+    )
+    environment = _visual_only_clauses(compact.get("环境动态")) or (
+        "场景内可见物保持真实、克制的自然状态"
+    )
+    anchor = _text(compact.get("参考图锚定")) or "无"
+    return (
+        "真人古装短剧，真实摄影机拍摄质感；"
+        f"镜头类型与主体：{_text(compact.get('镜头类型'))}，"
+        f"{_text(compact.get('可见主体'))}；"
+        f"空间站位：{_visual_only_clauses(compact.get('空间站位描述'))}；"
+        f"定格状态：{start_state}；"
+        f"摄影机：{_visual_only_clauses(compact.get('机位'))}；"
+        f"光影：{_visual_only_clauses(compact.get('光影'))}；"
+        f"光源来源：{_visual_only_clauses(compact.get('光源来源'))}；"
+        f"光源方向：{_visual_only_clauses(compact.get('光源方向'))}；"
+        f"色彩：{_visual_only_clauses(compact.get('色温倾向'))}；"
+        f"环境可见状态：{environment}；"
+        f"参考图锚定：{_visual_only_clauses(anchor)}；"
+        "单一稳定视觉时刻，禁止字幕、水印、现代物件、人物看镜头、"
+        "复制脸、上下黑边、无来源光、重HDR、塑料皮肤与海报摆拍。"
     )
 
 
