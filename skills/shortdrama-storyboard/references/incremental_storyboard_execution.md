@@ -92,7 +92,7 @@ Outside the authorized semantic scope, every atomic shot hash must remain identi
 
 For every delta replacement, exact dialogue text, punctuation, order/segmentation, and speaker identity must match the base. Any addition, deletion, rewrite, reorder, split/merge, or speaker reassignment requires the full route for the complete affected scene or episode so source mapping, cognition, protected dialogue, performance chains, and coverage can be rebuilt together. Within an unchanged shot identity and shot count, visual action, expression, camera/movement, listener reaction, delivery that does not change dialogue or cognition, and other non-cognitive execution facts may use delta only when the caller supplies fresh complete shot-bound evidence for every affected atom. `音色` remains independent. Psychological audio remains on the full route because the delta contract has no shot-keyed cognition proof.
 
-For an eligible same-identity replacement, the 0.5.0 service may deterministically change only cumulative duration, total duration, formula/statistics results, the exact ten-column workbook projection, and directly redundant shot-plan bindings. The canonical stores neither `正式分镜母版·字段合并` nor `GPT关键帧生成指令`; they are export-only projections. It also stores no `batches`, Seedance text, Seedance column, or generated-batch sheet. Dialogue/speaker changes and insert, delete, move, split, merge, or renumber operations use the full route. A computed change does not authorize unrelated story, dialogue, cognition, performance, camera, sound, lighting or source-mapping content.
+For an eligible same-identity replacement, the 0.5.0 service may deterministically change only episode-local cumulative duration, batch total duration, formula/statistics results, the exact R10-SPC-1 ten-column workbook projection, and directly redundant shot-plan bindings. The canonical stores neither `正式分镜母版` nor `GPT关键帧生成指令`; they are export-only projections. It also stores no `batches`, Seedance text, Seedance column, or generated-batch sheet. Dialogue/speaker changes and insert, delete, move, split, merge, or renumber operations use the full route. A computed change does not authorize unrelated story, dialogue, cognition, performance, camera, sound, lighting or source-mapping content.
 
 ## Store atoms once and project only at export
 
@@ -100,14 +100,14 @@ Generate and merge unique semantic information once. Do not start a delayed/back
 
 Each shot uses exactly 27 atoms in this order: `镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`.
 
-`画面内容` is the sole atom for visible action, performance, exact dialogue, six-dimensional delivery, punctuation effect, listener reaction, breath/end state and optional Seedance 2.5 single-shot timing stages. `空间站位描述`, `起始状态`, and `音色` remain separate. `光影`, `光源来源`, `光源方向`, and `色温倾向` are four mandatory independent atoms. The retired standalone fields are forbidden on new writes.
+`画面内容` is the sole atom for visible action, performance, exact dialogue, six-dimensional delivery, punctuation effect, listener reaction, breath/end state and the three required R10-SPC-1 Seedance 2.5 single-shot timing stages. `空间站位描述`, `起始状态`, and `音色` remain separate. `光影`, `光源来源`, `光源方向`, and `色温倾向` are four mandatory independent atoms; color temperature is qualitative and contains no Kelvin/K value, while source and direction contain no alternative-choice wording. The retired standalone fields are forbidden on new writes.
 
 The 0.5.0 deterministic outputs are limited to cumulative time, total duration, formulas/statistics, and two export-only projections:
 
-- `正式分镜母版·字段合并`, the only blank-context executable single-shot master;
+- `正式分镜母版`, the only blank-context executable single-shot master, beginning with the exact EP ID/duration/cumulative line and paragraph order defined by `strict_prompt_contract.md`;
 - `GPT关键帧生成指令`, a visual-only projection with timing, dialogue, lip-sync and audio instructions removed.
 
-The workbook projection has exactly ten columns: `分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版·字段合并｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`. No third long-text projection exists.
+The workbook projection has exactly ten columns: `分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`. No third long-text projection exists. New display IDs use `EP##-###`; cumulative time resets at each episode boundary while batch total duration remains the sum of all shot durations.
 
 The exporter must not invent or reinterpret plot, dialogue, character knowledge, motivation, action, camera intent, performance, sound source, lighting, or continuity. If a required creative fact is absent, export fails and returns the task to semantic generation. Production, audit, repair, cache warm-up and background workers must not pre-generate or persist Seedance prompts or batches.
 
