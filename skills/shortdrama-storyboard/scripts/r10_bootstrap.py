@@ -149,6 +149,7 @@ def verify_bundled(self_test: bool) -> dict:
         refs / "project_agent_schema.json",
         refs / "jimeng_timing_policy.md",
         refs / "strict_prompt_contract.md",
+        refs / "no_api_performance_diagnostics.md",
         refs / "novel_to_storyboard_intake.md",
         refs / "public_scene_ecology.md",
         root / "scripts" / "validate_storyboard.py",

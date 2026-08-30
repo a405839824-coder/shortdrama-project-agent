@@ -105,6 +105,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "只有独立审计失败且用户明确授权后，独立repair窗口才可使用签名修复包；非结构字段可用commit_storyboard_patch局部修复，边界、认知、原文、编号和时长变化必须执行绑定修复包的完整重建。"
             "修复后仍执行完整生产校验并交回原独立审计窗口复核；最多三轮，只有原审计窗口确认零残留、零新增才可称通过。"
             "正式归档必须同时具备精确版本的独立审计通过证书和signoff_task人工签核。"
+            "只有用户要求排查原生ChatGPT耗时时才启用mark_performance_stage；按五个固定阶段记录"
+            "服务端收件时间，不上传提示词、原文、对白或隐藏思考，不改变分镜质量字段。"
         ),
         token_verifier=token_verifier,
         auth=auth_settings,
@@ -137,6 +139,72 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     )
     async def get_agent_status(project_id: str | None = None, full_self_test: bool = False) -> ToolResponse:
         return service.agent_status(request_namespace(settings), project_id, full_self_test)
+
+    @server.tool(
+        name="mark_performance_stage",
+        title="记录无API性能诊断阶段",
+        description=(
+            "仅在用户明确要求排查ChatGPT原生窗口耗时时调用。依次记录task_started、inputs_ready、"
+            "plan_ready、canonical_ready、delivery_ready五个服务端收件检查点，并把已持久化插件trace"
+            "与同一项目/角色关联，区分调用端区间和插件服务端时间。start返回diagnostic_run_id；"
+            "中间使用mark；最后使用finish并返回归因报告。禁止提交原文、提示词、对白、分镜正文、"
+            "隐藏思考或调用端自报时间；诊断不会生成Seedance批次，也不会删减逐镜字段。"
+        ),
+        annotations=_annotations(read_only=False),
+        meta=meta("正在记录性能阶段…", "性能阶段已记录"),
+        structured_output=True,
+    )
+    async def mark_performance_stage(
+        project_id: str,
+        work_order_id: str,
+        action: Literal["start", "mark", "finish"],
+        stage: Literal[
+            "task_started",
+            "inputs_ready",
+            "plan_ready",
+            "canonical_ready",
+            "delivery_ready",
+        ],
+        ctx: Context,
+        diagnostic_run_id: str | None = None,
+        reasoning_mode: Literal[
+            "light", "medium", "high", "extra_high", "max", "unknown"
+        ] = "unknown",
+        window_type: Literal["fresh", "continued", "unknown"] = "unknown",
+        route: Literal[
+            "full_rebuild",
+            "episode_delta",
+            "first_independent_audit",
+            "repeat_audit",
+            "audit_repair",
+            "unknown",
+        ] = "unknown",
+        episode_count: Annotated[int, Field(ge=0, le=1_000)] = 0,
+        expected_shot_count: Annotated[int, Field(ge=0, le=100_000)] = 0,
+        observed_shot_count: Annotated[int, Field(ge=0, le=100_000)] = 0,
+        observed_character_count: Annotated[int, Field(ge=0, le=100_000_000)] = 0,
+        related_trace_ids: Annotated[list[str], Field(max_length=16)] | None = None,
+        related_artifact_id: str | None = None,
+    ) -> ToolResponse:
+        return service.mark_performance_stage(
+            request_namespace(settings),
+            project_id=project_id,
+            work_order_id=work_order_id,
+            action=action,
+            stage=stage,
+            diagnostic_run_id=diagnostic_run_id,
+            reasoning_mode=reasoning_mode,
+            window_type=window_type,
+            route=route,
+            episode_count=episode_count,
+            expected_shot_count=expected_shot_count,
+            observed_shot_count=observed_shot_count,
+            observed_character_count=observed_character_count,
+            related_trace_ids=related_trace_ids,
+            related_artifact_id=related_artifact_id,
+            request_session_id=_window_session_id(ctx),
+        )
+
 
     @server.tool(
         name="create_project",

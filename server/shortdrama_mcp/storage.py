@@ -19,7 +19,13 @@ from filelock import FileLock
 
 
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-PROJECT_RECORD_KINDS = {"handoffs", "certificates", "telemetry", "repair_packages"}
+PROJECT_RECORD_KINDS = {
+    "handoffs",
+    "certificates",
+    "telemetry",
+    "diagnostics",
+    "repair_packages",
+}
 DEFAULT_SUCCESSOR_LEASE_SECONDS = 300
 MAX_SUCCESSOR_LEASE_SECONDS = 86_400
 MAX_SUCCESSOR_TRANSACTION_HISTORY = 32
@@ -498,6 +504,37 @@ class ProjectStore:
             raise ValueError(f"invalid {clean_kind} record: {clean_id}")
         self._verify_record_integrity(value, record_id=clean_id)
         return value
+
+    @contextlib.contextmanager
+    def mutate_project_record(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        kind: str,
+        record_id: str,
+    ) -> Iterator[dict[str, Any]]:
+        """Atomically mutate one signed project record.
+
+        Diagnostic checkpoints are advanced by separate MCP calls. Keeping
+        the read, sequence check, signature refresh, and write under the same
+        project lock prevents concurrent windows from appending two different
+        stages to the same run.
+        """
+
+        clean_kind = self._project_record_kind(kind)
+        clean_id = safe_id(record_id, "record_id")
+        path = self.project_dir(namespace, project_id) / clean_kind / f"{clean_id}.json"
+        with self.lock(f"{namespace}-{project_id}"):
+            if not path.is_file():
+                raise ValueError(f"unknown {clean_kind} record_id: {clean_id}")
+            value = self.read_json(path)
+            if not isinstance(value, dict) or value.get("project_id") != project_id:
+                raise ValueError(f"invalid {clean_kind} record: {clean_id}")
+            self._verify_record_integrity(value, record_id=clean_id)
+            yield value
+            value["integrity_hmac"] = self._record_integrity_hmac(value)
+            self.atomic_write_json(path, value)
 
     def list_project_records(
         self,

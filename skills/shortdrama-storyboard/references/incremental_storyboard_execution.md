@@ -148,12 +148,12 @@ Production preflight, semantic preflight, compact canonicalization/export succes
 
 Every formal production, delta, audit, and repair result must return a `trace_id` that resolves to an immutable persisted trace for the same project, work order, role binding, audit cycle, artifact, and fingerprints. A completed optimized workflow must expose `fast_path_evidence` that resolves both the production trace and the independent-audit trace against the same canonical and handoff/certificate chain. Missing either trace is `fast_path_incomplete`.
 
-Every plugin trace declares `measurement_scope=server_only`: it measures MCP/service execution but not the model's reading, reasoning, or generation time. End-to-end time may be compared only in a separate caller/orchestrator replay record; it is not written into or presented as a plugin stage trace.
+Every plugin trace declares `measurement_scope=server_only`: it measures MCP/service execution but not the model's reading, reasoning, or generation time. When the user explicitly requests a native ChatGPT no-API timing investigation, plugin 0.5.3 may additionally record the five ordered `mark_performance_stage` checkpoints defined in `no_api_performance_diagnostics.md`. That separate signed record declares `measurement_scope=tool_bracketed_chat`; it brackets work between tool calls but is not exact user-click-to-render end-to-end telemetry and never changes a plugin stage trace.
 
 Record applicable stages separately:
 
 - bootstrap/status and source bulk read;
-- planning and semantic generation;
+- model planning and semantic generation remain unmeasured in ordinary plugin traces; in an explicit diagnostic they appear only as the `storyboard_planning` and `canonical_authorship` gaps between server-received markers;
 - delta compare-and-set and merge;
 - compact merge and deterministic export projection;
 - full validation and impact regression;
@@ -162,7 +162,7 @@ Record applicable stages separately:
 
 For each stage, record only server-observed wall duration and payload, affected/total shot, preserved semantic-unit, export-projection, legacy-generation-call and cache metrics actually measured. New routes must report `legacy_generation_calls=0`, `seedance_batches_generated=0`, and `model_authored_derived_chars=0`. Never infer model tool-call count, source characters, generation duration or retries from service time. Do not double-count parallel child durations in parent wall time.
 
-List any unmeasured stages. A `server_only` trace may support a claim about tool latency, payload reduction, or deterministic work avoided; it cannot support a claim about total ChatGPT turn time. Do not promise a percentage reduction until comparable traces exist for the same source, scope, rules, service tier, and final output contract.
+List any unmeasured stages. A `server_only` trace may support a claim about tool latency, payload reduction, or deterministic work avoided; it cannot support a claim about total ChatGPT turn time. A `tool_bracketed_chat` diagnostic may identify the largest observed interval but cannot isolate provider queueing, hidden reasoning, token generation rate, client transport, or final rendering. Do not promise a percentage reduction until comparable traces exist for the same source, scope, rules, service tier, window type, reasoning mode declaration, cache state, and final output contract.
 
 Trace data must never contain source prose, dialogue, prompt bodies, private download URLs, credentials, OAuth subjects, or other user-identifying content.
 

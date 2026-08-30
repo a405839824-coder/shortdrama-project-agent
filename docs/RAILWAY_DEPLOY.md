@@ -67,7 +67,7 @@ railway up
 
 1. ChatGPT → Settings → Apps & Connectors → Advanced settings，打开 Developer mode。
 2. 创建自定义 MCP 连接，URL 为 `https://你的服务.up.railway.app/mcp`。
-3. 完成 Auth0 登录，刷新连接，确认发现 14 个工具。
+3. 完成 Auth0 登录，刷新连接，确认发现 15 个工具。
 4. 复制浏览器地址中的 `plugin_asdk_app...` ID，运行：
 
 ```bash

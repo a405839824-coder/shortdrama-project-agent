@@ -61,9 +61,10 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_contracts_and_file_params(self) -> None:
         tools = await self.server.list_tools()
-        self.assertEqual(len(tools), 14)
+        self.assertEqual(len(tools), 15)
         by_name = {tool.name: tool.model_dump(by_alias=True, exclude_none=True) for tool in tools}
         self.assertEqual(by_name["get_agent_status"]["annotations"]["readOnlyHint"], True)
+        self.assertEqual(by_name["mark_performance_stage"]["annotations"]["readOnlyHint"], False)
         self.assertEqual(by_name["audit_storyboard"]["annotations"]["readOnlyHint"], False)
         file_tool = by_name["import_source_file"]
         self.assertEqual(file_tool["_meta"]["openai/fileParams"], ["file"])
