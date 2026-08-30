@@ -104,7 +104,7 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
             mode="audit_and_repair",
             authorization="explicit_execute",
             session_id=session_id,
-            targets=["S001"],
+            targets=["EP01-001"],
             label=label,
         )
 
@@ -185,7 +185,7 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
         return [
             {
                 "op": "replace_field",
-                "shot_id": "S001",
+                "shot_id": "EP01-001",
                 "field": "光源来源",
                 "value": "窗纸透入的日光",
                 "issue_ids": ["E-TEMPLATE-008"],
@@ -211,7 +211,7 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
             expected_raw_artifact_fingerprint=None,
             audit_certificate_id=str(audited.data["certificate"]["certificate_id"]),
             operations=self._patch_operations(),
-            impact_scope=["S001"],
+            impact_scope=["EP01-001"],
             file_name=f"{label}.xlsx",
             request_session_id=repair_session,
         )
