@@ -1743,13 +1743,18 @@ class StoryboardService:
         request_session_id: str | None = None,
     ) -> ToolResponse:
         self._require_runtime()
+        authority_bearing = (
+            mode in {"audit_only", "audit_and_repair"}
+            or (mode == "execute" and authorization == "explicit_execute")
+        )
         if (
             self.settings.deployment_mode == "cloud"
-            and operation.startswith("storyboard_")
+            and authority_bearing
             and not request_session_id
         ):
             raise ValueError(
-                "window_session_required: open this role in a distinct ChatGPT conversation with an active MCP session"
+                "window_session_required: the server did not receive trusted ChatGPT "
+                "openai/session metadata for this authority-bearing work order"
             )
         if operation in STORYBOARD_OPERATIONS | {"storyboard_audit"}:
             prospective = {
@@ -1797,7 +1802,13 @@ class StoryboardService:
             summary=f"工单已建立｜{operation}｜{result['work_order_status']}",
             project_id=project_id,
             work_order_id=request["work_order_id"],
-            data=result,
+            data={
+                **result,
+                "server_actor_role": request["server_actor_role"],
+                "session_binding_status": (
+                    "bound" if request["transport_session_fingerprint"] else "unbound"
+                ),
+            },
         )
 
     def import_source_file(
