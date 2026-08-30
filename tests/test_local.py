@@ -363,7 +363,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         loaded = load_workbook(BytesIO(workbook), data_only=False, read_only=True)
         sheet = loaded["正式生产母版"]
         headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
-        content_index = headers.index("正式分镜母版·字段合并") + 1
+        content_index = headers.index("正式分镜母版") + 1
         projected = str(sheet.cell(2, content_index).value)
         self.assertFalse(projected.startswith(("=", "+", "-", "@")))
         self.assertIn("画面内容：=HYPERLINK", projected)
