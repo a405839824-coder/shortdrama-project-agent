@@ -37,10 +37,18 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
         cls.settings = Settings.from_env()
         cls.server, cls.service = create_mcp(cls.settings)
         cls.namespace = request_namespace(cls.settings)
-        created = cls.service.create_project(cls.namespace, "v0.4.0双常驻加条件修复安全测试")
-        cls.project_id = str(created.project_id)
-        checked = cls.service.agent_status(
-            cls.namespace, cls.project_id, full_self_test=True
+
+    def setUp(self) -> None:
+        # Each security scenario owns a project. Several negative cases
+        # intentionally leave a pending handoff or validating work order; in
+        # v0.5.5 those states correctly block a later storyboard batch and
+        # therefore must not leak into the next test.
+        created = self.service.create_project(
+            self.namespace, f"v0.4.0双常驻安全测试-{self._testMethodName}"
+        )
+        self.project_id = str(created.project_id)
+        checked = self.service.agent_status(
+            self.namespace, self.project_id, full_self_test=True
         )
         if not checked.data.get("runtime_test_certificate_valid"):
             raise AssertionError("v0.4.0 security tests require a valid runtime certificate")
@@ -255,6 +263,22 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
                 handoff_id=str(committed.data["handoff"]["handoff_id"]),
                 session_id=shared,
             )
+
+        # Close the first production-to-audit handoff through a genuinely
+        # independent transport before starting the next production chain.
+        independent_session = "transport-independent-cleanup-audit"
+        clean_audit_work_order = self._begin_audit(
+            str(committed.artifact_id),
+            independent_session,
+            "same-session-cleanup-audit",
+        )
+        clean = self._audit(
+            artifact_id=str(committed.artifact_id),
+            audit_work_order_id=clean_audit_work_order,
+            handoff_id=str(committed.data["handoff"]["handoff_id"]),
+            session_id=independent_session,
+        )
+        self.assertEqual(clean.status, "pass")
 
         production_session = "transport-production-for-repair-separation"
         audit_session = "transport-audit-for-repair-separation"

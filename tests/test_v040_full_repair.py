@@ -248,7 +248,15 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
     async def test_consumed_package_cannot_be_replayed(self) -> None:
         first = await self.call("commit_storyboard", self.full_arguments())
         self.assertEqual(first["status"], "production_preflight_pass")
-        replay = await self.rejection("commit_storyboard", self.full_arguments())
+        replay_order = await self.begin(
+            "storyboard_repair",
+            mode="audit_and_repair",
+            authorization="explicit_execute",
+            window_key="full-repair-consumed-package-replay",
+        )
+        replay_arguments = self.full_arguments()
+        replay_arguments["work_order_id"] = replay_order
+        replay = await self.rejection("commit_storyboard", replay_arguments)
         self.assertIn("repair_package_unavailable", replay)
         base_meta, _base_path = self.service.store.get_artifact(
             self.namespace, self.project_id, self.committed["artifact_id"]

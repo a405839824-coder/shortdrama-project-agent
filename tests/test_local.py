@@ -61,9 +61,10 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_contracts_and_file_params(self) -> None:
         tools = await self.server.list_tools()
-        self.assertEqual(len(tools), 15)
+        self.assertEqual(len(tools), 18)
         by_name = {tool.name: tool.model_dump(by_alias=True, exclude_none=True) for tool in tools}
-        self.assertEqual(by_name["get_agent_status"]["annotations"]["readOnlyHint"], True)
+        self.assertEqual(by_name["get_agent_status"]["annotations"]["readOnlyHint"], False)
+        self.assertEqual(by_name["get_agent_status"]["annotations"]["idempotentHint"], False)
         self.assertEqual(by_name["mark_performance_stage"]["annotations"]["readOnlyHint"], False)
         self.assertEqual(by_name["audit_storyboard"]["annotations"]["readOnlyHint"], False)
         file_tool = by_name["import_source_file"]
@@ -71,6 +72,10 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         file_schema = file_tool["inputSchema"]["$defs"]["OpenAIFile"]
         self.assertEqual(set(file_schema["properties"]), {"download_url", "file_id", "mime_type", "file_name"})
         self.assertEqual(file_schema["required"], ["download_url", "file_id"])
+        gap_schema = by_name["record_capability_gap"]["inputSchema"]
+        self.assertIn("work_order_id", gap_schema["properties"])
+        self.assertIn("work_order_id", gap_schema["required"])
+        self.assertNotIn("ctx", gap_schema["properties"])
         for descriptor in by_name.values():
             self.assertIn("outputSchema", descriptor)
             self.assertIn("securitySchemes", descriptor["_meta"])
@@ -222,9 +227,10 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(repeated["data"]["cache_hit"])
         status = await self.call("get_agent_status", {"project_id": project_id})
         self.assertTrue(status["data"]["state_valid"])
-        # The rejected preflight creates no artifact or audit event; only the
-        # successful production preflight and independent audit are recorded.
-        self.assertEqual(status["data"]["issues"]["event_count"], 2)
+        # The rejected draft creates no artifact, but is retained as learning;
+        # its clean closure, production preflight and independent audit remain
+        # separate events.
+        self.assertEqual(status["data"]["issues"]["event_count"], 4)
         self.assertEqual(status["data"]["issues"]["open_issue_count"], 0)
 
     async def test_public_scene_people_audio_gate_and_repair(self) -> None:

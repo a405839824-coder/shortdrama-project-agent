@@ -20,6 +20,12 @@ In MCP plugin mode, the authenticated plugin store for the exact `project_id` is
 
 An older valid plugin certificate does not certify R10-SPC-1 unless status explicitly advertises that output contract. Such a service may still coordinate project state, but its workbook/projection is not deliverable as current output. When the canonical is available, run the bundled deterministic R10-SPC-1 validation/export adapter and persist a compliant successor; otherwise record the exact plugin capability gap and stop without claiming the Agent update reached the server exporter.
 
+For plugin 0.5.5, `migration_required` is a recovery state, not an executable production state. Only an authorized `rule_improvement` or `version_management` work order may call `migrate_project_state`: plan first, verify schema compatibility plus before/after state hashes, then execute with compare-and-set. Preserve every historical artifact byte and canonical fingerprint as read-only evidence. Re-run status after migration; do not begin ordinary content work until the hub and issue ledger both validate under 0.5.5.
+
+Before any new full storyboard or complete scene/episode rebuild, execute the fixed generation-first chain: `get_agent_status` → required `migrate_project_state` → `query_project_issues` and prevention-profile binding → `preflight_storyboard_draft(scope_kind="scene")` after every scene → signed `preflight_storyboard_draft(scope_kind="full")` on the exact final canonical → `commit_storyboard` with that `draft_preflight_id` → immutable production handoff → separate `audit_storyboard`. A failed draft is learned as a ledger occurrence but produces no artifact, version, XLSX, deterministic projection, successor pointer, or handoff.
+
+Grade the immutable first full draft before repair: overall correctness and direct usability must each be at least 98%, every episode at least 96%, and new local issues at most 2%; hard errors, major issues, known-issue recurrences, and systemic duplicate patterns must each equal zero. This threshold measures prevention quality and never suppresses an issue. A full preflight becomes commit-ready only after every detected issue is cleared. The independent audit remains a read-only omission defense and final release requires 100% pass across all eight layers with blocking, residual, and introduced issues all zero.
+
 Resolve these exact Library titles only for standalone skill operation, explicit shared-ledger work, system/rule architecture updates, or final archival synchronization:
 
 - `分镜项目Agent_项目中枢.json`: current project state, work orders, change requests, deliverables, decisions, capability gaps, and version history.
@@ -289,12 +295,14 @@ Use `agent_runtime.md` for issue event structure, recurrence escalation, concise
 - A second consecutive recurrence requires root-cause repair; a third requires upstream rebuild.
 - Never activate a formal rule or validator automatically.
 
+Production is responsible for authoring one canonical and correcting scene/full preflight failures before commit. Deterministic service code is responsible for migration CAS, pattern queries, schema and semantic gates, output projection, quality metrics, certificate/hash binding, and failed-draft ledger writes. Independent audit is responsible only for independently searching the immutable committed artifact for omissions and signing the final verdict; it must not regenerate or repair content and cannot be used as the normal cleanup stage for preventable generation defects.
+
 ## Handle missing capabilities honestly
 
 When a request is not in the capability registry or required tools, files, permissions, or source evidence are unavailable:
 
 1. Do not simulate a completed capability.
-2. Record a `capability_gap` with requested input, desired output, missing dependency, risk, safe fallback, proposed implementation, and tests.
+2. Open a `capability_gap` work order in `plan_only/plan_only` mode, then record the gap from that same bound window/session with requested input, desired output, missing dependency, risk, safe fallback, proposed implementation, and tests. Never append a project gap without that work-order authority.
 3. Continue only with a safe in-scope fallback that does not misrepresent completion.
 4. Require user approval before adding external access, new credentials, destructive behavior, or a formal rule.
 

@@ -10,10 +10,11 @@ import os
 import re
 import secrets
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, BinaryIO, Iterator
 
 from filelock import FileLock
 
@@ -25,10 +26,21 @@ PROJECT_RECORD_KINDS = {
     "telemetry",
     "diagnostics",
     "repair_packages",
+    "draft_preflights",
+    "migrations",
 }
+SIGNED_ONLY_PROJECT_RECORD_KINDS = {"draft_preflights", "migrations"}
 DEFAULT_SUCCESSOR_LEASE_SECONDS = 300
 MAX_SUCCESSOR_LEASE_SECONDS = 86_400
 MAX_SUCCESSOR_TRANSACTION_HISTORY = 32
+DEFAULT_DRAFT_PREFLIGHT_COMMIT_LEASE_SECONDS = 300
+DEFAULT_HANDOFF_CLAIM_LEASE_SECONDS = 300
+MAX_CONSUMPTION_LEASE_SECONDS = 3_600
+MAX_CONSUMPTION_CLAIM_HISTORY = 16
+DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+DOWNLOAD_SPOOL_MEMORY_BYTES = 2 * 1024 * 1024
+DOWNLOAD_COPY_CHUNK_BYTES = 1024 * 1024
+LEGACY_DOWNLOAD_TOKEN_WINDOW_SECONDS = 86_400
 SUCCESSOR_KINDS = frozenset({"patch", "delta", "repair"})
 UNPUBLISHED_ARTIFACT_STATES = frozenset({"pending", "aborted", "rejected"})
 
@@ -56,22 +68,75 @@ def slug_filename(value: str, fallback: str = "artifact") -> str:
 
 
 class ProjectStore:
-    def __init__(self, root: Path, public_base_url: str):
+    def __init__(
+        self,
+        root: Path,
+        public_base_url: str,
+        *,
+        max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES,
+    ):
         self.root = root
         self.public_base_url = public_base_url.rstrip("/")
+        self.max_download_bytes = max(1, int(max_download_bytes))
         self.root.mkdir(parents=True, exist_ok=True)
         self.projects_dir = self.root / "projects"
         self.projects_dir.mkdir(parents=True, exist_ok=True)
         self._secret = self._load_or_create_secret()
+        self._download_verification_secrets = self._verification_secret_candidates(
+            self._secret
+        )
         self._integrity_secret = self._load_or_create_integrity_secret()
+        self._integrity_verification_secrets = self._verification_secret_candidates(
+            self._integrity_secret
+        )
+        self._legacy_download_token_accept_until = (
+            self._load_or_create_legacy_download_token_window()
+        )
+        # Pure pre-commit work is guarded only inside this process.  It avoids
+        # duplicate expensive projections without writing a durable claim
+        # that an exception or process crash could strand.  The durable,
+        # cross-process claim is acquired later at the persistence boundary.
+        self._draft_preparation_guard = threading.Lock()
+        self._draft_preparations: set[tuple[str, str, str]] = set()
+
+    @staticmethod
+    def _verification_secret_candidates(raw: bytes) -> tuple[bytes, ...]:
+        """Return the exact key plus the one legacy text-trimmed variant.
+
+        Releases through 0.5.4 reloaded binary keys with ``bytes.strip()``.
+        A deployment that had already restarted may therefore have signed
+        records and download tokens with the trimmed key even though the key
+        file still contains the original edge bytes.  New signatures always
+        use the exact binary key; verification accepts the legacy variant only
+        when it is distinct and still a valid-strength key.
+        """
+
+        candidates = [raw]
+        legacy = raw.strip()
+        if legacy != raw and len(legacy) >= 32:
+            candidates.append(legacy)
+        return tuple(candidates)
 
     def _load_or_create_secret(self) -> bytes:
         path = self.root / ".download_secret"
         with self.lock("download-secret"):
             if path.is_file():
-                raw = path.read_bytes().strip()
-                if len(raw) >= 32:
+                # This is an opaque binary key, not text.  Trimming it makes
+                # the in-memory key used on first boot differ from the key
+                # reloaded after a restart whenever a random edge byte happens
+                # to be ASCII whitespace, invalidating every existing token.
+                raw = path.read_bytes()
+                if len(raw) >= 32 and raw.strip():
                     return raw
+                raise RuntimeError(
+                    "download_secret_invalid: existing key is shorter than 32 "
+                    "bytes or contains only whitespace"
+                )
+            if any(self.projects_dir.iterdir()):
+                raise RuntimeError(
+                    "download_secret_missing_for_existing_state: restore the "
+                    "matching persistent secret before startup"
+                )
             raw = secrets.token_bytes(48)
             self.atomic_write_bytes(path, raw)
             with contextlib.suppress(OSError):
@@ -89,14 +154,362 @@ class ProjectStore:
         path = self.root / ".record_integrity_secret"
         with self.lock("record-integrity-secret"):
             if path.is_file():
-                raw = path.read_bytes().strip()
-                if len(raw) >= 32:
+                # Preserve all bytes exactly.  secrets.token_bytes() can
+                # legitimately produce whitespace-valued edge bytes; treating
+                # the key as text would make signed records fail after restart.
+                raw = path.read_bytes()
+                if len(raw) >= 32 and raw.strip():
                     return raw
+                raise RuntimeError(
+                    "record_integrity_secret_invalid: existing key is shorter "
+                    "than 32 bytes or contains only whitespace"
+                )
+            if any(self.projects_dir.iterdir()):
+                raise RuntimeError(
+                    "record_integrity_secret_missing_for_existing_state: restore "
+                    "the matching persistent secret before startup"
+                )
             raw = secrets.token_bytes(48)
             self.atomic_write_bytes(path, raw)
             with contextlib.suppress(OSError):
                 path.chmod(0o600)
             return raw
+
+    def _load_or_create_legacy_download_token_window(self) -> int:
+        """Persist a crash-safe, non-renewable per-install legacy deadline."""
+
+        window_path = self.root / ".legacy_download_token_window.json"
+        sentinel_path = self.root / ".v055_security_epoch.json"
+        anchor_path = self.projects_dir / ".v055_security_epoch.anchor.json"
+
+        def signed_record(
+            *, record_type: str, cutoff: int, epoch_id: str, status: str
+        ) -> dict[str, Any]:
+            record = {
+                "record_id": record_type,
+                "record_type": record_type,
+                "epoch_id": epoch_id,
+                "status": status,
+                "created_at": utc_stamp(),
+                "accept_until_epoch": cutoff,
+            }
+            record["integrity_hmac"] = self._record_integrity_hmac_with_secret(
+                record, self._integrity_secret
+            )
+            return record
+
+        def load_raw_signed(path: Path, *, record_type: str) -> dict[str, Any]:
+            try:
+                record = self.read_json(path)
+                if not isinstance(record, dict):
+                    raise TypeError("security record is not an object")
+                signature = record.get("integrity_hmac")
+                expected_signature = self._record_integrity_hmac_with_secret(
+                    record, self._integrity_secret
+                )
+                cutoff = record.get("accept_until_epoch")
+                epoch_id = record.get("epoch_id")
+                if (
+                    record.get("record_type") != record_type
+                    or not isinstance(signature, str)
+                    or not hmac.compare_digest(signature, expected_signature)
+                    or not isinstance(cutoff, int)
+                    or isinstance(cutoff, bool)
+                    or cutoff <= 0
+                    or not isinstance(epoch_id, str)
+                    or not epoch_id
+                ):
+                    raise ValueError("invalid signed security record")
+                return record
+            except (OSError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "legacy_download_token_window_invalid: restore the matching "
+                    "persistent state"
+                ) from exc
+
+        with self.lock("legacy-download-token-window"):
+            sentinel_exists = sentinel_path.is_file()
+            window_exists = window_path.is_file()
+            anchor_exists = anchor_path.is_file()
+            anchor = (
+                load_raw_signed(
+                    anchor_path, record_type="v055_security_epoch_anchor"
+                )
+                if anchor_exists
+                else None
+            )
+            if sentinel_exists:
+                sentinel = load_raw_signed(
+                    sentinel_path, record_type="v055_security_epoch"
+                )
+                sentinel_status = sentinel.get("status")
+                if sentinel_status not in {"preparing", "committed"}:
+                    raise RuntimeError("legacy_download_token_window_invalid")
+                cutoff = int(sentinel["accept_until_epoch"])
+                epoch_id = str(sentinel["epoch_id"])
+                if anchor is None:
+                    anchor = signed_record(
+                        record_type="v055_security_epoch_anchor",
+                        cutoff=cutoff,
+                        epoch_id=epoch_id,
+                        status=str(sentinel_status),
+                    )
+                    self.atomic_write_json(anchor_path, anchor)
+                elif (
+                    anchor.get("epoch_id") != epoch_id
+                    or anchor.get("accept_until_epoch") != cutoff
+                    or anchor.get("status") not in {"preparing", "committed"}
+                ):
+                    raise RuntimeError("v055_security_epoch_anchor_mismatch")
+                if not window_exists:
+                    if sentinel_status != "preparing":
+                        raise RuntimeError(
+                            "legacy_download_token_window_missing: committed "
+                            "security epoch cannot be renewed"
+                        )
+                    window = signed_record(
+                        record_type="legacy_download_token_window",
+                        cutoff=cutoff,
+                        epoch_id=epoch_id,
+                        status="active",
+                    )
+                    self.atomic_write_json(window_path, window)
+                else:
+                    window = load_raw_signed(
+                        window_path,
+                        record_type="legacy_download_token_window",
+                    )
+                    if (
+                        window.get("epoch_id") != epoch_id
+                        or window.get("accept_until_epoch") != cutoff
+                        or window.get("status") != "active"
+                    ):
+                        raise RuntimeError(
+                            "legacy_download_token_window_epoch_mismatch"
+                        )
+                if sentinel_status == "preparing":
+                    sentinel["status"] = "committed"
+                    sentinel["committed_at"] = utc_stamp()
+                    sentinel["integrity_hmac"] = (
+                        self._record_integrity_hmac_with_secret(
+                            sentinel, self._integrity_secret
+                        )
+                    )
+                    self.atomic_write_json(sentinel_path, sentinel)
+                if anchor.get("status") == "preparing":
+                    anchor["status"] = "committed"
+                    anchor["committed_at"] = utc_stamp()
+                    anchor["integrity_hmac"] = (
+                        self._record_integrity_hmac_with_secret(
+                            anchor, self._integrity_secret
+                        )
+                    )
+                    self.atomic_write_json(anchor_path, anchor)
+                return cutoff
+
+            if window_exists:
+                # Recover an interim/pre-sentinel 0.5.5 state without opening
+                # a new window. The existing window must carry a valid raw-key
+                # signature, and its exact epoch/cutoff become immutable.
+                try:
+                    window = load_raw_signed(
+                        window_path,
+                        record_type="legacy_download_token_window",
+                    )
+                except RuntimeError:
+                    try:
+                        interim = self.read_json(window_path)
+                        interim_signature = interim.get("integrity_hmac")
+                        interim_expected = self._record_integrity_hmac_with_secret(
+                            interim, self._integrity_secret
+                        )
+                        interim_cutoff = interim.get("accept_until_epoch")
+                        if (
+                            not isinstance(interim_signature, str)
+                            or not hmac.compare_digest(
+                                interim_signature, interim_expected
+                            )
+                            or interim.get("record_type")
+                            != "legacy_download_token_window"
+                            or not isinstance(interim_cutoff, int)
+                            or isinstance(interim_cutoff, bool)
+                            or interim_cutoff <= 0
+                            or "epoch_id" in interim
+                            or "status" in interim
+                        ):
+                            raise ValueError("invalid interim security window")
+                        interim_epoch_id = (
+                            "SEC-"
+                            + sha256_bytes(
+                                f"{interim_signature}:{interim_cutoff}".encode(
+                                    "utf-8"
+                                )
+                            )[:32]
+                        )
+                        window = signed_record(
+                            record_type="legacy_download_token_window",
+                            cutoff=interim_cutoff,
+                            epoch_id=interim_epoch_id,
+                            status="active",
+                        )
+                        self.atomic_write_json(window_path, window)
+                    except (AttributeError, OSError, TypeError, ValueError) as exc:
+                        raise RuntimeError(
+                            "legacy_download_token_window_invalid"
+                        ) from exc
+                if window.get("status") != "active":
+                    raise RuntimeError("legacy_download_token_window_invalid")
+                if anchor is not None and (
+                    anchor.get("epoch_id") != window.get("epoch_id")
+                    or anchor.get("accept_until_epoch")
+                    != window.get("accept_until_epoch")
+                    or anchor.get("status") not in {"preparing", "committed"}
+                ):
+                    raise RuntimeError("v055_security_epoch_anchor_mismatch")
+                sentinel = signed_record(
+                    record_type="v055_security_epoch",
+                    cutoff=int(window["accept_until_epoch"]),
+                    epoch_id=str(window["epoch_id"]),
+                    status="committed",
+                )
+                sentinel["committed_at"] = utc_stamp()
+                sentinel["integrity_hmac"] = (
+                    self._record_integrity_hmac_with_secret(
+                        sentinel, self._integrity_secret
+                    )
+                )
+                self.atomic_write_json(sentinel_path, sentinel)
+                if anchor is None:
+                    anchor = signed_record(
+                        record_type="v055_security_epoch_anchor",
+                        cutoff=int(window["accept_until_epoch"]),
+                        epoch_id=str(window["epoch_id"]),
+                        status="committed",
+                    )
+                    anchor["committed_at"] = utc_stamp()
+                    anchor["integrity_hmac"] = (
+                        self._record_integrity_hmac_with_secret(
+                            anchor, self._integrity_secret
+                        )
+                    )
+                    self.atomic_write_json(anchor_path, anchor)
+                elif anchor.get("status") == "preparing":
+                    anchor["status"] = "committed"
+                    anchor["committed_at"] = utc_stamp()
+                    anchor["integrity_hmac"] = (
+                        self._record_integrity_hmac_with_secret(
+                            anchor, self._integrity_secret
+                        )
+                    )
+                    self.atomic_write_json(anchor_path, anchor)
+                return int(window["accept_until_epoch"])
+            if anchor is not None:
+                if anchor.get("status") != "preparing":
+                    raise RuntimeError(
+                        "v055_security_epoch_files_missing: committed anchor "
+                        "forbids security-window rebootstrap"
+                    )
+                cutoff = int(anchor["accept_until_epoch"])
+                epoch_id = str(anchor["epoch_id"])
+                sentinel = signed_record(
+                    record_type="v055_security_epoch",
+                    cutoff=cutoff,
+                    epoch_id=epoch_id,
+                    status="preparing",
+                )
+                self.atomic_write_json(sentinel_path, sentinel)
+                window = signed_record(
+                    record_type="legacy_download_token_window",
+                    cutoff=cutoff,
+                    epoch_id=epoch_id,
+                    status="active",
+                )
+                self.atomic_write_json(window_path, window)
+                sentinel["status"] = "committed"
+                sentinel["committed_at"] = utc_stamp()
+                sentinel["integrity_hmac"] = (
+                    self._record_integrity_hmac_with_secret(
+                        sentinel, self._integrity_secret
+                    )
+                )
+                self.atomic_write_json(sentinel_path, sentinel)
+                anchor["status"] = "committed"
+                anchor["committed_at"] = utc_stamp()
+                anchor["integrity_hmac"] = (
+                    self._record_integrity_hmac_with_secret(
+                        anchor, self._integrity_secret
+                    )
+                )
+                self.atomic_write_json(anchor_path, anchor)
+                return cutoff
+            if self._project_state_declares_v055():
+                raise RuntimeError(
+                    "v055_security_epoch_missing_for_existing_state: restore "
+                    "the matching security records"
+                )
+
+            cutoff = int(time.time()) + LEGACY_DOWNLOAD_TOKEN_WINDOW_SECONDS
+            epoch_id = f"SEC-{secrets.token_hex(16)}"
+            sentinel = signed_record(
+                record_type="v055_security_epoch",
+                cutoff=cutoff,
+                epoch_id=epoch_id,
+                status="preparing",
+            )
+            self.atomic_write_json(sentinel_path, sentinel)
+            anchor = signed_record(
+                record_type="v055_security_epoch_anchor",
+                cutoff=cutoff,
+                epoch_id=epoch_id,
+                status="preparing",
+            )
+            self.atomic_write_json(anchor_path, anchor)
+            window = signed_record(
+                record_type="legacy_download_token_window",
+                cutoff=cutoff,
+                epoch_id=epoch_id,
+                status="active",
+            )
+            self.atomic_write_json(window_path, window)
+            sentinel["status"] = "committed"
+            sentinel["committed_at"] = utc_stamp()
+            sentinel["integrity_hmac"] = self._record_integrity_hmac_with_secret(
+                sentinel, self._integrity_secret
+            )
+            self.atomic_write_json(sentinel_path, sentinel)
+            anchor["status"] = "committed"
+            anchor["committed_at"] = utc_stamp()
+            anchor["integrity_hmac"] = self._record_integrity_hmac_with_secret(
+                anchor, self._integrity_secret
+            )
+            self.atomic_write_json(anchor_path, anchor)
+            return cutoff
+
+    def _project_state_declares_v055(self) -> bool:
+        for path in self.projects_dir.rglob("hub.json"):
+            try:
+                hub = self.read_json(path)
+                policy = hub.get("policy") if isinstance(hub, dict) else None
+                version = (
+                    policy.get("compact_master_version")
+                    if isinstance(policy, dict)
+                    else None
+                )
+                if version == "0.5.5":
+                    return True
+            except (OSError, TypeError, ValueError):
+                continue
+        for path in self.projects_dir.rglob("migrations/*.json"):
+            try:
+                record = self.read_json(path)
+                if (
+                    isinstance(record, dict)
+                    and record.get("target_version") == "0.5.5"
+                ):
+                    return True
+            except (OSError, TypeError, ValueError):
+                continue
+        return False
 
     @contextlib.contextmanager
     def lock(self, name: str) -> Iterator[None]:
@@ -202,6 +615,485 @@ class ProjectStore:
         with self.lock(f"{namespace}-{project_id}"):
             self.atomic_write_json(path, ledger)
 
+    @staticmethod
+    def project_state_sha256(value: Any) -> str:
+        payload = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return sha256_bytes(payload)
+
+    def commit_project_state_migration(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        migration_id: str,
+        migration_key: str,
+        work_order_id: str,
+        from_version: str,
+        target_version: str,
+        hub_before: dict[str, Any],
+        ledger_before: dict[str, Any],
+        hub_after: dict[str, Any],
+        ledger_after: dict[str, Any],
+        runtime_test_certificate_id: str,
+        ruleset_version: str,
+        validator_version: str,
+        changed_paths: list[str],
+    ) -> dict[str, Any]:
+        """Commit or recover one journaled hub+ledger migration.
+
+        The signed before/after journal makes an interrupted two-file replace
+        recoverable.  Any state outside the journal's CAS identities fails
+        closed instead of overwriting subsequent project work.
+        """
+
+        clean_id = safe_id(migration_id, "migration_id")
+        directory = self.project_dir(namespace, project_id)
+        hub_path = directory / "hub.json"
+        ledger_path = directory / "ledger.json"
+        record_path = directory / "migrations" / f"{clean_id}.json"
+        before_hub_sha = self.project_state_sha256(hub_before)
+        before_ledger_sha = self.project_state_sha256(ledger_before)
+        after_hub_sha = self.project_state_sha256(hub_after)
+        after_ledger_sha = self.project_state_sha256(ledger_after)
+
+        with self.lock(f"{namespace}-{project_id}"):
+            current_hub = self.read_json(hub_path)
+            current_ledger = self.read_json(ledger_path)
+            current_hub_sha = self.project_state_sha256(current_hub)
+            current_ledger_sha = self.project_state_sha256(current_ledger)
+            record: dict[str, Any] | None = None
+            if record_path.is_file():
+                record = self.read_json(record_path)
+                self._verify_record_integrity(record, record_id=clean_id)
+                if not self.project_record_is_signed(record):
+                    raise ValueError("migration_record_signature_required")
+                if record.get("migration_key") != migration_key:
+                    raise ValueError("migration_id_conflict")
+                before_hub_sha = str(record["hub_before_sha256"])
+                before_ledger_sha = str(record["ledger_before_sha256"])
+                after_hub_sha = str(record["hub_after_sha256"])
+                after_ledger_sha = str(record["ledger_after_sha256"])
+                hub_after = record["hub_after"]
+                ledger_after = record["ledger_after"]
+
+            if (current_hub_sha, current_ledger_sha) == (after_hub_sha, after_ledger_sha):
+                if record is not None and record.get("status") != "committed":
+                    record["status"] = "committed"
+                    record["committed_at"] = utc_stamp()
+                    record["integrity_hmac"] = self._record_integrity_hmac(record)
+                    self.atomic_write_json(record_path, record)
+                return record or {
+                    "migration_id": clean_id,
+                    "migration_key": migration_key,
+                    "status": "committed",
+                    "idempotent_replay": True,
+                }
+
+            valid_hub = current_hub_sha in {before_hub_sha, after_hub_sha}
+            valid_ledger = current_ledger_sha in {before_ledger_sha, after_ledger_sha}
+            if not valid_hub or not valid_ledger:
+                raise ValueError("migration_recovery_required: project state changed outside migration CAS")
+            if record is None and (current_hub_sha, current_ledger_sha) != (
+                before_hub_sha,
+                before_ledger_sha,
+            ):
+                raise ValueError("migration_recovery_required: unsigned partial migration")
+
+            if record is None:
+                record = {
+                    "record_id": clean_id,
+                    "migration_id": clean_id,
+                    "migration_key": migration_key,
+                    "project_id": project_id,
+                    "work_order_id": work_order_id,
+                    "status": "prepared",
+                    "created_at": utc_stamp(),
+                    "from_version": from_version,
+                    "target_version": target_version,
+                    "hub_before_sha256": before_hub_sha,
+                    "ledger_before_sha256": before_ledger_sha,
+                    "hub_after_sha256": after_hub_sha,
+                    "ledger_after_sha256": after_ledger_sha,
+                    "hub_before": hub_before,
+                    "ledger_before": ledger_before,
+                    "hub_after": hub_after,
+                    "ledger_after": ledger_after,
+                    "runtime_test_certificate_id": runtime_test_certificate_id,
+                    "ruleset_version": ruleset_version,
+                    "validator_version": validator_version,
+                    "changed_paths": list(changed_paths),
+                    "preserves_artifacts": True,
+                }
+                record["integrity_hmac"] = self._record_integrity_hmac(record)
+                self.atomic_write_json(record_path, record)
+
+            if current_hub_sha == before_hub_sha:
+                self.atomic_write_json(hub_path, hub_after)
+            if current_ledger_sha == before_ledger_sha:
+                self.atomic_write_json(ledger_path, ledger_after)
+            final_hub_sha = self.project_state_sha256(self.read_json(hub_path))
+            final_ledger_sha = self.project_state_sha256(self.read_json(ledger_path))
+            if (final_hub_sha, final_ledger_sha) != (after_hub_sha, after_ledger_sha):
+                raise RuntimeError("migration_commit_incomplete")
+            record["status"] = "committed"
+            record["committed_at"] = utc_stamp()
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(record_path, record)
+            return record
+
+    def rollback_project_state_migration(
+        self,
+        namespace: str,
+        project_id: str,
+        migration_id: str,
+    ) -> dict[str, Any]:
+        """CAS rollback with a signed journal and interrupted-write recovery."""
+
+        clean_id = safe_id(migration_id, "migration_id")
+        directory = self.project_dir(namespace, project_id)
+        record_path = directory / "migrations" / f"{clean_id}.json"
+        with self.lock(f"{namespace}-{project_id}"):
+            if not record_path.is_file():
+                raise ValueError("unknown migration_id")
+            record = self.read_json(record_path)
+            self._verify_record_integrity(record, record_id=clean_id)
+            if not self.project_record_is_signed(record):
+                raise ValueError("migration_record_signature_required")
+            hub_path = directory / "hub.json"
+            ledger_path = directory / "ledger.json"
+            current_hub_sha = self.project_state_sha256(self.read_json(hub_path))
+            current_ledger_sha = self.project_state_sha256(
+                self.read_json(ledger_path)
+            )
+            if record.get("status") == "rolled_back":
+                if (
+                    current_hub_sha == record.get("hub_before_sha256")
+                    and current_ledger_sha == record.get("ledger_before_sha256")
+                ):
+                    result = dict(record)
+                    result["idempotent_replay"] = True
+                    return result
+                raise ValueError(
+                    "migration_rollback_cas_mismatch: project changed after rollback"
+                )
+            status = str(record.get("status") or "")
+            if status not in {"committed", "rolling_back"}:
+                raise ValueError(
+                    f"migration_rollback_state_conflict: migration status is {status!r}"
+                )
+            before_hub_sha = str(record.get("hub_before_sha256") or "")
+            before_ledger_sha = str(record.get("ledger_before_sha256") or "")
+            after_hub_sha = str(record.get("hub_after_sha256") or "")
+            after_ledger_sha = str(record.get("ledger_after_sha256") or "")
+            if status == "committed" and (
+                current_hub_sha,
+                current_ledger_sha,
+            ) != (after_hub_sha, after_ledger_sha):
+                raise ValueError(
+                    "migration_rollback_cas_mismatch: project changed after migration"
+                )
+            if status == "rolling_back" and (
+                current_hub_sha not in {before_hub_sha, after_hub_sha}
+                or current_ledger_sha not in {before_ledger_sha, after_ledger_sha}
+            ):
+                raise ValueError(
+                    "migration_rollback_cas_mismatch: project changed during rollback"
+                )
+            if status == "committed":
+                # Sign intent before either project-state file changes. A retry
+                # can then distinguish a legitimate half rollback from an
+                # unrelated write and complete only the missing side.
+                record["status"] = "rolling_back"
+                record["rollback_started_at"] = utc_stamp()
+                record["integrity_hmac"] = self._record_integrity_hmac(record)
+                self.atomic_write_json(record_path, record)
+            if current_hub_sha == after_hub_sha:
+                self.atomic_write_json(hub_path, record["hub_before"])
+            if current_ledger_sha == after_ledger_sha:
+                self.atomic_write_json(ledger_path, record["ledger_before"])
+            final_hub_sha = self.project_state_sha256(self.read_json(hub_path))
+            final_ledger_sha = self.project_state_sha256(
+                self.read_json(ledger_path)
+            )
+            if (final_hub_sha, final_ledger_sha) != (
+                before_hub_sha,
+                before_ledger_sha,
+            ):
+                raise RuntimeError("migration_rollback_incomplete")
+            record["status"] = "rolled_back"
+            record["rolled_back_at"] = utc_stamp()
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(record_path, record)
+            return record
+
+    @contextlib.contextmanager
+    def draft_preflight_commit_preparation(
+        self,
+        namespace: str,
+        project_id: str,
+        draft_preflight_id: str,
+    ) -> Iterator[None]:
+        """Guard pure pre-commit work without creating recoverable state."""
+
+        clean_id = safe_id(draft_preflight_id, "draft_preflight_id")
+        key = (self.namespace_key(namespace), safe_id(project_id, "project_id"), clean_id)
+        with self._draft_preparation_guard:
+            if key in self._draft_preparations:
+                raise ValueError("draft_preflight_commit_in_progress")
+            self._draft_preparations.add(key)
+        try:
+            yield
+        finally:
+            with self._draft_preparation_guard:
+                self._draft_preparations.discard(key)
+
+    def claim_draft_preflight_commit(
+        self,
+        namespace: str,
+        project_id: str,
+        draft_preflight_id: str,
+        *,
+        request_sha256: str,
+        lease_seconds: int = DEFAULT_DRAFT_PREFLIGHT_COMMIT_LEASE_SECONDS,
+    ) -> dict[str, Any]:
+        """Atomically reserve one passed draft certificate for one commit.
+
+        A same-request retry may take over only after the bounded lease has
+        expired.  A different request can never repurpose the certificate,
+        even after expiry.  The claim token fences a late owner at completion.
+        """
+
+        clean_id = safe_id(draft_preflight_id, "draft_preflight_id")
+        if not isinstance(request_sha256, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", request_sha256
+        ):
+            raise ValueError("invalid draft_preflight commit request_sha256")
+        try:
+            lease_seconds = int(lease_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid draft_preflight commit lease_seconds") from exc
+        if not 1 <= lease_seconds <= MAX_CONSUMPTION_LEASE_SECONDS:
+            raise ValueError(
+                "draft_preflight commit lease_seconds must be between "
+                f"1 and {MAX_CONSUMPTION_LEASE_SECONDS}"
+            )
+        path = (
+            self.project_dir(namespace, project_id)
+            / "draft_preflights"
+            / f"{clean_id}.json"
+        )
+        with self.lock(f"{namespace}-{project_id}"):
+            if not path.is_file():
+                raise ValueError(f"unknown draft_preflight_id: {clean_id}")
+            record = self.read_json(path)
+            self._verify_record_integrity(record, record_id=clean_id)
+            if not self.project_record_is_signed(record):
+                raise ValueError("draft_preflight_signature_required")
+            bound_request = record.get("commit_request_sha256")
+            if bound_request not in {None, request_sha256}:
+                raise ValueError("draft_preflight_commit_claim_conflict")
+            if record.get("consumed_by_commit"):
+                return {"claim_status": "consumed", "record": record}
+            claim = record.get("commit_claim")
+            if isinstance(claim, dict):
+                if claim.get("request_sha256") != request_sha256:
+                    raise ValueError("draft_preflight_commit_claim_conflict")
+                try:
+                    lease_expires_epoch = float(
+                        claim.get("lease_expires_epoch_seconds") or 0
+                    )
+                except (TypeError, ValueError):
+                    lease_expires_epoch = 0
+                if lease_expires_epoch <= 0:
+                    try:
+                        claimed_epoch = float(
+                            claim.get("claim_epoch_seconds")
+                            or path.stat().st_mtime
+                        )
+                    except (TypeError, ValueError, OSError):
+                        claimed_epoch = time.time()
+                    lease_expires_epoch = claimed_epoch + lease_seconds
+                if lease_expires_epoch > time.time():
+                    return {"claim_status": "in_progress", "record": record}
+                expired = dict(claim)
+                expired["state"] = "lease_expired"
+                expired["expired_at"] = utc_stamp()
+                history = record.setdefault("commit_claim_history", [])
+                if not isinstance(history, list):
+                    history = []
+                    record["commit_claim_history"] = history
+                history.append(expired)
+                del history[:-MAX_CONSUMPTION_CLAIM_HISTORY]
+            now = time.time()
+            token = f"DPC-{uuid.uuid4().hex}"
+            try:
+                generation = int(record.get("commit_claim_generation") or 0) + 1
+            except (TypeError, ValueError):
+                generation = 1
+            record["commit_claim"] = {
+                "claim_token": token,
+                "request_sha256": request_sha256,
+                "generation": generation,
+                "state": "claimed",
+                "claimed_at": utc_stamp(),
+                "claim_epoch_seconds": now,
+                "lease_seconds": lease_seconds,
+                "lease_expires_at": time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + lease_seconds)
+                ),
+                "lease_expires_epoch_seconds": now + lease_seconds,
+            }
+            record["commit_request_sha256"] = request_sha256
+            record["commit_claim_generation"] = generation
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(path, record)
+            return {
+                "claim_status": "claimed",
+                "claim_token": token,
+                "claim_generation": generation,
+                "record": record,
+            }
+
+    def release_draft_preflight_commit(
+        self,
+        namespace: str,
+        project_id: str,
+        draft_preflight_id: str,
+        *,
+        claim_token: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Release an unconsumed claim, fenced to its exact owner token."""
+
+        clean_id = safe_id(draft_preflight_id, "draft_preflight_id")
+        path = (
+            self.project_dir(namespace, project_id)
+            / "draft_preflights"
+            / f"{clean_id}.json"
+        )
+        with self.lock(f"{namespace}-{project_id}"):
+            record = self.read_json(path)
+            self._verify_record_integrity(record, record_id=clean_id)
+            if not self.project_record_is_signed(record):
+                raise ValueError("draft_preflight_signature_required")
+            if record.get("consumed_by_commit"):
+                return record
+            claim = record.get("commit_claim")
+            if not isinstance(claim, dict) or claim.get("claim_token") != claim_token:
+                raise ValueError("draft_preflight_commit_claim_owner_mismatch")
+            released = dict(claim)
+            released["state"] = "released"
+            released["released_at"] = utc_stamp()
+            released["release_reason"] = str(reason or "commit_failed")[:256]
+            history = record.setdefault("commit_claim_history", [])
+            if not isinstance(history, list):
+                history = []
+                record["commit_claim_history"] = history
+            history.append(released)
+            del history[:-MAX_CONSUMPTION_CLAIM_HISTORY]
+            record.pop("commit_claim", None)
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(path, record)
+            return record
+
+    def update_draft_preflight_commit_progress(
+        self,
+        namespace: str,
+        project_id: str,
+        draft_preflight_id: str,
+        *,
+        claim_token: str,
+        stage: str,
+        progress: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Advance the fenced, restart-stable commit recovery journal."""
+
+        clean_id = safe_id(draft_preflight_id, "draft_preflight_id")
+        path = (
+            self.project_dir(namespace, project_id)
+            / "draft_preflights"
+            / f"{clean_id}.json"
+        )
+        if not isinstance(stage, str) or not stage or len(stage) > 64:
+            raise ValueError("invalid draft_preflight commit progress stage")
+        with self.lock(f"{namespace}-{project_id}"):
+            record = self.read_json(path)
+            self._verify_record_integrity(record, record_id=clean_id)
+            if not self.project_record_is_signed(record):
+                raise ValueError("draft_preflight_signature_required")
+            if record.get("consumed_by_commit"):
+                return record
+            claim = record.get("commit_claim")
+            if not isinstance(claim, dict) or claim.get("claim_token") != claim_token:
+                raise ValueError("draft_preflight_commit_claim_owner_mismatch")
+            journal = record.setdefault("commit_progress", {})
+            if not isinstance(journal, dict):
+                journal = {}
+                record["commit_progress"] = journal
+            journal.update(dict(progress or {}))
+            journal.update(
+                {
+                    "request_sha256": claim.get("request_sha256"),
+                    "claim_generation": claim.get("generation"),
+                    "stage": stage,
+                    "updated_at": utc_stamp(),
+                }
+            )
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(path, record)
+            return record
+
+    def complete_draft_preflight_commit(
+        self,
+        namespace: str,
+        project_id: str,
+        draft_preflight_id: str,
+        *,
+        claim_token: str,
+        consumed_by_commit: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Complete only the atomic claim owner; exact repeats are idempotent."""
+
+        clean_id = safe_id(draft_preflight_id, "draft_preflight_id")
+        path = (
+            self.project_dir(namespace, project_id)
+            / "draft_preflights"
+            / f"{clean_id}.json"
+        )
+        with self.lock(f"{namespace}-{project_id}"):
+            record = self.read_json(path)
+            self._verify_record_integrity(record, record_id=clean_id)
+            if not self.project_record_is_signed(record):
+                raise ValueError("draft_preflight_signature_required")
+            if record.get("consumed_by_commit"):
+                return record
+            claim = record.get("commit_claim")
+            if not isinstance(claim, dict) or claim.get("claim_token") != claim_token:
+                raise ValueError("draft_preflight_commit_claim_owner_mismatch")
+            record["consumed_by_commit"] = dict(consumed_by_commit)
+            record["commit_claim"]["state"] = "completed"
+            record["commit_claim"]["completed_at"] = utc_stamp()
+            journal = record.setdefault("commit_progress", {})
+            if isinstance(journal, dict):
+                journal.update(
+                    {
+                        "stage": "completed",
+                        "updated_at": utc_stamp(),
+                        "artifact_id": consumed_by_commit.get("artifact_id"),
+                        "canonical_json_artifact_id": consumed_by_commit.get(
+                            "canonical_json_artifact_id"
+                        ),
+                    }
+                )
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(path, record)
+            return record
+
     @contextlib.contextmanager
     def mutate_project(self, namespace: str, project_id: str) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
         directory = self.project_dir(namespace, project_id)
@@ -228,10 +1120,15 @@ class ProjectStore:
         work_order_id: str | None = None,
         source_artifact_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        artifact_id: str | None = None,
     ) -> dict[str, Any]:
         directory = self.project_dir(namespace, project_id) / "artifacts"
         directory.mkdir(parents=True, exist_ok=True)
-        artifact_id = f"ART-{uuid.uuid4().hex[:16]}"
+        artifact_id = (
+            safe_id(artifact_id, "artifact_id")
+            if artifact_id is not None
+            else f"ART-{uuid.uuid4().hex[:16]}"
+        )
         safe_name = slug_filename(file_name)
         payload_path = directory / f"{artifact_id}__{safe_name}"
         meta_path = directory / f"{artifact_id}.meta.json"
@@ -250,6 +1147,42 @@ class ProjectStore:
             "metadata": metadata or {},
         }
         with self.lock(f"{namespace}-{project_id}"):
+            if meta_path.is_file():
+                existing = self.read_json(meta_path)
+                existing_path = self.project_dir(namespace, project_id) / str(
+                    existing.get("relative_path") or ""
+                )
+                requested_commit = (metadata or {}).get(
+                    "draft_commit_request_sha256"
+                )
+                existing_commit = (existing.get("metadata") or {}).get(
+                    "draft_commit_request_sha256"
+                )
+                resumable_same_commit = bool(
+                    requested_commit and requested_commit == existing_commit
+                )
+                immutable_matches = (
+                    existing.get("artifact_id") == artifact_id
+                    and existing.get("project_id") == project_id
+                    and existing.get("artifact_type") == artifact_type
+                    and existing.get("file_name") == safe_name
+                    and existing.get("version") == version
+                    and existing.get("work_order_id") == work_order_id
+                    and existing.get("source_artifact_id") == source_artifact_id
+                    and existing_path.is_file()
+                    and sha256_bytes(existing_path.read_bytes())
+                    == existing.get("fingerprint")
+                    and (
+                        resumable_same_commit
+                        or existing.get("fingerprint") == sha256_bytes(data)
+                    )
+                )
+                if immutable_matches:
+                    return existing
+                raise ValueError(
+                    "artifact_idempotency_conflict: deterministic artifact id "
+                    f"{artifact_id} is already bound to different bytes or metadata"
+                )
             self.atomic_write_bytes(payload_path, data)
             self.atomic_write_json(meta_path, record)
         return record
@@ -377,7 +1310,10 @@ class ProjectStore:
             )
         return record, payload_path
 
-    def _record_integrity_hmac(self, value: dict[str, Any]) -> str:
+    @staticmethod
+    def _record_integrity_hmac_with_secret(
+        value: dict[str, Any], secret: bytes
+    ) -> str:
         unsigned = {key: item for key, item in value.items() if key != "integrity_hmac"}
         payload = json.dumps(
             unsigned,
@@ -385,13 +1321,27 @@ class ProjectStore:
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
-        return hmac.new(self._integrity_secret, payload, hashlib.sha256).hexdigest()
+        return hmac.new(secret, payload, hashlib.sha256).hexdigest()
+
+    def _record_integrity_hmac(self, value: dict[str, Any]) -> str:
+        return self._record_integrity_hmac_with_secret(value, self._integrity_secret)
+
+    def _record_integrity_signature_matches(
+        self, value: dict[str, Any], signature: str
+    ) -> bool:
+        return any(
+            hmac.compare_digest(
+                signature,
+                self._record_integrity_hmac_with_secret(value, secret),
+            )
+            for secret in self._integrity_verification_secrets
+        )
 
     def project_record_is_signed(self, value: dict[str, Any]) -> bool:
         signature = value.get("integrity_hmac")
         if not isinstance(signature, str):
             return False
-        return hmac.compare_digest(signature, self._record_integrity_hmac(value))
+        return self._record_integrity_signature_matches(value, signature)
 
     def _verify_record_integrity(self, value: dict[str, Any], *, record_id: str) -> None:
         """Verify new signed records while accepting pre-0.3 legacy records.
@@ -405,8 +1355,9 @@ class ProjectStore:
         signature = value.get("integrity_hmac")
         if signature is None:
             return
-        expected = self._record_integrity_hmac(value)
-        if not isinstance(signature, str) or not hmac.compare_digest(signature, expected):
+        if not isinstance(signature, str) or not self._record_integrity_signature_matches(
+            value, signature
+        ):
             raise ValueError(f"project_record_integrity_mismatch: {record_id}")
 
     def list_artifacts(
@@ -503,6 +1454,11 @@ class ProjectStore:
         if not isinstance(value, dict) or value.get("project_id") != project_id:
             raise ValueError(f"invalid {clean_kind} record: {clean_id}")
         self._verify_record_integrity(value, record_id=clean_id)
+        if (
+            clean_kind in SIGNED_ONLY_PROJECT_RECORD_KINDS
+            and not self.project_record_is_signed(value)
+        ):
+            raise ValueError(f"project_record_signature_required: {clean_id}")
         return value
 
     @contextlib.contextmanager
@@ -532,6 +1488,11 @@ class ProjectStore:
             if not isinstance(value, dict) or value.get("project_id") != project_id:
                 raise ValueError(f"invalid {clean_kind} record: {clean_id}")
             self._verify_record_integrity(value, record_id=clean_id)
+            if (
+                clean_kind in SIGNED_ONLY_PROJECT_RECORD_KINDS
+                and not self.project_record_is_signed(value)
+            ):
+                raise ValueError(f"project_record_signature_required: {clean_id}")
             yield value
             value["integrity_hmac"] = self._record_integrity_hmac(value)
             self.atomic_write_json(path, value)
@@ -553,6 +1514,13 @@ class ProjectStore:
                     self._verify_record_integrity(
                         value, record_id=str(value.get("record_id") or path.stem)
                     )
+                    if (
+                        clean_kind in SIGNED_ONLY_PROJECT_RECORD_KINDS
+                        and not self.project_record_is_signed(value)
+                    ):
+                        raise ValueError(
+                            f"project_record_signature_required: {path.stem}"
+                        )
                     result.append(value)
         result.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
         return result
@@ -605,10 +1573,19 @@ class ProjectStore:
         consumer_work_order_id: str,
         expected_to_role: str,
         expected_types: set[str],
+        lease_seconds: int = DEFAULT_HANDOFF_CLAIM_LEASE_SECONDS,
     ) -> dict[str, Any]:
-        """Atomically claim one signed handoff, allowing same-consumer retries."""
+        """Atomically claim one signed handoff with a fenced, bounded lease."""
 
         clean_id = safe_id(handoff_id, "handoff_id")
+        try:
+            lease_seconds = int(lease_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid handoff lease_seconds") from exc
+        if not 1 <= lease_seconds <= MAX_CONSUMPTION_LEASE_SECONDS:
+            raise ValueError(
+                f"handoff lease_seconds must be between 1 and {MAX_CONSUMPTION_LEASE_SECONDS}"
+            )
         path = self.project_dir(namespace, project_id) / "handoffs" / f"{clean_id}.json"
         with self.lock(f"{namespace}-{project_id}"):
             if not path.is_file():
@@ -620,6 +1597,11 @@ class ProjectStore:
                 or record.get("handoff_type") not in expected_types
             ):
                 raise ValueError("handoff_binding_mismatch: type or destination role is invalid")
+            bound_authority = record.get("claim_authority_work_order_id")
+            if bound_authority not in {None, consumer_work_order_id}:
+                raise ValueError(
+                    "handoff_state_conflict: handoff is bound to another audit authority"
+                )
             publication_state = str(record.get("publication_state") or "committed")
             if not self.handoff_is_published(
                 namespace, project_id, record
@@ -637,14 +1619,119 @@ class ProjectStore:
                     return result
                 raise ValueError("handoff_state_conflict: handoff was consumed by another audit authority")
             if status == "consuming":
-                claimed_at = float(record.get("claim_epoch_seconds") or 0)
-                if owner != consumer_work_order_id and time.time() - claimed_at < 300:
+                if owner != consumer_work_order_id:
+                    # Once an audit authority has claimed this signed handoff,
+                    # expiry may recover only that same authority.  It must
+                    # never transfer the audit to a competing work order.
+                    raise ValueError(
+                        "handoff_state_conflict: handoff is bound to another audit authority"
+                    )
+                try:
+                    lease_expires_epoch = float(
+                        record.get("claim_lease_expires_epoch_seconds") or 0
+                    )
+                except (TypeError, ValueError):
+                    lease_expires_epoch = 0
+                if lease_expires_epoch <= 0:
+                    try:
+                        claimed_at = float(record.get("claim_epoch_seconds") or 0)
+                    except (TypeError, ValueError):
+                        claimed_at = 0
+                    lease_expires_epoch = claimed_at + lease_seconds
+                if lease_expires_epoch > time.time():
                     raise ValueError("handoff_state_conflict: handoff is being consumed")
+                expired = {
+                    "claim_token": record.get("claim_token"),
+                    "claimed_by_work_order_id": owner,
+                    "claim_generation": record.get("claim_generation"),
+                    "claim_epoch_seconds": record.get("claim_epoch_seconds"),
+                    "claim_lease_expires_epoch_seconds": record.get(
+                        "claim_lease_expires_epoch_seconds"
+                    ),
+                    "state": "lease_expired",
+                    "expired_at": utc_stamp(),
+                }
+                history = record.setdefault("claim_history", [])
+                if not isinstance(history, list):
+                    history = []
+                    record["claim_history"] = history
+                history.append(expired)
+                del history[:-MAX_CONSUMPTION_CLAIM_HISTORY]
             elif status != "prepared":
                 raise ValueError(f"handoff_state_conflict: handoff status is {status!r}")
+            now = time.time()
+            try:
+                generation = int(record.get("claim_generation") or 0) + 1
+            except (TypeError, ValueError):
+                generation = 1
             record["status"] = "consuming"
+            record["claim_authority_work_order_id"] = consumer_work_order_id
             record["claimed_by_work_order_id"] = consumer_work_order_id
-            record["claim_epoch_seconds"] = time.time()
+            record["claim_token"] = f"HCL-{uuid.uuid4().hex}"
+            record["claim_generation"] = generation
+            record["claim_epoch_seconds"] = now
+            record["claim_lease_seconds"] = lease_seconds
+            record["claim_lease_expires_at"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + lease_seconds)
+            )
+            record["claim_lease_expires_epoch_seconds"] = now + lease_seconds
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(path, record)
+            return record
+
+    def release_handoff_claim(
+        self,
+        namespace: str,
+        project_id: str,
+        handoff_id: str,
+        *,
+        consumer_work_order_id: str,
+        claim_token: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Release an audit claim only for its exact authority and token."""
+
+        clean_id = safe_id(handoff_id, "handoff_id")
+        path = self.project_dir(namespace, project_id) / "handoffs" / f"{clean_id}.json"
+        with self.lock(f"{namespace}-{project_id}"):
+            record = self.read_json(path)
+            self._verify_record_integrity(record, record_id=clean_id)
+            if record.get("status") == "consumed":
+                return record
+            if (
+                record.get("status") != "consuming"
+                or record.get("claimed_by_work_order_id") != consumer_work_order_id
+                or record.get("claim_token") != claim_token
+            ):
+                raise ValueError("handoff_state_conflict: handoff claim is not current")
+            released = {
+                "claim_token": record.get("claim_token"),
+                "claimed_by_work_order_id": consumer_work_order_id,
+                "claim_generation": record.get("claim_generation"),
+                "claim_epoch_seconds": record.get("claim_epoch_seconds"),
+                "claim_lease_expires_epoch_seconds": record.get(
+                    "claim_lease_expires_epoch_seconds"
+                ),
+                "state": "released",
+                "released_at": utc_stamp(),
+                "release_reason": str(reason or "audit_failed")[:256],
+            }
+            history = record.setdefault("claim_history", [])
+            if not isinstance(history, list):
+                history = []
+                record["claim_history"] = history
+            history.append(released)
+            del history[:-MAX_CONSUMPTION_CLAIM_HISTORY]
+            record["status"] = "prepared"
+            for key in (
+                "claimed_by_work_order_id",
+                "claim_token",
+                "claim_epoch_seconds",
+                "claim_lease_seconds",
+                "claim_lease_expires_at",
+                "claim_lease_expires_epoch_seconds",
+            ):
+                record.pop(key, None)
             record["integrity_hmac"] = self._record_integrity_hmac(record)
             self.atomic_write_json(path, record)
             return record
@@ -657,6 +1744,7 @@ class ProjectStore:
         *,
         consumer_work_order_id: str,
         audit_certificate_id: str,
+        claim_token: str | None = None,
         allow_reaudit: bool = False,
     ) -> dict[str, Any]:
         clean_id = safe_id(handoff_id, "handoff_id")
@@ -705,6 +1793,8 @@ class ProjectStore:
             if (
                 record.get("status") != "consuming"
                 or record.get("claimed_by_work_order_id") != consumer_work_order_id
+                or not claim_token
+                or record.get("claim_token") != claim_token
             ):
                 raise ValueError("handoff_state_conflict: handoff claim is not current")
             record["status"] = "consumed"
@@ -712,7 +1802,11 @@ class ProjectStore:
             record["audit_certificate_id"] = audit_certificate_id
             record["consumed_at"] = utc_stamp()
             record.pop("claimed_by_work_order_id", None)
+            record.pop("claim_token", None)
             record.pop("claim_epoch_seconds", None)
+            record.pop("claim_lease_seconds", None)
+            record.pop("claim_lease_expires_at", None)
+            record.pop("claim_lease_expires_epoch_seconds", None)
             record["integrity_hmac"] = self._record_integrity_hmac(record)
             self.atomic_write_json(path, record)
             return record
@@ -1438,12 +2532,30 @@ class ProjectStore:
         *,
         lifetime_seconds: int = 3600,
     ) -> str:
-        expiry = int(time.time()) + max(60, min(int(lifetime_seconds), 86400))
+        directory = self.project_dir(namespace, project_id)
+        clean_artifact_id = safe_id(artifact_id, "artifact_id")
+        record, payload_path = self._load_artifact_record_path(
+            directory,
+            project_id=project_id,
+            artifact_id=clean_artifact_id,
+        )
+        verified, verified_size = self._open_verified_artifact_payload(
+            record, payload_path
+        )
+        verified.close()
+
+        issued_at = int(time.time())
+        expiry = issued_at + max(60, min(int(lifetime_seconds), 86400))
         payload = json.dumps(
             {
+                "sig_v": 2,
+                "iat": issued_at,
                 "namespace_key": self.namespace_key(namespace),
                 "project_id": project_id,
-                "artifact_id": artifact_id,
+                "artifact_id": clean_artifact_id,
+                "fingerprint": record.get("fingerprint"),
+                "size_bytes": verified_size,
+                "file_name": record.get("file_name"),
                 "exp": expiry,
             },
             separators=(",", ":"),
@@ -1453,33 +2565,210 @@ class ProjectStore:
         payload_token = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
         signature_token = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
         token = f"{payload_token}.{signature_token}"
-        return f"{self.public_base_url}/files/{token}/{slug_filename(file_name)}"
+        return (
+            f"{self.public_base_url}/files/{token}/"
+            f"{slug_filename(str(record.get('file_name') or file_name))}"
+        )
 
-    def resolve_download_token(self, token: str) -> tuple[dict[str, Any], Path]:
+    def _load_artifact_record_path(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        artifact_id: str,
+    ) -> tuple[dict[str, Any], Path]:
+        """Load a complete artifact index and normalize failures to fail closed."""
+
+        meta_path = directory / "artifacts" / f"{artifact_id}.meta.json"
+        try:
+            record = self.read_json(meta_path)
+            if not isinstance(record, dict):
+                raise TypeError("artifact metadata is not an object")
+            required_strings = ("artifact_id", "project_id", "file_name", "relative_path", "fingerprint")
+            if any(
+                not isinstance(record.get(field), str) or not record.get(field)
+                for field in required_strings
+            ):
+                raise ValueError("artifact metadata is incomplete")
+            if (
+                record["artifact_id"] != artifact_id
+                or record["project_id"] != project_id
+            ):
+                raise ValueError("artifact metadata identity mismatch")
+            if "metadata" in record and not isinstance(record["metadata"], dict):
+                raise ValueError("artifact publication metadata is invalid")
+            size = record.get("size_bytes")
+            if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+                raise ValueError("artifact metadata size is invalid")
+            payload_path = (directory / record["relative_path"]).resolve()
+            if (
+                directory.resolve() not in payload_path.parents
+                or not payload_path.is_file()
+            ):
+                raise ValueError("artifact payload is unavailable")
+        except (KeyError, OSError, TypeError, ValueError) as exc:
+            raise ValueError("artifact metadata or payload is unavailable") from exc
+        return record, payload_path
+
+    def _resolve_download_record_path(
+        self, token: str
+    ) -> tuple[dict[str, Any], Path]:
         try:
             payload_token, signature_token = token.split(".", 1)
             payload = base64.urlsafe_b64decode((payload_token + "=" * (-len(payload_token) % 4)).encode("ascii"))
             signature = base64.urlsafe_b64decode(
                 (signature_token + "=" * (-len(signature_token) % 4)).encode("ascii")
             )
-            expected = hmac.new(self._secret, payload, hashlib.sha256).digest()
-            if not hmac.compare_digest(signature, expected):
-                raise ValueError("invalid signature")
             value = json.loads(payload.decode("utf-8"))
-            if int(value["exp"]) < int(time.time()):
+            untrusted_signature_version = value.get("sig_v")
+            is_v2 = (
+                isinstance(untrusted_signature_version, int)
+                and not isinstance(untrusted_signature_version, bool)
+                and untrusted_signature_version == 2
+            )
+            if is_v2:
+                verification_secrets = (self._secret,)
+            elif untrusted_signature_version is None:
+                verification_secrets = self._download_verification_secrets
+            else:
+                verification_secrets = (self._secret,)
+            signature_valid = any(
+                hmac.compare_digest(
+                    signature,
+                    hmac.new(secret, payload, hashlib.sha256).digest(),
+                )
+                for secret in verification_secrets
+            )
+            if not signature_valid:
+                raise ValueError("invalid signature")
+            now = int(time.time())
+            expiry_value = value.get("exp")
+            if not isinstance(expiry_value, int) or isinstance(expiry_value, bool):
+                raise ValueError("invalid expiry")
+            expiry = expiry_value
+            if expiry < now:
                 raise ValueError("expired")
+            signature_version = value.get("sig_v")
+            if signature_version is None:
+                # Every pre-0.5.5 token was capped to a 24-hour lifetime. Keep
+                # only the persisted one-time forward-compatibility window;
+                # restarts never extend it and far-future tokens are rejected.
+                if (
+                    now > self._legacy_download_token_accept_until
+                    or expiry > self._legacy_download_token_accept_until
+                ):
+                    raise ValueError("legacy token compatibility window expired")
+            elif (
+                not isinstance(signature_version, int)
+                or isinstance(signature_version, bool)
+                or signature_version != 2
+            ):
+                raise ValueError("unsupported signature version")
+            else:
+                issued_at = value.get("iat")
+                if (
+                    not isinstance(issued_at, int)
+                    or isinstance(issued_at, bool)
+                    or issued_at > now + 300
+                    or expiry < issued_at
+                    or expiry - issued_at > 86_400
+                ):
+                    raise ValueError("invalid signed token lifetime")
             namespace_key = safe_id(str(value["namespace_key"]), "namespace_key")
             project_id = safe_id(str(value["project_id"]), "project_id")
             artifact_id = safe_id(str(value["artifact_id"]), "artifact_id")
         except Exception as exc:
             raise ValueError("invalid or expired download token") from exc
         directory = self.projects_dir / namespace_key / project_id
-        meta_path = directory / "artifacts" / f"{artifact_id}.meta.json"
-        if not meta_path.is_file():
-            raise ValueError("artifact is unavailable")
-        record = self.read_json(meta_path)
+        record, payload_path = self._load_artifact_record_path(
+            directory,
+            project_id=project_id,
+            artifact_id=artifact_id,
+        )
         self._assert_artifact_published(directory, record)
-        payload_path = (directory / str(record["relative_path"])).resolve()
-        if directory.resolve() not in payload_path.parents or not payload_path.is_file():
-            raise ValueError("artifact payload is unavailable")
+        if value.get("sig_v") == 2:
+            token_size = value.get("size_bytes")
+            if (
+                not isinstance(token_size, int)
+                or isinstance(token_size, bool)
+                or value.get("fingerprint") != record.get("fingerprint")
+                or token_size != record.get("size_bytes")
+                or value.get("file_name") != record.get("file_name")
+            ):
+                raise ValueError("download_token_artifact_binding_mismatch")
         return record, payload_path
+
+    def _open_verified_artifact_payload(
+        self, record: dict[str, Any], payload_path: Path
+    ) -> tuple[BinaryIO, int]:
+        """Copy once into a bounded spool and bind it to immutable metadata.
+
+        A signed URL proves who issued the token, not that the payload on disk
+        is still the artifact that was signed. Copy from one opened descriptor,
+        verify size and raw fingerprint, then stream that exact snapshot. Large
+        files spill to disk instead of occupying one response-sized byte array.
+        """
+
+        expected_size = record.get("size_bytes")
+        if (
+            not isinstance(expected_size, int)
+            or isinstance(expected_size, bool)
+            or expected_size < 0
+        ):
+            raise ValueError("artifact_size_metadata_invalid")
+        if expected_size > self.max_download_bytes:
+            raise ValueError("artifact_payload_exceeds_download_limit")
+        expected = record.get("fingerprint")
+        if not isinstance(expected, str):
+            raise ValueError("artifact_fingerprint_metadata_invalid")
+
+        spool = tempfile.SpooledTemporaryFile(
+            max_size=min(DOWNLOAD_SPOOL_MEMORY_BYTES, self.max_download_bytes),
+            mode="w+b",
+        )
+        digest = hashlib.sha256()
+        copied = 0
+        try:
+            if payload_path.stat().st_size != expected_size:
+                raise ValueError("artifact_raw_size_mismatch")
+            with payload_path.open("rb") as source:
+                while True:
+                    chunk = source.read(DOWNLOAD_COPY_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    copied += len(chunk)
+                    if copied > self.max_download_bytes:
+                        raise ValueError("artifact_payload_exceeds_download_limit")
+                    digest.update(chunk)
+                    spool.write(chunk)
+        except ValueError:
+            spool.close()
+            raise
+        except OSError as exc:
+            spool.close()
+            raise ValueError("artifact payload is unavailable") from exc
+
+        if copied != expected_size:
+            spool.close()
+            raise ValueError("artifact_raw_size_mismatch")
+        if not hmac.compare_digest(digest.hexdigest(), expected):
+            spool.close()
+            raise ValueError(
+                "artifact_raw_fingerprint_mismatch: payload bytes changed for "
+                f"{record.get('artifact_id') or 'artifact'}"
+            )
+        spool.seek(0)
+        return spool, copied
+
+    def resolve_download_token(self, token: str) -> tuple[dict[str, Any], Path]:
+        record, payload_path = self._resolve_download_record_path(token)
+        stream, _size = self._open_verified_artifact_payload(record, payload_path)
+        stream.close()
+        return record, payload_path
+
+    def open_verified_download(
+        self, token: str
+    ) -> tuple[dict[str, Any], BinaryIO, int]:
+        record, payload_path = self._resolve_download_record_path(token)
+        stream, size = self._open_verified_artifact_payload(record, payload_path)
+        return record, stream, size

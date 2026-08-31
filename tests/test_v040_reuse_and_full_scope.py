@@ -125,6 +125,18 @@ class ProjectReuseAndFullScopeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_full_commit_rejects_outside_delete_modify_and_add(self) -> None:
         project_id, base, committed = await self.prepare_base()
+        audit_arguments = inject_semantic_audit(
+            self.service,
+            self.settings,
+            "audit_storyboard",
+            {
+                "project_id": project_id,
+                "artifact_id": committed["artifact_id"],
+                "handoff_artifact_id": committed["data"]["handoff"]["handoff_id"],
+            },
+        )
+        audited = await self.call("audit_storyboard", audit_arguments)
+        self.assertEqual(audited["status"], "pass")
         artifact_count = len(self.service.store.list_artifacts(self.namespace, project_id))
 
         cases: list[tuple[str, dict[str, Any]]] = []

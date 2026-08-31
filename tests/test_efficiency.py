@@ -957,13 +957,12 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
 
         # A later valid commit must still allocate the first storyboard
         # version, proving the rejected attempt consumed no version number.
-        retry_work_order_id = await self.begin_storyboard_task(
-            project_id,
-            window_key="preflight-zero-side-effects-retry",
-        )
+        # v0.5.5 binds a failed draft scope to its originating work order so
+        # the correction cannot evade the learned prevention profile by
+        # opening a fresh storyboard batch.
         committed = await self.commit_fixture(
             project_id,
-            retry_work_order_id,
+            work_order_id,
             valid_storyboard(),
             file_name="首个有效分镜.xlsx",
         )

@@ -1,4 +1,4 @@
-# Incremental storyboard execution protocol 0.5.4 compact master
+# Incremental storyboard execution protocol 0.5.5 compact master
 
 Use this reference for an existing storyboard version when the requested work can be limited to named episodes, scenes, shots, or audit-confirmed repair targets. It defines execution authority and incremental assembly; it does not weaken any R10 content rule.
 
@@ -11,6 +11,8 @@ All paths in this protocol preserve these invariants:
 - the ordered G0–G13 preventive gates;
 - the THG-01–THG-12 template hard gates and actual multiline XLSX round-trip;
 - the complete eight-layer independent audit;
+- the mandatory `get_agent_status` → `migrate_project_state` when required → `query_project_issues` → per-scene `preflight_storyboard_draft` → signed full `preflight_storyboard_draft` → certificate-bound `commit_storyboard` → `audit_storyboard` sequence;
+- a first-draft grade of overall correctness and direct usability at least 98%, each episode at least 96%, new local issues at most 2%, and zero hard errors, major issues, known recurrences, or systemic duplicate patterns;
 - 100% coverage for core events, causal links, character-state changes, protected dialogue, and source treatment when chapter intake applies;
 - zero blocking, residual, or introduced issues before a clean final verdict;
 - an exact clean independent-audit certificate and human sign-off before archive.
@@ -61,7 +63,7 @@ Use the smallest safe route, not the smallest payload at any cost.
 | Audit-confirmed boundary, cognition, source, shot identity/order/timing, scene-topology, or core-plan issue limited to an affected scene or episode | Repair full `commit_storyboard` for the complete affected scene/episode with the exact repair package |
 | Stale base, unresolved boundary, insufficient authorization, fingerprint mismatch, or protected-scope conflict | Block; do not fall back silently |
 
-An affected-scene or affected-episode repair rebuild may still be limited conceptually to that project scope, but the 0.5.4 repair authority submits it through the package-bound full commit route. “Full rebuild required” means rebuilding the complete affected semantic unit and its boundaries, not automatically regenerating unrelated episodes.
+An affected-scene or affected-episode repair rebuild may still be limited conceptually to that project scope, but the 0.5.5 repair authority submits it through the package-bound full commit route. “Full rebuild required” means rebuilding the complete affected semantic unit and its boundaries, not automatically regenerating unrelated episodes.
 
 Fall back to a full commit when the server cannot prove a closed impact boundary, preserve outside-scope semantics, or deterministically rebuild all affected consumers.
 
@@ -87,13 +89,13 @@ Reject a stale or mismatched base. Never rebase a model-authored delta silently 
 
 ### Delta scope contract
 
-A 0.5.4 delta manifest records affected base shot IDs/UIDs, replacement IDs/UIDs, untouched-shot count and semantic-hash verification, evidence rows refreshed, computed timing/statistics, export projection version, legacy migration count, payload sizes/reduction, and internal merge/export duration. It contains no batch IDs or batch metrics. The request and persisted artifact metadata separately bind the exact base artifact/canonical, scope hash, target and left/right guards; the final result carries the server trace and successor handoff.
+A 0.5.5 delta manifest records affected base shot IDs/UIDs, replacement IDs/UIDs, untouched-shot count and semantic-hash verification, evidence rows refreshed, computed timing/statistics, export projection version, legacy migration count, payload sizes/reduction, and internal merge/export duration. It contains no batch IDs or batch metrics. The request and persisted artifact metadata separately bind the exact base artifact/canonical, scope hash, target and left/right guards; the final result carries the server trace and successor handoff.
 
 Outside the authorized semantic scope, every atomic shot hash must remain identical. The delta route does not accept top-level source, cognition, coverage, chapter, scene-state, protected-dialogue, or other evidence replacement; if any such evidence must change, use the full route. Because exact dialogue is merged into `画面内容` while these upstream evidence sets cannot be replaced by delta, the service must conservatively reject every dialogue or speaker change, even when the caller claims that source mapping or cognition is unchanged. Boundary neighbors are read-only guards and cannot be changed by delta.
 
 For every delta replacement, exact dialogue text, punctuation, order/segmentation, and speaker identity must match the base. Any addition, deletion, rewrite, reorder, split/merge, or speaker reassignment requires the full route for the complete affected scene or episode so source mapping, cognition, protected dialogue, performance chains, and coverage can be rebuilt together. Within an unchanged shot identity and shot count, visual action, expression, camera/movement, listener reaction, delivery that does not change dialogue or cognition, and other non-cognitive execution facts may use delta only when the caller supplies fresh complete shot-bound evidence for every affected atom. `音色` remains independent. Psychological audio remains on the full route because the delta contract has no shot-keyed cognition proof.
 
-For an eligible same-identity replacement, the 0.5.4 service may deterministically change only episode-local cumulative duration, batch total duration, formula/statistics results, the exact R10-SPC-1 ten-column workbook projection, and directly redundant shot-plan bindings. The canonical stores neither `正式分镜母版` nor `GPT关键帧生成指令`; they are export-only projections. It also stores no `batches`, Seedance text, Seedance column, or generated-batch sheet. Dialogue/speaker changes and insert, delete, move, split, merge, or renumber operations use the full route. A computed change does not authorize unrelated story, dialogue, cognition, performance, camera, sound, lighting or source-mapping content.
+For an eligible same-identity replacement, the 0.5.5 service may deterministically change only episode-local cumulative duration, batch total duration, formula/statistics results, the exact R10-SPC-1 ten-column workbook projection, and directly redundant shot-plan bindings. The canonical stores neither `正式分镜母版` nor `GPT关键帧生成指令`; they are export-only projections. It also stores no `batches`, Seedance text, Seedance column, or generated-batch sheet. Dialogue/speaker changes and insert, delete, move, split, merge, or renumber operations use the full route. A computed change does not authorize unrelated story, dialogue, cognition, performance, camera, sound, lighting or source-mapping content.
 
 ## Store atoms once and project only at export
 
@@ -103,7 +105,7 @@ Each shot uses exactly 27 atoms in this order: `镜头编号｜时长｜累计�
 
 `画面内容` is the sole atom for visible action, performance, exact dialogue, six-dimensional delivery, punctuation effect, listener reaction, breath/end state and the three required R10-SPC-1 Seedance 2.5 single-shot timing stages. `空间站位描述`, `起始状态`, and `音色` remain separate. `光影`, `光源来源`, `光源方向`, and `色温倾向` are four mandatory independent atoms; color temperature is qualitative and contains no Kelvin/K value, while source and direction contain no alternative-choice wording. The retired standalone fields are forbidden on new writes.
 
-The 0.5.4 deterministic outputs are limited to cumulative time, total duration, formulas/statistics, and two export-only projections:
+The 0.5.5 deterministic outputs are limited to cumulative time, total duration, formulas/statistics, and two export-only projections:
 
 - `正式分镜母版`, the only blank-context executable single-shot master, beginning with the exact EP ID/duration/cumulative line and paragraph order defined by `strict_prompt_contract.md`; every shot's `生成限制` explicitly contains `9:16竖屏` and uses `禁止额外配乐` rather than the literal `BGM`;
 - `GPT关键帧生成指令`, beginning with `画幅：9:16竖屏` and projected only from the static whitelist, with timing, motion, transition, dialogue, lip-sync and audio instructions removed.
@@ -118,7 +120,9 @@ The semantic delta is an input package, not a competing canonical. Only the comp
 
 ## Validate the compact artifact without reduction
 
-Production may run an early semantic preflight to catch source, causality, cognition, boundary, or continuity errors before export. This early check is advisory and cannot replace final validation.
+Production must run the 0.5.5 draft preflight before export. First call `query_project_issues` and bind the active prevention profile. Then call `preflight_storyboard_draft(scope_kind="scene")` after every scene; any failure is written to the issue ledger, creates no artifact/version/XLSX/projection/handoff, and must be repaired before the next scene is accepted. After all scenes are clean, call `preflight_storyboard_draft(scope_kind="full")` on the exact final canonical and pass its signed commit-ready `draft_preflight_id` to `commit_storyboard`. The signed binding covers project, work order, complete canonical, rules, validator, production session, prevention profile, and scope; a mismatch or stale certificate blocks commit.
+
+The first submitted full draft is graded immutably. Grade A requires overall correctness and direct usability of at least 98%, every episode at least 96%, new local issue rate at most 2%, and zero hard errors, major issues, known-issue recurrences, or systemic duplicate patterns. This grade measures upstream prevention quality; it is not permission to ship the remaining percentage. Full preflight is commit-ready only after all detected issues are gone, and final independent audit requires all eight layers at 100% with zero blocking, residual, or introduced issues.
 
 Before `production_to_audit` or `repair_to_audit`:
 
@@ -169,12 +173,16 @@ Trace data must never contain source prose, dialogue, prompt bodies, private dow
 
 ## Normal flow
 
-1. Production locks source, scope, base canonical, boundaries, protection, and runtime certificate.
-2. It selects full or delta routing and generates only the required semantic content.
-3. The service compare-and-sets the base, merges by stable UID, validates the compact canonical, deterministically projects the ten-column workbook, exports a new version without Seedance/batch artifacts, and records the trace.
-4. Production issues `production_preflight` plus `production_to_audit`; its immutable workbook reports `PENDING_AUDIT` / `待独立审计` with null issue counts and trace.
-5. The resident audit window verifies every fingerprint and independently recomputes all eight layers.
-6. If clean, the auditor creates a new immutable signed-audit-overlay artifact/successor workbook with the final certificate and waits for human sign-off; it never edits the production XLSX in place. Repair is never activated.
+1. Production calls status; if required, authorized migration runs first and status is revalidated.
+2. Production locks source, scope, base canonical, boundaries, protection, runtime certificate, and the current issue-pattern prevention profile.
+3. It selects full or delta routing, generates only the required semantic content, and runs mandatory scene draft preflight after each scene.
+4. For the full route, the service signs a clean full-draft preflight; production passes that exact certificate into commit. Failed drafts remain ledger evidence only and never create formal artifacts.
+5. The service compare-and-sets the base, merges by stable UID, validates the compact canonical, deterministically projects the ten-column workbook, exports a new version without Seedance/batch artifacts, and records the trace.
+6. Production issues `production_preflight` plus `production_to_audit`; its immutable workbook reports `PENDING_AUDIT` / `待独立审计` with null issue counts and trace.
+7. The resident audit window verifies every fingerprint and independently recomputes all eight layers.
+8. If clean, the auditor creates a new immutable signed-audit-overlay artifact/successor workbook with the final certificate and waits for human sign-off; it never edits the production XLSX in place. Repair is never activated.
+
+Production owns semantic authorship and pre-commit correction. Deterministic service code owns schema/gate execution, projections, migration CAS, certificate bindings and issue-pattern learning. Independent audit owns read-only omission detection and the final semantic verdict; it must not regenerate or repair content, and it must not be used as the routine cleaner for known defects.
 
 For an unchanged-runtime ordinary task, keep execution on the fast-safe path: verify the runtime certificate once, reuse only fingerprint-matched objective records, transfer only the semantic delta, and make the server perform complete validation/export. Do not inspect runtime source or rerun system regression suites. In the audit window, call the signed-handoff audit once and report its compact result; do not regenerate the storyboard, Seedance text, export rows, or echo all rows into chat. Any extra reread, retry or rebuild must have a recorded cache miss, fingerprint mismatch, missing semantic input, validator failure or transport error.
 

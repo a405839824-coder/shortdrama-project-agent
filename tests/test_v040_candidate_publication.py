@@ -228,6 +228,15 @@ class CandidatePublicationFaultTests(unittest.IsolatedAsyncioTestCase):
                 "file_name": "delta基线.xlsx",
             },
         )
+        audited = await self.call(
+            "audit_storyboard",
+            {
+                "project_id": project_id,
+                "artifact_id": base["artifact_id"],
+                "handoff_artifact_id": base["data"]["handoff"]["handoff_id"],
+            },
+        )
+        self.assertEqual(audited["status"], "pass")
         change_order = await self.begin(
             project_id,
             operation="storyboard_change",

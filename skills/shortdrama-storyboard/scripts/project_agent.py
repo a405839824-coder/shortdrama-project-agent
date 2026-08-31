@@ -19,7 +19,7 @@ SCHEMA_VERSION = "R10-PROJECT-AGENT-1"
 RUNTIME_VERSION = "V16.3-148-R10-StableRuntime"
 WORKFLOW_REVISION = "R10-PG1"
 AGENT_MODE = "full_safe"
-COMPACT_MASTER_VERSION = "0.5.4"
+COMPACT_MASTER_VERSION = "0.5.5"
 MODES = {"plan_only", "execute", "audit_only", "audit_and_repair"}
 AUTHORIZATIONS = {"read_only", "plan_only", "explicit_execute", "pending"}
 CHANGE_OPERATIONS = {"add", "modify", "delete", "replace", "merge", "split", "move"}
@@ -160,6 +160,14 @@ def new_hub(project_name: str, project_id: str | None = None, timestamp: str | N
             "production_audit_separation_required": True,
             "repair_activation_condition": "independent_audit_fail_and_explicit_authorization",
             "repair_returns_to_independent_audit": True,
+            "scene_draft_preflight_required": True,
+            "failed_draft_learning_required": True,
+            "first_draft_correctness_threshold_percent": 98.0,
+            "first_draft_direct_usability_threshold_percent": 98.0,
+            "max_new_local_issue_rate_percent": 2.0,
+            "minimum_episode_correctness_percent": 96.0,
+            "known_issue_recurrence_tolerance": 0,
+            "systemic_root_cause_tolerance": 0,
         },
         "capability_registry": load_capability_registry(),
         "project_state": {
@@ -173,6 +181,9 @@ def new_hub(project_name: str, project_id: str | None = None, timestamp: str | N
             "props": {},
             "open_decisions": [],
             "blocked_scopes": [],
+            "production_quality_block": None,
+            "latest_first_draft_quality": None,
+            "active_prevention_profile_sha256": None,
         },
         "work_orders": [],
         "change_requests": [],
@@ -189,6 +200,116 @@ def new_hub(project_name: str, project_id: str | None = None, timestamp: str | N
             "capability_gap_count": 0,
         },
     }
+
+
+def migrate_hub_to_current(
+    hub: dict[str, Any],
+    *,
+    timestamp: str | None = None,
+    migration_id: str | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Build a non-destructive current-version control-state candidate."""
+
+    if not isinstance(hub, dict):
+        raise ValueError("hub must be an object")
+    migrated = copy.deepcopy(hub)
+    changed: list[str] = []
+
+    def set_value(container: dict[str, Any], key: str, value: Any, path: str) -> None:
+        if container.get(key) != value:
+            container[key] = copy.deepcopy(value)
+            changed.append(path)
+
+    set_value(migrated, "schema_version", SCHEMA_VERSION, "schema_version")
+    set_value(migrated, "runtime_version", RUNTIME_VERSION, "runtime_version")
+    set_value(migrated, "workflow_revision", WORKFLOW_REVISION, "workflow_revision")
+    set_value(migrated, "agent_mode", AGENT_MODE, "agent_mode")
+
+    policy = migrated.setdefault("policy", {})
+    current_policy = new_hub(
+        str(migrated.get("project_name") or "迁移项目"),
+        project_id=str(migrated.get("project_id") or "SBP-migration"),
+        timestamp=timestamp,
+    )["policy"]
+    for key, value in current_policy.items():
+        set_value(policy, key, value, f"policy.{key}")
+
+    capabilities = load_capability_registry()
+    if migrated.get("capability_registry") != capabilities:
+        migrated["capability_registry"] = capabilities
+        changed.append("capability_registry")
+
+    state = migrated.setdefault("project_state", {})
+    current_state = new_hub(
+        str(migrated.get("project_name") or "迁移项目"),
+        project_id=str(migrated.get("project_id") or "SBP-migration"),
+        timestamp=timestamp,
+    )["project_state"]
+    for key, value in current_state.items():
+        if key not in state:
+            state[key] = copy.deepcopy(value)
+            changed.append(f"project_state.{key}")
+
+    supported_operations = {
+        str(row.get("operation"))
+        for row in capabilities.get("capabilities", [])
+        if isinstance(row, dict) and row.get("operation")
+    }
+    for index, work_order in enumerate(migrated.setdefault("work_orders", [])):
+        if not isinstance(work_order, dict):
+            continue
+        retired_outputs = [
+            str(value)
+            for value in work_order.get("expected_outputs", [])
+            if str(value) in FORBIDDEN_BACKGROUND_OUTPUTS
+        ]
+        unsupported = str(work_order.get("operation") or "") not in supported_operations
+        if retired_outputs or unsupported:
+            work_order["legacy_read_only"] = True
+            if retired_outputs:
+                work_order["legacy_expected_outputs"] = list(
+                    dict.fromkeys(
+                        list(work_order.get("legacy_expected_outputs", []))
+                        + retired_outputs
+                    )
+                )
+                work_order["expected_outputs"] = [
+                    value
+                    for value in work_order.get("expected_outputs", [])
+                    if str(value) not in FORBIDDEN_BACKGROUND_OUTPUTS
+                ]
+            changed.append(f"work_orders[{index}].legacy_read_only")
+
+    for index, deliverable in enumerate(migrated.setdefault("deliverables", [])):
+        if (
+            isinstance(deliverable, dict)
+            and str(deliverable.get("artifact_type")) in FORBIDDEN_BACKGROUND_OUTPUTS
+        ):
+            deliverable["legacy_read_only"] = True
+            changed.append(f"deliverables[{index}].legacy_read_only")
+
+    migrated.setdefault("version_history", [])
+    if changed:
+        now = _timestamp(timestamp)
+        record = {
+            "version": COMPACT_MASTER_VERSION,
+            "timestamp": now,
+            "change_type": "project_control_state_migration",
+            "migration_id": migration_id,
+            "preserves_authored_artifacts": True,
+            "changed_paths": sorted(set(changed)),
+        }
+        if not any(
+            isinstance(row, dict)
+            and migration_id
+            and row.get("migration_id") == migration_id
+            for row in migrated["version_history"]
+        ):
+            migrated["version_history"].append(record)
+            changed.append("version_history")
+        migrated["updated_at"] = now
+        changed.append("updated_at")
+    return migrated, sorted(set(changed))
 
 
 def _is_iso_timestamp(value: Any) -> bool:
@@ -648,6 +769,191 @@ def record_capability_gap(hub: dict[str, Any], record: dict[str, Any]) -> dict[s
     return {"status": "recorded", "gap_id": gap["gap_id"], "formal_capability_mutated": False}
 
 
+def _validate_first_draft_quality(value: Any, path: str) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(value, dict):
+        return [f"{path} must be an object or null"]
+    required = [
+        "grade", "checked_shot_count", "issue_point_count",
+        "unique_affected_shot_count", "affected_shot_ids",
+        "first_draft_correctness_percent", "direct_usability_percent",
+        "new_local_issue_shot_rate_percent", "episode_correctness_percent",
+        "minimum_episode_correctness_percent", "hard_or_major_issue_count",
+        "global_blocking_issue_count", "known_recurrence_count",
+        "known_recurrence_pattern_keys", "systemic_duplicate_count",
+        "systemic_pattern_keys", "commit_eligible",
+        "final_independent_audit_required_percent", "threshold_met",
+        "final_audit_pass",
+    ]
+    for field in required:
+        if field not in value:
+            errors.append(f"{path} missing field: {field}")
+    if value.get("grade") not in {"A", "B", "C"}:
+        errors.append(f"{path}.grade must be A, B, or C")
+    count_fields = [
+        "checked_shot_count", "issue_point_count", "unique_affected_shot_count",
+        "hard_or_major_issue_count", "global_blocking_issue_count",
+        "known_recurrence_count", "systemic_duplicate_count",
+    ]
+    for field in count_fields:
+        item = value.get(field)
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            errors.append(f"{path}.{field} must be a non-negative integer")
+    percentage_fields = [
+        "first_draft_correctness_percent", "direct_usability_percent",
+        "new_local_issue_shot_rate_percent", "minimum_episode_correctness_percent",
+        "final_independent_audit_required_percent",
+    ]
+    for field in percentage_fields:
+        item = value.get(field)
+        if (
+            isinstance(item, bool)
+            or not isinstance(item, (int, float))
+            or not 0 <= float(item) <= 100
+        ):
+            errors.append(f"{path}.{field} must be a percentage from 0 to 100")
+    if value.get("final_independent_audit_required_percent") != 100.0:
+        errors.append(f"{path}.final_independent_audit_required_percent must equal 100.0")
+    for field in ["commit_eligible", "threshold_met", "final_audit_pass"]:
+        if not isinstance(value.get(field), bool):
+            errors.append(f"{path}.{field} must be boolean")
+    list_fields = [
+        "affected_shot_ids", "known_recurrence_pattern_keys", "systemic_pattern_keys",
+    ]
+    for field in list_fields:
+        items = value.get(field)
+        if not isinstance(items, list) or any(
+            not isinstance(item, str) or not item for item in items
+        ):
+            errors.append(f"{path}.{field} must be an array of non-empty strings")
+        elif len(items) != len(set(items)):
+            errors.append(f"{path}.{field} must contain unique values")
+    episode_rates = value.get("episode_correctness_percent")
+    if not isinstance(episode_rates, dict):
+        errors.append(f"{path}.episode_correctness_percent must be an object")
+    else:
+        for episode_id, rate in episode_rates.items():
+            if not isinstance(episode_id, str) or not episode_id:
+                errors.append(f"{path}.episode_correctness_percent keys must be non-empty strings")
+            if (
+                isinstance(rate, bool)
+                or not isinstance(rate, (int, float))
+                or not 0 <= float(rate) <= 100
+            ):
+                errors.append(f"{path}.episode_correctness_percent[{episode_id!r}] is invalid")
+    if isinstance(value.get("affected_shot_ids"), list) and isinstance(
+        value.get("unique_affected_shot_count"), int
+    ) and value.get("unique_affected_shot_count") != len(value["affected_shot_ids"]):
+        errors.append(f"{path}.unique_affected_shot_count does not match affected_shot_ids")
+    if isinstance(value.get("known_recurrence_pattern_keys"), list) and isinstance(
+        value.get("known_recurrence_count"), int
+    ) and value.get("known_recurrence_count") != len(value["known_recurrence_pattern_keys"]):
+        errors.append(f"{path}.known_recurrence_count does not match pattern keys")
+    if isinstance(value.get("systemic_pattern_keys"), list) and isinstance(
+        value.get("systemic_duplicate_count"), int
+    ) and value.get("systemic_duplicate_count") != len(value["systemic_pattern_keys"]):
+        errors.append(f"{path}.systemic_duplicate_count does not match pattern keys")
+    if (
+        isinstance(value.get("checked_shot_count"), int)
+        and isinstance(value.get("unique_affected_shot_count"), int)
+        and value.get("unique_affected_shot_count") > value.get("checked_shot_count")
+    ):
+        errors.append(f"{path}.unique_affected_shot_count exceeds checked_shot_count")
+    return errors
+
+
+def _validate_project_state(state: Any) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(state, dict):
+        return ["project_state must be an object"]
+    required = [
+        "current_stage", "authoritative_sources", "latest_artifacts",
+        "current_episode", "locked_story_range", "characters", "scenes",
+        "props", "open_decisions", "blocked_scopes",
+        "production_quality_block", "latest_first_draft_quality",
+        "active_prevention_profile_sha256",
+    ]
+    for field in required:
+        if field not in state:
+            errors.append(f"project_state missing field: {field}")
+    expected_types = {
+        "authoritative_sources": list,
+        "latest_artifacts": dict,
+        "characters": dict,
+        "scenes": dict,
+        "props": dict,
+        "open_decisions": list,
+        "blocked_scopes": list,
+    }
+    if not isinstance(state.get("current_stage"), str) or not state.get("current_stage", "").strip():
+        errors.append("project_state.current_stage must be a non-empty string")
+    for field, expected_type in expected_types.items():
+        if not isinstance(state.get(field), expected_type):
+            errors.append(f"project_state.{field} must be {expected_type.__name__}")
+    prevention_sha = state.get("active_prevention_profile_sha256")
+    if prevention_sha is not None and (
+        not isinstance(prevention_sha, str)
+        or re.fullmatch(r"[A-Fa-f0-9]{64}", prevention_sha) is None
+    ):
+        errors.append("project_state.active_prevention_profile_sha256 must be null or sha256")
+    quality = state.get("latest_first_draft_quality")
+    if quality is not None:
+        errors.extend(_validate_first_draft_quality(quality, "project_state.latest_first_draft_quality"))
+    block = state.get("production_quality_block")
+    if block is not None:
+        if not isinstance(block, dict):
+            errors.append("project_state.production_quality_block must be an object or null")
+        else:
+            block_required = [
+                "active", "reason", "grade", "artifact_id", "audit_cycle_id",
+                "required_action", "created_at",
+            ]
+            for field in block_required:
+                if field not in block:
+                    errors.append(f"project_state.production_quality_block missing field: {field}")
+            if not isinstance(block.get("active"), bool):
+                errors.append("project_state.production_quality_block.active must be boolean")
+            if block.get("reason") != "first_draft_quality_below_threshold":
+                errors.append("project_state.production_quality_block.reason is invalid")
+            if block.get("grade") not in {"B", "C"}:
+                errors.append("project_state.production_quality_block.grade must be B or C")
+            if block.get("required_action") != "repair_root_cause_and_revalidate_prevention_gate":
+                errors.append("project_state.production_quality_block.required_action is invalid")
+            for field in ["artifact_id", "audit_cycle_id", "created_at"]:
+                if not isinstance(block.get(field), str) or not block.get(field, "").strip():
+                    errors.append(f"project_state.production_quality_block.{field} must be a non-empty string")
+            if block.get("created_at") and not _is_iso_timestamp(block.get("created_at")):
+                errors.append("project_state.production_quality_block.created_at must be ISO-8601")
+            clearance_fields = [
+                "cleared_at", "cleared_by_audit_cycle_id",
+                "cleared_by_artifact_id", "cleared_by_certificate_id",
+            ]
+            if block.get("active") is False:
+                for field in clearance_fields:
+                    if not isinstance(block.get(field), str) or not block.get(field, "").strip():
+                        errors.append(
+                            f"project_state.production_quality_block.{field} is required when cleared"
+                        )
+                if (
+                    block.get("cleared_by_audit_cycle_id")
+                    and block.get("audit_cycle_id")
+                    and block.get("cleared_by_audit_cycle_id") != block.get("audit_cycle_id")
+                ):
+                    errors.append(
+                        "project_state.production_quality_block clearance audit cycle does not match the blocked cycle"
+                    )
+                if block.get("cleared_at") and not _is_iso_timestamp(block.get("cleared_at")):
+                    errors.append("project_state.production_quality_block.cleared_at must be ISO-8601")
+            elif block.get("active") is True and any(field in block for field in clearance_fields):
+                errors.append("project_state.production_quality_block is active but contains clearance evidence")
+            # The active block is bound to its own artifact and audit cycle.
+            # `latest_first_draft_quality` may legitimately describe a later,
+            # unrelated audit whose lineage is not allowed to clear this block.
+    if isinstance(quality, dict) and quality.get("grade") in {"B", "C"} and not isinstance(block, dict):
+        errors.append("project_state.production_quality_block is required for below-threshold first-draft quality")
+    return errors
+
+
 def validate_hub(hub: Any) -> list[str]:
     errors: list[str] = []
     if not isinstance(hub, dict):
@@ -680,15 +986,25 @@ def validate_hub(hub: Any) -> list[str]:
         "impact_regression_required": True,
         "human_signoff_required_for_archive": True,
         "formal_rule_auto_mutation": False,
+        "unavailable_capability_must_be_recorded": True,
         "compact_master_version": COMPACT_MASTER_VERSION,
         "background_seedance_generation": False,
         "production_audit_separation_required": True,
         "repair_activation_condition": "independent_audit_fail_and_explicit_authorization",
         "repair_returns_to_independent_audit": True,
+        "scene_draft_preflight_required": True,
+        "failed_draft_learning_required": True,
+        "first_draft_correctness_threshold_percent": 98.0,
+        "first_draft_direct_usability_threshold_percent": 98.0,
+        "max_new_local_issue_rate_percent": 2.0,
+        "minimum_episode_correctness_percent": 96.0,
+        "known_issue_recurrence_tolerance": 0,
+        "systemic_root_cause_tolerance": 0,
     }
     for field, value in policy_expected.items():
         if policy.get(field) != value:
             errors.append(f"policy.{field} must equal {value!r}")
+    errors.extend(_validate_project_state(hub.get("project_state")))
     capabilities = hub.get("capability_registry", {}).get("capabilities", [])
     operations = [item.get("operation") for item in capabilities if isinstance(item, dict)]
     if len(operations) != len(set(operations)) or not operations:
@@ -714,7 +1030,7 @@ def validate_hub(hub: Any) -> list[str]:
         if work_order_id in work_order_ids:
             errors.append(f"duplicate work_order_id: {work_order_id}")
         work_order_ids.add(work_order_id)
-        if work_order.get("operation") not in operations:
+        if work_order.get("operation") not in operations and work_order.get("legacy_read_only") is not True:
             errors.append(f"work order {work_order_id} has unsupported operation")
         if work_order.get("mode") == "plan_only" and work_order.get("mutates_source") is not False:
             errors.append(f"work order {work_order_id} mutates source in plan_only mode")
@@ -722,7 +1038,7 @@ def validate_hub(hub: Any) -> list[str]:
             {str(value) for value in work_order.get("expected_outputs", [])}
             & FORBIDDEN_BACKGROUND_OUTPUTS
         )
-        if forbidden_outputs:
+        if forbidden_outputs and work_order.get("legacy_read_only") is not True:
             errors.append(f"work order {work_order_id} requests forbidden background outputs: {forbidden_outputs}")
         if work_order.get("operation") in STORYBOARD_AUTHORITY_MATRIX:
             expected_role = _server_role_for_work_order(str(work_order.get("operation")))
@@ -771,6 +1087,7 @@ def validate_hub(hub: Any) -> list[str]:
                 collection_name == "deliverables"
                 and isinstance(item, dict)
                 and str(item.get("artifact_type")) in FORBIDDEN_BACKGROUND_OUTPUTS
+                and item.get("legacy_read_only") is not True
             ):
                 errors.append(f"deliverable {value} persists a forbidden Seedance batch")
     return errors
