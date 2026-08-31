@@ -172,11 +172,14 @@ class SemanticAuditIssueInput(BaseModel):
     issue_id: str = Field(min_length=1, max_length=128)
     layer: SemanticAuditLayerName
     error_code: str = Field(min_length=1, max_length=128)
-    severity: Literal["fail", "blocking"] = "fail"
+    severity: Literal["info", "warn", "fail", "blocking"] = "fail"
     blocking: bool = True
     shot_ids: list[str] = Field(default_factory=list, max_length=256)
     batch_ids: list[str] = Field(default_factory=list, max_length=256)
     field: str = Field(default="语义审计", min_length=1, max_length=256)
+    issue_type: str | None = Field(default=None, min_length=1, max_length=256)
+    problem_key: str | None = Field(default=None, min_length=1, max_length=512)
+    root_cause: str | None = Field(default=None, min_length=1, max_length=2_000)
     evidence_ids: list[str] = Field(min_length=1, max_length=256)
     evidence: str = Field(min_length=1, max_length=8_000)
     repair_action: str = Field(min_length=1, max_length=4_000)
@@ -186,10 +189,17 @@ class SemanticAuditIssueInput(BaseModel):
     def normalize_legacy_layer(cls, value: Any) -> Any:
         return LEGACY_SEMANTIC_AUDIT_LAYER_ALIASES.get(str(value), value)
 
-    @field_validator("issue_id", "error_code", "field")
+    @field_validator(
+        "issue_id",
+        "error_code",
+        "field",
+        "issue_type",
+        "problem_key",
+        "root_cause",
+    )
     @classmethod
-    def strip_identifiers(cls, value: str) -> str:
-        return value.strip()
+    def strip_identifiers(cls, value: str | None) -> str | None:
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("shot_ids", "batch_ids", "evidence_ids")
     @classmethod

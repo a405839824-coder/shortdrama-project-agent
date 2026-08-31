@@ -31,7 +31,14 @@ AUDIT_CATEGORIES = [
 LEGACY_AUDIT_CATEGORY_ALIASES = {
     "Seedance独立执行": "正式母版单镜执行完整性",
 }
-TASK_TYPES = {"generation_audit", "audit", "audit_repair", "repair_regression", "bootstrap_import"}
+TASK_TYPES = {
+    "production_draft_preflight",
+    "generation_audit",
+    "audit",
+    "audit_repair",
+    "repair_regression",
+    "bootstrap_import",
+}
 RESULTS = {"pass", "fail_current", "blocked"}
 SEVERITIES = {"fail", "warn", "info", "blocking", "error"}
 ISSUE_STATUS_ALIASES = {
@@ -85,6 +92,13 @@ def new_ledger(project_name: str, project_id: str | None = None, timestamp: str 
             "formal_rule_auto_mutation": False,
             "exact_cross_window_claim_requires_shared_ledger": True,
             "pass_requires_zero_issues": True,
+            "cross_batch_pattern_identity_required": True,
+            "failed_draft_recording_required": True,
+            "first_draft_correctness_threshold_percent": 98.0,
+            "first_draft_direct_usability_threshold_percent": 98.0,
+            "max_new_local_issue_rate_percent": 2.0,
+            "minimum_episode_correctness_percent": 96.0,
+            "hard_major_known_systemic_tolerance": 0,
         },
         "counters": {
             "event_sequence": 0,
@@ -101,6 +115,243 @@ def new_ledger(project_name: str, project_id: str | None = None, timestamp: str 
         "authority_reopens": [],
         "historical_patterns": [],
     }
+
+
+def _field_class(value: Any) -> str:
+    """Normalize a location to a reusable semantic field, not one shot cell."""
+
+    text = str(value or "全表")
+    text = re.sub(r"shots\[\d+\]", "shots[]", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bEP\d{1,4}-\d{1,4}\b", "shot", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[\d+\]", "[]", text)
+    terminal = text.rsplit(".", 1)[-1]
+    return _normalize(terminal) or "scope"
+
+
+def _normalized_root_cause(issue: dict[str, Any]) -> str:
+    value = (
+        issue.get("normalized_root_cause")
+        or issue.get("problem_key")
+        or issue.get("root_cause")
+        or issue.get("issue_type")
+        or issue.get("category")
+        or "unknown"
+    )
+    return _normalize(value) or "unknown"
+
+
+def issue_pattern_key(
+    project_id: str,
+    issue: dict[str, Any],
+) -> str:
+    """Identify one reusable defect pattern across files, episodes and shots."""
+
+    value = "|".join(
+        [
+            str(project_id),
+            _normalize(issue.get("error_code")),
+            _field_class(
+                issue.get("field_class")
+                or issue.get("field")
+                or issue.get("location")
+            ),
+            _normalized_root_cause(issue),
+        ]
+    )
+    return f"PATTERN-{_stable_hash(value, 24)}"
+
+
+def migrate_ledger_to_current(
+    ledger: dict[str, Any],
+    *,
+    timestamp: str | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Return a history-preserving candidate with cross-batch pattern identity."""
+
+    if not isinstance(ledger, dict):
+        raise ValueError("ledger must be an object")
+    migrated = copy.deepcopy(ledger)
+    changed: list[str] = []
+    defaults = new_ledger(
+        str(migrated.get("project_name") or "迁移项目"),
+        project_id=str(migrated.get("project_id") or "SB-migration"),
+        timestamp=timestamp,
+    )
+    for key in ("schema_version", "runtime_version", "workflow_revision", "agent_mode"):
+        if migrated.get(key) != defaults[key]:
+            migrated[key] = defaults[key]
+            changed.append(key)
+    policy = migrated.setdefault("policy", {})
+    for key, value in defaults["policy"].items():
+        if policy.get(key) != value:
+            policy[key] = copy.deepcopy(value)
+            changed.append(f"policy.{key}")
+    migrated.setdefault("authority_reopens", [])
+    migrated.setdefault("historical_patterns", [])
+    project_id = str(migrated.get("project_id") or "")
+    for index, record in enumerate(migrated.setdefault("issues", [])):
+        if not isinstance(record, dict):
+            continue
+        history_rows = [
+            row for row in record.get("history", []) if isinstance(row, dict)
+        ]
+        if not history_rows:
+            synthetic_event_id = f"LEGACY-{_stable_hash(str(record.get('issue_id') or index), 12)}"
+            synthetic_scope_key = str(
+                next(iter(record.get("open_scope_keys", [])), "LEGACY-SCOPE")
+            )
+            history_rows = [{
+                "event_id": synthetic_event_id,
+                "timestamp": str(record.get("last_seen_at") or migrated.get("updated_at") or _timestamp(timestamp)),
+                "scope_key": synthetic_scope_key,
+                "audit_round": 0,
+                "source_version": "legacy",
+                "migration_note": "legacy issue history reconstructed from retained issue record",
+            }]
+            record["history"] = copy.deepcopy(history_rows)
+            changed.append(f"issues[{index}].history")
+        latest_history = next(
+            (
+                row
+                for row in reversed(history_rows)
+                if row.get("field")
+                or row.get("root_cause")
+                or row.get("issue_type")
+            ),
+            {},
+        )
+        legacy_defaults = {
+            "logical_file": str(record.get("logical_file") or latest_history.get("file_name") or "legacy-issue"),
+            "episode_id": str(record.get("episode_id") or latest_history.get("episode_id") or "legacy"),
+            "issue_type": str(record.get("issue_type") or record.get("category") or "legacy_issue"),
+            "recurrence_state": "first_occurrence",
+            "introduced_by_repair_count": 0,
+            "first_seen_at": str(
+                record.get("first_seen_at")
+                or next((row.get("timestamp") for row in history_rows if row.get("timestamp")), None)
+                or migrated.get("created_at")
+                or _timestamp(timestamp)
+            ),
+            "last_seen_at": str(
+                record.get("last_seen_at")
+                or next((row.get("timestamp") for row in reversed(history_rows) if row.get("timestamp")), None)
+                or migrated.get("updated_at")
+                or _timestamp(timestamp)
+            ),
+            "root_cause_gate": "not_triggered",
+            "repair_strategy": "local_repair",
+        }
+        for field, value in legacy_defaults.items():
+            if field not in record or record[field] in (None, ""):
+                record[field] = value
+                changed.append(f"issues[{index}].{field}")
+        if not record.get("field_class"):
+            record["field_class"] = _field_class(
+                record.get("field") or latest_history.get("field")
+            )
+            changed.append(f"issues[{index}].field_class")
+        if not record.get("normalized_root_cause"):
+            record["normalized_root_cause"] = _normalized_root_cause(
+                {
+                    **record,
+                    "root_cause": record.get("root_cause")
+                    or latest_history.get("root_cause"),
+                }
+            )
+            changed.append(f"issues[{index}].normalized_root_cause")
+        pattern = issue_pattern_key(project_id, record)
+        if record.get("pattern_key") != pattern:
+            record["pattern_key"] = pattern
+            changed.append(f"issues[{index}].pattern_key")
+        if "occurrence_locations" not in record:
+            record["occurrence_locations"] = []
+            changed.append(f"issues[{index}].occurrence_locations")
+        locations = record["occurrence_locations"]
+        for location_index, location in enumerate(locations):
+            if not isinstance(location, dict):
+                continue
+            for field, value in {
+                "event_id": "unknown",
+                "scope_key": "unknown",
+                "episode_id": str(record.get("episode_id") or "unknown"),
+                "file_name": str(record.get("logical_file") or "unknown"),
+                "source_version": "unknown",
+                "shot_ids": [],
+                "field": "全表",
+            }.items():
+                if field not in location or location[field] in (None, ""):
+                    location[field] = copy.deepcopy(value)
+                    changed.append(
+                        f"issues[{index}].occurrence_locations[{location_index}].{field}"
+                    )
+        for history in record.get("history", []):
+            if not isinstance(history, dict):
+                continue
+            location = {
+                "event_id": str(history.get("event_id") or "unknown"),
+                "scope_key": str(history.get("scope_key") or "unknown"),
+                "episode_id": str(history.get("episode_id") or record.get("episode_id") or "unknown"),
+                "file_name": str(history.get("file_name") or record.get("logical_file") or "unknown"),
+                "source_version": str(history.get("source_version") or "unknown"),
+                "shot_ids": copy.deepcopy(history.get("shot_ids", [])),
+                "field": str(history.get("field") or "全表"),
+            }
+            if location not in locations:
+                locations.append(location)
+                changed.append(f"issues[{index}].occurrence_locations")
+        observation_count = int(record.get("occurrence_count") or 0)
+        if observation_count <= 0:
+            observation_count = sum(
+                bool(row.get("issue_status"))
+                for row in history_rows
+            ) or 1
+            record["occurrence_count"] = observation_count
+            changed.append(f"issues[{index}].occurrence_count")
+        if record.get("observation_count") != observation_count:
+            record["observation_count"] = observation_count
+            changed.append(f"issues[{index}].observation_count")
+        distinct_event_count = len(
+            {
+                str(row.get("event_id"))
+                for row in locations
+                if isinstance(row, dict) and row.get("event_id")
+            }
+        )
+        distinct_scope_count = len(
+            {
+                str(row.get("scope_key"))
+                for row in locations
+                if isinstance(row, dict) and row.get("scope_key")
+            }
+        )
+        if record.get("distinct_event_count") != distinct_event_count:
+            record["distinct_event_count"] = distinct_event_count
+            changed.append(f"issues[{index}].distinct_event_count")
+        if record.get("distinct_scope_count") != distinct_scope_count:
+            record["distinct_scope_count"] = distinct_scope_count
+            changed.append(f"issues[{index}].distinct_scope_count")
+    records_by_pattern: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for index, record in enumerate(migrated.get("issues", [])):
+        if isinstance(record, dict) and record.get("pattern_key"):
+            records_by_pattern.setdefault(str(record["pattern_key"]), []).append((index, record))
+    for indexed_pattern_records in records_by_pattern.values():
+        pattern_records = [record for _, record in indexed_pattern_records]
+        pattern_occurrence_count = len(pattern_records)
+        pattern_observation_count = sum(
+            int(record.get("observation_count", record.get("occurrence_count", 0)))
+            for record in pattern_records
+        )
+        for index, record in indexed_pattern_records:
+            if record.get("pattern_occurrence_count") != pattern_occurrence_count:
+                record["pattern_occurrence_count"] = pattern_occurrence_count
+                changed.append(f"issues[{index}].pattern_occurrence_count")
+            if record.get("pattern_observation_count") != pattern_observation_count:
+                record["pattern_observation_count"] = pattern_observation_count
+                changed.append(f"issues[{index}].pattern_observation_count")
+    if changed:
+        migrated["updated_at"] = _timestamp(timestamp)
+        changed.append("updated_at")
+    return migrated, sorted(set(changed))
 
 
 def read_json(path: str | Path) -> dict[str, Any]:
@@ -219,6 +470,15 @@ def validate_ledger(ledger: Any) -> list[str]:
         "human_approval_required_for_rule_activation": True,
         "human_signoff_required_for_archive": True,
         "formal_rule_auto_mutation": False,
+        "exact_cross_window_claim_requires_shared_ledger": True,
+        "pass_requires_zero_issues": True,
+        "cross_batch_pattern_identity_required": True,
+        "failed_draft_recording_required": True,
+        "first_draft_correctness_threshold_percent": 98.0,
+        "first_draft_direct_usability_threshold_percent": 98.0,
+        "max_new_local_issue_rate_percent": 2.0,
+        "minimum_episode_correctness_percent": 96.0,
+        "hard_major_known_systemic_tolerance": 0,
     }
     for field, value in policy_expected.items():
         if policy.get(field) != value:
@@ -245,7 +505,18 @@ def validate_ledger(ledger: Any) -> list[str]:
         if not isinstance(issue, dict):
             errors.append(f"issues[{index}] must be an object")
             continue
-        for field in ["issue_id", "dedup_key", "error_code", "category", "status", "open_scope_keys", "occurrence_count", "consecutive_rounds", "max_consecutive_rounds", "history"]:
+        required_issue_fields = [
+            "issue_id", "dedup_key", "pattern_key", "error_code", "category",
+            "logical_file", "episode_id", "issue_type", "field_class",
+            "normalized_root_cause", "status", "open_scope_keys",
+            "recurrence_state", "occurrence_count", "observation_count",
+            "pattern_occurrence_count", "pattern_observation_count",
+            "distinct_event_count", "distinct_scope_count", "consecutive_rounds",
+            "max_consecutive_rounds", "introduced_by_repair_count",
+            "first_seen_at", "last_seen_at", "root_cause_gate",
+            "repair_strategy", "occurrence_locations", "history",
+        ]
+        for field in required_issue_fields:
             if field not in issue:
                 errors.append(f"issues[{index}] missing field: {field}")
         issue_id = str(issue.get("issue_id", ""))
@@ -256,6 +527,132 @@ def validate_ledger(ledger: Any) -> list[str]:
             errors.append(f"duplicate issue dedup_key: {dedup_key}")
         issue_ids.add(issue_id)
         dedup_keys.add(dedup_key)
+        for field in [
+            "issue_id", "dedup_key", "pattern_key", "error_code", "category",
+            "logical_file", "episode_id", "issue_type", "field_class",
+            "normalized_root_cause", "first_seen_at", "last_seen_at",
+        ]:
+            if field in issue and (
+                not isinstance(issue.get(field), str) or not issue.get(field).strip()
+            ):
+                errors.append(f"issues[{index}].{field} must be a non-empty string")
+        expected_pattern_key = issue_pattern_key(str(ledger.get("project_id") or ""), issue)
+        if issue.get("pattern_key") != expected_pattern_key:
+            errors.append(f"issues[{index}].pattern_key does not match its normalized pattern identity")
+        if issue.get("status") not in {"open", "resolved"}:
+            errors.append(f"issues[{index}].status must be open or resolved")
+        if issue.get("recurrence_state") not in {
+            "first_occurrence", "consecutive", "recurred_in_parallel_scope",
+            "recurred_after_resolution", "reobserved", "repeated_two_rounds",
+            "systemic_three_rounds", "systemic_same_draft",
+            "cross_batch_recurrence",
+        }:
+            errors.append(f"issues[{index}].recurrence_state is invalid")
+        if issue.get("root_cause_gate") not in {"not_triggered", "recorded", "required"}:
+            errors.append(f"issues[{index}].root_cause_gate is invalid")
+        if issue.get("repair_strategy") not in {
+            "local_repair", "root_cause_repair_required", "upstream_rebuild_required",
+        }:
+            errors.append(f"issues[{index}].repair_strategy is invalid")
+        open_scope_keys = issue.get("open_scope_keys")
+        if not isinstance(open_scope_keys, list) or any(
+            not isinstance(value, str) or not value for value in open_scope_keys
+        ):
+            errors.append(f"issues[{index}].open_scope_keys must be an array of non-empty strings")
+        elif len(open_scope_keys) != len(set(open_scope_keys)):
+            errors.append(f"issues[{index}].open_scope_keys must be unique")
+        if issue.get("status") == "resolved" and open_scope_keys:
+            errors.append(f"issues[{index}] resolved issue cannot retain open scopes")
+        if issue.get("status") == "open" and isinstance(open_scope_keys, list) and not open_scope_keys:
+            errors.append(f"issues[{index}] open issue requires at least one open scope")
+        count_fields = {
+            "occurrence_count": 1,
+            "observation_count": 1,
+            "pattern_occurrence_count": 1,
+            "pattern_observation_count": 1,
+            "distinct_event_count": 1,
+            "distinct_scope_count": 1,
+            "consecutive_rounds": 0,
+            "max_consecutive_rounds": 1,
+            "introduced_by_repair_count": 0,
+        }
+        for field, minimum in count_fields.items():
+            value = issue.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                errors.append(f"issues[{index}].{field} must be an integer >= {minimum}")
+        if (
+            isinstance(issue.get("observation_count"), int)
+            and isinstance(issue.get("occurrence_count"), int)
+            and issue.get("observation_count") != issue.get("occurrence_count")
+        ):
+            errors.append(f"issues[{index}].observation_count must equal occurrence_count")
+        history = issue.get("history")
+        if not isinstance(history, list) or not history:
+            errors.append(f"issues[{index}].history must be a non-empty array")
+            history = []
+        locations = issue.get("occurrence_locations")
+        if not isinstance(locations, list) or not locations:
+            errors.append(f"issues[{index}].occurrence_locations must be a non-empty array")
+            locations = []
+        required_location_fields = [
+            "event_id", "scope_key", "episode_id", "file_name",
+            "source_version", "shot_ids", "field",
+        ]
+        for location_index, location in enumerate(locations, 1):
+            if not isinstance(location, dict):
+                errors.append(f"issues[{index}].occurrence_locations[{location_index}] must be an object")
+                continue
+            for field in required_location_fields:
+                if field not in location:
+                    errors.append(
+                        f"issues[{index}].occurrence_locations[{location_index}] missing field: {field}"
+                    )
+            for field in [
+                "event_id", "scope_key", "episode_id", "file_name",
+                "source_version", "field",
+            ]:
+                if field in location and (
+                    not isinstance(location.get(field), str) or not location.get(field).strip()
+                ):
+                    errors.append(
+                        f"issues[{index}].occurrence_locations[{location_index}].{field} must be a non-empty string"
+                    )
+            if "shot_ids" in location and not isinstance(location.get("shot_ids"), list):
+                errors.append(
+                    f"issues[{index}].occurrence_locations[{location_index}].shot_ids must be an array"
+                )
+        distinct_event_count = len(
+            {
+                str(row.get("event_id"))
+                for row in locations
+                if isinstance(row, dict) and row.get("event_id")
+            }
+        )
+        distinct_scope_count = len(
+            {
+                str(row.get("scope_key"))
+                for row in locations
+                if isinstance(row, dict) and row.get("scope_key")
+            }
+        )
+        if issue.get("distinct_event_count") != distinct_event_count:
+            errors.append(f"issues[{index}].distinct_event_count does not match history")
+        if issue.get("distinct_scope_count") != distinct_scope_count:
+            errors.append(f"issues[{index}].distinct_scope_count does not match history")
+    patterns: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for index, issue in enumerate(issues, 1):
+        if isinstance(issue, dict) and issue.get("pattern_key"):
+            patterns.setdefault(str(issue["pattern_key"]), []).append((index, issue))
+    for records in patterns.values():
+        expected_occurrences = len(records)
+        expected_observations = sum(
+            int(issue.get("observation_count", 0)) for _, issue in records
+        )
+        for index, issue in records:
+            if issue.get("pattern_occurrence_count") != expected_occurrences:
+                errors.append(f"issues[{index}].pattern_occurrence_count does not match ledger pattern group")
+            if issue.get("pattern_observation_count") != expected_observations:
+                errors.append(f"issues[{index}].pattern_observation_count does not match ledger pattern group")
     candidates = ledger.get("rule_candidates")
     if not isinstance(candidates, list):
         errors.append("rule_candidates must be an array")
@@ -310,6 +707,8 @@ def _scope_key(ledger: dict[str, Any], event: dict[str, Any]) -> str:
 
 
 def _issue_dedup_key(ledger: dict[str, Any], event: dict[str, Any], issue: dict[str, Any]) -> str:
+    """Identify one concrete occurrence while pattern_key crosses batches."""
+
     logical_problem = issue.get("problem_key") or issue.get("issue_type") or issue.get("category")
     shot_ids = ",".join(sorted(_normalize(value) for value in issue.get("shot_ids", []))) or "scope"
     value = "|".join([
@@ -332,7 +731,9 @@ def _normalize_issue(issue: dict[str, Any]) -> dict[str, Any]:
     normalized["status"] = ISSUE_STATUS_ALIASES[issue["status"]]
     normalized["shot_ids"] = [str(value) for value in issue.get("shot_ids", [])]
     normalized["blocking"] = bool(issue.get("blocking", issue.get("severity") in {"fail", "blocking", "error"}))
-    normalized.setdefault("issue_type", issue.get("category"))
+    normalized["issue_type"] = str(
+        issue.get("issue_type") or issue.get("category") or "unknown_issue"
+    )
     normalized.setdefault("impact_scope", normalized["shot_ids"])
     return normalized
 
@@ -352,15 +753,17 @@ def _event_counts(event: dict[str, Any]) -> dict[str, int]:
 
 
 def _candidate_for_issue(issue: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
-    candidate_id = f"RC-{_stable_hash(issue['issue_id'] + '|preventive-gate')}"
+    pattern_key = str(issue.get("pattern_key") or issue["issue_id"])
+    candidate_id = f"RC-{_stable_hash(pattern_key + '|preventive-gate')}"
     return {
         "candidate_id": candidate_id,
         "created_at": event["timestamp"],
         "updated_at": event["timestamp"],
-        "trigger_issue_ids": [issue["issue_id"]],
+        "trigger_issue_ids": list(issue.get("trigger_issue_ids") or [issue["issue_id"]]),
         "trigger_error_codes": [issue["error_code"]],
         "trigger_recurrence": {
-            "occurrence_count": issue["occurrence_count"],
+            "occurrence_count": issue.get("pattern_occurrence_count", issue["occurrence_count"]),
+            "observation_count": issue.get("pattern_observation_count", issue["occurrence_count"]),
             "max_consecutive_rounds": issue["max_consecutive_rounds"],
         },
         "target_artifact": "preventive_rule+deterministic_validator+golden_tests",
@@ -462,14 +865,20 @@ def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str,
             raise ValueError(f"audit_round must continue from {scope['last_audit_round']} to {expected_round} in this cycle")
 
     previous_open = set(scope["open_issue_ids"])
-    records_by_key = {item["dedup_key"]: item for item in ledger["issues"]}
+    records_by_key: dict[str, dict[str, Any]] = {}
+    for item in ledger["issues"]:
+        if not isinstance(item, dict):
+            continue
+        records_by_key[str(item.get("dedup_key"))] = item
     incoming_ids: set[str] = set()
     created_candidate_ids: list[str] = []
+    touched_pattern_keys: set[str] = set()
 
     for issue in event["issues"]:
         dedup_key = _issue_dedup_key(ledger, event, issue)
+        pattern_key = issue_pattern_key(str(ledger["project_id"]), issue)
+        touched_pattern_keys.add(pattern_key)
         issue_id = f"ISS-{_stable_hash(dedup_key)}"
-        incoming_ids.add(issue_id)
         history_entry = {
             "event_id": event["event_id"],
             "timestamp": event["timestamp"],
@@ -492,15 +901,19 @@ def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str,
             record = {
                 "issue_id": issue_id,
                 "dedup_key": dedup_key,
+                "pattern_key": pattern_key,
                 "error_code": issue["error_code"],
                 "category": issue["category"],
                 "logical_file": event["file_name"],
                 "episode_id": event["episode_id"],
                 "issue_type": issue.get("issue_type", issue["category"]),
+                "normalized_root_cause": _normalized_root_cause(issue),
+                "field_class": _field_class(issue.get("field")),
                 "status": "open",
                 "open_scope_keys": [scope_key],
                 "recurrence_state": "first_occurrence",
                 "occurrence_count": 1,
+                "observation_count": 1,
                 "consecutive_rounds": 1,
                 "max_consecutive_rounds": 1,
                 "introduced_by_repair_count": int(issue["status"] == "introduced"),
@@ -509,39 +922,136 @@ def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str,
                 "root_cause_gate": "not_triggered",
                 "repair_strategy": "local_repair",
                 "history": [history_entry],
+                "occurrence_locations": [],
+                "distinct_event_count": 1,
+                "distinct_scope_count": 1,
+                "pattern_occurrence_count": 1,
+                "pattern_observation_count": 1,
             }
             ledger["issues"].append(record)
             records_by_key[dedup_key] = record
         else:
             was_open = record["issue_id"] in previous_open
+            open_elsewhere = bool(
+                set(record.get("open_scope_keys", [])) - {scope_key}
+            )
+            was_resolved = record.get("status") == "resolved"
             record["occurrence_count"] += 1
+            record["observation_count"] = int(
+                record.get("observation_count", record["occurrence_count"] - 1)
+            ) + 1
             record["consecutive_rounds"] = record["consecutive_rounds"] + 1 if was_open else 1
             record["max_consecutive_rounds"] = max(record["max_consecutive_rounds"], record["consecutive_rounds"])
             record["introduced_by_repair_count"] += int(issue["status"] == "introduced")
             record["last_seen_at"] = event["timestamp"]
             record["status"] = "open"
             record["open_scope_keys"] = sorted(set(record.get("open_scope_keys", [])) | {scope_key})
-            record["recurrence_state"] = "consecutive" if was_open else "recurred_after_resolution"
+            if was_open:
+                record["recurrence_state"] = "consecutive"
+            elif open_elsewhere:
+                record["recurrence_state"] = "recurred_in_parallel_scope"
+            elif was_resolved:
+                record["recurrence_state"] = "recurred_after_resolution"
+            else:
+                record["recurrence_state"] = "reobserved"
             record["history"].append(history_entry)
 
-        if record["consecutive_rounds"] >= 3:
+        issue_id = str(record["issue_id"])
+        incoming_ids.add(issue_id)
+        occurrence_location = {
+            "event_id": event["event_id"],
+            "scope_key": scope_key,
+            "episode_id": event["episode_id"],
+            "file_name": event["file_name"],
+            "source_version": event["source_version"],
+            "shot_ids": copy.deepcopy(issue["shot_ids"]),
+            "field": issue["field"],
+        }
+        if occurrence_location not in record.setdefault("occurrence_locations", []):
+            record["occurrence_locations"].append(occurrence_location)
+        record["distinct_event_count"] = len(
+            {str(row.get("event_id")) for row in record["history"] if row.get("event_id")}
+        )
+        record["distinct_scope_count"] = len(
+            {str(row.get("scope_key")) for row in record["history"] if row.get("scope_key")}
+        )
+
+        recurrence_count = int(record.get("occurrence_count", 0))
+        if recurrence_count >= 3 or record["consecutive_rounds"] >= 3:
             record["root_cause_gate"] = "required"
             record["repair_strategy"] = "upstream_rebuild_required"
             record["recurrence_state"] = "systemic_three_rounds"
-        elif record["consecutive_rounds"] >= 2:
+        elif recurrence_count >= 2 or record["consecutive_rounds"] >= 2:
             record["root_cause_gate"] = "recorded" if issue.get("root_cause") else "required"
             record["repair_strategy"] = "root_cause_repair_required"
             record["recurrence_state"] = "repeated_two_rounds"
 
-        if record["max_consecutive_rounds"] >= 2:
-            candidate = _candidate_for_issue(record, event)
-            existing_candidate = next((item for item in ledger["rule_candidates"] if item["candidate_id"] == candidate["candidate_id"]), None)
+    # Escalate and propose one preventive rule per reusable cross-batch pattern,
+    # while retaining separate occurrence records for exact repair/closure.
+    for pattern_key in sorted(touched_pattern_keys):
+        pattern_records = [
+            row
+            for row in ledger["issues"]
+            if row.get("pattern_key") == pattern_key
+        ]
+        occurrence_count = len(pattern_records)
+        observation_count = sum(
+            int(row.get("observation_count", row.get("occurrence_count", 0)))
+            for row in pattern_records
+        )
+        same_event_observations = sum(
+            1
+            for row in pattern_records
+            for history in row.get("history", [])
+            if history.get("event_id") == event["event_id"]
+        )
+        systemic_same_draft = same_event_observations >= 2
+        cross_batch_recurrence = occurrence_count >= 2
+        for row in pattern_records:
+            row["pattern_occurrence_count"] = occurrence_count
+            row["pattern_observation_count"] = observation_count
+            if systemic_same_draft:
+                row["root_cause_gate"] = "required"
+                row["repair_strategy"] = "upstream_rebuild_required"
+                row["recurrence_state"] = "systemic_same_draft"
+            elif cross_batch_recurrence:
+                row["root_cause_gate"] = (
+                    "recorded" if row.get("normalized_root_cause") not in {None, "", "unknown"}
+                    else "required"
+                )
+                row["repair_strategy"] = "root_cause_repair_required"
+                row["recurrence_state"] = "cross_batch_recurrence"
+        max_consecutive = max(
+            (int(row.get("max_consecutive_rounds", 0)) for row in pattern_records),
+            default=0,
+        )
+        if occurrence_count >= 2 or max_consecutive >= 2:
+            representative = copy.deepcopy(pattern_records[0])
+            representative["pattern_occurrence_count"] = occurrence_count
+            representative["pattern_observation_count"] = observation_count
+            representative["trigger_issue_ids"] = sorted(
+                str(row["issue_id"]) for row in pattern_records
+            )
+            candidate = _candidate_for_issue(representative, event)
+            existing_candidate = next(
+                (
+                    item
+                    for item in ledger["rule_candidates"]
+                    if item["candidate_id"] == candidate["candidate_id"]
+                ),
+                None,
+            )
             if existing_candidate is None:
                 ledger["rule_candidates"].append(candidate)
                 created_candidate_ids.append(candidate["candidate_id"])
             else:
                 existing_candidate["updated_at"] = event["timestamp"]
-                existing_candidate["trigger_recurrence"] = candidate["trigger_recurrence"]
+                existing_candidate["trigger_issue_ids"] = candidate[
+                    "trigger_issue_ids"
+                ]
+                existing_candidate["trigger_recurrence"] = candidate[
+                    "trigger_recurrence"
+                ]
 
     for issue_id in previous_open - incoming_ids:
         record = next((item for item in ledger["issues"] if item["issue_id"] == issue_id), None)
@@ -565,7 +1075,10 @@ def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str,
     scope["open_issue_ids"] = sorted(incoming_ids)
     scope["human_signoff"] = None
     scope["can_advance"] = False
-    scope["closure_state"] = "awaiting_human_signoff" if event["result"] == "pass" else "open"
+    if event.get("task_type") == "production_draft_preflight":
+        scope["closure_state"] = "preflight_clean" if event["result"] == "pass" else "open"
+    else:
+        scope["closure_state"] = "awaiting_human_signoff" if event["result"] == "pass" else "open"
 
     ledger["events"].append(event)
     ledger["updated_at"] = event["timestamp"]
@@ -712,14 +1225,122 @@ def summarize(ledger: dict[str, Any]) -> dict[str, Any]:
     initial = totals["initial_error_count"]
     residual = totals["residual_error_count"]
     introduced = totals["introduced_error_count"]
+    independent_events = [
+        event
+        for event in events
+        if isinstance(event, dict)
+        and event.get("audit_class") == "independent_audit"
+    ]
+    audit_cycles: dict[str, list[dict[str, Any]]] = {}
+    for event in independent_events:
+        cycle_id = str(event.get("audit_cycle_id") or "")
+        if cycle_id:
+            audit_cycles.setdefault(cycle_id, []).append(event)
+    first_audits: list[dict[str, Any]] = []
+    latest_audits: list[dict[str, Any]] = []
+    for cycle_events in audit_cycles.values():
+        ordered = sorted(
+            cycle_events,
+            key=lambda row: (
+                int(row.get("audit_round", 0)),
+                str(row.get("timestamp") or ""),
+            ),
+        )
+        first_audits.append(ordered[0])
+        latest_audits.append(ordered[-1])
+
+    first_checked = 0
+    first_problem_shots = 0
+    for event in first_audits:
+        quality = event.get("first_draft_quality")
+        if isinstance(quality, dict):
+            first_checked += int(quality.get("checked_shot_count", 0))
+            first_problem_shots += int(
+                quality.get("unique_affected_shot_count", 0)
+            )
+        else:
+            counts = event.get("counts") or _event_counts(event)
+            first_checked += int(counts.get("checked_shot_count", 0))
+            first_problem_shots += int(counts.get("problem_shot_count", 0))
+
+    passed_latest = [
+        event for event in latest_audits if event.get("result") == "pass"
+    ]
+    signed_passed = 0
+    for event in passed_latest:
+        expected_scope = _scope_key(ledger, event)
+        if any(
+            scope.get("scope_key") == expected_scope
+            and scope.get("closure_state") == "human_signed_off"
+            for scope in scopes
+            if isinstance(scope, dict)
+        ):
+            signed_passed += 1
+
+    open_issues = [
+        issue
+        for issue in issues
+        if isinstance(issue, dict) and issue.get("status") == "open"
+    ]
+    open_pattern_keys = {
+        str(
+            issue.get("pattern_key")
+            or issue_pattern_key(str(ledger.get("project_id") or ""), issue)
+        )
+        for issue in open_issues
+    }
+    open_blocking_pattern_keys = {
+        str(
+            issue.get("pattern_key")
+            or issue_pattern_key(str(ledger.get("project_id") or ""), issue)
+        )
+        for issue in open_issues
+        if bool(issue.get("blocking"))
+        or issue.get("severity") in {"fail", "blocking", "error"}
+    }
+    current_independent = independent_events[-1] if independent_events else None
+    current_counts = (
+        (current_independent.get("counts") or _event_counts(current_independent))
+        if isinstance(current_independent, dict)
+        else None
+    )
     metrics = {
         **totals,
+        "historical_checked_shot_observations": totals["checked_shot_count"],
+        "historical_issue_point_observations": totals["total_error_points"],
+        "first_draft_shot_correctness_percent": _rate(
+            max(first_checked - first_problem_shots, 0), first_checked
+        ),
+        "first_draft_problem_shot_rate_percent": _rate(
+            first_problem_shots, first_checked
+        ),
+        "independent_audit_cycle_pass_rate_percent": _rate(
+            len(passed_latest), len(latest_audits)
+        ),
+        "human_release_signoff_completion_percent": _rate(
+            signed_passed, len(passed_latest)
+        ),
+        "open_issue_pattern_count": len(open_pattern_keys),
+        "open_blocking_pattern_count": len(open_blocking_pattern_keys),
+        "current_artifact_issue_point_count": (
+            int(current_counts.get("total_error_points", 0))
+            if current_counts is not None
+            else None
+        ),
+        "current_artifact_problem_shot_count": (
+            int(current_counts.get("problem_shot_count", 0))
+            if current_counts is not None
+            else None
+        ),
         "consecutive_2_issue_count": sum(issue.get("max_consecutive_rounds", 0) >= 2 for issue in issues),
         "consecutive_3_system_issue_count": sum(issue.get("max_consecutive_rounds", 0) >= 3 for issue in issues),
         "first_repair_effectiveness_percent": _rate(max(initial - residual, 0), initial),
         "residual_rate_percent": _rate(residual, initial),
         "repair_side_effect_rate_percent": _rate(introduced, max(initial + residual, 1)),
-        "final_pass_rate_percent": _rate(sum(scope.get("closure_state") == "human_signed_off" for scope in scopes), len(scopes)),
+        "archived_scope_rate_percent": _rate(
+            sum(scope.get("closure_state") == "human_signed_off" for scope in scopes),
+            sum(scope.get("closure_state") != "preflight_clean" for scope in scopes),
+        ),
     }
     candidate_status_counts: dict[str, int] = {}
     for candidate in candidates:
@@ -731,7 +1352,9 @@ def summarize(ledger: dict[str, Any]) -> dict[str, Any]:
         "project_name": ledger.get("project_name"),
         "event_count": len(events),
         "scope_count": len(scopes),
-        "open_issue_count": sum(issue.get("status") == "open" for issue in issues),
+        "open_issue_count": len(open_issues),
+        "open_issue_pattern_count": len(open_pattern_keys),
+        "open_blocking_pattern_count": len(open_blocking_pattern_keys),
         "issue_record_count": len(issues),
         "rule_candidate_status_counts": candidate_status_counts,
         "metrics": metrics,
@@ -744,6 +1367,91 @@ def summarize(ledger: dict[str, Any]) -> dict[str, Any]:
         },
         "advance_ready_scope_count": sum(scope.get("can_advance") is True for scope in scopes),
         "awaiting_human_signoff_count": sum(scope.get("closure_state") == "awaiting_human_signoff" for scope in scopes),
+    }
+
+
+def active_prevention_profile(ledger: dict[str, Any]) -> dict[str, Any]:
+    """Return known patterns that generation must scan before authoring."""
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in ledger.get("issues", []):
+        if not isinstance(record, dict):
+            continue
+        pattern_key = str(
+            record.get("pattern_key")
+            or issue_pattern_key(str(ledger.get("project_id") or ""), record)
+        )
+        grouped.setdefault(pattern_key, []).append(record)
+    patterns = []
+    for pattern_key, records in grouped.items():
+        representative = records[0]
+        observation_count = sum(
+            int(row.get("observation_count", row.get("occurrence_count", 0)))
+            for row in records
+        )
+        occurrence_count = len(records)
+        max_consecutive = max(
+            (int(row.get("max_consecutive_rounds", 0)) for row in records),
+            default=0,
+        )
+        blocking = bool(
+            occurrence_count >= 2
+            or max_consecutive >= 2
+            or any(
+                row.get("root_cause_gate") in {"required", "recorded"}
+                for row in records
+            )
+        )
+        last_seen = max(
+            (str(row.get("last_seen_at") or "") for row in records),
+            default="",
+        )
+        patterns.append(
+            {
+                "pattern_key": pattern_key,
+                "error_code": representative.get("error_code"),
+                "category": representative.get("category"),
+                "field_class": representative.get("field_class")
+                or _field_class(representative.get("field")),
+                "normalized_root_cause": representative.get("normalized_root_cause")
+                or _normalized_root_cause(representative),
+                "status": (
+                    "open" if any(row.get("status") == "open" for row in records) else "resolved"
+                ),
+                "occurrence_count": occurrence_count,
+                "observation_count": observation_count,
+                "affected_issue_ids": sorted(str(row.get("issue_id")) for row in records),
+                "affected_episode_ids": sorted(
+                    {str(row.get("episode_id")) for row in records if row.get("episode_id")}
+                ),
+                "affected_file_names": sorted(
+                    {str(row.get("logical_file")) for row in records if row.get("logical_file")}
+                ),
+                "recurrence_state": (
+                    "cross_batch_recurrence"
+                    if occurrence_count >= 2
+                    else representative.get("recurrence_state")
+                ),
+                "repair_strategy": (
+                    "root_cause_repair_required"
+                    if blocking
+                    else representative.get("repair_strategy")
+                ),
+                "block_generation": blocking,
+                "last_seen_at": last_seen or None,
+            }
+        )
+    patterns.sort(
+        key=lambda row: (
+            not bool(row["block_generation"]),
+            str(row.get("error_code") or ""),
+            str(row.get("pattern_key") or ""),
+        )
+    )
+    return {
+        "known_pattern_count": len(patterns),
+        "blocking_pattern_count": sum(bool(row["block_generation"]) for row in patterns),
+        "patterns": patterns,
     }
 
 

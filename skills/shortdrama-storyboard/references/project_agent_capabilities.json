@@ -3,7 +3,7 @@
   "runtime_version": "V16.3-148-R10-StableRuntime",
   "workflow_revision": "R10-PG1",
   "compact_master_contract": {
-    "plugin_version": "0.5.4",
+    "plugin_version": "0.5.5",
     "schema_version": "R10.1",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
@@ -27,7 +27,7 @@
     "conditional": "repair",
     "repair_activation": "independent_audit_fail_and_explicit_authorization",
     "repair_return": "original_independent_audit_authority",
-    "quality_contract": "49项validator完整机器验证 + G0-G13 + THG-01至THG-12 + 多行XLSX round-trip + 首次/失效后显式8层语义审计；命中精确独立审计缓存时才复用"
+    "quality_contract": "生产初稿总体正确率与直接可用率>=98%、单集>=96%、新增局部问题镜率<=2%，硬错/重大/已知复发/系统性重复=0；49项validator + G0-G13 + THG-01至THG-12 + 多行XLSX round-trip；最终独立审计仍须100%且零问题"
   },
   "change_operations": [
     "add",
@@ -256,6 +256,29 @@
       "group": "项目管理",
       "status": "supported",
       "output": "镜头、时长、对白、问题、闭环率、残留率和副作用统计",
+      "approval_policy": "read_only"
+    },
+    {
+      "operation": "storyboard_draft_preflight",
+      "group": "分镜生产",
+      "status": "supported",
+      "condition": "production窗口、已锁定工单与候选canonical",
+      "output": "scene/episode/full草稿门禁、唯一问题镜质量指标、失败学习事件；零artifact/版本/XLSX/handoff副作用",
+      "approval_policy": "production_work_order_only"
+    },
+    {
+      "operation": "project_state_migration",
+      "group": "项目管理",
+      "status": "guarded",
+      "condition": "旧项目控制状态且用户已明确授权迁移",
+      "output": "dry-run、签名快照、双哈希CAS、幂等恢复或安全回滚；历史分镜与审计证据只读",
+      "approval_policy": "explicit_execute_plus_full_regression_certificate"
+    },
+    {
+      "operation": "issue_query",
+      "group": "系统改进",
+      "status": "supported",
+      "output": "精确问题清单、跨批次pattern聚合与主动防错画像",
       "approval_policy": "read_only"
     },
     {

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import copy
+import functools
 import json
 import re
 import sys
@@ -134,6 +137,8 @@ AUDIT_CLASS_PRODUCTION_PREFLIGHT = "production_preflight"
 AUDIT_CLASS_INDEPENDENT = "independent_audit"
 PRODUCTION_PREFLIGHT_PASS = "production_preflight_pass"
 PRODUCTION_PREFLIGHT_FAIL = "production_preflight_fail"
+DRAFT_PREFLIGHT_PASS = "draft_preflight_pass"
+DRAFT_PREFLIGHT_FAIL = "draft_preflight_fail"
 
 PERFORMANCE_DIAGNOSTIC_STAGES = (
     "task_started",
@@ -280,6 +285,65 @@ STRICT_OUTPUT_CONTRACT = "R10-SPC-1"
 SEMANTIC_AUDIT_CONTRACT_FINGERPRINT = sha256_bytes(
     SEMANTIC_AUDIT_CONTRACT_VERSION.encode("utf-8")
 )
+
+_ACTIVE_CONSUMPTION_CLAIMS: contextvars.ContextVar[tuple[dict[str, str], ...]] = (
+    contextvars.ContextVar("shortdrama_active_consumption_claims", default=())
+)
+
+
+def _release_consumption_claims_on_error(method: Any) -> Any:
+    """Compensate ordinary failures after a durable single-consumer claim.
+
+    The durable journal and deterministic ids make a later retry resumable;
+    releasing here prevents a handled exception from needlessly waiting for
+    lease expiry.  A hard process crash is recovered by the bounded lease.
+    """
+
+    @functools.wraps(method)
+    def wrapped(self: "StoryboardService", *args: Any, **kwargs: Any) -> Any:
+        context_token = _ACTIVE_CONSUMPTION_CLAIMS.set(())
+        try:
+            return method(self, *args, **kwargs)
+        except BaseException as exc:
+            for claim in reversed(_ACTIVE_CONSUMPTION_CLAIMS.get()):
+                try:
+                    if claim.get("kind") == "draft_preflight":
+                        self.store.update_draft_preflight_commit_progress(
+                            claim["namespace"],
+                            claim["project_id"],
+                            claim["record_id"],
+                            claim_token=claim["claim_token"],
+                            stage="failed_recoverable",
+                            progress={
+                                "last_error_type": type(exc).__name__,
+                                "last_error_at": utc_stamp(),
+                            },
+                        )
+                        self.store.release_draft_preflight_commit(
+                            claim["namespace"],
+                            claim["project_id"],
+                            claim["record_id"],
+                            claim_token=claim["claim_token"],
+                            reason=f"handled {type(exc).__name__}",
+                        )
+                    elif claim.get("kind") == "handoff":
+                        self.store.release_handoff_claim(
+                            claim["namespace"],
+                            claim["project_id"],
+                            claim["record_id"],
+                            consumer_work_order_id=claim["consumer_work_order_id"],
+                            claim_token=claim["claim_token"],
+                            reason=f"handled {type(exc).__name__}",
+                        )
+                except Exception:
+                    # Preserve the original failure.  The bounded lease is the
+                    # fallback if compensation itself cannot be persisted.
+                    pass
+            raise
+        finally:
+            _ACTIVE_CONSUMPTION_CLAIMS.reset(context_token)
+
+    return wrapped
 
 # These columns are deterministic projections of the atomic shot fields.  A
 # protected-scope comparison must ignore them or an older, unmaterialized
@@ -546,12 +610,399 @@ def _gate_results(required_gates: list[str], issues: list[dict[str, Any]]) -> di
     return results
 
 
+def _issue_shot_ids(
+    storyboard: dict[str, Any], issue: dict[str, Any]
+) -> list[str]:
+    supplied = issue.get("shot_ids")
+    if isinstance(supplied, list):
+        values = [str(value) for value in supplied if str(value)]
+        if values:
+            return values
+    location = str(issue.get("location") or "")
+    match = re.search(r"shots\[(\d+)\]", location)
+    shots = storyboard.get("shots", [])
+    if match:
+        index = int(match.group(1)) - 1
+        if 0 <= index < len(shots) and isinstance(shots[index], dict):
+            row = shots[index]
+            return [str(row.get("镜头编号") or row.get("shot_uid") or index + 1)]
+    return []
+
+
+SCENE_ID_FIELDS = ("scene_uid", "scene_id", "场景ID", "场景连续性ID")
+
+
+def _shot_reference_ids(shot: dict[str, Any]) -> set[str]:
+    """Return every stable/display identifier that can target one shot."""
+
+    return {
+        str(value)
+        for value in (shot.get("shot_uid"), shot.get("镜头编号"))
+        if value not in (None, "")
+    }
+
+
+def _shot_scene_aliases(shot: dict[str, Any]) -> tuple[str, ...]:
+    """Resolve scene aliases without assuming which producer spelling was used."""
+
+    return tuple(
+        dict.fromkeys(
+            str(shot.get(field)).strip()
+            for field in SCENE_ID_FIELDS
+            if shot.get(field) not in (None, "") and str(shot.get(field)).strip()
+        )
+    )
+
+
+def _stable_scene_id(shot: dict[str, Any]) -> str:
+    aliases = _shot_scene_aliases(shot)
+    return aliases[0] if aliases else ""
+
+
+def _scene_scope_groups(storyboard: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build deterministic logical scene groups from a compact candidate."""
+
+    groups: dict[str, dict[str, Any]] = {}
+    for shot in storyboard.get("shots", []):
+        if not isinstance(shot, dict):
+            continue
+        scene_id = _stable_scene_id(shot)
+        if not scene_id:
+            continue
+        group = groups.setdefault(
+            scene_id,
+            {"stable_scene_id": scene_id, "aliases": set(), "shots": []},
+        )
+        group["aliases"].update(_shot_scene_aliases(shot))
+        group["shots"].append(shot)
+    result: list[dict[str, Any]] = []
+    for scene_id in sorted(groups):
+        group = groups[scene_id]
+        shots = list(group["shots"])
+        result.append(
+            {
+                "stable_scene_id": scene_id,
+                "scene_aliases": sorted(str(value) for value in group["aliases"]),
+                "shots": shots,
+                "scope_shot_ids": [
+                    str(row.get("镜头编号") or row.get("shot_uid") or "")
+                    for row in shots
+                ],
+                "scope_sha256": sha256_bytes(_stable_json_bytes(shots)),
+            }
+        )
+    return result
+
+
+def _targeted_rows_for_scene(
+    rows: Any,
+    scoped_refs: set[str],
+) -> list[dict[str, Any]]:
+    """Keep evidence whose complete target set belongs to this scene."""
+
+    if not isinstance(rows, list):
+        return []
+    selected: list[dict[str, Any]] = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        target_field = next(
+            (
+                field
+                for field in ("mapped_shot_uids", "target_shots")
+                if isinstance(raw.get(field), list) and raw.get(field)
+            ),
+            None,
+        )
+        if target_field is None:
+            continue
+        targets = {str(value) for value in raw.get(target_field, []) if str(value)}
+        if targets and targets <= scoped_refs:
+            selected.append(copy.deepcopy(raw))
+    return selected
+
+
+def _scene_candidate_for_validation(
+    candidate: dict[str, Any], scoped_shots: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Project a validation-only scene canonical and remove global-only inputs."""
+
+    scoped = copy.deepcopy(candidate)
+    scoped["shots"] = copy.deepcopy(scoped_shots)
+    scoped["total_duration"] = round(
+        sum(float(row.get("时长") or 0) for row in scoped_shots), 10
+    )
+    scoped_refs = (
+        set().union(*(_shot_reference_ids(row) for row in scoped_shots))
+        if scoped_shots
+        else set()
+    )
+    scoped["protected_dialogue"] = _targeted_rows_for_scene(
+        scoped.get("protected_dialogue"), scoped_refs
+    )
+    source_ingestion = scoped.get("source_ingestion")
+    if isinstance(source_ingestion, dict):
+        source_ingestion["protected_dialogue"] = _targeted_rows_for_scene(
+            source_ingestion.get("protected_dialogue"), scoped_refs
+        )
+    evidence = scoped.get("prevention_evidence")
+    if isinstance(evidence, dict):
+        for field in ("scene_state_ledger", "shot_plan", "performance_chains"):
+            rows = evidence.get(field)
+            if isinstance(rows, list):
+                evidence[field] = [
+                    copy.deepcopy(row)
+                    for row in rows
+                    if isinstance(row, dict)
+                    and str(row.get("shot_id") or "") in scoped_refs
+                ]
+        source_rows = evidence.get("source_ledger")
+        if isinstance(source_rows, list):
+            evidence["source_ledger"] = [
+                copy.deepcopy(row)
+                for row in source_rows
+                if isinstance(row, dict)
+                and isinstance(row.get("target_shots"), list)
+                and {
+                    str(value)
+                    for value in row.get("target_shots", [])
+                    if str(value)
+                }
+                & scoped_refs
+            ]
+        change_lock = evidence.get("change_lock")
+        if isinstance(change_lock, dict):
+            change_lock["must_include"] = []
+    return scoped
+
+
+def _scene_issue_is_applicable(issue: dict[str, Any]) -> bool:
+    """Return whether a finding is decidable from a complete scene alone."""
+
+    location = str(issue.get("location") or "")
+    if location.endswith(".累计时长") or location == "total_duration":
+        return False
+    if location.startswith(
+        (
+            "shots[",
+            "scene:",
+            "scene_state:",
+            "shot_plan:",
+            "performance_chain:",
+            "protected_dialogue[",
+        )
+    ):
+        return True
+    return location in {
+        "prevention_evidence.scene_state_ledger",
+        "prevention_evidence.shot_plan",
+        "prevention_evidence.change_lock.must_exclude",
+    }
+
+
+def _scene_scoped_report(
+    candidate: dict[str, Any], scoped_shots: list[dict[str, Any]]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run local gates on a scene and explicitly mark global gates N/A."""
+
+    scoped_candidate = _scene_candidate_for_validation(candidate, scoped_shots)
+    raw_report = validate_storyboard.validate_project(scoped_candidate, mode="audit")
+    raw_issues = [
+        copy.deepcopy(row)
+        for row in raw_report.get("issues", [])
+        if isinstance(row, dict)
+    ]
+    applicable = [row for row in raw_issues if _scene_issue_is_applicable(row)]
+    excluded = [row for row in raw_issues if not _scene_issue_is_applicable(row)]
+    report = copy.deepcopy(raw_report)
+    report["validation_scope"] = "scene"
+    report["issues"] = applicable
+    report["shot_count"] = len(scoped_shots)
+    report["error_count"] = sum(
+        str(row.get("severity") or "fail").casefold()
+        not in {"warning", "warn", "info"}
+        for row in applicable
+    )
+    report["warning_count"] = sum(
+        str(row.get("severity") or "").casefold() in {"warning", "warn"}
+        for row in applicable
+    )
+    report["status"] = "pass" if not applicable else "fail_current"
+    report["scope_status"] = report["status"]
+    reason = (
+        "scene scope cannot decide chapter intake, whole-project coverage, "
+        "episode boundaries, cumulative statistics, or export round-trip"
+    )
+    report["scope_gate_results"] = {
+        gate: {
+            "status": "not_applicable",
+            "evidence_count": 0,
+            "evidence_ids": [],
+            "not_applicable_reason": reason,
+        }
+        for gate in (
+            "G1",
+            "G2",
+            "G3",
+            "statistics_closure",
+            "source_coverage",
+            "episode_boundary",
+        )
+    }
+    report["not_applicable_gates"] = list(report["scope_gate_results"])
+    report["not_applicable_findings"] = [
+        {
+            "error_code": str(row.get("error_code") or "E-UNKNOWN"),
+            "location": str(row.get("location") or ""),
+            "reason": reason,
+        }
+        for row in excluded
+    ]
+    report["raw_scene_projection_issue_count"] = len(raw_issues)
+    report["applicable_scene_issue_count"] = len(applicable)
+    return report, scoped_candidate
+
+
+def _draft_quality_metrics(
+    storyboard: dict[str, Any],
+    issues: list[dict[str, Any]],
+    *,
+    project_id: str = "quality",
+    known_pattern_keys: set[str] | None = None,
+) -> dict[str, Any]:
+    """Measure first-draft usability by unique affected shots, never issue points."""
+
+    shots = [row for row in storyboard.get("shots", []) if isinstance(row, dict)]
+    shot_to_episode = {
+        str(row.get("镜头编号") or row.get("shot_uid") or index + 1): str(
+            row.get("episode_id") or "全项目"
+        )
+        for index, row in enumerate(shots)
+    }
+    affected: set[str] = set()
+    pattern_counts: dict[str, int] = {}
+    hard_major_count = 0
+    global_blocking_count = 0
+    known_hits: set[str] = set()
+    for issue in issues:
+        ids = _issue_shot_ids(storyboard, issue)
+        affected.update(ids)
+        severity = str(issue.get("severity") or "fail").casefold()
+        blocking = bool(
+            issue.get("blocking", severity in {"fail", "error", "blocking"})
+        )
+        if blocking or severity in {"fail", "error", "blocking"}:
+            hard_major_count += 1
+            if not ids:
+                global_blocking_count += 1
+        normalized = {
+            "error_code": issue.get("error_code"),
+            "field": str(
+                issue.get("field")
+                or str(issue.get("location") or "全表").rsplit(".", 1)[-1]
+            ),
+            "issue_type": issue.get("issue_type")
+            or issue.get("template_gate_id")
+            or _issue_category(str(issue.get("error_code") or "")),
+            "root_cause": issue.get("root_cause"),
+            "category": issue.get("semantic_layer")
+            or _issue_category(str(issue.get("error_code") or "")),
+        }
+        pattern = storyboard_agent.issue_pattern_key(project_id, normalized)
+        pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
+        if known_pattern_keys and pattern in known_pattern_keys:
+            known_hits.add(pattern)
+
+    total = len(shots)
+    affected_count = len(affected)
+    direct = (
+        round((total - affected_count) * 100.0 / total, 2)
+        if total
+        else (100.0 if not issues else 0.0)
+    )
+    episode_totals: dict[str, int] = {}
+    episode_affected: dict[str, set[str]] = {}
+    for shot_id, episode_id in shot_to_episode.items():
+        episode_totals[episode_id] = episode_totals.get(episode_id, 0) + 1
+        if shot_id in affected:
+            episode_affected.setdefault(episode_id, set()).add(shot_id)
+    episode_rates = {
+        episode_id: round(
+            (count - len(episode_affected.get(episode_id, set()))) * 100.0 / count,
+            2,
+        )
+        for episode_id, count in episode_totals.items()
+        if count
+    }
+    minimum_episode = min(episode_rates.values(), default=direct)
+    systemic_patterns = sorted(
+        key for key, count in pattern_counts.items() if count >= 2
+    )
+    new_local_issue_rate = (
+        round(affected_count * 100.0 / total, 2) if total else (0.0 if not issues else 100.0)
+    )
+    zero_tolerance_clean = (
+        hard_major_count == 0
+        and not known_hits
+        and not systemic_patterns
+        and global_blocking_count == 0
+    )
+    grade = "A"
+    if not zero_tolerance_clean or direct < 95.0 or minimum_episode < 96.0:
+        grade = "C"
+    elif direct < 98.0 or new_local_issue_rate > 2.0:
+        grade = "B"
+    commit_eligible = bool(
+        grade == "A"
+        and direct >= 98.0
+        and minimum_episode >= 96.0
+        and new_local_issue_rate <= 2.0
+        and zero_tolerance_clean
+        and not issues
+    )
+    return {
+        "grade": grade,
+        "checked_shot_count": total,
+        "issue_point_count": len(issues),
+        "unique_affected_shot_count": affected_count,
+        "affected_shot_ids": sorted(affected),
+        "first_draft_correctness_percent": direct,
+        "direct_usability_percent": direct,
+        "new_local_issue_shot_rate_percent": new_local_issue_rate,
+        "episode_correctness_percent": episode_rates,
+        "minimum_episode_correctness_percent": minimum_episode,
+        "hard_or_major_issue_count": hard_major_count,
+        "global_blocking_issue_count": global_blocking_count,
+        "known_recurrence_count": len(known_hits),
+        "known_recurrence_pattern_keys": sorted(known_hits),
+        "systemic_duplicate_count": len(systemic_patterns),
+        "systemic_pattern_keys": systemic_patterns,
+        "commit_eligible": commit_eligible,
+        "final_independent_audit_required_percent": 100.0,
+    }
+
+
 class StoryboardService:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.store = ProjectStore(settings.data_dir, settings.public_base_url)
+        self.store = ProjectStore(
+            settings.data_dir,
+            settings.public_base_url,
+            max_download_bytes=settings.max_file_bytes,
+        )
         self.bootstrap = r10_bootstrap.verify_bundled(self_test=False)
-        ruleset_paths = [SKILL_ROOT / "SKILL.md", *sorted((SKILL_ROOT / "references").glob("*.json"))]
+        # Every behavior-bearing Skill resource must invalidate runtime and
+        # preflight certificates when it changes. Restrict by controlled
+        # textual rule formats, but include Markdown contracts and JSONL rule
+        # registries rather than hashing only JSON schemas.
+        ruleset_paths = [
+            SKILL_ROOT / "SKILL.md",
+            *sorted(
+                path
+                for path in (SKILL_ROOT / "references").rglob("*")
+                if path.is_file() and path.suffix.casefold() in {".md", ".json", ".jsonl"}
+            ),
+        ]
         ruleset_fingerprints = [
             [str(path.relative_to(SKILL_ROOT)), sha256_bytes(path.read_bytes())]
             for path in ruleset_paths
@@ -799,10 +1250,6 @@ class StoryboardService:
         source_artifact_id: str | None,
         artifact_record: dict[str, Any] | None = None,
     ) -> str:
-        if artifact_record:
-            cached = artifact_record.get("metadata", {}).get("source_fingerprint")
-            if cached:
-                return str(cached)
         if source_artifact_id:
             try:
                 source_record, _path = self.store.get_artifact(namespace, project_id, source_artifact_id)
@@ -812,8 +1259,15 @@ class StoryboardService:
                 # must never replace the novel/script source fingerprint.
                 inherited = source_metadata.get("source_fingerprint")
                 return str(inherited or source_record.get("fingerprint"))
-            except ValueError:
-                pass
+            except ValueError as exc:
+                raise ValueError(
+                    "source_artifact_missing_or_invalid: explicit source_artifact_id "
+                    "must resolve inside the current namespace and project"
+                ) from exc
+        if artifact_record:
+            cached = artifact_record.get("metadata", {}).get("source_fingerprint")
+            if cached:
+                return str(cached)
         source_lock = storyboard.get("source_lock") or {}
         explicit = source_lock.get("source_fingerprint") if isinstance(source_lock, dict) else None
         return str(explicit or sha256_bytes(_stable_json_bytes(source_lock)))
@@ -956,6 +1410,12 @@ class StoryboardService:
     ) -> None:
         expected = work_order.get("transport_session_fingerprint")
         actual = self._session_fingerprint(namespace, request_session_id)
+        # Local/direct service callers have no trusted host session envelope.
+        # Keep that development/test path compatible while still comparing a
+        # session whenever one is supplied.  Cloud authority always requires
+        # both sides of the server-minted binding below.
+        if self.settings.deployment_mode != "cloud" and actual is None:
+            return
         if self.settings.deployment_mode == "cloud" and (not expected or not actual):
             raise ValueError(
                 "window_session_required: cloud production, audit, and repair authorities require a server-observed MCP session"
@@ -1031,6 +1491,27 @@ class StoryboardService:
             raise ValueError(
                 "artifact_write_authority_mismatch: read_only, audit, and repair "
                 "authorities cannot persist generic project artifacts"
+            )
+        self._assert_work_order_session(namespace, work_order, request_session_id)
+        self._assert_work_order_write_ready(work_order)
+
+    def _assert_capability_gap_authority(
+        self,
+        namespace: str,
+        work_order: dict[str, Any],
+        request_session_id: str | None,
+    ) -> None:
+        """Authorize the additive proposal record without granting rule writes."""
+
+        if (
+            work_order.get("server_actor_role") != "production"
+            or work_order.get("operation") != "capability_gap"
+            or work_order.get("mode") != "plan_only"
+            or work_order.get("authorization") != "plan_only"
+        ):
+            raise ValueError(
+                "capability_gap_authority_required: use a capability_gap "
+                "plan_only/plan_only production work order"
             )
         self._assert_work_order_session(namespace, work_order, request_session_id)
         self._assert_work_order_write_ready(work_order)
@@ -1311,19 +1792,25 @@ class StoryboardService:
             and all(row["status"] == "pass" for row in layer_matrix.values())
         )
         submission_hash = sha256_bytes(_stable_json_bytes(submission))
+        quality = _draft_quality_metrics(storyboard, issues)
+        source_issue_count = sum(
+            _issue_category(str(item.get("error_code") or "")) == "源文对白"
+            for item in issues
+        )
         enriched["semantic_audit"] = submission
         enriched["semantic_audit_sha256"] = submission_hash
         enriched["independent_evidence_matrix"] = {
             "preventive_gate_results": gate_matrix,
             "audit_layer_results": layer_matrix,
             "quality_thresholds": {
-                "source_and_key_dialogue_mapping_percent": 100 if clean else 0,
+                "source_and_key_dialogue_mapping_percent": 100 if source_issue_count == 0 else 0,
                 "blocking_error_count": sum(
                     bool(item.get("blocking", True)) for item in issues
                 ),
                 "old_content_hit_count": 0,
                 "cross_context_term_count": 0,
-                "shot_pass_percent": 100 if clean else max(0, 100 - len(issues)),
+                "shot_pass_percent": quality["first_draft_correctness_percent"],
+                "unique_affected_shot_count": quality["unique_affected_shot_count"],
                 "residual_issue_count": 0,
                 "introduced_issue_count": 0,
             },
@@ -1406,6 +1893,19 @@ class StoryboardService:
                 "semantic_audit_contract", ""
             ),
         )
+
+    @staticmethod
+    def _independent_audit_cache_scope(
+        handoff: dict[str, Any], artifact_id: str
+    ) -> dict[str, Any]:
+        """Prevent a byte-identical sibling artifact reusing audit authority."""
+
+        return {
+            "artifact_id": str(artifact_id),
+            "handoff_id": str(handoff.get("handoff_id") or ""),
+            "audit_cycle_id": str(handoff.get("audit_cycle_id") or ""),
+            "production_scope": copy.deepcopy(handoff.get("scope") or {}),
+        }
 
     @classmethod
     def _valid_cache_identity(cls, record: dict[str, Any], audit_class: str) -> bool:
@@ -1567,6 +2067,236 @@ class StoryboardService:
             value=value,
         )
 
+    def _verify_authoritative_audit_overlay(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        overlay_record: dict[str, Any],
+        source_record: dict[str, Any],
+        certificate: dict[str, Any],
+    ) -> None:
+        """Bind every visible audit-page claim to the signed certificate.
+
+        Artifact metadata is an index and its public SHA can be recomputed by a
+        local writer.  It is therefore insufficient evidence for a PASS.  This
+        verifier reparses the authoritative workbook (which also checks the
+        hidden canonical sidecar and both visible projections), reconstructs
+        the complete audit-page value matrix from the signed certificate, and
+        requires the two to be identical before status may expose PASS.
+        """
+
+        overlay_id = str(overlay_record.get("artifact_id") or "")
+        if not overlay_id:
+            raise ValueError("authoritative_audit_overlay_identity_missing")
+        current_overlay, overlay_path = self.store.get_artifact(
+            namespace,
+            project_id,
+            overlay_id,
+        )
+        source_id = str(source_record.get("artifact_id") or "")
+        if (
+            current_overlay.get("artifact_type") != "storyboard_audit_overlay"
+            or str(current_overlay.get("source_artifact_id") or "") != source_id
+        ):
+            raise ValueError("authoritative_audit_overlay_source_binding_invalid")
+
+        overlay_metadata = current_overlay.get("metadata")
+        source_metadata = source_record.get("metadata")
+        if not isinstance(overlay_metadata, dict) or not isinstance(
+            source_metadata, dict
+        ):
+            raise ValueError("authoritative_audit_overlay_metadata_invalid")
+        report = certificate.get("report")
+        certificate_summary = certificate.get("audit_summary")
+        certificate_fingerprints = certificate.get("fingerprints")
+        semantic_conclusion = certificate.get("semantic_conclusion")
+        if (
+            not isinstance(report, dict)
+            or not isinstance(report.get("issues"), list)
+            or not isinstance(certificate_summary, dict)
+            or not isinstance(certificate_fingerprints, dict)
+            or not isinstance(semantic_conclusion, dict)
+            or not str(semantic_conclusion.get("summary") or "").strip()
+        ):
+            raise ValueError("authoritative_audit_overlay_certificate_incomplete")
+
+        overlay_status = str(certificate.get("result") or "fail_current").upper()
+        if overlay_status not in {"PASS", "FAIL_CURRENT", "BLOCKED"}:
+            raise ValueError("authoritative_audit_overlay_status_invalid")
+        issue_count = int(certificate.get("issue_count") or 0)
+        expected_counts = {
+            "initial_issue_count": int(
+                certificate_summary.get("initial_issue_count", issue_count)
+            ),
+            "residual_issue_count": int(
+                certificate_summary.get("residual_issue_count", 0)
+            ),
+            "introduced_issue_count": int(
+                certificate_summary.get("introduced_issue_count", 0)
+            ),
+            "blocking_issue_count": int(
+                certificate_summary.get("blocking_issue_count", issue_count)
+            ),
+        }
+        certificate_id = str(certificate.get("certificate_id") or "")
+        certificate_hmac = str(certificate.get("integrity_hmac") or "")
+        audit_trace_id = str(
+            certificate.get("audit_trace_id")
+            or certificate.get("stage_trace_id")
+            or ""
+        )
+        canonical_hash = str(certificate.get("canonical_sha256") or "")
+        source_raw_hash = str(certificate_fingerprints.get("artifact_raw") or "")
+        expected_metadata = {
+            "canonical_sha256": canonical_hash,
+            "source_storyboard_artifact_id": source_id,
+            "source_storyboard_raw_sha256": source_raw_hash,
+            "independent_audit_status": overlay_status,
+            "audit_status": overlay_status,
+            "issue_count": issue_count,
+            "independent_audit_certificate_id": certificate_id,
+            "independent_audit_trace_id": audit_trace_id,
+            "independent_audit_summary": certificate_summary,
+            "signed_audit_overlay": True,
+            "canonical_json_artifact_id": source_metadata.get(
+                "canonical_json_artifact_id"
+            ),
+            "canonical_json_fingerprint": source_metadata.get(
+                "canonical_json_fingerprint"
+            ),
+        }
+        if any(
+            overlay_metadata.get(key) != value
+            for key, value in expected_metadata.items()
+        ):
+            raise ValueError("authoritative_audit_overlay_metadata_binding_invalid")
+        source_metadata_canonical = str(
+            source_metadata.get("canonical_sha256") or ""
+        )
+        if (
+            str(source_record.get("fingerprint") or "") != source_raw_hash
+            or (
+                source_metadata_canonical
+                and source_metadata_canonical != canonical_hash
+            )
+        ):
+            raise ValueError("authoritative_audit_overlay_source_fingerprint_invalid")
+
+        extracted = extract_file(
+            overlay_path.read_bytes(),
+            str(current_overlay.get("file_name") or "audit-overlay.xlsx"),
+        )
+        canonical = extracted.get("canonical_storyboard")
+        sheets = extracted.get("sheets")
+        if (
+            extracted.get("kind") != "workbook"
+            or extracted.get("canonical_sidecar_present") is not True
+            or not isinstance(canonical, dict)
+            or canonical_storyboard_sha256(canonical) != canonical_hash
+            or not isinstance(sheets, list)
+        ):
+            raise ValueError("authoritative_audit_overlay_workbook_binding_invalid")
+        scope_sheets = [
+            sheet
+            for sheet in sheets
+            if isinstance(sheet, dict) and sheet.get("name") == "00_范围与审计"
+        ]
+        if len(scope_sheets) != 1:
+            raise ValueError("authoritative_audit_overlay_scope_sheet_invalid")
+
+        def visible_cell(value: Any) -> Any:
+            if isinstance(value, (dict, list, tuple)):
+                value = json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+                value = f"'{value}"
+            if value == "":
+                return None
+            if isinstance(value, float) and value.is_integer():
+                return int(value)
+            return value
+
+        def row(*values: Any) -> list[Any]:
+            padded = [*values, *([None] * max(0, 5 - len(values)))]
+            return [visible_cell(value) for value in padded[:5]]
+
+        scope_rows: list[tuple[str, Any]] = [
+            ("independent_audit_status", overlay_status),
+            (
+                "independent_audit_conclusion",
+                str(semantic_conclusion["summary"]),
+            ),
+            *[(key, expected_counts[key]) for key in expected_counts],
+            ("audit_trace_id", audit_trace_id),
+            ("certificate_id", certificate_id),
+            ("certificate_integrity_hmac", certificate_hmac),
+            ("canonical_sha256", canonical_hash),
+            ("source_artifact_raw_sha256", source_raw_hash),
+            ("project_version", canonical.get("project_version")),
+            ("schema_version", canonical.get("schema_version")),
+            ("workflow_profile", canonical.get("workflow_profile")),
+            ("total_duration", canonical.get("total_duration")),
+            (
+                "production_evidence_location",
+                "canonical sidecar（生产证据不作为独立审计结论）",
+            ),
+        ]
+        expected_matrix: list[list[Any]] = [
+            row(f"00_范围与审计｜{overlay_status}｜独立审计已签发"),
+            row(),
+            row("范围字段", "值"),
+            *[row(label, value) for label, value in scope_rows],
+            row(),
+            row("独立审计错误码", "严重度", "位置", "证据", "修复动作"),
+        ]
+        report_issues = report["issues"]
+        if report_issues:
+            expected_matrix.extend(
+                row(
+                    issue.get("error_code"),
+                    issue.get("severity"),
+                    issue.get("location"),
+                    issue.get("evidence"),
+                    issue.get("repair_action"),
+                )
+                for issue in report_issues
+                if isinstance(issue, dict)
+            )
+            if len(expected_matrix) != 21 + len(report_issues):
+                raise ValueError("authoritative_audit_overlay_report_issue_invalid")
+        else:
+            sentinel = (
+                "INDEPENDENT_AUDIT_PASS"
+                if overlay_status == "PASS"
+                else f"INDEPENDENT_AUDIT_{overlay_status}"
+            )
+            expected_matrix.append(
+                row(
+                    sentinel,
+                    "info" if overlay_status == "PASS" else "fail",
+                    "全表",
+                    (
+                        "独立审计证书已签发；残留0、新增0、阻塞0"
+                        if overlay_status == "PASS"
+                        else f"独立审计证书状态为{overlay_status}"
+                    ),
+                    "无需修复"
+                    if overlay_status == "PASS"
+                    else "按审计问题修复后重审",
+                )
+            )
+
+        actual_matrix = [
+            [visible_cell(value) for value in list(raw_row)]
+            for raw_row in list(scope_sheets[0].get("matrix") or [])
+        ]
+        if actual_matrix != expected_matrix:
+            raise ValueError("authoritative_audit_overlay_visible_claim_mismatch")
+
     def _project_reuse_summary(
         self,
         namespace: str,
@@ -1610,9 +2340,7 @@ class StoryboardService:
         for handoff in self.store.list_project_records(
             namespace, project_id, kind="handoffs"
         ):
-            if handoff.get("status") != "prepared":
-                continue
-            if not self.store.handoff_is_published(namespace, project_id, handoff):
+            if handoff.get("status") not in {"prepared", "consuming"}:
                 continue
             pending_handoffs.append(
                 {
@@ -1642,24 +2370,78 @@ class StoryboardService:
 
         artifacts = self.store.list_artifacts(namespace, project_id)
         storyboard_artifacts = [
-            row for row in artifacts if row.get("artifact_type") == "storyboard"
+            row
+            for row in artifacts
+            if row.get("artifact_type") in {"storyboard", "storyboard_audit_overlay"}
+        ]
+        overlay_source_artifacts = [
+            row
+            for row in artifacts
+            if row.get("artifact_type")
+            in {
+                "storyboard",
+                "storyboard_json",
+                "storyboard_json_recovered",
+                "source:storyboard",
+            }
         ]
         authoritative_storyboard_id = str(
             latest_artifacts.get("storyboard", {}).get("artifact_id") or ""
         )
-        selected = next(
-            (
-                row
-                for row in storyboard_artifacts
-                if row.get("artifact_id") == authoritative_storyboard_id
-            ),
-            storyboard_artifacts[0] if storyboard_artifacts else None,
+        reuse_state_errors: list[str] = []
+        if authoritative_storyboard_id:
+            authoritative = next(
+                (
+                    row
+                    for row in storyboard_artifacts
+                    if row.get("artifact_id") == authoritative_storyboard_id
+                ),
+                None,
+            )
+            if authoritative is None:
+                reuse_state_errors.append(
+                    "AUTHORITATIVE_ARTIFACT_MISSING: latest storyboard pointer cannot be resolved"
+                )
+        else:
+            authoritative = storyboard_artifacts[0] if storyboard_artifacts else None
+        selected = authoritative
+        authoritative_is_overlay = bool(
+            isinstance(authoritative, dict)
+            and authoritative.get("artifact_type") == "storyboard_audit_overlay"
         )
+        if authoritative_is_overlay:
+            source_artifact_id = str(
+                authoritative.get("source_artifact_id") or ""
+            ).strip()
+            if not source_artifact_id:
+                reuse_state_errors.append(
+                    "AUTHORITATIVE_OVERLAY_SOURCE_MISSING: audit overlay has no source_artifact_id"
+                )
+                selected = None
+            else:
+                selected = next(
+                    (
+                        row
+                        for row in overlay_source_artifacts
+                        if row.get("artifact_id") == source_artifact_id
+                    ),
+                    None,
+                )
+                if selected is None:
+                    reuse_state_errors.append(
+                        "AUTHORITATIVE_OVERLAY_SOURCE_MISSING: audit overlay source artifact cannot be resolved"
+                    )
         latest_storyboard: dict[str, Any] | None = None
         if isinstance(selected, dict):
             metadata = selected.get("metadata")
             if not isinstance(metadata, dict):
                 metadata = {}
+            authoritative_metadata = (
+                authoritative.get("metadata")
+                if isinstance(authoritative, dict)
+                and isinstance(authoritative.get("metadata"), dict)
+                else metadata
+            )
             matching_handoff = next(
                 (
                     row
@@ -1668,8 +2450,86 @@ class StoryboardService:
                 ),
                 None,
             )
+            # Audit authority belongs to the immutable overlay, while the
+            # certificate itself remains bound to the source production bytes.
+            raw_audit_status = authoritative_metadata.get("audit_status")
+            raw_issue_count = authoritative_metadata.get("issue_count")
+            certificate_id = authoritative_metadata.get(
+                "independent_audit_certificate_id"
+            )
+            effective_audit_status = "PENDING_AUDIT"
+            effective_issue_count: int | None = None
+            audit_evidence_state = "missing_certificate"
+            verified_certificate: dict[str, Any] | None = None
+            if certificate_id:
+                try:
+                    if (
+                        isinstance(authoritative, dict)
+                        and authoritative.get("artifact_type")
+                        == "storyboard_audit_overlay"
+                    ):
+                        self.store.get_artifact(
+                            namespace,
+                            project_id,
+                            str(authoritative.get("artifact_id")),
+                        )
+                    (
+                        verified_certificate,
+                        verified_artifact_record,
+                    ) = self._load_current_independent_audit_certificate(
+                        namespace,
+                        project_id,
+                        certificate_id=str(certificate_id),
+                        artifact_id=str(selected.get("artifact_id")),
+                    )
+                    selected = verified_artifact_record
+                    metadata = selected.get("metadata")
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+                    if authoritative_is_overlay:
+                        self._verify_authoritative_audit_overlay(
+                            namespace,
+                            project_id,
+                            overlay_record=authoritative,
+                            source_record=selected,
+                            certificate=verified_certificate,
+                        )
+                    report = verified_certificate.get("report")
+                    if not isinstance(report, dict):
+                        raise ValueError("independent audit report is unavailable")
+                    effective_audit_status = str(
+                        verified_certificate.get("result") or "fail_current"
+                    ).upper()
+                    effective_issue_count = int(
+                        verified_certificate.get("issue_count") or 0
+                    )
+                    if effective_audit_status == "PASS" and (
+                        effective_issue_count != 0 or report.get("issues")
+                    ):
+                        raise ValueError("clean certificate is inconsistent")
+                    audit_evidence_state = "verified_independent_certificate"
+                except (AttributeError, KeyError, OSError, TypeError, ValueError):
+                    effective_audit_status = "AUDIT_EVIDENCE_INVALID"
+                    effective_issue_count = None
+                    audit_evidence_state = "invalid_certificate_or_binding"
+
+            if authoritative_is_overlay:
+                if audit_evidence_state == "missing_certificate":
+                    reuse_state_errors.append(
+                        "AUTHORITATIVE_OVERLAY_CERTIFICATE_MISSING: audit overlay has no independent audit certificate"
+                    )
+                elif audit_evidence_state != "verified_independent_certificate":
+                    reuse_state_errors.append(
+                        "AUTHORITATIVE_OVERLAY_AUDIT_EVIDENCE_INVALID: audit overlay certificate, binding, or artifact bytes are invalid"
+                    )
+
             latest_storyboard = {
                 "artifact_id": selected.get("artifact_id"),
+                "authoritative_artifact_id": (
+                    authoritative.get("artifact_id")
+                    if isinstance(authoritative, dict)
+                    else selected.get("artifact_id")
+                ),
                 "canonical_artifact_id": metadata.get("canonical_json_artifact_id"),
                 "canonical_sha256": metadata.get("canonical_sha256"),
                 "handoff_id": (
@@ -1689,26 +2549,35 @@ class StoryboardService:
                 "version": selected.get("version"),
                 "fingerprint": selected.get("fingerprint"),
                 "created_at": selected.get("created_at"),
-                "audit_status": metadata.get("audit_status"),
-                "issue_count": metadata.get("issue_count"),
+                "audit_status": effective_audit_status,
+                "effective_audit_status": effective_audit_status,
+                "issue_count": effective_issue_count,
+                "legacy_audit_status": raw_audit_status,
+                "legacy_issue_count": raw_issue_count,
+                "legacy_claim_accepted": False,
+                "audit_evidence_state": audit_evidence_state,
                 "production_preflight_status": metadata.get(
                     "production_preflight_status"
                 ),
                 "production_preflight_issue_count": metadata.get(
                     "production_preflight_issue_count"
                 ),
-                "independent_audit_status": metadata.get(
-                    "independent_audit_status", "PENDING_AUDIT"
+                "independent_audit_status": effective_audit_status,
+                "independent_audit_certificate_id": (
+                    certificate_id
+                    if audit_evidence_state == "verified_independent_certificate"
+                    else None
                 ),
-                "independent_audit_certificate_id": metadata.get(
-                    "independent_audit_certificate_id"
-                ),
-                "independent_audit_trace_id": metadata.get(
-                    "independent_audit_trace_id"
+                "independent_audit_trace_id": (
+                    verified_certificate.get("audit_trace_id")
+                    if isinstance(verified_certificate, dict)
+                    and audit_evidence_state == "verified_independent_certificate"
+                    else None
                 ),
                 "authoritative_latest": bool(
                     authoritative_storyboard_id
-                    and selected.get("artifact_id") == authoritative_storyboard_id
+                    and isinstance(authoritative, dict)
+                    and authoritative.get("artifact_id") == authoritative_storyboard_id
                 ),
             }
 
@@ -1717,6 +2586,120 @@ class StoryboardService:
             "latest_artifacts": latest_artifacts,
             "pending_handoffs": pending_handoffs,
             "latest_storyboard": latest_storyboard,
+            "reuse_state_errors": reuse_state_errors,
+        }
+
+    @staticmethod
+    def _independent_audit_pending_state(
+        hub: dict[str, Any], reuse_summary: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Return one fail-closed pending-audit decision for status and writes."""
+
+        reasons: list[str] = []
+        handoff_ids: list[str] = []
+        for row in reuse_summary.get("pending_handoffs", []):
+            if not isinstance(row, dict):
+                continue
+            if row.get("handoff_type") not in {
+                "production_to_audit",
+                "repair_to_audit",
+            }:
+                continue
+            if row.get("status") not in {"prepared", "consuming"}:
+                continue
+            handoff_ids.append(str(row.get("handoff_id") or ""))
+        if handoff_ids:
+            reasons.append("production_or_repair_handoff_pending")
+
+        work_order_ids: list[str] = []
+        for row in hub.get("work_orders", []):
+            if not isinstance(row, dict):
+                continue
+            if row.get("operation") not in STORYBOARD_OPERATIONS:
+                continue
+            if (
+                row.get("status") == "validating"
+                and row.get("awaiting_independent_audit") is True
+            ):
+                work_order_ids.append(str(row.get("work_order_id") or ""))
+        if work_order_ids:
+            reasons.append("production_work_order_awaiting_independent_audit")
+
+        latest_storyboard = reuse_summary.get("latest_storyboard")
+        latest_audit_status = ""
+        if isinstance(latest_storyboard, dict):
+            latest_audit_status = str(
+                latest_storyboard.get("effective_audit_status")
+                or latest_storyboard.get("audit_status")
+                or ""
+            ).upper()
+        if latest_audit_status in {"PENDING_AUDIT", "AUDIT_EVIDENCE_INVALID"}:
+            reasons.append(f"latest_storyboard_{latest_audit_status.casefold()}")
+
+        return {
+            "pending": bool(reasons),
+            "reasons": reasons,
+            "handoff_ids": [value for value in handoff_ids if value],
+            "work_order_ids": [value for value in work_order_ids if value],
+            "latest_audit_status": latest_audit_status or None,
+        }
+
+    @staticmethod
+    def _draft_preflight_failure_state(
+        ledger: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Return unresolved failed draft scopes governed by fail-current policy."""
+
+        policy_enabled = bool(
+            ledger.get("policy", {}).get("fail_current_blocks_next_episode")
+            is True
+        )
+        if not policy_enabled:
+            return {
+                "blocked": False,
+                "policy_enabled": False,
+                "scope_keys": [],
+                "open_issue_ids": [],
+            }
+
+        failed_scope_keys = {
+            str(event.get("scope_key") or "")
+            for event in ledger.get("events", [])
+            if isinstance(event, dict)
+            and event.get("task_type") == "production_draft_preflight"
+            and event.get("result") == "fail_current"
+            and event.get("scope_key")
+        }
+        unresolved_scopes: list[str] = []
+        open_issue_ids: set[str] = set()
+        for scope in ledger.get("scope_states", []):
+            if not isinstance(scope, dict):
+                continue
+            scope_key = str(scope.get("scope_key") or "")
+            if scope_key not in failed_scope_keys:
+                continue
+            scope_open_issue_ids = {
+                str(value)
+                for value in scope.get("open_issue_ids", [])
+                if str(value)
+            }
+            unresolved = bool(
+                scope.get("last_result") != "pass"
+                or scope_open_issue_ids
+                or scope.get("closure_state") != "preflight_clean"
+            )
+            if unresolved:
+                unresolved_scopes.append(scope_key)
+                open_issue_ids.update(scope_open_issue_ids)
+
+        # The scope is authoritative for closure.  A same-scope clean
+        # preflight sets preflight_clean and empties open_issue_ids, so old
+        # failed events never keep a repaired draft blocked indefinitely.
+        return {
+            "blocked": bool(unresolved_scopes),
+            "policy_enabled": True,
+            "scope_keys": sorted(unresolved_scopes),
+            "open_issue_ids": sorted(open_issue_ids),
         }
 
     def agent_status(self, namespace: str, project_id: str | None = None, full_self_test: bool = False) -> ToolResponse:
@@ -1724,6 +2707,7 @@ class StoryboardService:
         projects = self.store.list_projects(namespace)
         data: dict[str, Any] = {
             "plugin_version": __version__,
+            "runtime_status": report.get("status"),
             "runtime": report,
             "output_contract": STRICT_OUTPUT_CONTRACT,
             "target_model": "Seedance 2.5",
@@ -1740,35 +2724,119 @@ class StoryboardService:
                 "ordinary_runs_add_markers": False,
             },
         }
-        summary = "Agent可执行" if report.get("status") == "pass" else "Agent阻塞"
+        response_status = str(report.get("status"))
+        summary = "运行时PASS" if report.get("status") == "pass" else "运行时阻塞"
         if project_id:
             hub = self.store.load_hub(namespace, project_id)
             ledger = self.store.load_ledger(namespace, project_id)
-            runtime_certificate = (
-                self._matching_runtime_certificate(namespace, project_id)
-                or self._persist_runtime_certificate(namespace, project_id, report)
-                if full_self_test
-                else self._matching_runtime_certificate(namespace, project_id)
+            runtime_certificate = self._matching_runtime_certificate(
+                namespace, project_id
             )
-            hub_errors = project_agent.validate_hub(hub)
-            ledger_errors = storyboard_agent.validate_ledger(ledger)
+            runtime_certificate_valid = bool(
+                runtime_certificate is not None
+                and runtime_certificate.get("result") == "pass"
+                and self.store.project_record_is_signed(runtime_certificate)
+            )
+            if full_self_test:
+                if report.get("status") == "pass":
+                    if not runtime_certificate_valid:
+                        runtime_certificate = self._persist_runtime_certificate(
+                            namespace, project_id, report
+                        )
+                else:
+                    # A failed current full regression must not be masked by a
+                    # certificate issued by an earlier successful invocation.
+                    runtime_certificate = self._persist_runtime_certificate(
+                        namespace, project_id, report
+                    )
+                runtime_certificate_valid = bool(
+                    runtime_certificate is not None
+                    and runtime_certificate.get("result") == "pass"
+                    and self.store.project_record_is_signed(runtime_certificate)
+                )
+            state_errors = self._project_state_errors(hub, ledger)
             data["project"] = project_agent.summarize(hub)
             data["issues"] = storyboard_agent.summarize(ledger)
-            data.update(self._project_reuse_summary(namespace, project_id, hub))
-            data["state_valid"] = not hub_errors and not ledger_errors
-            data["state_errors"] = hub_errors + ledger_errors
+            reuse_summary = self._project_reuse_summary(namespace, project_id, hub)
+            data.update(reuse_summary)
+            state_errors.extend(reuse_summary.get("reuse_state_errors", []))
+            data["state_valid"] = not state_errors
+            data["state_errors"] = state_errors
+            data["project_state_status"] = (
+                "valid" if data["state_valid"] else "migration_required"
+            )
             data["recent_telemetry"] = self.store.list_project_records(
                 namespace, project_id, kind="telemetry"
             )[:20]
             data["recent_performance_diagnostics"] = self.store.list_project_records(
                 namespace, project_id, kind="diagnostics"
             )[:10]
-            data["runtime_test_certificate_valid"] = bool(
-                runtime_certificate is not None and runtime_certificate.get("result") == "pass"
-            )
+            data["runtime_test_certificate_valid"] = runtime_certificate_valid
             data["runtime_test_certificate"] = runtime_certificate
-            summary += f"｜项目{hub.get('project_name')}｜开放问题{data['issues'].get('open_issue_count', 0)}"
-        return ToolResponse(status=str(report.get("status")), summary=summary, project_id=project_id, data=data)
+            quality_block = hub.get("project_state", {}).get(
+                "production_quality_block"
+            )
+            data["production_quality_block"] = copy.deepcopy(quality_block)
+            draft_failure_state = self._draft_preflight_failure_state(ledger)
+            data["draft_preflight_repair_pending"] = bool(
+                draft_failure_state["blocked"]
+            )
+            data["draft_preflight_failure_details"] = draft_failure_state
+            pending_audit_state = self._independent_audit_pending_state(
+                hub, reuse_summary
+            )
+            pending_independent_audit = bool(pending_audit_state["pending"])
+            data["independent_audit_pending"] = pending_independent_audit
+            data["independent_audit_pending_details"] = pending_audit_state
+            data["open_issue_pattern_count"] = data["issues"].get(
+                "open_issue_count", 0
+            )
+            if not data["state_valid"]:
+                response_status = "migration_required"
+                data["execution_available"] = False
+                data["execution_mode"] = "recovery_only"
+                data["recovery_available"] = True
+                data["recovery_operations"] = [
+                    "get_agent_status",
+                    "query_project_issues",
+                    "migrate_project_state",
+                ]
+                summary += (
+                    f"｜项目状态INVALID｜需迁移｜错误{len(data['state_errors'])}项"
+                )
+            elif report.get("status") != "pass" or not runtime_certificate_valid:
+                response_status = "action_required"
+                data["execution_available"] = False
+                data["execution_mode"] = "self_test_only"
+                data["action_required"] = "run_full_self_test"
+                data["self_test_required"] = True
+                summary += "｜当前运行时未获有效全量回归证书｜仅允许自检"
+            elif isinstance(quality_block, dict) and quality_block.get("active"):
+                response_status = "action_required"
+                data["execution_available"] = False
+                data["execution_mode"] = "root_cause_repair_only"
+                summary += "｜初版质量门阻断下一批｜需根因修复"
+            elif pending_independent_audit:
+                response_status = "action_required"
+                data["execution_available"] = False
+                data["execution_mode"] = "independent_audit_only"
+                summary += "｜上一批待独立审计｜禁止扩大生产"
+            elif draft_failure_state["blocked"]:
+                response_status = "action_required"
+                data["execution_available"] = False
+                data["execution_mode"] = "draft_repair_only"
+                data["action_required"] = (
+                    "correct_failed_draft_scope_or_start_root_cause_repair"
+                )
+                summary += "｜初稿预检失败scope未闭合｜仅允许原工单修正或根因修复"
+            else:
+                data["execution_mode"] = "normal"
+                summary += "｜项目状态VALID｜Agent可执行"
+            summary += (
+                f"｜项目{hub.get('project_name')}"
+                f"｜开放问题模式{data['issues'].get('open_issue_count', 0)}"
+            )
+        return ToolResponse(status=response_status, summary=summary, project_id=project_id, data=data)
 
     def _resolve_performance_diagnostic_links(
         self,
@@ -2321,6 +3389,1247 @@ class StoryboardService:
             data={"project": project_agent.summarize(hub)},
         )
 
+    def _assert_project_migration_authority(
+        self,
+        namespace: str,
+        work_order: dict[str, Any],
+        request_session_id: str | None,
+    ) -> None:
+        if (
+            work_order.get("operation") not in {"rule_improvement", "version_management"}
+            or work_order.get("mode") != "execute"
+            or work_order.get("authorization") != "explicit_execute"
+            or work_order.get("server_actor_role") != "production"
+        ):
+            raise ValueError(
+                "project_migration_authority_required: use an explicit rule_improvement "
+                "or version_management production work order"
+            )
+        self._assert_work_order_session(namespace, work_order, request_session_id)
+        self._assert_work_order_write_ready(work_order)
+
+    @staticmethod
+    def _whole_schema_errors(schema: dict[str, Any], value: dict[str, Any]) -> list[str]:
+        errors = []
+        for error in Draft202012Validator(schema).iter_errors(value):
+            location = ".".join(str(item) for item in error.absolute_path) or "$"
+            errors.append(f"{location}: {error.message}")
+        return errors
+
+    def _project_state_errors(
+        self, hub: dict[str, Any], ledger: dict[str, Any]
+    ) -> list[str]:
+        return (
+            project_agent.validate_hub(hub)
+            + storyboard_agent.validate_ledger(ledger)
+            + [
+                f"hub_schema.{value}"
+                for value in self._whole_schema_errors(self._project_schema, hub)
+            ]
+            + [
+                f"ledger_schema.{value}"
+                for value in self._whole_schema_errors(self._ledger_schema, ledger)
+            ]
+        )
+
+    def _require_current_project_state(
+        self, namespace: str, project_id: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        hub = self.store.load_hub(namespace, project_id)
+        ledger = self.store.load_ledger(namespace, project_id)
+        errors = self._project_state_errors(hub, ledger)
+        if errors:
+            raise ValueError(
+                "project_state_migration_required: " + "; ".join(errors[:20])
+            )
+        return hub, ledger
+
+    def migrate_project_state(
+        self,
+        namespace: str,
+        *,
+        project_id: str,
+        work_order_id: str,
+        action: str,
+        target_version: str,
+        expected_current_version: str | None,
+        migration_id: str | None,
+        request_session_id: str | None,
+    ) -> ToolResponse:
+        """Plan, commit or CAS-rollback one control-state-only migration."""
+
+        self._require_runtime()
+        if action not in {"plan", "execute", "rollback"}:
+            raise ValueError("migration action must be plan, execute, or rollback")
+        if target_version != project_agent.COMPACT_MASTER_VERSION:
+            raise ValueError(
+                f"unsupported migration target: expected {project_agent.COMPACT_MASTER_VERSION}"
+            )
+        hub_before = self.store.load_hub(namespace, project_id)
+        ledger_before = self.store.load_ledger(namespace, project_id)
+        work_order = _find_work_order(hub_before, work_order_id)
+        self._assert_project_migration_authority(
+            namespace, work_order, request_session_id
+        )
+        current_version = str(
+            hub_before.get("policy", {}).get("compact_master_version") or "unknown"
+        )
+        if action == "rollback":
+            if not migration_id:
+                raise ValueError("migration_id is required for rollback")
+            rollback_record = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="migrations",
+                record_id=migration_id,
+            )
+            if (
+                rollback_record.get("work_order_id") != work_order_id
+                or rollback_record.get("target_version") != target_version
+                or (
+                    expected_current_version
+                    and rollback_record.get("target_version")
+                    != expected_current_version
+                )
+            ):
+                raise ValueError("migration_record_authority_conflict")
+            # Bind the caller's expected version to the signed journal target,
+            # not the currently readable hub field. During an interrupted
+            # two-file rollback the hub may already contain `from_version`
+            # while the ledger still contains `target_version`; storage owns
+            # the exact before/after CAS recovery decision.
+            record = self.store.rollback_project_state_migration(
+                namespace, project_id, migration_id
+            )
+            return ToolResponse(
+                status="rolled_back",
+                summary=f"项目控制状态已回滚｜{migration_id}",
+                project_id=project_id,
+                work_order_id=work_order_id,
+                data={"migration": record, "authored_artifacts_modified": False},
+            )
+
+        # A process can stop after replacing hub.json but before ledger.json.
+        # Resume the signed prepared journal before deriving a key from the
+        # now-partially-updated state; otherwise the changed version would make
+        # an exact retry calculate the wrong migration key.
+        prepared_migration: dict[str, Any] | None = None
+        if action == "execute":
+            if migration_id:
+                try:
+                    candidate_record = self.store.get_project_record(
+                        namespace,
+                        project_id,
+                        kind="migrations",
+                        record_id=migration_id,
+                    )
+                except ValueError:
+                    candidate_record = None
+                if isinstance(candidate_record, dict) and (
+                    candidate_record.get("project_id") != project_id
+                    or candidate_record.get("work_order_id") != work_order_id
+                    or candidate_record.get("target_version") != target_version
+                    or (
+                        expected_current_version
+                        and candidate_record.get("from_version")
+                        != expected_current_version
+                    )
+                ):
+                    raise ValueError("migration_record_authority_conflict")
+                if (
+                    isinstance(candidate_record, dict)
+                    and candidate_record.get("status") == "prepared"
+                ):
+                    expected_key = sha256_bytes(
+                        _stable_json_bytes(
+                            {
+                                "project_id": project_id,
+                                "work_order_id": work_order_id,
+                                "from_version": candidate_record.get("from_version"),
+                                "target_version": target_version,
+                                "spec": "project-state-migration-v055",
+                            }
+                        )
+                    )
+                    if (
+                        candidate_record.get("project_id") != project_id
+                        or candidate_record.get("work_order_id") != work_order_id
+                        or candidate_record.get("target_version") != target_version
+                        or (
+                            expected_current_version
+                            and candidate_record.get("from_version")
+                            != expected_current_version
+                        )
+                        or candidate_record.get("migration_key") != expected_key
+                        or candidate_record.get("ruleset_version")
+                        != self._ruleset_version
+                        or candidate_record.get("validator_version")
+                        != self._validator_version()
+                    ):
+                        raise ValueError("migration_record_authority_conflict")
+                    prepared_migration = candidate_record
+            if prepared_migration is None:
+                prepared_migration = next(
+                    (
+                        row
+                        for row in self.store.list_project_records(
+                            namespace, project_id, kind="migrations"
+                        )
+                        if row.get("status") == "prepared"
+                        and row.get("work_order_id") == work_order_id
+                        and row.get("target_version") == target_version
+                    ),
+                    None,
+                )
+            if prepared_migration is not None:
+                expected_prepared_key = sha256_bytes(
+                    _stable_json_bytes(
+                        {
+                            "project_id": project_id,
+                            "work_order_id": work_order_id,
+                            "from_version": prepared_migration.get("from_version"),
+                            "target_version": target_version,
+                            "spec": "project-state-migration-v055",
+                        }
+                    )
+                )
+                if (
+                    prepared_migration.get("project_id") != project_id
+                    or prepared_migration.get("work_order_id") != work_order_id
+                    or prepared_migration.get("target_version") != target_version
+                    or prepared_migration.get("migration_key")
+                    != expected_prepared_key
+                    or prepared_migration.get("ruleset_version")
+                    != self._ruleset_version
+                    or prepared_migration.get("validator_version")
+                    != self._validator_version()
+                ):
+                    raise ValueError("migration_record_authority_conflict")
+                current_certificate = self._require_runtime_test_certificate(
+                    namespace, project_id
+                )
+                if prepared_migration.get("runtime_test_certificate_id") != str(
+                    current_certificate["certificate_id"]
+                ):
+                    raise ValueError("migration_runtime_certificate_conflict")
+                recovered = self.store.commit_project_state_migration(
+                    namespace,
+                    project_id,
+                    migration_id=str(prepared_migration["migration_id"]),
+                    migration_key=str(prepared_migration["migration_key"]),
+                    work_order_id=str(prepared_migration["work_order_id"]),
+                    from_version=str(prepared_migration["from_version"]),
+                    target_version=str(prepared_migration["target_version"]),
+                    hub_before=prepared_migration["hub_before"],
+                    ledger_before=prepared_migration["ledger_before"],
+                    hub_after=prepared_migration["hub_after"],
+                    ledger_after=prepared_migration["ledger_after"],
+                    runtime_test_certificate_id=str(
+                        current_certificate["certificate_id"]
+                    ),
+                    ruleset_version=self._ruleset_version,
+                    validator_version=self._validator_version(),
+                    changed_paths=list(prepared_migration.get("changed_paths", [])),
+                )
+                return ToolResponse(
+                    status="migration_recovered",
+                    summary=(
+                        f"项目控制状态迁移已从签名日志恢复｜"
+                        f"{prepared_migration['from_version']}→{target_version}"
+                    ),
+                    project_id=project_id,
+                    work_order_id=work_order_id,
+                    data={
+                        "migration": recovered,
+                        "authored_artifacts_modified": False,
+                    },
+                )
+
+        key_payload = {
+            "project_id": project_id,
+            "work_order_id": work_order_id,
+            # Use the caller's CAS version when present so an exact retry after a
+            # successful write resolves to the original migration key.
+            "from_version": expected_current_version or current_version,
+            "target_version": target_version,
+            "spec": "project-state-migration-v055",
+        }
+        migration_key = sha256_bytes(_stable_json_bytes(key_payload))
+        resolved_migration_id = migration_id or f"MIG-{migration_key[:20]}"
+        existing = self.store.find_project_record(
+            namespace,
+            project_id,
+            kind="migrations",
+            field="migration_key",
+            value=migration_key,
+        )
+        if existing and existing.get("status") == "committed":
+            current_certificate = self._require_runtime_test_certificate(
+                namespace, project_id
+            )
+            if (
+                not self.store.project_record_is_signed(existing)
+                or existing.get("project_id") != project_id
+                or existing.get("work_order_id") != work_order_id
+                or existing.get("migration_key") != migration_key
+                or existing.get("from_version")
+                != (expected_current_version or current_version)
+                or existing.get("target_version") != target_version
+                or (
+                    migration_id
+                    and str(existing.get("migration_id") or "") != migration_id
+                )
+                or existing.get("ruleset_version") != self._ruleset_version
+                or existing.get("validator_version") != self._validator_version()
+                or existing.get("runtime_test_certificate_id")
+                != str(current_certificate["certificate_id"])
+            ):
+                raise ValueError("migration_record_authority_conflict")
+            return ToolResponse(
+                status="already_migrated",
+                summary=f"项目迁移已完成且幂等｜{resolved_migration_id}",
+                project_id=project_id,
+                work_order_id=work_order_id,
+                data={"migration": existing, "authored_artifacts_modified": False},
+            )
+        if expected_current_version and current_version != expected_current_version:
+            raise ValueError(
+                "migration_current_version_mismatch: "
+                f"expected {expected_current_version}, found {current_version}"
+            )
+        if current_version == target_version:
+            current_errors = (
+                project_agent.validate_hub(hub_before)
+                + storyboard_agent.validate_ledger(ledger_before)
+                + [
+                    f"hub_schema.{value}"
+                    for value in self._whole_schema_errors(self._project_schema, hub_before)
+                ]
+                + [
+                    f"ledger_schema.{value}"
+                    for value in self._whole_schema_errors(self._ledger_schema, ledger_before)
+                ]
+            )
+            if not current_errors:
+                return ToolResponse(
+                    status="already_current",
+                    summary=f"项目控制状态已是{target_version}且验证通过",
+                    project_id=project_id,
+                    work_order_id=work_order_id,
+                    data={
+                        "target_version": target_version,
+                        "authored_artifacts_modified": False,
+                    },
+                )
+
+        candidate_hub, hub_changes = project_agent.migrate_hub_to_current(
+            hub_before,
+            timestamp=utc_stamp(),
+            migration_id=resolved_migration_id,
+        )
+        candidate_ledger, ledger_changes = storyboard_agent.migrate_ledger_to_current(
+            ledger_before,
+            timestamp=utc_stamp(),
+        )
+        validation_errors = (
+            project_agent.validate_hub(candidate_hub)
+            + storyboard_agent.validate_ledger(candidate_ledger)
+            + [
+                f"hub_schema.{value}"
+                for value in self._whole_schema_errors(
+                    self._project_schema, candidate_hub
+                )
+            ]
+            + [
+                f"ledger_schema.{value}"
+                for value in self._whole_schema_errors(
+                    self._ledger_schema, candidate_ledger
+                )
+            ]
+        )
+        report = {
+            "migration_id": resolved_migration_id,
+            "migration_key": migration_key,
+            "from_version": current_version,
+            "target_version": target_version,
+            "hub_changed_paths": hub_changes,
+            "ledger_changed_paths": ledger_changes,
+            "candidate_valid": not validation_errors,
+            "candidate_errors": validation_errors,
+            "before": {
+                "hub_sha256": self.store.project_state_sha256(hub_before),
+                "ledger_sha256": self.store.project_state_sha256(ledger_before),
+            },
+            "after": {
+                "hub_sha256": self.store.project_state_sha256(candidate_hub),
+                "ledger_sha256": self.store.project_state_sha256(candidate_ledger),
+            },
+            "preserved_counts": {
+                "artifacts": len(self.store.list_artifacts(namespace, project_id)),
+                "work_orders": len(hub_before.get("work_orders", [])),
+                "issues": len(ledger_before.get("issues", [])),
+                "events": len(ledger_before.get("events", [])),
+            },
+            "authored_artifacts_modified": False,
+        }
+        if action == "plan":
+            return ToolResponse(
+                status="migration_plan_ready" if not validation_errors else "blocked",
+                summary=(
+                    f"迁移预演完成｜{current_version}→{target_version}｜候选有效"
+                    if not validation_errors
+                    else f"迁移预演阻塞｜候选错误{len(validation_errors)}项"
+                ),
+                project_id=project_id,
+                work_order_id=work_order_id,
+                data={"migration_plan": report},
+            )
+        if validation_errors:
+            raise ValueError(
+                "migration_candidate_invalid: " + "; ".join(validation_errors[:20])
+            )
+        runtime_certificate = self._require_runtime_test_certificate(namespace, project_id)
+        record = self.store.commit_project_state_migration(
+            namespace,
+            project_id,
+            migration_id=resolved_migration_id,
+            migration_key=migration_key,
+            work_order_id=work_order_id,
+            from_version=current_version,
+            target_version=target_version,
+            hub_before=hub_before,
+            ledger_before=ledger_before,
+            hub_after=candidate_hub,
+            ledger_after=candidate_ledger,
+            runtime_test_certificate_id=str(runtime_certificate["certificate_id"]),
+            ruleset_version=self._ruleset_version,
+            validator_version=self._validator_version(),
+            changed_paths=hub_changes + ledger_changes,
+        )
+        return ToolResponse(
+            status="migrated",
+            summary=f"项目控制状态迁移完成｜{current_version}→{target_version}｜历史分镜未改写",
+            project_id=project_id,
+            work_order_id=work_order_id,
+            data={"migration": record, "migration_report": report},
+        )
+
+    def query_project_issues(
+        self,
+        namespace: str,
+        *,
+        project_id: str,
+        status: str,
+        error_codes: list[str] | None,
+        episode_ids: list[str] | None,
+        recurrence_states: list[str] | None,
+        minimum_occurrence_count: int,
+        include_history: bool,
+        limit: int,
+        cursor: int,
+    ) -> ToolResponse:
+        ledger = self.store.load_ledger(namespace, project_id)
+        profile = storyboard_agent.active_prevention_profile(ledger)
+        pattern_index = {
+            str(row.get("pattern_key")): row
+            for row in profile.get("patterns", [])
+            if row.get("pattern_key")
+        }
+        rows = []
+        allowed_codes = {str(value) for value in error_codes or []}
+        allowed_episodes = {str(value) for value in episode_ids or []}
+        allowed_recurrence = {str(value) for value in recurrence_states or []}
+        for raw in ledger.get("issues", []):
+            if not isinstance(raw, dict):
+                continue
+            if status != "all" and raw.get("status") != status:
+                continue
+            if allowed_codes and str(raw.get("error_code")) not in allowed_codes:
+                continue
+            pattern = pattern_index.get(str(raw.get("pattern_key") or ""), {})
+            effective_recurrence = str(
+                pattern.get("recurrence_state") or raw.get("recurrence_state")
+            )
+            if allowed_recurrence and effective_recurrence not in allowed_recurrence:
+                continue
+            # Public `minimum_occurrence_count` means observed occurrences,
+            # including repeat observations of the same concrete location.
+            # `occurrence_count` on the pattern is the number of distinct
+            # occurrence records and would miss a second round at one location.
+            effective_occurrences = int(
+                pattern.get(
+                    "observation_count",
+                    pattern.get(
+                        "occurrence_count", raw.get("occurrence_count", 0)
+                    ),
+                )
+            )
+            if effective_occurrences < minimum_occurrence_count:
+                continue
+            if allowed_episodes:
+                observed = {
+                    str(row.get("episode_id"))
+                    for row in raw.get("occurrence_locations", [])
+                    if isinstance(row, dict) and row.get("episode_id")
+                } | {str(raw.get("episode_id"))}
+                if observed.isdisjoint(allowed_episodes):
+                    continue
+            row = copy.deepcopy(raw)
+            row["pattern_summary"] = copy.deepcopy(pattern)
+            if not include_history:
+                row.pop("history", None)
+                row.pop("occurrence_locations", None)
+            rows.append(row)
+        rows.sort(
+            key=lambda row: (
+                str(row.get("last_seen_at") or ""),
+                str(row.get("issue_id") or ""),
+            ),
+            reverse=True,
+        )
+        total = len(rows)
+        page = rows[cursor : cursor + limit]
+        profile["profile_sha256"] = sha256_bytes(_stable_json_bytes(profile))
+        return ToolResponse(
+            status="ok",
+            summary=f"问题清单已读取｜匹配{total}项｜阻断模式{profile['blocking_pattern_count']}项",
+            project_id=project_id,
+            data={
+                "issues": page,
+                "total": total,
+                "cursor": cursor,
+                "next_cursor": cursor + limit if cursor + limit < total else None,
+                "active_prevention_profile": profile,
+                "ledger_summary": storyboard_agent.summarize(ledger),
+                "read_only": True,
+            },
+        )
+
+    def _assert_draft_preflight_authority(
+        self,
+        namespace: str,
+        work_order: dict[str, Any],
+        request_session_id: str | None,
+    ) -> None:
+        self._assert_storyboard_authority(work_order, "production")
+        self._assert_work_order_session(namespace, work_order, request_session_id)
+        self._assert_work_order_write_ready(work_order)
+
+    def _scene_preflight_coverage(
+        self,
+        namespace: str,
+        *,
+        project_id: str,
+        work_order_id: str,
+        candidate: dict[str, Any],
+        runtime_test_certificate_id: str,
+        request_session_id: str | None,
+        required: bool,
+    ) -> dict[str, Any]:
+        """Bind every final scene to one signed, exact scene-scope PASS."""
+
+        groups = _scene_scope_groups(candidate) if required else []
+        records = self.store.list_project_records(
+            namespace, project_id, kind="draft_preflights"
+        )
+        session_fingerprint = self._session_fingerprint(
+            namespace, request_session_id
+        )
+        manifest: list[dict[str, Any]] = []
+        missing: list[dict[str, Any]] = []
+        for group in groups:
+            expected_ids = list(group["scope_shot_ids"])
+            matching: list[dict[str, Any]] = []
+            for record in records:
+                report = record.get("report")
+                checks = (
+                    self.store.project_record_is_signed(record),
+                    record.get("scope_kind") == "scene",
+                    record.get("status") == DRAFT_PREFLIGHT_PASS,
+                    record.get("project_id") == project_id,
+                    record.get("work_order_id") == work_order_id,
+                    record.get("stable_scene_id") == group["stable_scene_id"],
+                    record.get("scope_sha256") == group["scope_sha256"],
+                    record.get("scope_shot_ids") == expected_ids,
+                    record.get("ruleset_version") == self._ruleset_version,
+                    record.get("validator_version") == self._validator_version(),
+                    record.get("runtime_test_certificate_id")
+                    == runtime_test_certificate_id,
+                    record.get("session_fingerprint") == session_fingerprint,
+                    isinstance(report, dict),
+                    isinstance(report, dict) and not report.get("issues"),
+                    isinstance(report, dict) and report.get("status") == "pass",
+                    record.get("report_sha256")
+                    == sha256_bytes(_stable_json_bytes(report or {})),
+                )
+                if all(checks):
+                    matching.append(record)
+            if not matching:
+                missing.append(
+                    {
+                        "stable_scene_id": group["stable_scene_id"],
+                        "scene_aliases": group["scene_aliases"],
+                        "scope_sha256": group["scope_sha256"],
+                        "scope_shot_ids": expected_ids,
+                    }
+                )
+                continue
+            # Records are already newest-first; deterministic tie-breaking by
+            # ID makes the manifest stable even when timestamps collide.
+            matching.sort(
+                key=lambda row: (
+                    str(row.get("created_at") or ""),
+                    str(row.get("draft_preflight_id") or ""),
+                ),
+                reverse=True,
+            )
+            record = matching[0]
+            manifest.append(
+                {
+                    "stable_scene_id": group["stable_scene_id"],
+                    "scene_aliases": group["scene_aliases"],
+                    "scope_sha256": group["scope_sha256"],
+                    "scope_shot_ids": expected_ids,
+                    "scene_preflight_id": record.get("draft_preflight_id"),
+                    "report_sha256": record.get("report_sha256"),
+                }
+            )
+        manifest.sort(key=lambda row: str(row.get("stable_scene_id") or ""))
+        missing.sort(key=lambda row: str(row.get("stable_scene_id") or ""))
+        manifest_sha = sha256_bytes(_stable_json_bytes(manifest))
+        return {
+            "required": required,
+            "complete": not missing,
+            "required_scene_count": len(groups),
+            "covered_scene_count": len(manifest),
+            "scene_coverage_manifest": manifest,
+            "scene_coverage_manifest_sha256": manifest_sha,
+            "missing_scenes": missing,
+        }
+
+    def preflight_storyboard_draft(
+        self,
+        namespace: str,
+        *,
+        project_id: str,
+        work_order_id: str,
+        storyboard: dict[str, Any],
+        scope_kind: str,
+        scope_id: str,
+        request_session_id: str | None,
+    ) -> ToolResponse:
+        """Validate a candidate before any artifact, version, XLSX or handoff exists."""
+
+        self._require_runtime()
+        if scope_kind not in {"scene", "episode", "full"}:
+            raise ValueError("scope_kind must be scene, episode, or full")
+        hub, ledger_snapshot = self._require_current_project_state(
+            namespace, project_id
+        )
+        work_order = _find_work_order(hub, work_order_id)
+        self._assert_draft_preflight_authority(
+            namespace, work_order, request_session_id
+        )
+        runtime_certificate = self._require_runtime_test_certificate(namespace, project_id)
+        profile = storyboard_agent.active_prevention_profile(ledger_snapshot)
+        profile_sha = sha256_bytes(_stable_json_bytes(profile))
+        known_patterns = {
+            str(row.get("pattern_key"))
+            for row in profile.get("patterns", [])
+            if row.get("pattern_key")
+        }
+        candidate: dict[str, Any]
+        preparation_error: Exception | None = None
+        try:
+            candidate, _identity = _prepare_compact_storyboard_for_commit(storyboard)
+            _assert_r10_spc1_output_contract(candidate)
+        except (TypeError, ValueError, AssertionError) as exc:
+            preparation_error = exc
+            candidate = copy.deepcopy(storyboard) if isinstance(storyboard, dict) else {}
+        all_shots = [
+            row for row in candidate.get("shots", []) if isinstance(row, dict)
+        ]
+        if scope_kind == "full":
+            scoped_shots = all_shots
+        elif scope_kind == "episode":
+            scoped_shots = [
+                row
+                for row in all_shots
+                if str(row.get("episode_id") or "") == str(scope_id)
+            ]
+        else:
+            scoped_shots = [
+                row
+                for row in all_shots
+                if str(scope_id)
+                in {
+                    str(value)
+                    for value in (
+                        row.get("scene_uid"),
+                        row.get("scene_id"),
+                        row.get("场景ID"),
+                        row.get("场景连续性ID"),
+                    )
+                    if value not in (None, "")
+                }
+            ]
+        scoped_candidate = copy.deepcopy(candidate)
+        scoped_candidate["shots"] = copy.deepcopy(scoped_shots)
+        if preparation_error is not None:
+            report = {
+                "status": "fail_current",
+                "shot_count": len(scoped_shots),
+                "issues": [
+                    {
+                        "error_code": "E-DRAFT-CONTRACT-001",
+                        "location": "draft_candidate",
+                        "severity": "blocking",
+                        "blocking": True,
+                        "evidence": str(preparation_error)[:4000],
+                        "repair_action": "修正候选结构或R10-SPC-1契约后重新运行草稿预检。",
+                    }
+                ],
+            }
+        elif scope_kind != "full" and not scoped_shots:
+            report = {
+                "status": "fail_current",
+                "shot_count": 0,
+                "issues": [
+                    {
+                        "error_code": "E-DRAFT-CONTRACT-001",
+                        "location": f"scope.{scope_kind}.{scope_id}",
+                        "severity": "blocking",
+                        "blocking": True,
+                        "evidence": "scope_id未绑定到候选中的任何镜头。",
+                        "repair_action": "提交包含该分集/场景稳定标识的候选后重新预检。",
+                    }
+                ],
+            }
+        elif scope_kind == "scene":
+            report, scoped_candidate = _scene_scoped_report(
+                candidate, scoped_shots
+            )
+            logical_scenes = _scene_scope_groups(scoped_candidate)
+            if len(logical_scenes) != 1:
+                report.setdefault("issues", []).append(
+                    {
+                        "error_code": "E-DRAFT-SCENE-PREFLIGHT-001",
+                        "location": f"scope.scene.{scope_id}",
+                        "severity": "blocking",
+                        "blocking": True,
+                        "evidence": (
+                            "scene scope必须且只能绑定一个稳定scene；"
+                            f"当前绑定={len(logical_scenes)}"
+                        ),
+                        "repair_action": "使用单一scene_uid/scene_id/场景ID/场景连续性ID重新预检。",
+                    }
+                )
+                report["status"] = "fail_current"
+                report["scope_status"] = "fail_current"
+        elif scope_kind == "full":
+            report = validate_storyboard.validate_project(candidate, mode="audit")
+        else:
+            full_report = validate_storyboard.validate_project(candidate, mode="audit")
+            scoped_ids = {
+                str(row.get("镜头编号") or row.get("shot_uid") or "")
+                for row in scoped_shots
+            }
+            scoped_issues = []
+            for issue in full_report.get("issues", []):
+                issue_ids = set(_issue_shot_ids(candidate, issue))
+                if not issue_ids or issue_ids & scoped_ids:
+                    scoped_issues.append(issue)
+            report = copy.deepcopy(full_report)
+            report["full_candidate_status"] = report.get("status")
+            report["full_candidate_issue_count"] = len(report.get("issues", []))
+            report["issues"] = scoped_issues
+            report["shot_count"] = len(scoped_shots)
+            report["status"] = "pass" if not scoped_issues else "fail_current"
+            report["scope_status"] = report["status"]
+        candidate_sha = canonical_storyboard_sha256(candidate)
+        scene_groups = _scene_scope_groups(scoped_candidate) if scope_kind == "scene" else []
+        stable_scene_id = (
+            str(scene_groups[0]["stable_scene_id"])
+            if len(scene_groups) == 1
+            else ""
+        )
+        scene_aliases = (
+            list(scene_groups[0]["scene_aliases"])
+            if len(scene_groups) == 1
+            else []
+        )
+        scene_coverage: dict[str, Any] | None = None
+        if scope_kind == "full" and preparation_error is None:
+            scene_coverage = self._scene_preflight_coverage(
+                namespace,
+                project_id=project_id,
+                work_order_id=work_order_id,
+                candidate=candidate,
+                runtime_test_certificate_id=str(
+                    runtime_certificate["certificate_id"]
+                ),
+                request_session_id=request_session_id,
+                required=bool(
+                    hub.get("policy", {}).get(
+                        "scene_draft_preflight_required", False
+                    )
+                ),
+            )
+            report = copy.deepcopy(report)
+            report["scene_preflight_coverage"] = copy.deepcopy(scene_coverage)
+            if not scene_coverage["complete"]:
+                for missing in scene_coverage["missing_scenes"]:
+                    report.setdefault("issues", []).append(
+                        {
+                            "error_code": "E-DRAFT-SCENE-PREFLIGHT-001",
+                            "location": (
+                                "scene_preflight_coverage."
+                                + str(missing["stable_scene_id"])
+                            ),
+                            "severity": "blocking",
+                            "blocking": True,
+                            "shot_ids": list(missing["scope_shot_ids"]),
+                            "evidence": (
+                                "缺少与最终scene内容哈希完全一致的签名PASS场景预检："
+                                f"scene={missing['stable_scene_id']}, "
+                                f"scope_sha256={missing['scope_sha256']}"
+                            ),
+                            "repair_action": "先对该完整scene运行草稿预检并通过，再运行full预检。",
+                        }
+                    )
+                report["status"] = "fail_current"
+        issues = list(report.get("issues", []))
+        report["error_count"] = sum(
+            str(row.get("severity") or "fail").casefold()
+            not in {"warning", "warn", "info"}
+            for row in issues
+            if isinstance(row, dict)
+        )
+        report["warning_count"] = sum(
+            str(row.get("severity") or "").casefold() in {"warning", "warn"}
+            for row in issues
+            if isinstance(row, dict)
+        )
+        report["status"] = "pass" if not issues else "fail_current"
+        report["scope_status"] = report["status"]
+        quality = _draft_quality_metrics(
+            scoped_candidate,
+            issues,
+            project_id=project_id,
+            known_pattern_keys=known_patterns,
+        )
+        commit_ready = bool(scope_kind == "full" and quality["commit_eligible"])
+        scene_coverage_generation_sha = sha256_bytes(
+            _stable_json_bytes(
+                scene_coverage
+                if scene_coverage is not None
+                else {"scope_kind": scope_kind, "scope_id": scope_id}
+            )
+        )
+        preflight_base_key = sha256_bytes(
+            _stable_json_bytes(
+                {
+                    "project_id": project_id,
+                    "work_order_id": work_order_id,
+                    "scope_kind": scope_kind,
+                    "scope_id": scope_id,
+                    "candidate_sha256": candidate_sha,
+                    "ruleset": self._ruleset_version,
+                    "validator": self._validator_version(),
+                    "runtime_certificate_id": runtime_certificate["certificate_id"],
+                    "session": self._session_fingerprint(namespace, request_session_id),
+                }
+            )
+        )
+        base_records = [
+            row
+            for row in self.store.list_project_records(
+                namespace, project_id, kind="draft_preflights"
+            )
+            if row.get("preflight_base_key") == preflight_base_key
+        ]
+        replay_records = [
+            row
+            for row in base_records
+            if row.get("prevention_profile_sha256") == profile_sha
+            and row.get("scene_coverage_generation_sha256")
+            == scene_coverage_generation_sha
+            and self.store.project_record_is_signed(row)
+        ]
+        replay_records.sort(
+            key=lambda row: (
+                str(row.get("created_at") or ""),
+                str(row.get("draft_preflight_id") or ""),
+            ),
+            reverse=True,
+        )
+        preflight_revision_key = sha256_bytes(
+            _stable_json_bytes(
+                {
+                    "preflight_base_key": preflight_base_key,
+                    "profile_generation_sha256": profile_sha,
+                    "scene_coverage_generation_sha256": scene_coverage_generation_sha,
+                }
+            )
+        )
+        preflight_key = preflight_revision_key
+        preflight_id = f"DPF-{preflight_revision_key[:20]}"
+        draft_cycle_id = "DRAFT-" + sha256_bytes(
+            _stable_json_bytes(
+                {
+                    "work_order_id": work_order_id,
+                    "scope_kind": scope_kind,
+                    "scope_id": scope_id,
+                }
+            )
+        )[:20]
+        if replay_records:
+            record = replay_records[0]
+            if not self.store.project_record_is_signed(record):
+                raise ValueError("draft_preflight_unsigned_or_tampered")
+            preflight_id = str(record["draft_preflight_id"])
+            preflight_key = str(
+                record.get("preflight_revision_key")
+                or record.get("preflight_key")
+                or preflight_revision_key
+            )
+            duplicate = True
+        else:
+            try:
+                record = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="draft_preflights",
+                    record_id=preflight_id,
+                )
+                if not self.store.project_record_is_signed(record):
+                    raise ValueError("draft_preflight_unsigned_or_tampered")
+                if (
+                    record.get("preflight_base_key") != preflight_base_key
+                    or record.get("prevention_profile_input_sha256")
+                    != profile_sha
+                    or record.get("scene_coverage_generation_sha256")
+                    != scene_coverage_generation_sha
+                ):
+                    raise ValueError("draft_preflight_revision_conflict")
+                duplicate = True
+            except ValueError as exc:
+                if "unknown draft_preflights record_id" not in str(exc):
+                    raise
+                duplicate = False
+        if not duplicate:
+            duplicate = False
+            prior_draft_events = [
+                event
+                for event in ledger_snapshot.get("events", [])
+                if event.get("task_type") == "production_draft_preflight"
+                and event.get("audit_cycle_id") == draft_cycle_id
+            ]
+            audit_round = len(prior_draft_events) + 1
+            if audit_round > int(
+                ledger_snapshot.get("policy", {}).get("max_auto_repair_rounds", 3)
+            ):
+                raise ValueError(
+                    "draft_preflight_round_limit: three failed/corrected attempts require "
+                    "upstream root-cause rebuild and a new work order"
+                )
+            previous_issue_signatures = {
+                (
+                    str(row.get("error_code") or ""),
+                    str(row.get("field") or row.get("location") or ""),
+                    tuple(sorted(str(value) for value in row.get("shot_ids", []))),
+                )
+                for row in (
+                    prior_draft_events[-1].get("issues", [])
+                    if prior_draft_events
+                    else []
+                )
+                if isinstance(row, dict)
+            }
+            event_issues = []
+            for issue in issues:
+                location = str(issue.get("location") or "draft_candidate")
+                severity = str(issue.get("severity") or "fail")
+                if severity == "warning":
+                    severity = "warn"
+                event_issue = {
+                        "error_code": str(
+                            issue.get("error_code") or "E-DRAFT-CONTRACT-001"
+                        ),
+                        "category": str(
+                            issue.get("semantic_layer")
+                            or _issue_category(str(issue.get("error_code") or ""))
+                        ),
+                        "severity": (
+                            severity
+                            if severity in storyboard_agent.SEVERITIES
+                            else "fail"
+                        ),
+                        "blocking": bool(
+                            issue.get("blocking", severity != "warn")
+                        ),
+                        "shot_ids": _issue_shot_ids(scoped_candidate, issue),
+                        "field": str(
+                            issue.get("field")
+                            or location.rsplit(".", 1)[-1]
+                        ),
+                        "location": location,
+                        "issue_type": issue.get("template_gate_id")
+                        or _issue_category(str(issue.get("error_code") or "")),
+                        "root_cause": str(issue.get("root_cause") or ""),
+                        "evidence": str(issue.get("evidence") or location),
+                        "source_sentence": str(
+                            issue.get("evidence") or "候选草稿预检"
+                        ),
+                        "repair_action": str(
+                            issue.get("repair_action")
+                            or "修正失败字段后重新预检。"
+                        ),
+                        "status": "initial",
+                    }
+                signature = (
+                    event_issue["error_code"],
+                    event_issue["field"],
+                    tuple(sorted(event_issue["shot_ids"])),
+                )
+                if audit_round > 1:
+                    event_issue["status"] = (
+                        "residual"
+                        if signature in previous_issue_signatures
+                        else "introduced"
+                    )
+                event_issues.append(event_issue)
+            event = {
+                "event_id": f"EVT-{preflight_key[:20]}",
+                "timestamp": utc_stamp(),
+                "episode_id": scope_id or "全项目",
+                "file_name": f"draft-{scope_kind}-{scope_id or 'all'}",
+                "file_fingerprint": candidate_sha,
+                "source_version": "draft-candidate",
+                "audit_cycle_id": draft_cycle_id,
+                "task_type": "production_draft_preflight",
+                "audit_class": "production_draft_preflight",
+                "audit_round": audit_round,
+                "result": "pass" if not issues else "fail_current",
+                "checked_shot_count": len(scoped_shots),
+                "issues": event_issues,
+                "draft_preflight_id": preflight_id,
+                "quality": quality,
+                "commit_ready": commit_ready,
+            }
+            post_profile: dict[str, Any]
+            with self.store.mutate_project(namespace, project_id) as (_hub, ledger):
+                storyboard_agent.ingest_event(ledger, event)
+                post_profile = storyboard_agent.active_prevention_profile(ledger)
+            post_profile_sha = sha256_bytes(_stable_json_bytes(post_profile))
+            record_value = {
+                "draft_preflight_id": preflight_id,
+                "record_id": preflight_id,
+                "preflight_key": preflight_key,
+                "preflight_base_key": preflight_base_key,
+                "preflight_revision_key": preflight_revision_key,
+                "preflight_revision": len(base_records) + 1,
+                "profile_generation_sha256": profile_sha,
+                "scene_coverage_generation_sha256": scene_coverage_generation_sha,
+                "project_id": project_id,
+                "work_order_id": work_order_id,
+                "created_at": utc_stamp(),
+                "scope_kind": scope_kind,
+                "scope_id": scope_id,
+                "stable_scene_id": stable_scene_id or None,
+                "scene_aliases": scene_aliases,
+                "scope_shot_ids": [
+                    str(row.get("镜头编号") or row.get("shot_uid") or "")
+                    for row in scoped_shots
+                ],
+                "scope_sha256": sha256_bytes(_stable_json_bytes(scoped_shots)),
+                "candidate_sha256": candidate_sha,
+                "ruleset_version": self._ruleset_version,
+                "validator_version": self._validator_version(),
+                "runtime_test_certificate_id": runtime_certificate["certificate_id"],
+                "session_fingerprint": self._session_fingerprint(
+                    namespace, request_session_id
+                ),
+                "prevention_profile_input_sha256": profile_sha,
+                "prevention_profile_sha256": post_profile_sha,
+                "report_sha256": sha256_bytes(_stable_json_bytes(report)),
+                "report": copy.deepcopy(report),
+                "status": DRAFT_PREFLIGHT_PASS if not issues else DRAFT_PREFLIGHT_FAIL,
+                "commit_ready": commit_ready,
+                "quality": quality,
+                "scene_coverage_required": bool(
+                    (scene_coverage or {}).get("required", False)
+                ),
+                "scene_coverage_complete": bool(
+                    (scene_coverage or {}).get("complete", scope_kind != "full")
+                ),
+                "scene_coverage_manifest": copy.deepcopy(
+                    (scene_coverage or {}).get("scene_coverage_manifest", [])
+                ),
+                "scene_coverage_manifest_sha256": (
+                    (scene_coverage or {}).get("scene_coverage_manifest_sha256")
+                    if scope_kind == "full"
+                    else None
+                ),
+                "scene_coverage_missing_scenes": copy.deepcopy(
+                    (scene_coverage or {}).get("missing_scenes", [])
+                ),
+                "artifact_created": False,
+                "version_created": False,
+                "xlsx_created": False,
+                "handoff_created": False,
+                "ledger_event": copy.deepcopy(event),
+            }
+            record = self.store.save_project_record(
+                namespace,
+                project_id,
+                kind="draft_preflights",
+                record_id=preflight_id,
+                value=record_value,
+            )
+        if duplicate:
+            event = record.get("ledger_event")
+            ledger_now = self.store.load_ledger(namespace, project_id)
+            if not any(
+                row.get("event_id") == (event or {}).get("event_id")
+                for row in ledger_now.get("events", [])
+            ):
+                if not isinstance(event, dict):
+                    raise ValueError("draft_preflight_learning_record_incomplete")
+                with self.store.mutate_project(namespace, project_id) as (_hub, ledger):
+                    storyboard_agent.ingest_event(ledger, event)
+                    post_profile = storyboard_agent.active_prevention_profile(ledger)
+                record["prevention_profile_sha256"] = sha256_bytes(
+                    _stable_json_bytes(post_profile)
+                )
+                record = self.store.save_project_record(
+                    namespace,
+                    project_id,
+                    kind="draft_preflights",
+                    record_id=preflight_id,
+                    value=record,
+                )
+            # The signed record is the authority for an exact request replay.
+            # In particular, a pass/fail may not drift merely because this
+            # request's first ledger write changed the active prevention hash.
+            report = copy.deepcopy(record.get("report") or {})
+            issues = list(report.get("issues", []))
+            quality = copy.deepcopy(record.get("quality") or {})
+            commit_ready = record.get("commit_ready") is True
+        profile = storyboard_agent.active_prevention_profile(
+            self.store.load_ledger(namespace, project_id)
+        )
+        status = DRAFT_PREFLIGHT_PASS if not issues else DRAFT_PREFLIGHT_FAIL
+        return ToolResponse(
+            status=status,
+            summary=(
+                f"草稿预检通过｜{scope_kind}:{scope_id}｜可提交正式母版"
+                if commit_ready
+                else (
+                    f"草稿预检通过｜{scope_kind}:{scope_id}｜仅可继续场景内循环"
+                    if not issues
+                    else f"草稿预检未通过｜问题{len(issues)}项｜未生成文件或交接"
+                )
+            ),
+            project_id=project_id,
+            work_order_id=work_order_id,
+            trace_id=preflight_id,
+            data={
+                "draft_preflight": record,
+                "report": report,
+                "quality": quality,
+                "commit_ready": commit_ready,
+                "idempotent_replay": duplicate,
+                "artifact_created": False,
+                "version_created": False,
+                "xlsx_created": False,
+                "handoff_created": False,
+                "active_prevention_profile": profile,
+            },
+        )
+
+    def _verify_draft_preflight(
+        self,
+        namespace: str,
+        project_id: str,
+        work_order_id: str,
+        draft_preflight_id: str,
+        candidate: dict[str, Any],
+        request_session_id: str | None,
+    ) -> dict[str, Any]:
+        canonical_sha256 = canonical_storyboard_sha256(candidate)
+        record = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="draft_preflights",
+            record_id=draft_preflight_id,
+        )
+        if not self.store.project_record_is_signed(record):
+            raise ValueError("draft_preflight_unsigned_or_tampered")
+        ledger = self.store.load_ledger(namespace, project_id)
+        profile = storyboard_agent.active_prevention_profile(ledger)
+        expected_profile_sha = sha256_bytes(_stable_json_bytes(profile))
+        runtime_certificate = self._require_runtime_test_certificate(namespace, project_id)
+        hub = self.store.load_hub(namespace, project_id)
+        coverage_required = bool(
+            hub.get("policy", {}).get("scene_draft_preflight_required", False)
+        )
+        scene_coverage = self._scene_preflight_coverage(
+            namespace,
+            project_id=project_id,
+            work_order_id=work_order_id,
+            candidate=candidate,
+            runtime_test_certificate_id=str(runtime_certificate["certificate_id"]),
+            request_session_id=request_session_id,
+            required=coverage_required,
+        )
+        stored_manifest = record.get("scene_coverage_manifest")
+        stored_manifest_sha = record.get("scene_coverage_manifest_sha256")
+        checks = {
+            "project": record.get("project_id") == project_id,
+            "work_order": record.get("work_order_id") == work_order_id,
+            "scope": record.get("scope_kind") == "full",
+            "canonical": record.get("candidate_sha256") == canonical_sha256,
+            "rules": record.get("ruleset_version") == self._ruleset_version,
+            "validator": record.get("validator_version") == self._validator_version(),
+            "runtime_certificate": record.get("runtime_test_certificate_id")
+            == runtime_certificate.get("certificate_id"),
+            "session": record.get("session_fingerprint")
+            == self._session_fingerprint(namespace, request_session_id),
+            "prevention_profile": record.get("prevention_profile_sha256")
+            == expected_profile_sha,
+            "commit_ready": record.get("commit_ready") is True,
+            "report": record.get("report_sha256")
+            == sha256_bytes(_stable_json_bytes(record.get("report") or {})),
+            "scene_coverage_required": record.get("scene_coverage_required")
+            is coverage_required,
+            "scene_coverage_complete": (
+                record.get("scene_coverage_complete") is True
+                and scene_coverage["complete"] is True
+            ),
+            "scene_coverage_manifest": stored_manifest
+            == scene_coverage["scene_coverage_manifest"],
+            "scene_coverage_manifest_hash": (
+                stored_manifest_sha
+                == scene_coverage["scene_coverage_manifest_sha256"]
+                and stored_manifest_sha
+                == sha256_bytes(_stable_json_bytes(stored_manifest or []))
+            ),
+            "scene_coverage_report_binding": (
+                isinstance(record.get("report"), dict)
+                and (record.get("report") or {})
+                .get("scene_preflight_coverage", {})
+                .get("scene_coverage_manifest_sha256")
+                == stored_manifest_sha
+            ),
+        }
+        failed = [key for key, value in checks.items() if not value]
+        if failed:
+            raise ValueError(
+                "draft_preflight_binding_mismatch: " + ",".join(failed)
+            )
+        return record
+
     def begin_task(
         self,
         namespace: str,
@@ -2393,9 +4702,63 @@ class StoryboardService:
                 namespace, request_session_id
             ),
         }
-        with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
+        with self.store.mutate_project(namespace, project_id) as (hub, ledger):
+            state_errors = self._project_state_errors(hub, ledger)
+            reuse_summary = self._project_reuse_summary(
+                namespace, project_id, hub
+            )
+            state_errors.extend(reuse_summary.get("reuse_state_errors", []))
+            if state_errors and operation not in {
+                "rule_improvement",
+                "version_management",
+                "capability_gap",
+            }:
+                raise ValueError(
+                    "project_state_migration_required: " + "; ".join(state_errors[:8])
+                )
+            quality_block = hub.get("project_state", {}).get(
+                "production_quality_block"
+            )
+            draft_failure_state = self._draft_preflight_failure_state(ledger)
+            production_batch_operation = operation in {
+                "storyboard_create",
+                "storyboard_regenerate",
+                "storyboard_change",
+            }
+            if production_batch_operation:
+                pending_audit_state = self._independent_audit_pending_state(
+                    hub, reuse_summary
+                )
+                if pending_audit_state["pending"]:
+                    raise ValueError(
+                        "independent_audit_pending: close the previous production-to-audit "
+                        "handoff before starting another storyboard batch; reasons="
+                        + ",".join(pending_audit_state["reasons"])
+                    )
+                if draft_failure_state["blocked"]:
+                    raise ValueError(
+                        "draft_preflight_repair_pending: correct the failed scope "
+                        "through its original work order, or start an explicit "
+                        "storyboard_repair root-cause workflow before another "
+                        "storyboard batch"
+                    )
+            if (
+                production_batch_operation
+                and isinstance(quality_block, dict)
+                and quality_block.get("active")
+            ):
+                raise ValueError(
+                    "first_draft_quality_blocked: repair the recorded root cause before starting another production batch"
+                )
             result = project_agent.create_work_order(hub, request)
             hub["project_state"]["current_stage"] = result["work_order_status"]
+            prevention_profile = storyboard_agent.active_prevention_profile(ledger)
+            prevention_profile["profile_sha256"] = sha256_bytes(
+                _stable_json_bytes(prevention_profile)
+            )
+            hub["project_state"]["active_prevention_profile_sha256"] = (
+                prevention_profile["profile_sha256"]
+            )
         return ToolResponse(
             status=str(result["status"]),
             summary=f"工单已建立｜{operation}｜{result['work_order_status']}",
@@ -2407,6 +4770,7 @@ class StoryboardService:
                 "session_binding_status": (
                     "bound" if request["transport_session_fingerprint"] else "unbound"
                 ),
+                "active_prevention_profile": prevention_profile,
             },
         )
 
@@ -2532,7 +4896,7 @@ class StoryboardService:
             original["artifact_id"],
             {"extracted_artifact_id": extracted_record["artifact_id"], "source_role": source_role},
         )
-        with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
+        with self.store.mutate_project(namespace, project_id) as (hub, ledger):
             current_work_order = _find_work_order(hub, work_order_id)
             self._assert_source_import_authority(
                 namespace, current_work_order, request_session_id
@@ -2706,6 +5070,7 @@ class StoryboardService:
         source_version: str,
         operations: list[dict[str, Any]],
         authorization: str,
+        request_session_id: str | None = None,
     ) -> ToolResponse:
         self._require_runtime()
         request = {
@@ -2719,6 +5084,35 @@ class StoryboardService:
             "authorization": authorization,
         }
         with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
+            work_order = _find_work_order(hub, work_order_id)
+            self._assert_work_order_session(
+                namespace, work_order, request_session_id
+            )
+            operation = str(work_order.get("operation") or "")
+            if operation in STORYBOARD_OPERATIONS:
+                self._assert_storyboard_authority(
+                    work_order,
+                    self._work_order_role(
+                        operation, str(work_order.get("mode") or "")
+                    ),
+                )
+            elif work_order.get("server_actor_role") != "production":
+                raise ValueError(
+                    "window_role_matrix_mismatch: change requests require the "
+                    "work order's server-bound production authority"
+                )
+            if str(work_order.get("status") or "") not in {
+                "scope_locked",
+                "proposal_ready",
+                "awaiting_approval",
+                "approved",
+                "executing",
+                "failed_current",
+            }:
+                raise ValueError(
+                    "work_order_change_forbidden: a change request cannot be "
+                    f"registered from {work_order.get('status') or 'unknown'}"
+                )
             result = project_agent.create_change_request(hub, request)
         return ToolResponse(
             status=str(result["status"]),
@@ -3073,14 +5467,25 @@ class StoryboardService:
         duplicate = next(
             (
                 event
-                for event in ledger.get("events", [])
+                # A forced re-audit may supersede an earlier result under the
+                # same artifact/environment cache identity. Events are
+                # append-only, so an ordinary retry must reuse the newest
+                # evidence round rather than resurrecting the first verdict.
+                for event in reversed(ledger.get("events", []))
                 if audit_cache_key
                 and event.get("audit_cache_key") == audit_cache_key
                 and event.get("audit_class") == audit_class
             ),
             None,
         )
-        if duplicate:
+        # A forced independent re-audit is a new evidence round even when the
+        # artifact/environment cache identity is unchanged.  Returning the
+        # prior failed event here would combine a fresh clean report with the
+        # old round's non-zero summary, producing a contradictory PASS
+        # certificate. Ordinary retries still reuse the immutable event.
+        if duplicate and not (
+            allow_reopen and audit_class == AUDIT_CLASS_INDEPENDENT
+        ):
             return {"status": "duplicate", "event": duplicate, "ingest": None}
         prior_events = [
             event
@@ -3109,7 +5514,13 @@ class StoryboardService:
         issues = []
         for issue in report.get("issues", []):
             location = str(issue.get("location") or "全表")
-            field = location.rsplit(".", 1)[-1]
+            # `location` is evidence identity, not the semantic field identity.
+            # Independent auditors commonly use a per-report issue id in the
+            # terminal location segment; deriving `field` from that value would
+            # split one recurring problem into unrelated cross-batch patterns.
+            field = str(
+                issue.get("field") or location.rsplit(".", 1)[-1]
+            ).strip()
             supplied_shot_ids = issue.get("shot_ids")
             shot_ids = (
                 [str(value) for value in supplied_shot_ids if str(value)]
@@ -3137,6 +5548,15 @@ class StoryboardService:
                     "shot_ids": shot_ids,
                     "field": field,
                     "location": location,
+                    "issue_type": issue.get("issue_type")
+                    or issue.get("template_gate_id")
+                    or _issue_category(key[0]),
+                    "problem_key": str(
+                        issue.get("problem_key")
+                        or issue.get("template_gate_id")
+                        or ""
+                    ),
+                    "root_cause": str(issue.get("root_cause") or ""),
                     "evidence": str(issue.get("evidence") or location),
                     "source_sentence": str(issue.get("evidence") or "无额外原文证据"),
                     "repair_action": str(issue.get("repair_action") or "按R10规则修复后重跑。"),
@@ -3167,6 +5587,36 @@ class StoryboardService:
             "blocking_issue_count": blocking_issue_count,
             "final_status": "pass" if not issues else "fail_current",
         }
+        first_draft_quality: dict[str, Any] | None = None
+        if audit_class == AUDIT_CLASS_INDEPENDENT:
+            if audit_round == 1:
+                profile = storyboard_agent.active_prevention_profile(ledger)
+                known_patterns = {
+                    str(row.get("pattern_key"))
+                    for row in profile.get("patterns", [])
+                    if row.get("pattern_key")
+                }
+                first_draft_quality = _draft_quality_metrics(
+                    storyboard,
+                    issues,
+                    project_id=project_id,
+                    known_pattern_keys=known_patterns,
+                )
+                first_draft_quality["threshold_met"] = (
+                    first_draft_quality["grade"] == "A"
+                )
+                first_draft_quality["final_audit_pass"] = not issues
+            elif prior_events:
+                first_draft_quality = copy.deepcopy(
+                    prior_events[0].get("first_draft_quality")
+                    or prior_events[0].get("audit_summary", {}).get(
+                        "first_draft_quality"
+                    )
+                )
+            if first_draft_quality:
+                audit_summary["first_draft_quality"] = copy.deepcopy(
+                    first_draft_quality
+                )
         source_lock = storyboard.get("source_lock") or {}
         episode_id = str(
             source_lock.get("episode_id")
@@ -3200,6 +5650,8 @@ class StoryboardService:
             "issues": issues,
             "audit_summary": audit_summary,
         }
+        if first_draft_quality:
+            event["first_draft_quality"] = copy.deepcopy(first_draft_quality)
         if audit_class == AUDIT_CLASS_INDEPENDENT:
             if not handoff_id or not stage_trace_id or not fingerprints or not work_order_id:
                 raise ValueError("independent_audit_event_binding_incomplete")
@@ -3277,8 +5729,10 @@ class StoryboardService:
         audit_actor_binding_id: str | None = None,
         audit_session_fingerprint: str | None = None,
         result_override: str | None = None,
+        certificate_id: str | None = None,
     ) -> dict[str, Any]:
-        certificate_id = _new_id("CERT")
+        deterministic_certificate = certificate_id is not None
+        certificate_id = certificate_id or _new_id("CERT")
         cache_key = self._cache_key_from_components(cache_components)
         clean = not report.get("issues")
         audit_class = cache_components["audit_class"]
@@ -3423,6 +5877,34 @@ class StoryboardService:
             self._validate_schema_record(
                 self._ledger_schema, "independent_audit_certificate", certificate
             )
+        if deterministic_certificate:
+            try:
+                existing = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="certificates",
+                    record_id=certificate_id,
+                )
+            except ValueError as exc:
+                if not str(exc).startswith(
+                    "unknown certificates record_id:"
+                ):
+                    raise
+                existing = None
+            if existing is not None:
+                if not (
+                    self.store.project_record_is_signed(existing)
+                    and existing.get("artifact_id") == artifact_id
+                    and existing.get("canonical_sha256")
+                    == cache_components.get("canonical")
+                    and existing.get("cache_key") == cache_key
+                    and existing.get("report_sha256")
+                    == sha256_bytes(
+                        _stable_json_bytes(existing.get("report") or {})
+                    )
+                ):
+                    raise ValueError("audit_certificate_idempotency_conflict")
+                return existing
         return self.store.save_project_record(
             namespace,
             project_id,
@@ -3491,6 +5973,125 @@ class StoryboardService:
             raise ValueError("independent_audit_overlay_report_fingerprint_mismatch")
         return certificate
 
+    def _load_current_independent_audit_certificate(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        certificate_id: str,
+        artifact_id: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Verify audit authority against current bytes and current rules.
+
+        A certificate can be internally well signed yet stale after any Skill,
+        validator, parser, schema, runtime, dependency, model-contract or
+        full-regression-certificate change. Status and reuse decisions must
+        therefore rebuild the exact cache identity instead of accepting the
+        historical certificate's self-consistent component map.
+        """
+
+        storyboard, artifact_record = self._storyboard_from_artifact(
+            namespace,
+            project_id,
+            artifact_id,
+            persist_recovered_canonical=False,
+            require_bound_projection=True,
+        )
+        canonical_hash = canonical_storyboard_sha256(storyboard)
+        certificate = self._load_verified_independent_audit_certificate(
+            namespace,
+            project_id,
+            certificate_id=certificate_id,
+            artifact_id=artifact_id,
+            canonical_sha256=canonical_hash,
+            source_artifact_raw_sha256=str(
+                artifact_record.get("fingerprint") or ""
+            ),
+        )
+        runtime_certificate = self._matching_runtime_certificate(
+            namespace, project_id
+        )
+        if (
+            runtime_certificate is None
+            or runtime_certificate.get("result") != "pass"
+            or not self.store.project_record_is_signed(runtime_certificate)
+        ):
+            raise ValueError("current_runtime_test_certificate_required")
+        handoff_id = str(certificate.get("handoff_id") or "")
+        if not handoff_id:
+            raise ValueError("independent_audit_handoff_binding_missing")
+        handoff = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="handoffs",
+            record_id=handoff_id,
+        )
+        if (
+            not self.store.project_record_is_signed(handoff)
+            or str(handoff.get("storyboard_artifact_id") or "") != artifact_id
+            or str(handoff.get("canonical_sha256") or "") != canonical_hash
+        ):
+            raise ValueError("independent_audit_handoff_binding_invalid")
+        source_fingerprint = self._source_fingerprint(
+            namespace,
+            project_id,
+            storyboard,
+            artifact_record.get("source_artifact_id"),
+            artifact_record,
+        )
+        boundary_hash = self._boundary_hash(storyboard)
+        expected_fingerprints = self._fingerprint_bundle(
+            storyboard,
+            artifact_record,
+            canonical_hash=canonical_hash,
+            source_fingerprint=source_fingerprint,
+            boundary_hash=boundary_hash,
+        )
+        if handoff.get("fingerprints") != expected_fingerprints:
+            raise ValueError("independent_audit_handoff_fingerprint_stale")
+        certificate_fingerprint_map = {
+            "source": "source_bytes",
+            "boundary": "episode_boundary",
+            "artifact_raw": "artifact_raw",
+            "artifact_semantic": "artifact_semantic",
+            "canonical": "canonical",
+            "parser": "parser",
+            "schema": "schema",
+            "runtime": "runtime",
+            "rules": "rules",
+            "validator": "validator",
+            "project_anchors": "project_anchors",
+            "target_model_contract": "target_model_contract",
+        }
+        certificate_fingerprints = certificate.get("fingerprints")
+        if not isinstance(certificate_fingerprints, dict) or any(
+            certificate_fingerprints.get(certificate_key)
+            != expected_fingerprints.get(bundle_key)
+            for certificate_key, bundle_key in certificate_fingerprint_map.items()
+        ):
+            raise ValueError("independent_audit_certificate_fingerprint_stale")
+        expected_components = self._audit_cache_components(
+            canonical_hash=canonical_hash,
+            source_fingerprint=source_fingerprint,
+            boundary_hash=boundary_hash,
+            audit_class=AUDIT_CLASS_INDEPENDENT,
+            artifact_fingerprint=str(artifact_record.get("fingerprint") or ""),
+            storyboard=storyboard,
+            scope=self._independent_audit_cache_scope(handoff, artifact_id),
+            runtime_test_certificate_id=str(
+                runtime_certificate["certificate_id"]
+            ),
+        )
+        if (
+            certificate.get("cache_components") != expected_components
+            or certificate.get("cache_key")
+            != self._cache_key_from_components(expected_components)
+            or certificate.get("semantic_audit_contract")
+            != SEMANTIC_AUDIT_CONTRACT_VERSION
+        ):
+            raise ValueError("independent_audit_certificate_environment_stale")
+        return certificate, artifact_record
+
     @staticmethod
     def _certificate_summary(certificate: dict[str, Any]) -> dict[str, Any]:
         """Return the reusable certificate identity without duplicating the report."""
@@ -3548,8 +6149,10 @@ class StoryboardService:
         successor_base_artifact_id: str | None = None,
         successor_kind: str | None = None,
         successor_scope_hash: str | None = None,
+        handoff_id: str | None = None,
     ) -> dict[str, Any]:
-        handoff_id = _new_id("HND")
+        deterministic_handoff = handoff_id is not None
+        handoff_id = handoff_id or _new_id("HND")
         boundary = storyboard.get("chapter_intake") or storyboard.get("source_lock") or {}
         if not isinstance(boundary, dict):
             boundary = {}
@@ -3707,6 +6310,30 @@ class StoryboardService:
         self._validate_schema_record(
             self._project_schema, "handoff_manifest", handoff
         )
+        if deterministic_handoff:
+            try:
+                existing = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="handoffs",
+                    record_id=handoff_id,
+                )
+            except ValueError as exc:
+                if not str(exc).startswith("unknown handoffs record_id:"):
+                    raise
+                existing = None
+            if existing is not None:
+                if not (
+                    self.store.project_record_is_signed(existing)
+                    and existing.get("storyboard_artifact_id")
+                    == storyboard_artifact_id
+                    and existing.get("canonical_artifact_id")
+                    == canonical_artifact_id
+                    and existing.get("certificate_id")
+                    == certificate.get("certificate_id")
+                ):
+                    raise ValueError("production_handoff_idempotency_conflict")
+                return existing
         return self.store.save_project_record(
             namespace,
             project_id,
@@ -3855,6 +6482,17 @@ class StoryboardService:
         canonical_hash: str,
         handoff_id: str | None,
     ) -> dict[str, Any] | None:
+        def valid_identity(value: dict[str, Any]) -> bool:
+            if value.get("handoff_type") == "audit_intake":
+                return bool(
+                    value.get("audit_class") == "audit_intake"
+                    and value.get("from_window_role") == "external_input"
+                    and value.get("to_window_role") == "independent_audit"
+                )
+            return self._valid_cache_identity(
+                value, AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            )
+
         if handoff_id:
             handoff = self.store.get_project_record(
                 namespace,
@@ -3880,7 +6518,7 @@ class StoryboardService:
                 handoff.get("canonical_artifact_id"),
             }:
                 raise ValueError("handoff does not belong to the audited artifact")
-            if not self._valid_cache_identity(handoff, AUDIT_CLASS_PRODUCTION_PREFLIGHT):
+            if not valid_identity(handoff):
                 raise ValueError("handoff cache identity is invalid")
             return handoff
         for handoff in self.store.list_project_records(namespace, project_id, kind="handoffs"):
@@ -3894,7 +6532,7 @@ class StoryboardService:
                 handoff.get("storyboard_artifact_id"),
                 handoff.get("canonical_artifact_id"),
             }:
-                if self._valid_cache_identity(handoff, AUDIT_CLASS_PRODUCTION_PREFLIGHT):
+                if valid_identity(handoff):
                     if not self.store.project_record_is_signed(handoff):
                         raise ValueError(
                             "handoff_reissue_required: unsigned legacy handoff cannot be consumed"
@@ -4040,6 +6678,12 @@ class StoryboardService:
             boundary_hash=boundary_hash,
         )
         handoff_id = _new_id("HND")
+        audit_work_order_id = str(audit_work_order["work_order_id"])
+        producer_work_order_id = str(record.get("work_order_id") or "")
+        if not producer_work_order_id or producer_work_order_id == audit_work_order_id:
+            producer_work_order_id = "EXTWO-" + sha256_bytes(
+                str(record["artifact_id"]).encode("utf-8")
+            )[:20]
         handoff = {
             "handoff_id": handoff_id,
             "schema_version": str(storyboard.get("schema_version") or "legacy-read-only"),
@@ -4047,7 +6691,11 @@ class StoryboardService:
             "materializer_contract": "read-only-audit-intake:no-materialization",
             "materialization_passes": 0,
             **NO_DUPLICATE_GENERATION_EVIDENCE,
-            "work_order_id": str(audit_work_order["work_order_id"]),
+            # External intake has no producer work order in this project. A
+            # deterministic synthetic producer identity preserves the
+            # production/audit separation invariant without pretending that
+            # the audit authority authored the input artifact.
+            "work_order_id": producer_work_order_id,
             "audit_cycle_id": f"AUD-{audit_work_order['work_order_id']}",
             "logical_artifact_id": str(record["artifact_id"]),
             "handoff_type": "audit_intake",
@@ -4110,8 +6758,14 @@ class StoryboardService:
             "source_fingerprint": source_fingerprint,
             "boundary_hash": boundary_hash,
             "audit_class": "audit_intake",
-            "from_window_binding_id": _new_id("EXT"),
-            "from_actor_binding_id": _new_id("EXTACT"),
+            "from_window_binding_id": "EXTWIN-"
+            + sha256_bytes(
+                f"window:{record['artifact_id']}".encode("utf-8")
+            )[:20],
+            "from_actor_binding_id": "EXTACT-"
+            + sha256_bytes(
+                f"actor:{record['artifact_id']}".encode("utf-8")
+            )[:20],
             "from_session_fingerprint": None,
         }
         self._validate_schema_record(self._project_schema, "handoff_manifest", handoff)
@@ -5052,6 +7706,7 @@ class StoryboardService:
         response.summary = "完整结构修复已提交｜全表生产预检通过｜已单次消费修复包｜返回原独立审计"
         return response
 
+    @_release_consumption_claims_on_error
     def commit_storyboard(
         self,
         namespace: str,
@@ -5063,6 +7718,7 @@ class StoryboardService:
         source_artifact_id: str | None,
         request_session_id: str | None = None,
         repair_package_id: str | None = None,
+        draft_preflight_id: str | None = None,
         source_link_mode: str = "repair",
         prevalidated_report: dict[str, Any] | None = None,
         prevalidated_canonical_hash: str | None = None,
@@ -5116,7 +7772,9 @@ class StoryboardService:
                 "successor_scope_hash": _successor_scope_hash,
                 "publication_prepared_at": utc_stamp(),
             }
-        hub_snapshot = self.store.load_hub(namespace, project_id)
+        hub_snapshot, _ledger_snapshot = self._require_current_project_state(
+            namespace, project_id
+        )
         work_order_snapshot = _find_work_order(hub_snapshot, work_order_id)
         expected_role = self._work_order_role(
             str(work_order_snapshot.get("operation") or ""),
@@ -5136,6 +7794,97 @@ class StoryboardService:
         self._assert_work_order_session(
             namespace, work_order_snapshot, request_session_id
         )
+        recovering_draft_commit = False
+        if str(work_order_snapshot.get("status") or "") not in WRITE_READY_WORK_ORDER_STATUSES:
+            if draft_preflight_id:
+                replay_record = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="draft_preflights",
+                    record_id=draft_preflight_id,
+                )
+                consumed = replay_record.get("consumed_by_commit")
+                if isinstance(consumed, dict):
+                    replay_storyboard, _replay_identity = (
+                        _prepare_compact_storyboard_for_commit(storyboard)
+                    )
+                    replay_hash = canonical_storyboard_sha256(replay_storyboard)
+                    if (
+                        replay_record.get("project_id") != project_id
+                        or replay_record.get("work_order_id") != work_order_id
+                        or replay_record.get("candidate_sha256") != replay_hash
+                        or replay_record.get("session_fingerprint")
+                        != self._session_fingerprint(namespace, request_session_id)
+                        or consumed.get("canonical_sha256") != replay_hash
+                        or consumed.get("source_artifact_id") != source_artifact_id
+                        or consumed.get("file_name") != file_name
+                    ):
+                        raise ValueError("draft_preflight_commit_replay_conflict")
+                    artifact, _artifact_path = self.store.get_artifact(
+                        namespace,
+                        project_id,
+                        str(consumed["artifact_id"]),
+                    )
+                    return ToolResponse(
+                        status=str(consumed["status"]),
+                        summary=str(consumed["summary"]),
+                        project_id=project_id,
+                        work_order_id=work_order_id,
+                        artifact_id=str(consumed["artifact_id"]),
+                        download_url=self.store.signed_download_url(
+                            namespace,
+                            project_id,
+                            str(consumed["artifact_id"]),
+                            str(artifact["file_name"]),
+                        ),
+                        trace_id=str(consumed["trace_id"]),
+                        data={
+                            "artifact": artifact,
+                            "canonical_json_artifact_id": consumed.get(
+                                "canonical_json_artifact_id"
+                            ),
+                            "canonical_sha256": replay_hash,
+                            "handoff": copy.deepcopy(consumed.get("handoff")),
+                            "certificate": copy.deepcopy(
+                                consumed.get("certificate")
+                            ),
+                            "draft_preflight": {
+                                "draft_preflight_id": draft_preflight_id,
+                                "candidate_sha256": replay_hash,
+                                "quality": replay_record.get("quality"),
+                            },
+                            "idempotent_replay": True,
+                            "next_action": "independent_audit",
+                        },
+                    )
+                recovery_storyboard, _recovery_identity = (
+                    _prepare_compact_storyboard_for_commit(storyboard)
+                )
+                recovery_hash = canonical_storyboard_sha256(recovery_storyboard)
+                recovery_request_sha256 = sha256_bytes(
+                    _stable_json_bytes(
+                        {
+                            "project_id": project_id,
+                            "work_order_id": work_order_id,
+                            "draft_preflight_id": draft_preflight_id,
+                            "canonical_sha256": recovery_hash,
+                            "source_artifact_id": source_artifact_id,
+                            "file_name": file_name,
+                            "session": self._session_fingerprint(
+                                namespace, request_session_id
+                            ),
+                        }
+                    )
+                )
+                recovering_draft_commit = bool(
+                    replay_record.get("commit_request_sha256")
+                    == recovery_request_sha256
+                    and isinstance(replay_record.get("commit_progress"), dict)
+                )
+            if not recovering_draft_commit:
+                self._assert_work_order_write_ready(work_order_snapshot)
+        if not recovering_draft_commit:
+            self._assert_work_order_write_ready(work_order_snapshot)
         if expected_role == "repair" and not _repair_transaction_managed:
             return self._commit_storyboard_full_repair(
                 namespace,
@@ -5148,6 +7897,15 @@ class StoryboardService:
                 request_session_id=request_session_id,
             )
         runtime_test_certificate = self._require_runtime_test_certificate(namespace, project_id)
+        if (
+            self.settings.deployment_mode == "cloud"
+            and expected_role == "production"
+            and not successor_pending
+            and not draft_preflight_id
+        ):
+            raise ValueError(
+                "draft_preflight_required: cloud 0.5.5 full commits require a signed full-draft preflight"
+            )
         stage_trace_id = _new_id("TRC")
         materialize_started_ns = time.perf_counter_ns()
         # The persistence boundary is one-way: collapse old split inputs once,
@@ -5173,6 +7931,17 @@ class StoryboardService:
             source_artifact_id=source_artifact_id,
             candidate_storyboard=storyboard,
         )
+        bound_draft_preflight: dict[str, Any] | None = None
+        draft_commit_claim_token: str | None = None
+        if draft_preflight_id:
+            bound_draft_preflight = self._verify_draft_preflight(
+                namespace,
+                project_id,
+                work_order_id,
+                draft_preflight_id,
+                storyboard,
+                request_session_id,
+            )
         materialized_ns = time.perf_counter_ns()
         hub = self.store.load_hub(namespace, project_id)
         work_order = _find_work_order(hub, work_order_id)
@@ -5234,7 +8003,8 @@ class StoryboardService:
         validated_ns = time.perf_counter_ns()
         zero_issue = not report.get("issues")
         if not zero_issue:
-            with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
+            candidate_hash = canonical_storyboard_sha256(storyboard)
+            with self.store.mutate_project(namespace, project_id) as (hub, ledger):
                 live_order = _find_work_order(hub, work_order_id)
                 self._start_execution(hub, live_order)
                 if live_order.get("status") == "executing":
@@ -5242,6 +8012,85 @@ class StoryboardService:
                         hub, work_order_id, "failed_current"
                     )
                 hub["project_state"]["current_stage"] = "failed_current"
+                profile = storyboard_agent.active_prevention_profile(ledger)
+                known_patterns = {
+                    str(row.get("pattern_key"))
+                    for row in profile.get("patterns", [])
+                    if row.get("pattern_key")
+                }
+                quality = _draft_quality_metrics(
+                    storyboard,
+                    list(report.get("issues", [])),
+                    project_id=project_id,
+                    known_pattern_keys=known_patterns,
+                )
+                event_key = sha256_bytes(
+                    _stable_json_bytes(
+                        {
+                            "work_order_id": work_order_id,
+                            "candidate": candidate_hash,
+                            "report": report,
+                            "class": "production_draft_preflight",
+                        }
+                    )
+                )
+                event_issues = []
+                for issue in report.get("issues", []):
+                    location = str(issue.get("location") or "draft_candidate")
+                    severity = str(issue.get("severity") or "fail")
+                    if severity == "warning":
+                        severity = "warn"
+                    event_issues.append(
+                        {
+                            "error_code": str(issue.get("error_code") or "E-DRAFT-CONTRACT-001"),
+                            "category": str(
+                                issue.get("semantic_layer")
+                                or _issue_category(str(issue.get("error_code") or ""))
+                            ),
+                            "severity": severity
+                            if severity in storyboard_agent.SEVERITIES
+                            else "fail",
+                            "blocking": bool(
+                                issue.get("blocking", severity != "warn")
+                            ),
+                            "shot_ids": _issue_shot_ids(storyboard, issue),
+                            "field": location.rsplit(".", 1)[-1],
+                            "location": location,
+                            "issue_type": issue.get("template_gate_id")
+                            or _issue_category(str(issue.get("error_code") or "")),
+                            "evidence": str(issue.get("evidence") or location),
+                            "source_sentence": str(
+                                issue.get("evidence") or "生产提交前草稿预检"
+                            ),
+                            "repair_action": str(
+                                issue.get("repair_action") or "修正后重新预检。"
+                            ),
+                            "status": "initial",
+                        }
+                    )
+                storyboard_agent.ingest_event(
+                    ledger,
+                    {
+                        "event_id": f"EVT-{event_key[:20]}",
+                        "timestamp": utc_stamp(),
+                        "episode_id": str(
+                            storyboard.get("source_lock", {}).get("episode_id")
+                            or "全项目"
+                        ),
+                        "file_name": f"failed-draft-{work_order_id}",
+                        "file_fingerprint": candidate_hash,
+                        "source_version": "draft-candidate",
+                        "audit_cycle_id": f"DRAFT-{work_order_id}-{candidate_hash[:12]}",
+                        "task_type": "production_draft_preflight",
+                        "audit_class": "production_draft_preflight",
+                        "audit_round": 1,
+                        "result": "fail_current",
+                        "checked_shot_count": len(storyboard.get("shots", [])),
+                        "issues": event_issues,
+                        "quality": quality,
+                        "commit_ready": False,
+                    },
+                )
             telemetry = self._save_telemetry(
                 namespace,
                 project_id,
@@ -5275,38 +8124,137 @@ class StoryboardService:
                 data={
                     "report": report,
                     "artifact_created": False,
+                    "version_created": False,
+                    "xlsx_created": False,
                     "handoff_created": False,
+                    "quality": quality,
                     "telemetry": telemetry,
                 },
             )
         canonical_hash = canonical_storyboard_sha256(storyboard)
-        source_fingerprint = self._source_fingerprint(
-            namespace,
-            project_id,
-            storyboard,
-            source_artifact_id,
+        commit_request_sha256: str | None = None
+        draft_commit_ids: dict[str, str] = {}
+        if bound_draft_preflight is not None:
+            commit_request_sha256 = sha256_bytes(
+                _stable_json_bytes(
+                    {
+                        "project_id": project_id,
+                        "work_order_id": work_order_id,
+                        "draft_preflight_id": draft_preflight_id,
+                        "canonical_sha256": canonical_hash,
+                        "source_artifact_id": source_artifact_id,
+                        "file_name": file_name,
+                        "session": self._session_fingerprint(
+                            namespace, request_session_id
+                        ),
+                    }
+                )
+            )
+            stage_trace_id = f"TRC-{commit_request_sha256[:20]}"
+            draft_commit_ids = {
+                "canonical_json_artifact_id": (
+                    f"ART-{sha256_bytes((commit_request_sha256 + ':json').encode())[:16]}"
+                ),
+                "artifact_id": (
+                    f"ART-{sha256_bytes((commit_request_sha256 + ':xlsx').encode())[:16]}"
+                ),
+                "certificate_id": (
+                    f"CERT-{sha256_bytes((commit_request_sha256 + ':certificate').encode())[:20]}"
+                ),
+                "handoff_id": (
+                    f"HND-{sha256_bytes((commit_request_sha256 + ':handoff').encode())[:20]}"
+                ),
+            }
+        preparation_guard = (
+            self.store.draft_preflight_commit_preparation(
+                namespace, project_id, str(draft_preflight_id)
+            )
+            if bound_draft_preflight is not None
+            else contextlib.nullcontext()
         )
-        boundary_hash = self._boundary_hash(storyboard)
-        cache_components = self._audit_cache_components(
-            canonical_hash=canonical_hash,
-            source_fingerprint=source_fingerprint,
-            boundary_hash=boundary_hash,
-            audit_class=AUDIT_CLASS_PRODUCTION_PREFLIGHT,
-            storyboard=storyboard,
-            scope={
-                "targets": work_order_snapshot.get("targets", []),
-                "protected_scope": work_order_snapshot.get("protected_scope", []),
-            },
-            runtime_test_certificate_id=str(runtime_test_certificate["certificate_id"]),
-        )
-        audit_cache_key = self._cache_key_from_components(cache_components)
-        artifacts = self.store.list_artifacts(namespace, project_id)
-        version = _artifact_version(artifacts, "storyboard")
-        base_name = Path(slug_filename(file_name or f"正式分镜_{version}.xlsx")).stem
-        # Finish the deterministic projection and its reopen/round-trip checks
-        # before persisting either half of the canonical/XLSX pair.  A failed
-        # projection must not leave an orphan JSON artifact behind.
-        workbook_bytes = _export_compact_storyboard(storyboard, report)
+        # This process-local guard is intentionally non-persistent: failures
+        # during source fingerprinting or workbook projection release it
+        # immediately, while the durable cross-process claim remains deferred
+        # until the first artifact write boundary.
+        with preparation_guard:
+            source_fingerprint = self._source_fingerprint(
+                namespace,
+                project_id,
+                storyboard,
+                source_artifact_id,
+            )
+            boundary_hash = self._boundary_hash(storyboard)
+            cache_components = self._audit_cache_components(
+                canonical_hash=canonical_hash,
+                source_fingerprint=source_fingerprint,
+                boundary_hash=boundary_hash,
+                audit_class=AUDIT_CLASS_PRODUCTION_PREFLIGHT,
+                storyboard=storyboard,
+                scope={
+                    "targets": work_order_snapshot.get("targets", []),
+                    "protected_scope": work_order_snapshot.get("protected_scope", []),
+                },
+                runtime_test_certificate_id=str(
+                    runtime_test_certificate["certificate_id"]
+                ),
+            )
+            audit_cache_key = self._cache_key_from_components(cache_components)
+            artifacts = self.store.list_artifacts(namespace, project_id)
+            existing_commit_artifact: dict[str, Any] | None = None
+            if draft_commit_ids:
+                with contextlib.suppress(ValueError):
+                    existing_commit_artifact, _existing_path = self.store.get_artifact(
+                        namespace,
+                        project_id,
+                        draft_commit_ids["artifact_id"],
+                    )
+            version = (
+                str(existing_commit_artifact["version"])
+                if existing_commit_artifact is not None
+                else _artifact_version(artifacts, "storyboard")
+            )
+            base_name = Path(
+                slug_filename(file_name or f"正式分镜_{version}.xlsx")
+            ).stem
+            # Finish the deterministic projection and its reopen/round-trip
+            # checks before persisting either half of the canonical/XLSX pair.
+            workbook_bytes = _export_compact_storyboard(storyboard, report)
+        # Claim only after every pure calculation, source lookup, validation,
+        # version selection and workbook reopen/round-trip check has passed.
+        # The next operation is the first persistent artifact side effect.
+        if bound_draft_preflight is not None:
+            assert commit_request_sha256 is not None
+            claim_result = self.store.claim_draft_preflight_commit(
+                namespace,
+                project_id,
+                str(draft_preflight_id),
+                request_sha256=commit_request_sha256,
+            )
+            if claim_result["claim_status"] == "in_progress":
+                raise ValueError("draft_preflight_commit_in_progress")
+            if claim_result["claim_status"] == "consumed":
+                raise ValueError("draft_preflight_already_consumed")
+            draft_commit_claim_token = str(claim_result["claim_token"])
+            _ACTIVE_CONSUMPTION_CLAIMS.set(
+                (
+                    *_ACTIVE_CONSUMPTION_CLAIMS.get(),
+                    {
+                        "kind": "draft_preflight",
+                        "namespace": namespace,
+                        "project_id": project_id,
+                        "record_id": str(draft_preflight_id),
+                        "claim_token": draft_commit_claim_token,
+                    },
+                )
+            )
+            self.store.update_draft_preflight_commit_progress(
+                namespace,
+                project_id,
+                str(draft_preflight_id),
+                claim_token=draft_commit_claim_token,
+                stage="claimed",
+                progress={**draft_commit_ids, "version": version},
+            )
         json_record = self.store.save_artifact_json(
             namespace,
             project_id,
@@ -5316,6 +8264,7 @@ class StoryboardService:
             version=version,
             work_order_id=work_order_id,
             source_artifact_id=source_artifact_id,
+            artifact_id=draft_commit_ids.get("canonical_json_artifact_id"),
             metadata={
                 **successor_metadata,
                 **compact_contract_evidence(),
@@ -5338,8 +8287,27 @@ class StoryboardService:
                 ),
                 "stable_shot_uid_count": len(identity_manifest.get("shot_uids", [])),
                 "stable_batch_uid_count": len(identity_manifest.get("batch_uids", [])),
+                "draft_preflight_id": draft_preflight_id,
+                "draft_commit_request_sha256": commit_request_sha256,
+                "scene_coverage_manifest_sha256": (
+                    bound_draft_preflight.get("scene_coverage_manifest_sha256")
+                    if bound_draft_preflight is not None
+                    else None
+                ),
             },
         )
+        if bound_draft_preflight is not None and draft_commit_claim_token:
+            self.store.update_draft_preflight_commit_progress(
+                namespace,
+                project_id,
+                str(draft_preflight_id),
+                claim_token=draft_commit_claim_token,
+                stage="canonical_saved",
+                progress={
+                    "canonical_json_artifact_id": json_record["artifact_id"],
+                    "canonical_json_fingerprint": json_record["fingerprint"],
+                },
+            )
         xlsx_record = self.store.save_artifact_bytes(
             namespace,
             project_id,
@@ -5349,6 +8317,7 @@ class StoryboardService:
             version=version,
             work_order_id=work_order_id,
             source_artifact_id=source_artifact_id,
+            artifact_id=draft_commit_ids.get("artifact_id"),
             metadata={
                 **successor_metadata,
                 **compact_contract_evidence(),
@@ -5374,8 +8343,27 @@ class StoryboardService:
                 ),
                 "stable_shot_uid_count": len(identity_manifest.get("shot_uids", [])),
                 "stable_batch_uid_count": len(identity_manifest.get("batch_uids", [])),
+                "draft_preflight_id": draft_preflight_id,
+                "draft_commit_request_sha256": commit_request_sha256,
+                "scene_coverage_manifest_sha256": (
+                    bound_draft_preflight.get("scene_coverage_manifest_sha256")
+                    if bound_draft_preflight is not None
+                    else None
+                ),
             },
         )
+        if bound_draft_preflight is not None and draft_commit_claim_token:
+            self.store.update_draft_preflight_commit_progress(
+                namespace,
+                project_id,
+                str(draft_preflight_id),
+                claim_token=draft_commit_claim_token,
+                stage="artifact_pair_saved",
+                progress={
+                    "artifact_id": xlsx_record["artifact_id"],
+                    "artifact_fingerprint": xlsx_record["fingerprint"],
+                },
+            )
         if successor_pending:
             publication_owner = str(xlsx_record["artifact_id"])
             json_record = self.store.update_artifact_metadata(
@@ -5419,6 +8407,7 @@ class StoryboardService:
             cache_components=cache_components,
             report=report,
             work_order_id=work_order_id,
+            certificate_id=draft_commit_ids.get("certificate_id"),
         )
         handoff = self._persist_production_handoff(
             namespace,
@@ -5437,7 +8426,20 @@ class StoryboardService:
             successor_base_artifact_id=_successor_base_artifact_id,
             successor_kind=_successor_kind,
             successor_scope_hash=_successor_scope_hash,
+            handoff_id=draft_commit_ids.get("handoff_id"),
         )
+        if bound_draft_preflight is not None and draft_commit_claim_token:
+            self.store.update_draft_preflight_commit_progress(
+                namespace,
+                project_id,
+                str(draft_preflight_id),
+                claim_token=draft_commit_claim_token,
+                stage="certificate_and_handoff_saved",
+                progress={
+                    "certificate_id": certificate["certificate_id"],
+                    "handoff_id": handoff["handoff_id"],
+                },
+            )
         xlsx_record = self.store.update_artifact_metadata(
             namespace,
             project_id,
@@ -5458,10 +8460,58 @@ class StoryboardService:
         )
         with self.store.mutate_project(namespace, project_id) as (hub, ledger):
             work_order = _find_work_order(hub, work_order_id)
-            self._start_execution(hub, work_order)
-            project_agent.record_deliverable(
-                hub,
-                {
+            if work_order.get("status") != "validating":
+                self._start_execution(hub, work_order)
+            if zero_issue:
+                # Legacy/local callers may have learned a failed candidate by
+                # calling commit directly.  Close those exact draft scopes now
+                # that the same work order has produced a clean canonical;
+                # history and pattern learning remain intact.
+                legacy_draft_scopes = [
+                    copy.deepcopy(scope)
+                    for scope in ledger.get("scope_states", [])
+                    if scope.get("file_name") == f"failed-draft-{work_order_id}"
+                    and scope.get("open_issue_ids")
+                    and int(scope.get("last_audit_round", 0)) < int(
+                        ledger.get("policy", {}).get("max_auto_repair_rounds", 3)
+                    )
+                ]
+                for draft_scope in legacy_draft_scopes:
+                    closure_key = sha256_bytes(
+                        _stable_json_bytes(
+                            {
+                                "scope_key": draft_scope.get("scope_key"),
+                                "canonical_sha256": canonical_hash,
+                                "result": "pass",
+                            }
+                        )
+                    )
+                    storyboard_agent.ingest_event(
+                        ledger,
+                        {
+                            "event_id": f"EVT-{closure_key[:20]}",
+                            "timestamp": utc_stamp(),
+                            "episode_id": draft_scope.get("episode_id") or "全项目",
+                            "file_name": draft_scope["file_name"],
+                            "file_fingerprint": canonical_hash,
+                            "source_version": "clean-production-candidate",
+                            "audit_cycle_id": draft_scope["audit_cycle_id"],
+                            "task_type": "production_draft_preflight",
+                            "audit_class": "production_draft_preflight",
+                            "audit_round": int(draft_scope["last_audit_round"]) + 1,
+                            "result": "pass",
+                            "checked_shot_count": len(storyboard.get("shots", [])),
+                            "issues": [],
+                            "commit_ready": True,
+                        },
+                    )
+            if not any(
+                row.get("deliverable_id") == xlsx_record["artifact_id"]
+                for row in hub.get("deliverables", [])
+            ):
+                project_agent.record_deliverable(
+                    hub,
+                    {
                     "deliverable_id": xlsx_record["artifact_id"],
                     "work_order_id": work_order_id,
                     "timestamp": utc_stamp(),
@@ -5477,9 +8527,10 @@ class StoryboardService:
                         "pending" if successor_pending else "committed"
                     ),
                     "source_versions": [source_artifact_id] if source_artifact_id else [],
-                },
-            )
-            project_agent.transition_work_order(hub, work_order_id, "validating")
+                    },
+                )
+            if work_order.get("status") != "validating":
+                project_agent.transition_work_order(hub, work_order_id, "validating")
             audit_result = self._record_audit(
                 namespace=namespace,
                 project_id=project_id,
@@ -5525,7 +8576,11 @@ class StoryboardService:
             else:
                 project_agent.transition_work_order(hub, work_order_id, "failed_current")
                 hub["project_state"]["current_stage"] = "failed_current"
-            hub.setdefault("handoffs", []).append(copy.deepcopy(handoff))
+            if not any(
+                row.get("handoff_id") == handoff.get("handoff_id")
+                for row in hub.setdefault("handoffs", [])
+            ):
+                hub["handoffs"].append(copy.deepcopy(handoff))
             internal_round = work_order.get("internal_round", 0)
         ledger_ns = time.perf_counter_ns()
         download_url = self.store.signed_download_url(
@@ -5576,7 +8631,46 @@ class StoryboardService:
             cache_reason=str((telemetry_metrics or {}).get("cache_reason") or "compact canonical validation; no duplicate prompt or Seedance batch generation"),
         )
         with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
-            hub.setdefault("performance_traces", []).append(copy.deepcopy(telemetry))
+            if not any(
+                row.get("telemetry_id") == telemetry.get("telemetry_id")
+                for row in hub.setdefault("performance_traces", [])
+            ):
+                hub["performance_traces"].append(copy.deepcopy(telemetry))
+        if bound_draft_preflight is not None and draft_commit_claim_token:
+            self.store.update_draft_preflight_commit_progress(
+                namespace,
+                project_id,
+                str(draft_preflight_id),
+                claim_token=draft_commit_claim_token,
+                stage="project_state_and_telemetry_saved",
+                progress={"telemetry_id": telemetry["telemetry_id"]},
+            )
+        if bound_draft_preflight is not None:
+            if not draft_commit_claim_token:
+                raise RuntimeError("draft_preflight_commit_claim_missing")
+            consumed_by_commit = {
+                "consumed_at": utc_stamp(),
+                "artifact_id": xlsx_record["artifact_id"],
+                "canonical_json_artifact_id": json_record["artifact_id"],
+                "canonical_sha256": canonical_hash,
+                "source_artifact_id": source_artifact_id,
+                "file_name": file_name,
+                "status": status,
+                "summary": summary,
+                "trace_id": telemetry["telemetry_id"],
+                "scene_coverage_manifest_sha256": bound_draft_preflight.get(
+                    "scene_coverage_manifest_sha256"
+                ),
+                "handoff": self._handoff_summary(handoff),
+                "certificate": self._certificate_summary(certificate),
+            }
+            bound_draft_preflight = self.store.complete_draft_preflight_commit(
+                namespace,
+                project_id,
+                str(bound_draft_preflight["draft_preflight_id"]),
+                claim_token=draft_commit_claim_token,
+                consumed_by_commit=consumed_by_commit,
+            )
         return ToolResponse(
             status=status,
             summary=summary,
@@ -5599,6 +8693,18 @@ class StoryboardService:
                 "report": report,
                 "identity_manifest": identity_manifest,
                 "compact_contract": compact_contract_evidence(),
+                "draft_preflight": (
+                    None
+                    if bound_draft_preflight is None
+                    else {
+                        "draft_preflight_id": bound_draft_preflight.get("draft_preflight_id"),
+                        "candidate_sha256": bound_draft_preflight.get("candidate_sha256"),
+                        "scene_coverage_manifest_sha256": bound_draft_preflight.get(
+                            "scene_coverage_manifest_sha256"
+                        ),
+                        "quality": bound_draft_preflight.get("quality"),
+                    }
+                ),
                 "next_action": "independent_audit" if zero_issue else ("upstream_rebuild" if internal_round >= 3 else "repair_all_issues_then_recommit"),
             },
         )
@@ -6646,6 +9752,7 @@ class StoryboardService:
         )
         return response
 
+    @_release_consumption_claims_on_error
     def audit_storyboard(
         self,
         namespace: str,
@@ -6746,19 +9853,45 @@ class StoryboardService:
             audit_class=AUDIT_CLASS_INDEPENDENT,
             artifact_fingerprint=str(record.get("fingerprint") or ""),
             storyboard=storyboard,
-            scope=handoff.get("scope") or {},
+            scope=self._independent_audit_cache_scope(handoff, artifact_id),
             runtime_test_certificate_id=str(runtime_test_certificate["certificate_id"]),
         )
         audit_cache_key = self._cache_key_from_components(cache_components)
         cached_certificate = None
         if not force_machine_recheck:
-            cached_certificate = self.store.find_project_record(
-                namespace,
-                project_id,
-                kind="certificates",
-                field="cache_key",
-                value=audit_cache_key,
-            )
+            cache_candidates = [
+                candidate
+                for candidate in self.store.list_project_records(
+                    namespace,
+                    project_id,
+                    kind="certificates",
+                )
+                if candidate.get("cache_key") == audit_cache_key
+            ]
+            if cache_candidates:
+                # ``created_at`` has one-second precision, so two audit rounds
+                # can tie. The append-only ledger event order is the durable
+                # authority for which same-environment verdict supersedes the
+                # other; random certificate filenames must never decide it.
+                event_order = {
+                    str(event.get("event_id") or ""): index
+                    for index, event in enumerate(
+                        self.store.load_ledger(namespace, project_id).get(
+                            "events", []
+                        )
+                    )
+                    if isinstance(event, dict)
+                }
+                cached_certificate = max(
+                    cache_candidates,
+                    key=lambda candidate: (
+                        event_order.get(
+                            str(candidate.get("event_id") or ""), -1
+                        ),
+                        str(candidate.get("created_at") or ""),
+                        str(candidate.get("certificate_id") or ""),
+                    ),
+                )
         cache_hit = cached_certificate is not None
         if cached_certificate is not None:
             if (
@@ -6806,6 +9939,22 @@ class StoryboardService:
             expected_types={"production_to_audit", "repair_to_audit", "audit_intake"},
         )
         handoff = claimed_handoff
+        if handoff.get("status") == "consuming" and handoff.get("claim_token"):
+            _ACTIVE_CONSUMPTION_CLAIMS.set(
+                (
+                    *_ACTIVE_CONSUMPTION_CLAIMS.get(),
+                    {
+                        "kind": "handoff",
+                        "namespace": namespace,
+                        "project_id": project_id,
+                        "record_id": str(handoff["handoff_id"]),
+                        "consumer_work_order_id": str(
+                            audit_work_order["work_order_id"]
+                        ),
+                        "claim_token": str(handoff["claim_token"]),
+                    },
+                )
+            )
         event_id = str(certificate.get("event_id")) if cached_certificate else _new_id("EVT")
         with self.store.mutate_project(namespace, project_id) as (hub, ledger):
             audit_work_order_live = _find_work_order(hub, str(audit_work_order["work_order_id"]))
@@ -6832,6 +9981,32 @@ class StoryboardService:
                 validation_role="independent_audit",
                 allow_reopen=force_machine_recheck,
             )
+            if audit_result.get("status") == "duplicate":
+                # Crash/exception recovery must bind the certificate to the
+                # already-ingested immutable event, not to this retry's fresh
+                # provisional id.
+                event_id = str(audit_result["event"]["event_id"])
+            first_quality = audit_result.get("event", {}).get(
+                "first_draft_quality"
+            )
+            if isinstance(first_quality, dict):
+                hub.setdefault("project_state", {})[
+                    "latest_first_draft_quality"
+                ] = copy.deepcopy(first_quality)
+                audit_event = audit_result.get("event", {})
+                if (
+                    audit_event.get("audit_round") == 1
+                    and first_quality.get("grade") in {"B", "C"}
+                ):
+                    hub["project_state"]["production_quality_block"] = {
+                        "active": True,
+                        "reason": "first_draft_quality_below_threshold",
+                        "grade": first_quality.get("grade"),
+                        "artifact_id": artifact_id,
+                        "audit_cycle_id": audit_cycle_id,
+                        "required_action": "repair_root_cause_and_revalidate_prevention_gate",
+                        "created_at": utc_stamp(),
+                    }
         audit_blocked = audit_result.get("status") == "blocked"
         if audit_blocked:
             report.setdefault("issues", []).append(
@@ -6905,6 +10080,49 @@ class StoryboardService:
             canonical_sha256=canonical_hash,
             source_artifact_raw_sha256=fingerprints["artifact_raw"],
         )
+        if certificate.get("result") == "pass" and int(
+            certificate.get("issue_count", 0)
+        ) == 0:
+            with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
+                block = hub.get("project_state", {}).get(
+                    "production_quality_block"
+                )
+                if isinstance(block, dict) and block.get("active"):
+                    lineage_ids: set[str] = set()
+                    cursor_id = str(artifact_id)
+                    for _ in range(32):
+                        if not cursor_id or cursor_id in lineage_ids:
+                            break
+                        lineage_ids.add(cursor_id)
+                        try:
+                            lineage_record, _lineage_path = self.store.get_artifact(
+                                namespace, project_id, cursor_id
+                            )
+                        except ValueError:
+                            break
+                        cursor_id = str(
+                            lineage_record.get("source_artifact_id")
+                            or lineage_record.get("metadata", {}).get(
+                                "source_storyboard_artifact_id"
+                            )
+                            or ""
+                        )
+                    if (
+                        str(block.get("audit_cycle_id") or "")
+                        == str(audit_cycle_id)
+                        and str(block.get("artifact_id") or "") in lineage_ids
+                    ):
+                        block.update(
+                            {
+                                "active": False,
+                                "cleared_at": utc_stamp(),
+                                "cleared_by_audit_cycle_id": audit_cycle_id,
+                                "cleared_by_artifact_id": artifact_id,
+                                "cleared_by_certificate_id": certificate[
+                                    "certificate_id"
+                                ],
+                            }
+                        )
         repair_package = None
         audit_to_repair_handoff = None
         if certificate.get("issue_count", 0):
@@ -7157,8 +10375,16 @@ class StoryboardService:
                         {"certificate_id": certificate["certificate_id"]}
                     ],
                 }
-            producer_order = _find_work_order(hub, str(handoff["work_order_id"]))
-            if clean and producer_order["status"] == "validating":
+            producer_order = (
+                None
+                if handoff.get("handoff_type") == "audit_intake"
+                else _find_work_order(hub, str(handoff["work_order_id"]))
+            )
+            if (
+                clean
+                and isinstance(producer_order, dict)
+                and producer_order["status"] == "validating"
+            ):
                 producer_order["verified_independent_audit_certificate_id"] = (
                     certificate["certificate_id"]
                 )
@@ -7223,23 +10449,27 @@ class StoryboardService:
                     hub["project_state"]["latest_artifacts"].pop(
                         "storyboard", None
                     )
-                producer_order["awaiting_independent_audit"] = True
-                producer_order.pop("independent_audit_certificate_id", None)
-                producer_order.pop(
-                    "verified_independent_audit_certificate_id", None
-                )
-                producer_order.pop("independent_audit_validation", None)
-                if producer_order.get("status") == "validating":
-                    project_agent.transition_work_order(
-                        hub, producer_order["work_order_id"], "failed_current"
+                if isinstance(producer_order, dict):
+                    producer_order["awaiting_independent_audit"] = True
+                    producer_order.pop("independent_audit_certificate_id", None)
+                    producer_order.pop(
+                        "verified_independent_audit_certificate_id", None
                     )
-                elif producer_order.get("status") in {"passed", "awaiting_signoff"}:
-                    # The state machine has no ordinary PASS->FAIL edge because
-                    # this is authority revocation, not a production action.
-                    producer_order["status"] = "failed_current"
-                    producer_order["reopened_by_independent_audit"] = (
-                        certificate["certificate_id"]
-                    )
+                    producer_order.pop("independent_audit_validation", None)
+                    if producer_order.get("status") == "validating":
+                        project_agent.transition_work_order(
+                            hub, producer_order["work_order_id"], "failed_current"
+                        )
+                    elif producer_order.get("status") in {
+                        "passed",
+                        "awaiting_signoff",
+                    }:
+                        # The state machine has no ordinary PASS->FAIL edge because
+                        # this is authority revocation, not a production action.
+                        producer_order["status"] = "failed_current"
+                        producer_order["reopened_by_independent_audit"] = (
+                            certificate["certificate_id"]
+                        )
                 hub["project_state"]["current_stage"] = "failed_current"
             matching_handoff = next(
                 (
@@ -7311,6 +10541,11 @@ class StoryboardService:
             str(handoff["handoff_id"]),
             consumer_work_order_id=str(audit_work_order["work_order_id"]),
             audit_certificate_id=str(certificate["certificate_id"]),
+            claim_token=(
+                str(claimed_handoff.get("claim_token"))
+                if claimed_handoff.get("claim_token")
+                else None
+            ),
             allow_reaudit=force_machine_recheck,
         )
         production_trace_id = str(handoff.get("stage_trace_id") or "")
@@ -7383,10 +10618,19 @@ class StoryboardService:
         residual_issue_count: int,
         introduced_issue_count: int,
         blockers: list[str],
+        request_session_id: str | None = None,
     ) -> ToolResponse:
         self._require_runtime()
         with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
             work_order = _find_work_order(hub, work_order_id)
+            self._assert_work_order_session(
+                namespace, work_order, request_session_id
+            )
+            if work_order.get("server_actor_role") != "production":
+                raise ValueError(
+                    "window_role_matrix_mismatch: non-storyboard validation "
+                    "requires the work order's server-bound production authority"
+                )
             if work_order.get("operation") in STORYBOARD_OPERATIONS or str(
                 work_order.get("operation") or ""
             ).startswith("storyboard_"):
@@ -7441,15 +10685,19 @@ class StoryboardService:
         namespace: str,
         *,
         project_id: str,
+        work_order_id: str,
         request: str,
         missing_dependency: str,
         risk: str,
         safe_fallback: str,
         proposed_implementation: str,
         required_tests: list[str],
+        request_session_id: str | None = None,
     ) -> ToolResponse:
+        self._require_runtime()
         record = {
             "gap_id": _new_id("GAP"),
+            "work_order_id": work_order_id,
             "timestamp": utc_stamp(),
             "request": request,
             "missing_dependency": missing_dependency,
@@ -7459,11 +10707,21 @@ class StoryboardService:
             "required_tests": required_tests,
         }
         with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
+            work_order = _find_work_order(hub, work_order_id)
+            # Keep the authority check inside the project lock and immediately
+            # before the first write so a stale/cross-window work order cannot
+            # be used to append an otherwise plausible proposal record.
+            self._assert_capability_gap_authority(
+                namespace,
+                work_order,
+                request_session_id,
+            )
             result = project_agent.record_capability_gap(hub, record)
         return ToolResponse(
             status="recorded",
             summary="能力缺口已记录｜未擅自模拟执行",
             project_id=project_id,
+            work_order_id=work_order_id,
             data={**result, "gap_id": record["gap_id"]},
         )
 
@@ -7647,11 +10905,28 @@ class StoryboardService:
         work_order_id: str,
         decision: str,
         signer: str,
+        request_session_id: str | None = None,
     ) -> ToolResponse:
         if not signer.strip():
             raise ValueError("signer is required for human sign-off")
-        with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
+        with self.store.mutate_project(namespace, project_id) as (hub, ledger):
             work_order = _find_work_order(hub, work_order_id)
+            self._assert_work_order_session(
+                namespace, work_order, request_session_id
+            )
+            operation = str(work_order.get("operation") or "")
+            if operation in STORYBOARD_OPERATIONS:
+                self._assert_storyboard_authority(
+                    work_order,
+                    self._work_order_role(
+                        operation, str(work_order.get("mode") or "")
+                    ),
+                )
+            elif work_order.get("server_actor_role") != "production":
+                raise ValueError(
+                    "window_role_matrix_mismatch: sign-off requires the work "
+                    "order's server-bound production or repair authority"
+                )
             independent_certificate = None
             if decision == "approve" and work_order.get("operation") in STORYBOARD_OPERATIONS:
                 independent_certificate = self._clean_independent_certificate_for_work_order(
@@ -7667,6 +10942,25 @@ class StoryboardService:
             if independent_certificate is not None:
                 hub["human_signoffs"][-1]["independent_audit_certificate_id"] = (
                     independent_certificate["certificate_id"]
+                )
+                event_id = str(independent_certificate.get("event_id") or "")
+                audit_scope = next(
+                    (
+                        row
+                        for row in ledger.get("scope_states", [])
+                        if str(row.get("last_event_id") or "") == event_id
+                    ),
+                    None,
+                )
+                if not isinstance(audit_scope, dict):
+                    raise ValueError(
+                        "independent_audit_scope_missing: human sign-off cannot "
+                        "advance Hub without the matching Ledger scope"
+                    )
+                storyboard_agent.signoff_scope(
+                    ledger,
+                    str(audit_scope["scope_key"]),
+                    "approve" if decision == "approve" else "reopen",
                 )
             if decision == "approve":
                 for deliverable in hub.get("deliverables", []):

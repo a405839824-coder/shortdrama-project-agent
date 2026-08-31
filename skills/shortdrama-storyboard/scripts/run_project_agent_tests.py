@@ -122,7 +122,7 @@ def test_new_hub_and_registry() -> None:
     summary = agent.summarize(hub)
     assert_true(summary["capability_count"] >= 30, "full Agent must expose broad capability registry")
     assert_true(summary["capability_status_counts"]["supported"] >= 20, "supported capability count")
-    assert_true(hub["policy"]["compact_master_version"] == "0.5.4", "hub must pin compact master 0.5.4")
+    assert_true(hub["policy"]["compact_master_version"] == "0.5.5", "hub must pin compact master 0.5.5")
     assert_true(hub["policy"]["background_seedance_generation"] is False, "background Seedance must stay disabled")
 
 

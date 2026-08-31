@@ -12,10 +12,11 @@ Use this policy together with `V16.3-148-R10-StableRuntime` and `R10-PG1`. The A
 
 ## Record every audit and repair
 
-For every generation audit, audit-only run, repair, or repair regression, create one `audit_event` that satisfies `references/agent_ledger_schema.json`.
+For every draft preflight, generation audit, audit-only run, repair, or repair regression, create one `audit_event` that satisfies `references/agent_ledger_schema.json`.
 
 Distinguish the event authority explicitly:
 
+- `production_draft_preflight` records scene/full draft findings before persistence. A failed draft updates occurrence history and the active prevention profile but creates no artifact, version, XLSX, projection, successor, handoff, or audit verdict.
 - `production_preflight` may be stored as a separately classified production-evidence event and in the handoff's `producer_claims`, but it must use a distinct scope and audit class from `independent_audit`. It cannot close prior independent issues, increment an independent audit round, set release readiness, or issue the final audit verdict.
 - `audit_class=independent_audit` uses the backward-compatible `task_type=audit`, is read-only, and must bind its event and certificate to the verified handoff, source, boundary, artifact, canonical, runtime, rule, and validator fingerprints. Only this audit class may issue the final pass/fail conclusion.
 - Repair checks are stored in the immutable repair handoff and must return the new artifact fingerprint to `independent_audit` for final verification. Until the ledger writer enforces role-aware transitions, do not let a repair `result=pass` event close an audit cycle.
@@ -45,8 +46,8 @@ Use this fixed audit category order:
 
 ## Keep compact generation single-source
 
-- Pin the project hub to `compact_master_version=0.5.4` and `background_seedance_generation=false`.
-- Pin every new formal storyboard write/export to `source_lock.output_contract=R10-SPC-1`; keep the v0.5 canonical architecture under the active 0.5.4 rule patch, using strict EP numbering, episode-local cumulative time, exact three-stage Seedance 2.5 picture content, `正式分镜母版` fifth-column label, qualitative light fields, per-shot `9:16竖屏`, static GPT projection, and THG-01–THG-12 in `strict_prompt_contract.md`.
+- Pin the project hub to `compact_master_version=0.5.5` and `background_seedance_generation=false`.
+- Pin every new formal storyboard write/export to `source_lock.output_contract=R10-SPC-1`; keep the v0.5 canonical architecture under the active 0.5.5 rule patch, using strict EP numbering, episode-local cumulative time, exact three-stage Seedance 2.5 picture content, `正式分镜母版` fifth-column label, qualitative light fields, per-shot `9:16竖屏`, static GPT projection, and THG-01–THG-12 in `strict_prompt_contract.md`.
 - Pin newly issued independent-audit certificates and cache identities to `semantic-audit-v2-compact-master`; v1 is legacy history only and cannot authorize release or cache reuse.
 - Store only the R10.1 compact canonical. Compile the formal ten-column master and GPT keyframe projection deterministically when explicitly requested; do not persist generated copies in canonical.
 - Do not create `seedance_batches`, `独立Seedance批次`, a standalone Seedance execution column, or any background video prompt job.
@@ -54,7 +55,17 @@ Use this fixed audit category order:
 - Script and storyboard changes propagate to `compact_canonical` and `formal_master_export`, then invalidate dependent anchors, keyframes, audio cues, and explicit on-demand production packages as required.
 - Production writes and performs only `production_preflight`; its immutable workbook keeps `PENDING_AUDIT`/`未签发结论` with null counts and trace. Independent audit remains read-only and is the only authority that may create a new immutable signed-audit-overlay artifact/successor workbook with a final audit conclusion; it never edits the production XLSX in place. Repair activates only after an independent-audit failure plus explicit authorization, and its new artifact returns to the original independent-audit authority.
 
-The Agent computes the issue key from project, episode, logical file, error code, shot IDs, field, and issue type. Do not use mutable evidence text or content version as the only identity; the same defect must remain traceable after a repair changes the file.
+The Agent computes one stable pattern key from project, error code, normalized field class, and normalized root-cause/issue type. Episode, logical filename, version, event ID, and shot IDs are occurrence locations and must not split one recurring defect into false singletons. Mutable evidence text is never the identity. Preserve every distinct event/scope/location and report both pattern count and occurrence count so a template defect recurring across batches is escalated instead of hidden by location-specific deduplication.
+
+## Prevent defects before formal output
+
+Use this mandatory production sequence: `get_agent_status` → authorized `migrate_project_state` when status requires it → `query_project_issues` → per-scene `preflight_storyboard_draft` → full `preflight_storyboard_draft` → certificate-bound `commit_storyboard` → separate `independent_audit`.
+
+- Bind the active prevention-profile hash returned by `query_project_issues` to the work order and draft certificate. Any change invalidates the certificate.
+- Record the first full-draft quality result immutably. Overall correctness and direct usability must each be at least 98%, every episode at least 96%, and new local issues at most 2%; hard errors, major issues, known recurrences, and systemic duplicates must all be zero.
+- A threshold grade measures whether generation prevention is working. It does not hide findings or waive a validator: full preflight is commit-ready only with no remaining issue.
+- Final independent audit is a read-only omission defense and requires 100% pass across all eight layers, with blocking, residual, and introduced issues all zero. It does not regenerate or repair a producer's known errors.
+- A B/C first-draft result creates an active production quality block. Resume new storyboard production only after the root cause, rule/validator/template fix, negative regression fixture, and prevention profile are closed under the authorized improvement workflow.
 
 ## Close within two or three internal rounds
 

@@ -39,7 +39,16 @@
         "fail_current_blocks_next_episode",
         "human_approval_required_for_rule_activation",
         "human_signoff_required_for_archive",
-        "formal_rule_auto_mutation"
+        "formal_rule_auto_mutation",
+        "exact_cross_window_claim_requires_shared_ledger",
+        "pass_requires_zero_issues",
+        "cross_batch_pattern_identity_required",
+        "failed_draft_recording_required",
+        "first_draft_correctness_threshold_percent",
+        "first_draft_direct_usability_threshold_percent",
+        "max_new_local_issue_rate_percent",
+        "minimum_episode_correctness_percent",
+        "hard_major_known_systemic_tolerance"
       ],
       "properties": {
         "preferred_auto_repair_rounds": {"const": 2},
@@ -47,7 +56,16 @@
         "fail_current_blocks_next_episode": {"const": true},
         "human_approval_required_for_rule_activation": {"const": true},
         "human_signoff_required_for_archive": {"const": true},
-        "formal_rule_auto_mutation": {"const": false}
+        "formal_rule_auto_mutation": {"const": false},
+        "exact_cross_window_claim_requires_shared_ledger": {"const": true},
+        "pass_requires_zero_issues": {"const": true},
+        "cross_batch_pattern_identity_required": {"const": true},
+        "failed_draft_recording_required": {"const": true},
+        "first_draft_correctness_threshold_percent": {"const": 98.0},
+        "first_draft_direct_usability_threshold_percent": {"const": 98.0},
+        "max_new_local_issue_rate_percent": {"const": 2.0},
+        "minimum_episode_correctness_percent": {"const": 96.0},
+        "hard_major_known_systemic_tolerance": {"const": 0}
       }
     },
     "counters": {"type": "object"},
@@ -150,8 +168,8 @@
         "file_fingerprint": {"type": "string", "minLength": 1},
         "source_version": {"type": "string", "minLength": 1},
         "audit_cycle_id": {"type": "string", "minLength": 1},
-        "task_type": {"enum": ["generation_audit", "audit", "audit_repair", "repair_regression", "bootstrap_import"]},
-        "audit_class": {"enum": ["independent_audit", "legacy"]},
+        "task_type": {"enum": ["production_draft_preflight", "generation_audit", "audit", "audit_repair", "repair_regression", "bootstrap_import"]},
+        "audit_class": {"enum": ["production_draft_preflight", "production_preflight", "independent_audit", "legacy"]},
         "validation_role": {"enum": ["production", "independent_audit", "repair", "bootstrap"]},
         "handoff_id": {"type": "string"},
         "artifact_semantic_fingerprint": {"$ref": "#/$defs/sha256"},
@@ -353,7 +371,55 @@
             "final_status": {"enum": ["pass", "fail_current", "blocked"]},
             "audit_trace_id": {"type": "string", "minLength": 1},
             "canonical_sha256": {"$ref": "#/$defs/sha256"},
-            "artifact_raw_sha256": {"$ref": "#/$defs/sha256"}
+            "artifact_raw_sha256": {"$ref": "#/$defs/sha256"},
+            "first_draft_quality": {
+              "type": "object",
+              "required": [
+                "grade",
+                "checked_shot_count",
+                "issue_point_count",
+                "unique_affected_shot_count",
+                "affected_shot_ids",
+                "first_draft_correctness_percent",
+                "direct_usability_percent",
+                "new_local_issue_shot_rate_percent",
+                "episode_correctness_percent",
+                "minimum_episode_correctness_percent",
+                "hard_or_major_issue_count",
+                "global_blocking_issue_count",
+                "known_recurrence_count",
+                "known_recurrence_pattern_keys",
+                "systemic_duplicate_count",
+                "systemic_pattern_keys",
+                "commit_eligible",
+                "final_independent_audit_required_percent",
+                "threshold_met",
+                "final_audit_pass"
+              ],
+              "properties": {
+                "grade": {"enum": ["A", "B", "C"]},
+                "checked_shot_count": {"type": "integer", "minimum": 0},
+                "issue_point_count": {"type": "integer", "minimum": 0},
+                "unique_affected_shot_count": {"type": "integer", "minimum": 0},
+                "affected_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                "first_draft_correctness_percent": {"type": "number", "minimum": 0, "maximum": 100},
+                "direct_usability_percent": {"type": "number", "minimum": 0, "maximum": 100},
+                "new_local_issue_shot_rate_percent": {"type": "number", "minimum": 0, "maximum": 100},
+                "episode_correctness_percent": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 100}},
+                "minimum_episode_correctness_percent": {"type": "number", "minimum": 0, "maximum": 100},
+                "hard_or_major_issue_count": {"type": "integer", "minimum": 0},
+                "global_blocking_issue_count": {"type": "integer", "minimum": 0},
+                "known_recurrence_count": {"type": "integer", "minimum": 0},
+                "known_recurrence_pattern_keys": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                "systemic_duplicate_count": {"type": "integer", "minimum": 0},
+                "systemic_pattern_keys": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                "commit_eligible": {"type": "boolean"},
+                "final_independent_audit_required_percent": {"const": 100},
+                "threshold_met": {"type": "boolean"},
+                "final_audit_pass": {"type": "boolean"}
+              },
+              "additionalProperties": false
+            }
           },
           "additionalProperties": false
         },
@@ -547,15 +613,109 @@
       "required": [
         "issue_id",
         "dedup_key",
+        "pattern_key",
         "error_code",
         "category",
+        "logical_file",
+        "episode_id",
+        "issue_type",
+        "field_class",
+        "normalized_root_cause",
         "status",
         "open_scope_keys",
+        "recurrence_state",
         "occurrence_count",
+        "observation_count",
+        "pattern_occurrence_count",
+        "pattern_observation_count",
+        "distinct_event_count",
+        "distinct_scope_count",
         "consecutive_rounds",
         "max_consecutive_rounds",
+        "introduced_by_repair_count",
+        "first_seen_at",
+        "last_seen_at",
+        "root_cause_gate",
+        "repair_strategy",
+        "occurrence_locations",
         "history"
-      ]
+      ],
+      "properties": {
+        "issue_id": {"type": "string", "minLength": 1},
+        "dedup_key": {"type": "string", "minLength": 1},
+        "pattern_key": {"type": "string", "pattern": "^PATTERN-[A-Fa-f0-9]{24}$"},
+        "error_code": {"type": "string", "minLength": 1},
+        "category": {"type": "string", "minLength": 1},
+        "logical_file": {"type": "string", "minLength": 1},
+        "episode_id": {"type": "string", "minLength": 1},
+        "issue_type": {"type": "string", "minLength": 1},
+        "field_class": {"type": "string", "minLength": 1},
+        "normalized_root_cause": {"type": "string", "minLength": 1},
+        "status": {"enum": ["open", "resolved"]},
+        "open_scope_keys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "recurrence_state": {
+          "enum": [
+            "first_occurrence",
+            "consecutive",
+            "recurred_in_parallel_scope",
+            "recurred_after_resolution",
+            "reobserved",
+            "repeated_two_rounds",
+            "systemic_three_rounds",
+            "systemic_same_draft",
+            "cross_batch_recurrence"
+          ]
+        },
+        "occurrence_count": {"type": "integer", "minimum": 1},
+        "observation_count": {"type": "integer", "minimum": 1},
+        "pattern_occurrence_count": {"type": "integer", "minimum": 1},
+        "pattern_observation_count": {"type": "integer", "minimum": 1},
+        "distinct_event_count": {"type": "integer", "minimum": 1},
+        "distinct_scope_count": {"type": "integer", "minimum": 1},
+        "consecutive_rounds": {"type": "integer", "minimum": 0},
+        "max_consecutive_rounds": {"type": "integer", "minimum": 1},
+        "introduced_by_repair_count": {"type": "integer", "minimum": 0},
+        "first_seen_at": {"type": "string", "minLength": 1},
+        "last_seen_at": {"type": "string", "minLength": 1},
+        "root_cause_gate": {"enum": ["not_triggered", "recorded", "required"]},
+        "repair_strategy": {
+          "enum": [
+            "local_repair",
+            "root_cause_repair_required",
+            "upstream_rebuild_required"
+          ]
+        },
+        "occurrence_locations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "event_id",
+              "scope_key",
+              "episode_id",
+              "file_name",
+              "source_version",
+              "shot_ids",
+              "field"
+            ],
+            "properties": {
+              "event_id": {"type": "string", "minLength": 1},
+              "scope_key": {"type": "string", "minLength": 1},
+              "episode_id": {"type": "string", "minLength": 1},
+              "file_name": {"type": "string", "minLength": 1},
+              "source_version": {"type": "string", "minLength": 1},
+              "shot_ids": {"type": "array", "items": {"type": "string"}},
+              "field": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "history": {"type": "array", "minItems": 1}
+      }
     },
     "scope_state": {
       "type": "object",

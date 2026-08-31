@@ -261,13 +261,13 @@ class V051ServiceGuardTests(unittest.TestCase):
                 self._assert_no_publication_side_effects(project_id)
 
                 # A rejected attempt cannot consume a storyboard version.
-                retry_id, retry_session = self._begin_production(
-                    project_id, f"{label}-retry"
-                )
+                # A failed draft scope must be corrected through the same
+                # work order; opening a new batch would bypass the learned
+                # prevention profile and is intentionally blocked in v0.5.5.
                 committed = self._commit(
                     project_id,
-                    retry_id,
-                    retry_session,
+                    work_order_id,
+                    session_id,
                     valid_storyboard(),
                     f"{label}-retry",
                 )

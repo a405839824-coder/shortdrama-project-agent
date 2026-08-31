@@ -12,6 +12,7 @@ from shortdrama_mcp.config import Settings
 from shortdrama_mcp.delta import ensure_shot_uids, merge_storyboard_delta
 from shortdrama_mcp.models import MAX_DELTA_ITEMS, StoryboardDeltaRequestInput
 
+from semantic_audit_helpers import inject_semantic_audit
 from test_v040_architecture import three_shot_storyboard
 
 
@@ -278,6 +279,18 @@ class DeltaProtectedScopeTests(unittest.IsolatedAsyncioTestCase):
                 "file_name": "字段保护基线.xlsx",
             },
         )
+        audit_arguments = inject_semantic_audit(
+            self.service,
+            self.settings,
+            "audit_storyboard",
+            {
+                "project_id": project_id,
+                "artifact_id": committed["artifact_id"],
+                "handoff_artifact_id": committed["data"]["handoff"]["handoff_id"],
+            },
+        )
+        audited = await self.call("audit_storyboard", audit_arguments)
+        self.assertEqual(audited["status"], "pass")
         change_order = await begin("storyboard_change", ["EP02"], protected_scope)
         read = await self.call(
             "read_project_artifact",

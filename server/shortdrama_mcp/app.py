@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
@@ -8,7 +9,7 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from . import __version__
 from .auth import JwtTokenVerifier, request_namespace, security_schemes
@@ -132,13 +133,82 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     @server.tool(
         name="get_agent_status",
         title="检查分镜 Agent 状态",
-        description="在新聊天、继续旧项目或执行任务前调用；检查R10运行时、项目状态和跨窗口问题台账。",
-        annotations=_annotations(read_only=True),
+        description=(
+            "在新聊天、继续旧项目或执行任务前调用；检查R10运行时、项目状态和跨窗口问题台账。"
+            "full_self_test=true会执行完整自检并签发、持久化运行时测试证书，因此本工具不是只读工具。"
+        ),
+        annotations=_annotations(read_only=False),
         meta=meta("正在检查 Agent…", "Agent 状态已就绪"),
         structured_output=True,
     )
     async def get_agent_status(project_id: str | None = None, full_self_test: bool = False) -> ToolResponse:
         return service.agent_status(request_namespace(settings), project_id, full_self_test)
+
+    @server.tool(
+        name="migrate_project_state",
+        title="迁移分镜项目控制状态",
+        description=(
+            "对旧项目Hub与问题台账执行可预演、签名快照、双哈希CAS和幂等恢复的0.5.5迁移。"
+            "只更新控制状态与问题模式索引；绝不改写历史分镜、对白、canonical、XLSX、handoff或审计证书。"
+        ),
+        annotations=_annotations(read_only=False),
+        meta=meta("正在核对项目迁移…", "项目迁移已处理"),
+        structured_output=True,
+    )
+    async def migrate_project_state(
+        project_id: str,
+        work_order_id: str,
+        ctx: Context,
+        action: Literal["plan", "execute", "rollback"] = "plan",
+        expected_current_version: str | None = None,
+        target_version: str = "0.5.5",
+        migration_id: str | None = None,
+    ) -> ToolResponse:
+        return service.migrate_project_state(
+            request_namespace(settings),
+            project_id=project_id,
+            work_order_id=work_order_id,
+            action=action,
+            target_version=target_version,
+            expected_current_version=expected_current_version,
+            migration_id=migration_id,
+            request_session_id=_window_session_id(ctx),
+        )
+
+    @server.tool(
+        name="query_project_issues",
+        title="查询问题清单与主动防错画像",
+        description=(
+            "只读查询项目问题、跨批次复发模式和生成前必须扫描的主动防错画像；"
+            "镜号、集数和文件名只作为发生位置，不再拆散同一模板根因。"
+        ),
+        annotations=_annotations(read_only=True),
+        meta=meta("正在读取问题清单…", "问题清单已就绪"),
+        structured_output=True,
+    )
+    async def query_project_issues(
+        project_id: str,
+        status: Literal["open", "resolved", "all"] = "all",
+        error_codes: list[str] | None = None,
+        episode_ids: list[str] | None = None,
+        recurrence_states: list[str] | None = None,
+        minimum_occurrence_count: Annotated[int, Field(ge=1)] = 1,
+        include_history: bool = False,
+        limit: Annotated[int, Field(ge=1, le=200)] = 50,
+        cursor: Annotated[int, Field(ge=0)] = 0,
+    ) -> ToolResponse:
+        return service.query_project_issues(
+            request_namespace(settings),
+            project_id=project_id,
+            status=status,
+            error_codes=error_codes,
+            episode_ids=episode_ids,
+            recurrence_states=recurrence_states,
+            minimum_occurrence_count=minimum_occurrence_count,
+            include_history=include_history,
+            limit=limit,
+            cursor=cursor,
+        )
 
     @server.tool(
         name="mark_performance_stage",
@@ -443,6 +513,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         source_version: str,
         operations: list[ChangeOperationInput],
         authorization: Literal["read_only", "plan_only", "explicit_execute", "pending"],
+        ctx: Context,
     ) -> ToolResponse:
         return service.plan_change(
             request_namespace(settings),
@@ -453,6 +524,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             source_version=source_version,
             operations=[item.model_dump() for item in operations],
             authorization=authorization,
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.tool(
@@ -490,6 +562,37 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         )
 
     @server.tool(
+        name="preflight_storyboard_draft",
+        title="分场或整批初稿预检",
+        description=(
+            "在正式提交前对scene、episode或full候选执行与提交一致的compact和R10-SPC-1门禁，"
+            "计算唯一问题镜正确率、直接可用率、单集下限、已知复发和系统性重复。失败候选会写入"
+            "生产学习记录，但绝不生成artifact、版本、XLSX、证书或handoff；只有full零问题预检"
+            "可签发正式提交绑定。该结果不是独立审计结论。"
+        ),
+        annotations=_annotations(read_only=False),
+        meta=meta("正在预检初稿…", "初稿预检已完成"),
+        structured_output=True,
+    )
+    async def preflight_storyboard_draft(
+        project_id: str,
+        work_order_id: str,
+        storyboard: dict[str, Any],
+        scope_kind: Literal["scene", "episode", "full"],
+        scope_id: str,
+        ctx: Context,
+    ) -> ToolResponse:
+        return service.preflight_storyboard_draft(
+            request_namespace(settings),
+            project_id=project_id,
+            work_order_id=work_order_id,
+            storyboard=storyboard,
+            scope_kind=scope_kind,
+            scope_id=scope_id,
+            request_session_id=_window_session_id(ctx),
+        )
+
+    @server.tool(
         name="commit_storyboard",
         title="提交并生产预检分镜",
         description=(
@@ -511,6 +614,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         file_name: str = "正式分镜.xlsx",
         source_artifact_id: str | None = None,
         repair_package_id: str | None = None,
+        draft_preflight_id: str | None = None,
     ) -> ToolResponse:
         return service.commit_storyboard(
             request_namespace(settings),
@@ -520,6 +624,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             file_name=file_name,
             source_artifact_id=source_artifact_id,
             repair_package_id=repair_package_id,
+            draft_preflight_id=draft_preflight_id,
             request_session_id=_window_session_id(ctx),
         )
 
@@ -678,6 +783,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         residual_issue_count: int,
         introduced_issue_count: int,
         blockers: list[str],
+        ctx: Context,
     ) -> ToolResponse:
         return service.complete_validation(
             request_namespace(settings),
@@ -687,34 +793,39 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             residual_issue_count=residual_issue_count,
             introduced_issue_count=introduced_issue_count,
             blockers=blockers,
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.tool(
         name="record_capability_gap",
         title="登记缺失能力",
-        description="当前工具、权限或依赖无法真实完成用户请求时调用；记录安全替代、实现方案与测试门禁，禁止假装已执行。",
+        description="当前工具、权限或依赖无法真实完成用户请求时调用；必须使用当前窗口绑定的capability_gap方案工单，记录安全替代、实现方案与测试门禁，禁止假装已执行。",
         annotations=_annotations(read_only=False),
         meta=meta("正在登记能力缺口…", "能力缺口已记录"),
         structured_output=True,
     )
     async def record_capability_gap(
         project_id: str,
+        work_order_id: str,
         request: str,
         missing_dependency: str,
         risk: str,
         safe_fallback: str,
         proposed_implementation: str,
         required_tests: list[str],
+        ctx: Context,
     ) -> ToolResponse:
         return service.record_capability_gap(
             request_namespace(settings),
             project_id=project_id,
+            work_order_id=work_order_id,
             request=request,
             missing_dependency=missing_dependency,
             risk=risk,
             safe_fallback=safe_fallback,
             proposed_implementation=proposed_implementation,
             required_tests=required_tests,
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.tool(
@@ -730,6 +841,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         work_order_id: str,
         decision: Literal["approve", "reopen"],
         signer: str,
+        ctx: Context,
     ) -> ToolResponse:
         return service.signoff_task(
             request_namespace(settings),
@@ -737,6 +849,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             work_order_id=work_order_id,
             decision=decision,
             signer=signer,
+            request_session_id=_window_session_id(ctx),
         )
 
     @server.custom_route("/health", methods=["GET"], include_in_schema=False)
@@ -751,17 +864,41 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         )
 
     @server.custom_route("/files/{token}/{filename}", methods=["GET"], include_in_schema=False)
-    async def download(request: Request) -> FileResponse | PlainTextResponse:
+    async def download(request: Request) -> StreamingResponse | PlainTextResponse:
         try:
-            record, path = service.store.resolve_download_token(request.path_params["token"])
+            record, stream, size = service.store.open_verified_download(
+                request.path_params["token"]
+            )
         except ValueError as exc:
             return PlainTextResponse(str(exc), status_code=404)
-        return FileResponse(
-            path,
-            filename=record["file_name"],
-            media_type="application/octet-stream",
-            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
-        )
+
+        def verified_chunks():
+            try:
+                while True:
+                    chunk = stream.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                stream.close()
+
+        try:
+            return StreamingResponse(
+                verified_chunks(),
+                media_type="application/octet-stream",
+                headers={
+                    "Cache-Control": "private, no-store",
+                    "Content-Length": str(size),
+                    "Content-Disposition": (
+                        "attachment; filename*=utf-8''"
+                        + quote(str(record["file_name"]))
+                    ),
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+        except (KeyError, TypeError, ValueError):
+            stream.close()
+            return PlainTextResponse("artifact is unavailable", status_code=404)
 
     @server.custom_route("/", methods=["GET"], include_in_schema=False)
     async def index(_request: Request) -> JSONResponse:

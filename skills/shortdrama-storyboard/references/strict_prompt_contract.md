@@ -159,3 +159,18 @@ THG 是与 G0–G13 预防流程分开的十二项单镜/导出阻断门，避�
 | THG-12 | 独立审计签发前只能写 `PENDING_AUDIT` / `未签发结论`；问题计数和 `audit_trace_id` 不得预填0或 PASS | `E-ARCHIVE-001` |
 
 THG-11 的内容哈希不包含审计 overlay；独立审计完成后由服务端生成不可变的签名审计 overlay 新工件和后继工作簿，不改写 canonical，也不就地回填原生产 XLSX。
+
+## 11. 0.5.5 草稿预检与发布门
+
+本契约从“导出前检查”前移为“逐场景生成门禁”。正式生产必须按以下顺序执行：
+
+1. `get_agent_status`；若返回 `migration_required`，先由授权的规则/版本工单计划并执行 `migrate_project_state`，重新取得可执行状态。
+2. `query_project_issues` 读取跨批次问题模式和活动预防画像，并把画像哈希绑定到当前工单。
+3. 每完成一个场景，立即调用 `preflight_storyboard_draft(scope_kind="scene")`。失败时只记录草稿问题，不创建 artifact、版本、XLSX、正式母版/GPT投影、successor 或 handoff；修复并重检后才能接受后续场景。
+4. 全部场景干净后，对完整 canonical 调用 `preflight_storyboard_draft(scope_kind="full")`，取得与项目、工单、canonical、规则、验证器、生产会话和预防画像绑定的签名 `draft_preflight_id`。
+5. `commit_storyboard` 必须携带该证书；任一指纹变化、范围不是 full、证书非 commit-ready 或被跨工单/跨会话复用时都阻断。
+6. commit 后仍必须交由独立只读 authority 完成八层审计；生产预检和草稿预检都不能签发最终结论。
+
+第一版完整草稿的质量结果不可被后续修补覆盖。A级要求：总体正确率≥98%、直接可用率≥98%、每集正确率≥96%、新增局部问题率≤2%，并且硬错=0、重大问题=0、已知问题复发=0、系统性重复=0。该阈值用于衡量生成器是否已把错误前置预防，不代表允许带问题交付；全量预检只有在未解决问题为0时才可签发 commit-ready 证书。
+
+最终独立审计要求八层100%通过，阻塞、残留、修改新增问题均为0。职责不可混用：生产负责一次性创作 canonical 并在提交前修复；程序负责确定性投影、门禁、哈希/证书绑定和失败草稿记账；独立审计负责查漏并签发结论，不负责重写镜头或清理已知模板错误。
