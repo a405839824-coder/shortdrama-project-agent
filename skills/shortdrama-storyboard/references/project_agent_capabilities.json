@@ -3,7 +3,7 @@
   "runtime_version": "V16.3-148-R10-StableRuntime",
   "workflow_revision": "R10-PG1",
   "compact_master_contract": {
-    "plugin_version": "0.5.5",
+    "plugin_version": "0.5.6",
     "schema_version": "R10.1",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
@@ -273,6 +273,14 @@
       "condition": "旧项目控制状态且用户已明确授权迁移",
       "output": "dry-run、签名快照、双哈希CAS、幂等恢复或安全回滚；历史分镜与审计证据只读",
       "approval_policy": "explicit_execute_plus_full_regression_certificate"
+    },
+    {
+      "operation": "storyboard_handoff_recovery",
+      "group": "项目管理",
+      "status": "guarded",
+      "condition": "已登记能力缺口、production显式执行工单、精确handoff集合、有效全量回归证书及双阶段确认",
+      "output": "逐条签名日志与CAS恢复；旧prepared交接保留并标记superseded，新交接按当前15项完整指纹重新签发且仍为PENDING_AUDIT",
+      "approval_policy": "plan_hash_plus_exact_confirmation_plus_independent_audit"
     },
     {
       "operation": "issue_query",

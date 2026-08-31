@@ -132,6 +132,8 @@ ARTIFACT_OPERATION_BINDINGS: dict[str, set[str]] = {
 
 SOURCE_INTAKE_OPERATIONS = {"project_intake", "source_lock", "chapter_intake"}
 WRITE_READY_WORK_ORDER_STATUSES = {"approved", "scope_locked", "executing", "failed_current"}
+HANDOFF_RECOVERY_CONFIRMATION = "SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT"
+MAX_HANDOFF_RECOVERY_ITEMS = 32
 
 AUDIT_CLASS_PRODUCTION_PREFLIGHT = "production_preflight"
 AUDIT_CLASS_INDEPENDENT = "independent_audit"
@@ -3814,6 +3816,841 @@ class StoryboardService:
             data={"migration": record, "migration_report": report},
         )
 
+    @staticmethod
+    def _handoff_record_projection(value: dict[str, Any]) -> dict[str, Any]:
+        """Drop project-record envelope fields before embedding in the hub."""
+
+        return {
+            key: copy.deepcopy(item)
+            for key, item in value.items()
+            if key not in {"record_id", "project_id", "integrity_hmac"}
+        }
+
+    def _assert_handoff_recovery_authority(
+        self,
+        namespace: str,
+        work_order: dict[str, Any],
+        *,
+        gap_id: str,
+        handoff_ids: list[str],
+        request_session_id: str | None,
+    ) -> None:
+        self._assert_project_migration_authority(
+            namespace, work_order, request_session_id
+        )
+        targets = {str(value) for value in work_order.get("targets", [])}
+        required = {gap_id, *handoff_ids}
+        if targets != required:
+            missing = sorted(required - targets)
+            extra = sorted(targets - required)
+            raise ValueError(
+                "handoff_recovery_scope_mismatch: work order must target the "
+                f"exact gap and handoffs; missing {missing}; extra {extra}"
+            )
+
+    @staticmethod
+    def _require_capability_gap(hub: dict[str, Any], gap_id: str) -> dict[str, Any]:
+        gap = next(
+            (
+                row
+                for row in hub.get("capability_gaps", [])
+                if isinstance(row, dict) and row.get("gap_id") == gap_id
+            ),
+            None,
+        )
+        if gap is None:
+            raise ValueError(
+                "handoff_recovery_gap_required: gap_id is not registered in this project"
+            )
+        return gap
+
+    def _prepare_handoff_recovery_item(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        hub: dict[str, Any],
+        work_order_id: str,
+        gap_id: str,
+        handoff_id: str,
+        runtime_certificate: dict[str, Any],
+    ) -> dict[str, Any]:
+        handoff = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="handoffs",
+            record_id=handoff_id,
+        )
+        if not self.store.project_record_is_signed(handoff):
+            raise ValueError(
+                f"handoff_reissue_required: {handoff_id} is unsigned"
+            )
+        self._validate_schema_record(
+            self._project_schema, "handoff_manifest", handoff
+        )
+        if handoff.get("status") != "prepared":
+            raise ValueError(
+                f"handoff_recovery_state_conflict: {handoff_id} status is "
+                f"{handoff.get('status')!r}, expected 'prepared'"
+            )
+        if (
+            handoff.get("handoff_type") != "production_to_audit"
+            or handoff.get("from_window_role") != "production"
+            or handoff.get("to_window_role") != "independent_audit"
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} is not a production_to_audit handoff"
+            )
+        if handoff.get("claim_authority_work_order_id") or handoff.get(
+            "claimed_by_work_order_id"
+        ):
+            raise ValueError(
+                f"handoff_recovery_state_conflict: {handoff_id} has audit claim authority"
+            )
+        if not self.store.handoff_is_published(
+            namespace, project_id, handoff
+        ):
+            raise ValueError(
+                f"handoff_recovery_state_conflict: {handoff_id} is not committed"
+            )
+        if not self._valid_cache_identity(
+            handoff, AUDIT_CLASS_PRODUCTION_PREFLIGHT
+        ):
+            raise ValueError(
+                f"handoff_recovery_identity_invalid: {handoff_id} has an invalid original cache identity"
+            )
+        if (
+            handoff.get("production_preflight_status")
+            != PRODUCTION_PREFLIGHT_PASS
+            or int(handoff.get("production_preflight_issue_count") or 0) != 0
+            or handoff.get("independent_audit_status") != "PENDING_AUDIT"
+        ):
+            raise ValueError(
+                f"handoff_recovery_evidence_invalid: {handoff_id} is not a clean pending production preflight"
+            )
+
+        original_work_order = _find_work_order(
+            hub, str(handoff.get("work_order_id") or "")
+        )
+        if original_work_order.get("server_actor_role") != "production":
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} producer authority is invalid"
+            )
+        artifact_id = str(handoff.get("storyboard_artifact_id") or "")
+        canonical_artifact_id = str(
+            handoff.get("canonical_artifact_id") or ""
+        )
+        storyboard, artifact_record = self._storyboard_from_artifact(
+            namespace,
+            project_id,
+            artifact_id,
+            persist_recovered_canonical=False,
+            require_bound_projection=True,
+        )
+        artifact_metadata = artifact_record.get("metadata")
+        if not isinstance(artifact_metadata, dict):
+            artifact_metadata = {}
+        if str(artifact_metadata.get("canonical_json_artifact_id") or "") != (
+            canonical_artifact_id
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} canonical sidecar differs"
+            )
+        canonical_record, _canonical_path = self.store.get_artifact(
+            namespace, project_id, canonical_artifact_id
+        )
+        canonical_hash = canonical_storyboard_sha256(storyboard)
+        if (
+            str(handoff.get("canonical_sha256") or "") != canonical_hash
+            or str(canonical_record.get("metadata", {}).get("canonical_sha256") or canonical_hash)
+            != canonical_hash
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} canonical hash differs"
+            )
+
+        source_fingerprint = str(
+            artifact_metadata.get("source_fingerprint")
+            or handoff.get("source_fingerprint")
+            or ""
+        )
+        boundary_hash = self._boundary_hash(storyboard)
+        if (
+            not source_fingerprint
+            or str(handoff.get("source_fingerprint") or "")
+            != source_fingerprint
+            or str(handoff.get("boundary_hash") or "") != boundary_hash
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} source or boundary differs"
+            )
+
+        old_certificate = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=str(handoff.get("certificate_id") or ""),
+        )
+        if (
+            not self.store.project_record_is_signed(old_certificate)
+            or old_certificate.get("certificate_type")
+            != AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            or old_certificate.get("artifact_id") != artifact_id
+            or old_certificate.get("canonical_artifact_id")
+            != canonical_artifact_id
+            or old_certificate.get("canonical_sha256") != canonical_hash
+            or old_certificate.get("preflight_status")
+            != PRODUCTION_PREFLIGHT_PASS
+            or int(old_certificate.get("preflight_issue_count") or 0) != 0
+            or old_certificate.get("independent_audit_status")
+            != "PENDING_AUDIT"
+        ):
+            raise ValueError(
+                f"handoff_recovery_certificate_invalid: {handoff_id} production preflight certificate is invalid"
+            )
+
+        report = validate_storyboard.validate_project(storyboard, mode="audit")
+        if report.get("issues"):
+            raise ValueError(
+                f"handoff_recovery_validation_failed: {handoff_id} has "
+                f"{len(report.get('issues', []))} current validation issue(s)"
+            )
+        current_fingerprints = self._fingerprint_bundle(
+            storyboard,
+            artifact_record,
+            canonical_hash=canonical_hash,
+            source_fingerprint=source_fingerprint,
+            boundary_hash=boundary_hash,
+        )
+        old_fingerprints = handoff.get("fingerprints")
+        if not isinstance(old_fingerprints, dict):
+            raise ValueError(
+                f"handoff_recovery_identity_invalid: {handoff_id} has no complete fingerprints"
+            )
+        stale_components = sorted(
+            key
+            for key, value in current_fingerprints.items()
+            if old_fingerprints.get(key) != value
+        )
+        if not stale_components:
+            raise ValueError(
+                f"handoff_recovery_not_required: {handoff_id} already matches the current complete fingerprint"
+            )
+        cache_components = self._audit_cache_components(
+            canonical_hash=canonical_hash,
+            source_fingerprint=source_fingerprint,
+            boundary_hash=boundary_hash,
+            audit_class=AUDIT_CLASS_PRODUCTION_PREFLIGHT,
+            artifact_fingerprint=str(artifact_record.get("fingerprint") or ""),
+            storyboard=storyboard,
+            scope={
+                "targets": original_work_order.get("targets", []),
+                "protected_scope": original_work_order.get(
+                    "protected_scope", []
+                ),
+            },
+            runtime_test_certificate_id=str(
+                runtime_certificate["certificate_id"]
+            ),
+        )
+        old_record_sha256 = self.store.project_state_sha256(handoff)
+        current_fingerprints_sha256 = sha256_bytes(
+            _stable_json_bytes(current_fingerprints)
+        )
+        recovery_key = sha256_bytes(
+            _stable_json_bytes(
+                {
+                    "spec": "controlled-storyboard-handoff-recovery-v1",
+                    "project_id": project_id,
+                    "work_order_id": work_order_id,
+                    "gap_id": gap_id,
+                    "old_handoff_id": handoff_id,
+                    "old_record_sha256": old_record_sha256,
+                    "current_fingerprints_sha256": current_fingerprints_sha256,
+                    "runtime_test_certificate_id": runtime_certificate[
+                        "certificate_id"
+                    ],
+                }
+            )
+        )
+        public = {
+            "old_handoff_id": handoff_id,
+            "new_handoff_id": f"HND-{sha256_bytes((recovery_key + ':handoff').encode())[:20]}",
+            "new_certificate_id": f"CERT-{sha256_bytes((recovery_key + ':certificate').encode())[:20]}",
+            "recovery_id": f"REC-{recovery_key[:20]}",
+            "recovery_key": recovery_key,
+            "artifact_id": artifact_id,
+            "canonical_artifact_id": canonical_artifact_id,
+            "canonical_sha256": canonical_hash,
+            "old_record_sha256": old_record_sha256,
+            "old_fingerprints_sha256": sha256_bytes(
+                _stable_json_bytes(old_fingerprints)
+            ),
+            "current_fingerprints_sha256": current_fingerprints_sha256,
+            "stale_components": stale_components,
+            "cache_status": "miss",
+            "cache_reason": "complete fingerprint changed; prior handoff conclusion is not reusable",
+            "independent_audit_status": "PENDING_AUDIT",
+        }
+        return {
+            "public": public,
+            "handoff": handoff,
+            "storyboard": storyboard,
+            "artifact_record": artifact_record,
+            "report": report,
+            "current_fingerprints": current_fingerprints,
+            "cache_components": cache_components,
+            "original_work_order": original_work_order,
+        }
+
+    @staticmethod
+    def _handoff_recovery_plan_payload(
+        *,
+        project_id: str,
+        work_order_id: str,
+        gap_id: str,
+        runtime_test_certificate_id: str,
+        items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "spec": "controlled-storyboard-handoff-recovery-v1",
+            "project_id": project_id,
+            "work_order_id": work_order_id,
+            "gap_id": gap_id,
+            "runtime_test_certificate_id": runtime_test_certificate_id,
+            "items": copy.deepcopy(items),
+        }
+
+    def _execute_handoff_recovery_item(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        work_order_id: str,
+        gap_id: str,
+        plan_sha256: str,
+        trace_id: str,
+        prepared: dict[str, Any],
+        request_session_id: str | None,
+    ) -> dict[str, Any]:
+        public = prepared["public"]
+        old_handoff = prepared["handoff"]
+        certificate = self._persist_audit_certificate(
+            namespace,
+            project_id,
+            artifact_id=str(public["artifact_id"]),
+            canonical_artifact_id=str(public["canonical_artifact_id"]),
+            cache_components=prepared["cache_components"],
+            report=prepared["report"],
+            work_order_id=str(old_handoff["work_order_id"]),
+            certificate_id=str(public["new_certificate_id"]),
+        )
+        now = utc_stamp()
+        old_projection = self._handoff_record_projection(old_handoff)
+        old_after = copy.deepcopy(old_projection)
+        old_after.update(
+            {
+                "status": "superseded",
+                "superseded_at": now,
+                "superseded_by_handoff_id": public["new_handoff_id"],
+                "superseded_reason": "complete fingerprint invalidated",
+                "recovery_id": public["recovery_id"],
+                "recovery_gap_id": gap_id,
+                "recovery_work_order_id": work_order_id,
+                "recovery_trace_id": trace_id,
+                "recovery_plan_sha256": plan_sha256,
+                "recovery_plan_item": copy.deepcopy(public),
+                "history_preserved": True,
+            }
+        )
+        new_after = copy.deepcopy(old_projection)
+        for key in (
+            "claim_authority_work_order_id",
+            "claimed_by_work_order_id",
+            "claim_token",
+            "claim_generation",
+            "claim_epoch_seconds",
+            "claim_lease_seconds",
+            "claim_lease_expires_at",
+            "claim_lease_expires_epoch_seconds",
+            "consumed_by_work_order_id",
+            "consumed_at",
+            "audit_certificate_id",
+            "audit_certificate_ids",
+            "reaudit_count",
+            "reaudited_at",
+        ):
+            new_after.pop(key, None)
+        new_after.update(
+            {
+                "handoff_id": public["new_handoff_id"],
+                "created_at": now,
+                "status": "prepared",
+                "fingerprints": copy.deepcopy(
+                    prepared["current_fingerprints"]
+                ),
+                "stage_trace_id": trace_id,
+                "certificate_id": certificate["certificate_id"],
+                "cache_key": certificate["cache_key"],
+                "cache_components": copy.deepcopy(
+                    certificate["cache_components"]
+                ),
+                "ruleset_version": certificate["ruleset_version"],
+                "validator_version": certificate["validator_version"],
+                "production_preflight_status": certificate[
+                    "preflight_status"
+                ],
+                "production_preflight_issue_count": certificate[
+                    "preflight_issue_count"
+                ],
+                "independent_audit_status": "PENDING_AUDIT",
+                "checked_shot_count": certificate["checked_shot_count"],
+                "supersedes_handoff_id": public["old_handoff_id"],
+                "recovery_id": public["recovery_id"],
+                "recovery_gap_id": gap_id,
+                "recovery_work_order_id": work_order_id,
+                "recovery_trace_id": trace_id,
+                "recovery_plan_sha256": plan_sha256,
+                "recovery_plan_item": copy.deepcopy(public),
+                "recovery_cache_status": "invalidated_and_reissued",
+                "history_preserved": True,
+            }
+        )
+        recovery_work_order = _find_work_order(
+            self.store.load_hub(namespace, project_id), work_order_id
+        )
+        new_after.update(
+            {
+                "from_window_binding_id": recovery_work_order.get(
+                    "server_window_binding_id"
+                ),
+                "from_actor_binding_id": recovery_work_order.get(
+                    "server_actor_binding_id"
+                ),
+                "from_session_fingerprint": recovery_work_order.get(
+                    "transport_session_fingerprint"
+                ),
+            }
+        )
+        new_after["cache_manifest"] = [
+            {
+                "cache_class": "canonical_parse",
+                "cache_key": certificate["cache_key"],
+                "status": "miss",
+                "reason": "complete fingerprint changed; production preflight revalidated",
+                "dependency_fingerprints": copy.deepcopy(
+                    prepared["current_fingerprints"]
+                ),
+            }
+        ]
+        objective = new_after.get("objective_evidence")
+        if isinstance(objective, dict):
+            source_manifest = objective.get("source_manifest")
+            if isinstance(source_manifest, dict):
+                source_manifest["fingerprint"] = prepared[
+                    "current_fingerprints"
+                ]["source_bytes"]
+            workbook_manifest = objective.get("workbook_manifest")
+            if isinstance(workbook_manifest, dict):
+                workbook_manifest["raw_sha256"] = prepared[
+                    "current_fingerprints"
+                ]["artifact_raw"]
+            objective["canonical_ref"] = public["canonical_artifact_id"]
+        producer_claims = new_after.get("producer_claims")
+        if isinstance(producer_claims, dict):
+            producer_claims["preflight_findings"] = copy.deepcopy(
+                prepared["report"].get("issues", [])
+            )
+        self._validate_schema_record(
+            self._project_schema, "handoff_manifest", old_after
+        )
+        self._validate_schema_record(
+            self._project_schema, "handoff_manifest", new_after
+        )
+
+        hub_before = self.store.load_hub(namespace, project_id)
+        live_recovery_order = _find_work_order(hub_before, work_order_id)
+        self._assert_project_migration_authority(
+            namespace,
+            live_recovery_order,
+            request_session_id,
+        )
+        self._require_capability_gap(hub_before, gap_id)
+        current_old = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="handoffs",
+            record_id=str(public["old_handoff_id"]),
+        )
+        if self.store.project_state_sha256(current_old) != public[
+            "old_record_sha256"
+        ]:
+            raise ValueError(
+                "handoff_recovery_plan_stale: old handoff changed after plan"
+            )
+        hub_after = copy.deepcopy(hub_before)
+        matches = [
+            index
+            for index, row in enumerate(hub_after.setdefault("handoffs", []))
+            if isinstance(row, dict)
+            and row.get("handoff_id") == public["old_handoff_id"]
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "handoff_recovery_projection_invalid: old handoff must occur exactly once in hub"
+            )
+        if any(
+            isinstance(row, dict)
+            and row.get("handoff_id") == public["new_handoff_id"]
+            for row in hub_after["handoffs"]
+        ):
+            raise ValueError(
+                "handoff_recovery_projection_invalid: successor already exists in hub"
+            )
+        hub_after["handoffs"][matches[0]] = copy.deepcopy(old_after)
+        hub_after["handoffs"].append(copy.deepcopy(new_after))
+        hub_after["updated_at"] = now
+        journal = self.store.commit_handoff_recovery(
+            namespace,
+            project_id,
+            recovery_id=str(public["recovery_id"]),
+            recovery_key=str(public["recovery_key"]),
+            work_order_id=work_order_id,
+            gap_id=gap_id,
+            trace_id=trace_id,
+            old_handoff_id=str(public["old_handoff_id"]),
+            new_handoff_id=str(public["new_handoff_id"]),
+            old_before=current_old,
+            old_after=old_after,
+            new_after=new_after,
+            hub_before=hub_before,
+            hub_after=hub_after,
+        )
+        successor = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="handoffs",
+            record_id=str(public["new_handoff_id"]),
+        )
+        return {
+            "old_handoff_id": public["old_handoff_id"],
+            "new_handoff_id": public["new_handoff_id"],
+            "recovery_id": public["recovery_id"],
+            "artifact_id": public["artifact_id"],
+            "canonical_artifact_id": public["canonical_artifact_id"],
+            "canonical_sha256": public["canonical_sha256"],
+            "certificate_id": successor["certificate_id"],
+            "old_status": "superseded",
+            "new_status": "prepared",
+            "cache_status": "miss",
+            "independent_audit_status": "PENDING_AUDIT",
+            "idempotent_replay": bool(journal.get("idempotent_replay", False)),
+        }
+
+    def _resume_handoff_recovery_item(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        old_handoff: dict[str, Any],
+        work_order_id: str,
+        gap_id: str,
+        plan_sha256: str,
+        trace_id: str,
+        request_session_id: str | None,
+    ) -> dict[str, Any]:
+        if (
+            old_handoff.get("status") != "superseded"
+            or old_handoff.get("recovery_plan_sha256") != plan_sha256
+            or old_handoff.get("recovery_work_order_id") != work_order_id
+            or old_handoff.get("recovery_gap_id") != gap_id
+            or old_handoff.get("recovery_trace_id") != trace_id
+        ):
+            raise ValueError(
+                "handoff_recovery_state_conflict: superseded handoff belongs to another recovery"
+            )
+        recovery_id = str(old_handoff.get("recovery_id") or "")
+        journal = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="handoff_recoveries",
+            record_id=recovery_id,
+        )
+        hub = self.store.load_hub(namespace, project_id)
+        work_order = _find_work_order(hub, work_order_id)
+        self._assert_project_migration_authority(
+            namespace,
+            work_order,
+            request_session_id,
+        )
+        self.store.commit_handoff_recovery(
+            namespace,
+            project_id,
+            recovery_id=recovery_id,
+            recovery_key=str(journal["recovery_key"]),
+            work_order_id=work_order_id,
+            gap_id=gap_id,
+            trace_id=trace_id,
+            old_handoff_id=str(journal["old_handoff_id"]),
+            new_handoff_id=str(journal["new_handoff_id"]),
+            old_before=old_handoff,
+            old_after=dict(journal["old_after"]),
+            new_after=dict(journal["new_after"]),
+            hub_before=hub,
+            hub_after=dict(journal["hub_after"]),
+        )
+        successor = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="handoffs",
+            record_id=str(journal["new_handoff_id"]),
+        )
+        return {
+            "old_handoff_id": old_handoff["handoff_id"],
+            "new_handoff_id": successor["handoff_id"],
+            "recovery_id": recovery_id,
+            "artifact_id": successor["storyboard_artifact_id"],
+            "canonical_artifact_id": successor["canonical_artifact_id"],
+            "canonical_sha256": successor["canonical_sha256"],
+            "certificate_id": successor["certificate_id"],
+            "old_status": "superseded",
+            "new_status": "prepared",
+            "cache_status": "miss",
+            "independent_audit_status": "PENDING_AUDIT",
+            "idempotent_replay": True,
+        }
+
+    def recover_storyboard_handoff(
+        self,
+        namespace: str,
+        *,
+        project_id: str,
+        work_order_id: str,
+        gap_id: str,
+        handoff_ids: list[str],
+        action: str,
+        expected_plan_sha256: str | None,
+        confirmation: str | None,
+        request_session_id: str | None,
+    ) -> ToolResponse:
+        """Plan or execute a controlled stale production-handoff recovery."""
+
+        self._require_runtime()
+        if action not in {"plan", "execute"}:
+            raise ValueError("handoff recovery action must be plan or execute")
+        clean_ids = [str(value).strip() for value in handoff_ids]
+        if (
+            not clean_ids
+            or len(clean_ids) > MAX_HANDOFF_RECOVERY_ITEMS
+            or any(not value for value in clean_ids)
+            or len(set(clean_ids)) != len(clean_ids)
+        ):
+            raise ValueError(
+                f"handoff_ids must contain 1-{MAX_HANDOFF_RECOVERY_ITEMS} unique ids"
+            )
+        started_ns = time.perf_counter_ns()
+        hub = self.store.load_hub(namespace, project_id)
+        work_order = _find_work_order(hub, work_order_id)
+        self._assert_handoff_recovery_authority(
+            namespace,
+            work_order,
+            gap_id=gap_id,
+            handoff_ids=clean_ids,
+            request_session_id=request_session_id,
+        )
+        gap = self._require_capability_gap(hub, gap_id)
+        runtime_certificate = self._require_runtime_test_certificate(
+            namespace, project_id
+        )
+
+        prepared_items: dict[str, dict[str, Any]] = {}
+        public_items: list[dict[str, Any]] = []
+        for handoff_id in clean_ids:
+            current = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="handoffs",
+                record_id=handoff_id,
+            )
+            if current.get("status") == "superseded" and action == "execute":
+                plan_item = current.get("recovery_plan_item")
+                if not isinstance(plan_item, dict):
+                    raise ValueError(
+                        "handoff_recovery_state_conflict: superseded handoff has no recovery plan evidence"
+                    )
+                public_items.append(copy.deepcopy(plan_item))
+                prepared_items[handoff_id] = {"resume": current}
+                continue
+            prepared = self._prepare_handoff_recovery_item(
+                namespace,
+                project_id,
+                hub=hub,
+                work_order_id=work_order_id,
+                gap_id=gap_id,
+                handoff_id=handoff_id,
+                runtime_certificate=runtime_certificate,
+            )
+            prepared_items[handoff_id] = prepared
+            public_items.append(copy.deepcopy(prepared["public"]))
+
+        plan_payload = self._handoff_recovery_plan_payload(
+            project_id=project_id,
+            work_order_id=work_order_id,
+            gap_id=gap_id,
+            runtime_test_certificate_id=str(
+                runtime_certificate["certificate_id"]
+            ),
+            items=public_items,
+        )
+        plan_sha256 = sha256_bytes(_stable_json_bytes(plan_payload))
+        trace_id = f"TRC-{sha256_bytes((plan_sha256 + ':trace').encode())[:20]}"
+        plan = {
+            **plan_payload,
+            "plan_sha256": plan_sha256,
+            "trace_id": trace_id,
+            "item_count": len(public_items),
+            "history_records_deleted": 0,
+            "storyboard_artifacts_modified": 0,
+            "independent_audit_verdict_issued": False,
+            "expected_confirmation": HANDOFF_RECOVERY_CONFIRMATION,
+        }
+        if action == "plan":
+            return ToolResponse(
+                status="handoff_recovery_plan_ready",
+                summary=(
+                    f"交接恢复预演完成｜{len(public_items)}条｜零删除｜待确认执行"
+                ),
+                project_id=project_id,
+                work_order_id=work_order_id,
+                trace_id=trace_id,
+                data={
+                    "recovery_plan": plan,
+                    "gap": {
+                        "gap_id": gap_id,
+                        "status": gap.get("status"),
+                    },
+                },
+            )
+        if not expected_plan_sha256 or expected_plan_sha256 != plan_sha256:
+            raise ValueError(
+                "handoff_recovery_plan_stale: expected_plan_sha256 does not match the current exact plan"
+            )
+        if confirmation != HANDOFF_RECOVERY_CONFIRMATION:
+            raise ValueError(
+                "handoff_recovery_confirmation_required: exact confirmation literal is required"
+            )
+
+        mappings: list[dict[str, Any]] = []
+        for handoff_id in clean_ids:
+            prepared = prepared_items[handoff_id]
+            if "resume" in prepared:
+                mapping = self._resume_handoff_recovery_item(
+                    namespace,
+                    project_id,
+                    old_handoff=prepared["resume"],
+                    work_order_id=work_order_id,
+                    gap_id=gap_id,
+                    plan_sha256=plan_sha256,
+                    trace_id=trace_id,
+                    request_session_id=request_session_id,
+                )
+            else:
+                mapping = self._execute_handoff_recovery_item(
+                    namespace,
+                    project_id,
+                    work_order_id=work_order_id,
+                    gap_id=gap_id,
+                    plan_sha256=plan_sha256,
+                    trace_id=trace_id,
+                    prepared=prepared,
+                    request_session_id=request_session_id,
+                )
+            mappings.append(mapping)
+
+        trace_value = {
+            "telemetry_id": trace_id,
+            "trace_id": trace_id,
+            "operation": "recover_storyboard_handoff",
+            "measurement_scope": "server_only",
+            "duration_ms": round(
+                (time.perf_counter_ns() - started_ns) / 1_000_000, 3
+            ),
+            "cache_hit": False,
+            "cache_status": "miss",
+            "cache_reason": "complete fingerprints changed; all production preflights were revalidated",
+            "project_id": project_id,
+            "work_order_id": work_order_id,
+            "gap_id": gap_id,
+            "plan_sha256": plan_sha256,
+            "recovery_count": len(mappings),
+            "mappings": copy.deepcopy(mappings),
+            "history_records_deleted": 0,
+            "storyboard_artifacts_modified": 0,
+            "independent_audit_verdict_issued": False,
+            "independent_audit_status": "PENDING_AUDIT",
+        }
+        try:
+            existing_trace = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="telemetry",
+                record_id=trace_id,
+            )
+        except ValueError as exc:
+            if not str(exc).startswith("unknown telemetry record_id:"):
+                raise
+            existing_trace = None
+        if existing_trace is None:
+            trace_record = self.store.save_project_record(
+                namespace,
+                project_id,
+                kind="telemetry",
+                record_id=trace_id,
+                value=trace_value,
+            )
+        else:
+            def mapping_identity(rows: Any) -> list[dict[str, Any]]:
+                if not isinstance(rows, list):
+                    return []
+                return [
+                    {
+                        key: copy.deepcopy(value)
+                        for key, value in row.items()
+                        if key != "idempotent_replay"
+                    }
+                    for row in rows
+                    if isinstance(row, dict)
+                ]
+
+            if (
+                existing_trace.get("plan_sha256") != plan_sha256
+                or mapping_identity(existing_trace.get("mappings"))
+                != mapping_identity(mappings)
+            ):
+                raise ValueError("handoff_recovery_trace_conflict")
+            trace_record = existing_trace
+        return ToolResponse(
+            status="handoffs_recovered",
+            summary=(
+                f"交接恢复完成｜{len(mappings)}条旧记录已superseded｜"
+                f"{len(mappings)}条新记录待独立审计"
+            ),
+            project_id=project_id,
+            work_order_id=work_order_id,
+            trace_id=trace_id,
+            data={
+                "gap_id": gap_id,
+                "plan_sha256": plan_sha256,
+                "mappings": mappings,
+                "cache_status": "miss",
+                "history_records_deleted": 0,
+                "storyboard_artifacts_modified": 0,
+                "independent_audit_verdict_issued": False,
+                "independent_audit_status": "PENDING_AUDIT",
+                "trace": trace_record,
+            },
+        )
+
     def query_project_issues(
         self,
         namespace: str,
@@ -6127,6 +6964,14 @@ class StoryboardService:
             "return_to_audit_window_binding_id",
             "return_to_audit_actor_binding_id",
             "return_to_audit_session_fingerprint",
+            "supersedes_handoff_id",
+            "superseded_by_handoff_id",
+            "superseded_at",
+            "recovery_id",
+            "recovery_gap_id",
+            "recovery_work_order_id",
+            "recovery_trace_id",
+            "recovery_plan_sha256",
         }
         return {key: copy.deepcopy(value) for key, value in handoff.items() if key in keys}
 
@@ -6503,6 +7348,11 @@ class StoryboardService:
             if not self.store.project_record_is_signed(handoff):
                 raise ValueError("handoff_reissue_required: unsigned legacy handoff cannot be consumed")
             self._validate_schema_record(self._project_schema, "handoff_manifest", handoff)
+            if handoff.get("status") == "superseded":
+                raise ValueError(
+                    "handoff_superseded: use successor "
+                    f"{handoff.get('superseded_by_handoff_id') or 'unknown'}"
+                )
             publication_state = str(handoff.get("publication_state") or "committed")
             if not self.store.handoff_is_published(
                 namespace, project_id, handoff
@@ -6522,6 +7372,8 @@ class StoryboardService:
                 raise ValueError("handoff cache identity is invalid")
             return handoff
         for handoff in self.store.list_project_records(namespace, project_id, kind="handoffs"):
+            if handoff.get("status") in {"rejected", "superseded"}:
+                continue
             if not self.store.handoff_is_published(
                 namespace, project_id, handoff
             ):
@@ -7904,7 +8756,7 @@ class StoryboardService:
             and not draft_preflight_id
         ):
             raise ValueError(
-                "draft_preflight_required: cloud 0.5.5 full commits require a signed full-draft preflight"
+                "draft_preflight_required: cloud 0.5.6 full commits require a signed full-draft preflight"
             )
         stage_trace_id = _new_id("TRC")
         materialize_started_ns = time.perf_counter_ns()
