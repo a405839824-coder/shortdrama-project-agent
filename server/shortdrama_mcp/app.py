@@ -31,11 +31,17 @@ from .service import StoryboardService
 from .telemetry import WorkflowTrace
 
 
-def _annotations(*, read_only: bool, destructive: bool = False, open_world: bool = False) -> ToolAnnotations:
+def _annotations(
+    *,
+    read_only: bool,
+    destructive: bool = False,
+    idempotent: bool | None = None,
+    open_world: bool = False,
+) -> ToolAnnotations:
     return ToolAnnotations(
         readOnlyHint=read_only,
         destructiveHint=destructive,
-        idempotentHint=read_only,
+        idempotentHint=read_only if idempotent is None else idempotent,
         openWorldHint=open_world,
     )
 
@@ -105,6 +111,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "新写分镜必须遵守R10-SPC-1：EP##-###编号、单集累计重置、每镜恰好三个Seedance 2.5时间阶段，第五列表头为正式分镜母版。"
             "只有独立审计失败且用户明确授权后，独立repair窗口才可使用签名修复包；非结构字段可用commit_storyboard_patch局部修复，边界、认知、原文、编号和时长变化必须执行绑定修复包的完整重建。"
             "修复后仍执行完整生产校验并交回原独立审计窗口复核；最多三轮，只有原审计窗口确认零残留、零新增才可称通过。"
+            "失效prepared生产handoff只能由受控恢复工具先预演后按精确哈希确认；旧记录保留为superseded，新记录仍待独立审计。"
             "正式归档必须同时具备精确版本的独立审计通过证书和signoff_task人工签核。"
             "只有用户要求排查原生ChatGPT耗时时才启用mark_performance_stage；按五个固定阶段记录"
             "服务端收件时间，不上传提示词、原文、对白或隐藏思考，不改变分镜质量字段。"
@@ -172,6 +179,46 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             target_version=target_version,
             expected_current_version=expected_current_version,
             migration_id=migration_id,
+            request_session_id=_window_session_id(ctx),
+        )
+
+    @server.tool(
+        name="recover_storyboard_handoff",
+        title="受控恢复失效分镜交接",
+        description=(
+            "仅供production窗口在已登记能力缺口且用户明确授权后使用。先action=plan预演；"
+            "execute必须回传精确plan_sha256和确认字面量。工具逐条使用签名日志与CAS，将失效的"
+            "prepared production_to_audit handoff原子标记为superseded并按当前完整指纹重新签发；"
+            "不删除历史、不改写分镜/canonical/XLSX、不签发独立审计结论，新handoff仍为PENDING_AUDIT。"
+        ),
+        annotations=_annotations(
+            read_only=False,
+            destructive=True,
+            idempotent=True,
+            open_world=False,
+        ),
+        meta=meta("正在核对交接恢复…", "交接恢复已处理"),
+        structured_output=True,
+    )
+    async def recover_storyboard_handoff(
+        project_id: str,
+        work_order_id: str,
+        gap_id: str,
+        handoff_ids: Annotated[list[str], Field(min_length=1, max_length=32)],
+        ctx: Context,
+        action: Literal["plan", "execute"] = "plan",
+        expected_plan_sha256: str | None = None,
+        confirmation: str | None = None,
+    ) -> ToolResponse:
+        return service.recover_storyboard_handoff(
+            request_namespace(settings),
+            project_id=project_id,
+            work_order_id=work_order_id,
+            gap_id=gap_id,
+            handoff_ids=handoff_ids,
+            action=action,
+            expected_plan_sha256=expected_plan_sha256,
+            confirmation=confirmation,
             request_session_id=_window_session_id(ctx),
         )
 

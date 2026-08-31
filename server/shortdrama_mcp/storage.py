@@ -22,6 +22,7 @@ from filelock import FileLock
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 PROJECT_RECORD_KINDS = {
     "handoffs",
+    "handoff_recoveries",
     "certificates",
     "telemetry",
     "diagnostics",
@@ -29,7 +30,11 @@ PROJECT_RECORD_KINDS = {
     "draft_preflights",
     "migrations",
 }
-SIGNED_ONLY_PROJECT_RECORD_KINDS = {"draft_preflights", "migrations"}
+SIGNED_ONLY_PROJECT_RECORD_KINDS = {
+    "draft_preflights",
+    "handoff_recoveries",
+    "migrations",
+}
 DEFAULT_SUCCESSOR_LEASE_SECONDS = 300
 MAX_SUCCESSOR_LEASE_SECONDS = 86_400
 MAX_SUCCESSOR_TRANSACTION_HISTORY = 32
@@ -745,6 +750,200 @@ class ProjectStore:
             record["integrity_hmac"] = self._record_integrity_hmac(record)
             self.atomic_write_json(record_path, record)
             return record
+
+    def commit_handoff_recovery(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        recovery_id: str,
+        recovery_key: str,
+        work_order_id: str,
+        gap_id: str,
+        trace_id: str,
+        old_handoff_id: str,
+        new_handoff_id: str,
+        old_before: dict[str, Any],
+        old_after: dict[str, Any],
+        new_after: dict[str, Any],
+        hub_before: dict[str, Any],
+        hub_after: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Commit or recover one journaled handoff supersession.
+
+        The signed journal is the durable transaction descriptor.  The old
+        handoff is written first so an interrupted transaction fails closed:
+        independent audit can never claim stale evidence while the successor
+        is still missing.  A retry may only complete the exact journaled
+        before/after identities; unrelated project changes fail the CAS.
+        """
+
+        clean_recovery_id = safe_id(recovery_id, "recovery_id")
+        clean_old_id = safe_id(old_handoff_id, "old_handoff_id")
+        clean_new_id = safe_id(new_handoff_id, "new_handoff_id")
+        directory = self.project_dir(namespace, project_id)
+        old_path = directory / "handoffs" / f"{clean_old_id}.json"
+        new_path = directory / "handoffs" / f"{clean_new_id}.json"
+        hub_path = directory / "hub.json"
+        journal_path = (
+            directory / "handoff_recoveries" / f"{clean_recovery_id}.json"
+        )
+
+        def sealed(value: dict[str, Any], record_id: str) -> dict[str, Any]:
+            result = dict(value)
+            result["record_id"] = record_id
+            result["project_id"] = project_id
+            result["integrity_hmac"] = self._record_integrity_hmac(result)
+            return result
+
+        old_after = sealed(old_after, clean_old_id)
+        new_after = sealed(new_after, clean_new_id)
+        old_before_sha = self.project_state_sha256(old_before)
+        old_after_sha = self.project_state_sha256(old_after)
+        new_after_sha = self.project_state_sha256(new_after)
+        hub_before_sha = self.project_state_sha256(hub_before)
+        hub_after_sha = self.project_state_sha256(hub_after)
+
+        with self.lock(f"{namespace}-{project_id}"):
+            if not old_path.is_file():
+                raise ValueError("handoff_recovery_required: old handoff is missing")
+            current_old = self.read_json(old_path)
+            self._verify_record_integrity(current_old, record_id=clean_old_id)
+            if not self.project_record_is_signed(current_old):
+                raise ValueError("handoff_reissue_required: unsigned handoff")
+            current_hub = self.read_json(hub_path)
+            current_old_sha = self.project_state_sha256(current_old)
+            current_hub_sha = self.project_state_sha256(current_hub)
+            current_new: dict[str, Any] | None = None
+            current_new_sha: str | None = None
+            if new_path.is_file():
+                current_new = self.read_json(new_path)
+                self._verify_record_integrity(current_new, record_id=clean_new_id)
+                if not self.project_record_is_signed(current_new):
+                    raise ValueError("handoff_recovery_required: unsigned successor")
+                current_new_sha = self.project_state_sha256(current_new)
+
+            journal: dict[str, Any] | None = None
+            if journal_path.is_file():
+                journal = self.read_json(journal_path)
+                self._verify_record_integrity(
+                    journal, record_id=clean_recovery_id
+                )
+                if not self.project_record_is_signed(journal):
+                    raise ValueError("handoff_recovery_signature_required")
+                if (
+                    journal.get("recovery_key") != recovery_key
+                    or journal.get("old_handoff_id") != clean_old_id
+                    or journal.get("new_handoff_id") != clean_new_id
+                ):
+                    raise ValueError("handoff_recovery_id_conflict")
+                old_before_sha = str(journal["old_before_sha256"])
+                old_after_sha = str(journal["old_after_sha256"])
+                new_after_sha = str(journal["new_after_sha256"])
+                hub_before_sha = str(journal["hub_before_sha256"])
+                hub_after_sha = str(journal["hub_after_sha256"])
+                old_after = dict(journal["old_after"])
+                new_after = dict(journal["new_after"])
+                hub_after = dict(journal["hub_after"])
+
+            if (
+                current_old_sha == old_after_sha
+                and current_new_sha == new_after_sha
+                and current_hub_sha == hub_after_sha
+            ):
+                if journal is not None and journal.get("status") != "committed":
+                    journal["status"] = "committed"
+                    journal["committed_at"] = utc_stamp()
+                    journal["integrity_hmac"] = self._record_integrity_hmac(
+                        journal
+                    )
+                    self.atomic_write_json(journal_path, journal)
+                result = dict(journal or {})
+                result.update(
+                    {
+                        "recovery_id": clean_recovery_id,
+                        "old_handoff_id": clean_old_id,
+                        "new_handoff_id": clean_new_id,
+                        "status": "committed",
+                        "idempotent_replay": True,
+                    }
+                )
+                return result
+
+            if current_old_sha not in {old_before_sha, old_after_sha}:
+                raise ValueError(
+                    "handoff_recovery_required: old handoff changed outside recovery CAS"
+                )
+            if current_hub_sha not in {hub_before_sha, hub_after_sha}:
+                raise ValueError(
+                    "handoff_recovery_required: project hub changed outside recovery CAS"
+                )
+            if current_new_sha not in {None, new_after_sha}:
+                raise ValueError(
+                    "handoff_recovery_required: successor id is already occupied"
+                )
+            if journal is None and (
+                current_old_sha != old_before_sha
+                or current_hub_sha != hub_before_sha
+                or current_new_sha is not None
+            ):
+                raise ValueError(
+                    "handoff_recovery_required: unsigned partial recovery"
+                )
+
+            if journal is None:
+                journal = {
+                    "record_id": clean_recovery_id,
+                    "recovery_id": clean_recovery_id,
+                    "recovery_key": recovery_key,
+                    "project_id": project_id,
+                    "work_order_id": work_order_id,
+                    "gap_id": gap_id,
+                    "trace_id": trace_id,
+                    "old_handoff_id": clean_old_id,
+                    "new_handoff_id": clean_new_id,
+                    "status": "prepared",
+                    "created_at": utc_stamp(),
+                    "old_before_sha256": old_before_sha,
+                    "old_after_sha256": old_after_sha,
+                    "new_after_sha256": new_after_sha,
+                    "hub_before_sha256": hub_before_sha,
+                    "hub_after_sha256": hub_after_sha,
+                    "old_after": old_after,
+                    "new_after": new_after,
+                    "hub_after": hub_after,
+                    "history_preserved": True,
+                    "independent_audit_status": "PENDING_AUDIT",
+                }
+                journal["integrity_hmac"] = self._record_integrity_hmac(
+                    journal
+                )
+                self.atomic_write_json(journal_path, journal)
+
+            # Fail closed first: the stale handoff becomes unclaimable before
+            # the replacement is made visible.  The signed journal makes every
+            # following interruption idempotently recoverable.
+            if current_old_sha == old_before_sha:
+                self.atomic_write_json(old_path, old_after)
+            if current_new_sha is None:
+                self.atomic_write_json(new_path, new_after)
+            if current_hub_sha == hub_before_sha:
+                self.atomic_write_json(hub_path, hub_after)
+
+            final_old_sha = self.project_state_sha256(self.read_json(old_path))
+            final_new_sha = self.project_state_sha256(self.read_json(new_path))
+            final_hub_sha = self.project_state_sha256(self.read_json(hub_path))
+            if (final_old_sha, final_new_sha, final_hub_sha) != (
+                old_after_sha,
+                new_after_sha,
+                hub_after_sha,
+            ):
+                raise RuntimeError("handoff_recovery_commit_incomplete")
+            journal["status"] = "committed"
+            journal["committed_at"] = utc_stamp()
+            journal["integrity_hmac"] = self._record_integrity_hmac(journal)
+            self.atomic_write_json(journal_path, journal)
+            return journal
 
     def rollback_project_state_migration(
         self,
@@ -1612,6 +1811,11 @@ class ProjectStore:
                 )
             status = record.get("status")
             owner = record.get("consumed_by_work_order_id") or record.get("claimed_by_work_order_id")
+            if status == "superseded":
+                raise ValueError(
+                    "handoff_superseded: use successor "
+                    f"{record.get('superseded_by_handoff_id') or 'unknown'}"
+                )
             if status == "consumed":
                 if owner == consumer_work_order_id:
                     result = dict(record)
