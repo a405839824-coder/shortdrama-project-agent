@@ -471,11 +471,36 @@
         "workbook_projection_revalidation": {
           "$ref": "#/$defs/workbook_projection_revalidation"
         },
+        "production_validation_replay": {
+          "$ref": "#/$defs/production_validation_replay"
+        },
+        "production_preflight_status": {
+          "enum": [
+            "production_preflight_pass",
+            "production_preflight_fail",
+            "historical_contract_pass"
+          ]
+        },
+        "current_validation_status": {"const": "fail_current"},
+        "current_validation_issue_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "current_production_pass_claimed": {"const": false},
+        "current_preflight_cache_reusable": {"const": false},
+        "conclusion_reusable_for_independent_audit": {"const": false},
+        "requires_full_current_independent_audit": {"const": true},
         "recovery_plan_sha256": {"$ref": "#/$defs/sha256"},
         "recovery_plan_item": {"type": "object", "minProperties": 1},
         "recovery_cache_status": {"enum": ["invalidated_and_reissued"]},
         "recovery_publication_fenced": {"const": true},
-        "preflight_evidence_source": {"enum": ["original_handoff", "controlled_current_revalidation"]},
+        "preflight_evidence_source": {
+          "enum": [
+            "original_handoff",
+            "controlled_current_revalidation",
+            "controlled_historical_contract_replay"
+          ]
+        },
         "preflight_evidence_reissue_id": {"type": "string", "minLength": 1},
         "source_preflight_certificate_id": {"type": "string", "minLength": 1},
         "history_preserved": {"const": true},
@@ -650,14 +675,80 @@
             "properties": {"preflight_evidence_source": {"const": "controlled_current_revalidation"}},
             "required": ["preflight_evidence_source"]
           },
-          "then": {"required": ["preflight_evidence_reissue_id", "source_preflight_certificate_id"]}
+          "then": {
+            "required": ["preflight_evidence_reissue_id", "source_preflight_certificate_id"],
+            "not": {
+              "anyOf": [
+                {"required": ["production_validation_replay"]},
+                {"required": ["current_validation_status"]},
+                {"required": ["current_validation_issue_count"]},
+                {"required": ["current_production_pass_claimed"]},
+                {"required": ["current_preflight_cache_reusable"]},
+                {"required": ["requires_full_current_independent_audit"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"preflight_evidence_source": {"const": "controlled_historical_contract_replay"}},
+            "required": ["preflight_evidence_source"]
+          },
+          "then": {
+            "required": [
+              "preflight_evidence_reissue_id",
+              "source_preflight_certificate_id",
+              "production_validation_replay",
+              "production_preflight_status",
+              "current_validation_status",
+              "current_validation_issue_count",
+              "current_production_pass_claimed",
+              "current_preflight_cache_reusable",
+              "conclusion_reusable_for_independent_audit",
+              "requires_full_current_independent_audit"
+            ],
+            "properties": {
+              "production_preflight_status": {"const": "historical_contract_pass"},
+              "current_validation_status": {"const": "fail_current"},
+              "current_validation_issue_count": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "current_production_pass_claimed": {"const": false},
+              "current_preflight_cache_reusable": {"const": false},
+              "conclusion_reusable_for_independent_audit": {"const": false},
+              "requires_full_current_independent_audit": {"const": true}
+            },
+            "not": {
+              "anyOf": [
+                {"required": ["production_result"]},
+                {"required": ["issue_count"]}
+              ]
+            }
+          }
         },
         {
           "if": {
             "properties": {"preflight_evidence_source": {"const": "original_handoff"}},
             "required": ["preflight_evidence_source"]
           },
-          "then": {"not": {"required": ["preflight_evidence_reissue_id"]}}
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["preflight_evidence_reissue_id"]},
+                {"required": ["production_validation_replay"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {"required": ["production_validation_replay"]},
+          "then": {
+            "properties": {
+              "preflight_evidence_source": {"const": "controlled_historical_contract_replay"}
+            },
+            "required": ["preflight_evidence_source"]
+          }
         }
       ]
     },
@@ -673,7 +764,12 @@
       ],
       "properties": {
         "certificate_id": {"type": "string", "minLength": 1},
-        "certificate_type": {"const": "production_preflight"},
+        "certificate_type": {
+          "enum": [
+            "production_preflight",
+            "historical_production_preflight_attestation"
+          ]
+        },
         "work_order_id": {"type": "string", "minLength": 1},
         "production_work_order_id": {"type": "string", "minLength": 1},
         "artifact_id": {"type": "string", "minLength": 1},
@@ -683,15 +779,32 @@
         "boundary_hash": {"type": "string", "minLength": 1},
         "ruleset_version": {"type": "string", "minLength": 1},
         "validator_version": {"type": "string", "minLength": 1},
-        "audit_class": {"const": "production_preflight"},
-        "cache_key": {"type": "string", "pattern": "^AUDCACHE-[A-Fa-f0-9]{64}$"},
+        "audit_class": {
+          "enum": [
+            "production_preflight",
+            "historical_production_preflight_attestation"
+          ]
+        },
+        "cache_key": {
+          "type": "string",
+          "pattern": "^(?:AUDCACHE|HISTCACHE)-[A-Fa-f0-9]{64}$"
+        },
         "cache_components": {"type": "object", "minProperties": 1},
         "checked_shot_count": {"type": "integer", "minimum": 0},
         "report_sha256": {"$ref": "#/$defs/sha256"},
         "report": {"type": "object"},
-        "preflight_status": {"enum": ["production_preflight_pass", "production_preflight_fail"]},
+        "preflight_status": {
+          "enum": [
+            "production_preflight_pass",
+            "production_preflight_fail",
+            "historical_contract_pass"
+          ]
+        },
         "preflight_issue_count": {"type": "integer", "minimum": 0},
         "independent_audit_status": {"const": "PENDING_AUDIT"},
+        "evidence_type": {
+          "const": "controlled_historical_production_preflight_attestation"
+        },
         "evidence_origin": {"type": "string", "minLength": 1},
         "evidence_reissue_work_order_id": {"type": "string", "minLength": 1},
         "evidence_reissue_gap_id": {"type": "string", "minLength": 1},
@@ -706,6 +819,20 @@
         "workbook_projection_revalidation": {
           "$ref": "#/$defs/workbook_projection_revalidation"
         },
+        "production_validation_replay": {
+          "$ref": "#/$defs/production_validation_replay"
+        },
+        "historical_validation_report": {"type": "object"},
+        "current_validation_report": {"type": "object"},
+        "current_validation_status": {"const": "fail_current"},
+        "current_validation_issue_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "current_production_pass_claimed": {"const": false},
+        "current_preflight_cache_reusable": {"const": false},
+        "conclusion_reusable_for_independent_audit": {"const": false},
+        "requires_full_current_independent_audit": {"const": true},
         "authorized_handoff_ids": {
           "type": "array", "minItems": 1, "uniqueItems": true,
           "items": {"type": "string", "minLength": 1}
@@ -723,6 +850,101 @@
         "independent_audit_verdict_issued": {"type": "boolean"}
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {"certificate_type": {"const": "production_preflight"}},
+            "required": ["certificate_type"]
+          },
+          "then": {
+            "properties": {
+              "audit_class": {"const": "production_preflight"},
+              "cache_key": {"pattern": "^AUDCACHE-[A-Fa-f0-9]{64}$"},
+              "preflight_status": {
+                "enum": ["production_preflight_pass", "production_preflight_fail"]
+              }
+            },
+            "not": {
+              "anyOf": [
+                {"required": ["evidence_type"]},
+                {"required": ["production_validation_replay"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "certificate_type": {
+                    "const": "historical_production_preflight_attestation"
+                  }
+                },
+                "required": ["certificate_type"]
+              },
+              {
+                "properties": {
+                  "audit_class": {
+                    "const": "historical_production_preflight_attestation"
+                  }
+                },
+                "required": ["audit_class"]
+              },
+              {
+                "properties": {
+                  "evidence_type": {
+                    "const": "controlled_historical_production_preflight_attestation"
+                  }
+                },
+                "required": ["evidence_type"]
+              },
+              {
+                "properties": {
+                  "preflight_status": {"const": "historical_contract_pass"}
+                },
+                "required": ["preflight_status"]
+              },
+              {"required": ["production_validation_replay"]}
+            ]
+          },
+          "then": {
+            "required": [
+              "evidence_type",
+              "evidence_origin",
+              "production_validation_replay",
+              "current_validation_status",
+              "current_validation_issue_count",
+              "current_production_pass_claimed",
+              "current_preflight_cache_reusable",
+              "conclusion_reusable_for_independent_audit",
+              "requires_full_current_independent_audit"
+            ],
+            "properties": {
+              "certificate_type": {
+                "const": "historical_production_preflight_attestation"
+              },
+              "audit_class": {
+                "const": "historical_production_preflight_attestation"
+              },
+              "evidence_type": {
+                "const": "controlled_historical_production_preflight_attestation"
+              },
+              "cache_key": {"pattern": "^HISTCACHE-[A-Fa-f0-9]{64}$"},
+              "preflight_status": {"const": "historical_contract_pass"},
+              "preflight_issue_count": {"const": 0},
+              "independent_audit_status": {"const": "PENDING_AUDIT"},
+              "current_validation_status": {"const": "fail_current"},
+              "current_validation_issue_count": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "current_production_pass_claimed": {"const": false},
+              "current_preflight_cache_reusable": {"const": false},
+              "conclusion_reusable_for_independent_audit": {"const": false},
+              "requires_full_current_independent_audit": {"const": true}
+            }
+          }
+        },
         {
           "if": {
             "properties": {"evidence_origin": {"const": "controlled_current_revalidation"}},
@@ -767,6 +989,48 @@
               "independent_audit_verdict_issued": {"const": false}
             }
           }
+        },
+        {
+          "if": {
+            "properties": {"evidence_origin": {"const": "controlled_historical_contract_replay"}},
+            "required": ["evidence_origin"]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": [
+                  "evidence_reissue_work_order_id", "evidence_reissue_gap_id",
+                  "evidence_trace_id", "preflight_evidence_id",
+                  "backfill_for_handoff_id", "original_certificate_id",
+                  "original_handoff_sha256", "current_fingerprints",
+                  "current_fingerprints_sha256", "runtime_test_certificate_id",
+                  "authorized_handoff_ids", "first_draft_grade_reconstructed",
+                  "authored_artifacts_modified", "independent_audit_verdict_issued"
+                ]
+              },
+              {
+                "required": [
+                  "issuing_work_order_id", "recovery_work_order_id",
+                  "recovery_gap_id", "recovery_plan_sha256", "recovery_trace_id",
+                  "current_fingerprints", "current_fingerprints_sha256",
+                  "authorized_handoff_ids", "source_handoff_id",
+                  "source_preflight_evidence_id",
+                  "source_preflight_evidence_certificate_id",
+                  "first_draft_grade_reconstructed", "authored_artifacts_modified",
+                  "independent_audit_verdict_issued"
+                ],
+                "properties": {
+                  "source_preflight_evidence_id": {"type": "string", "minLength": 1},
+                  "source_preflight_evidence_certificate_id": {"type": "string", "minLength": 1}
+                }
+              }
+            ],
+            "properties": {
+              "first_draft_grade_reconstructed": {"const": false},
+              "authored_artifacts_modified": {"const": false},
+              "independent_audit_verdict_issued": {"const": false}
+            }
+          }
         }
       ]
     },
@@ -789,7 +1053,12 @@
       ],
       "properties": {
         "preflight_evidence_id": {"type": "string", "minLength": 1},
-        "evidence_type": {"const": "controlled_current_production_preflight_revalidation"},
+        "evidence_type": {
+          "enum": [
+            "controlled_current_production_preflight_revalidation",
+            "controlled_historical_production_preflight_attestation"
+          ]
+        },
         "work_order_id": {"type": "string", "minLength": 1},
         "gap_id": {"type": "string", "minLength": 1},
         "trace_id": {"type": "string", "minLength": 1},
@@ -814,9 +1083,33 @@
         "workbook_projection_revalidation": {
           "$ref": "#/$defs/workbook_projection_revalidation"
         },
+        "production_validation_replay": {
+          "$ref": "#/$defs/production_validation_replay"
+        },
+        "historical_validation_report": {"type": "object"},
+        "historical_validation_report_sha256": {"$ref": "#/$defs/sha256"},
+        "current_validation_report": {"type": "object"},
+        "current_validation_report_sha256": {"$ref": "#/$defs/sha256"},
+        "current_validation_status": {"const": "fail_current"},
+        "current_validation_issue_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "current_validation_error_histogram": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"type": "string", "minLength": 1},
+          "additionalProperties": {"type": "integer", "minimum": 1}
+        },
+        "current_production_pass_claimed": {"const": false},
+        "current_preflight_cache_reusable": {"const": false},
+        "conclusion_reusable_for_independent_audit": {"const": false},
+        "requires_full_current_independent_audit": {"const": true},
         "validation_report_sha256": {"$ref": "#/$defs/sha256"},
         "checked_shot_count": {"type": "integer", "minimum": 0},
-        "production_preflight_status": {"const": "production_preflight_pass"},
+        "production_preflight_status": {
+          "enum": ["production_preflight_pass", "historical_contract_pass"]
+        },
         "production_preflight_issue_count": {"const": 0},
         "independent_audit_status": {"const": "PENDING_AUDIT"},
         "first_draft_grade_reconstructed": {"const": false},
@@ -833,6 +1126,92 @@
         "committed_at": {"type": "string", "minLength": 1}
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "evidence_type": {
+                "const": "controlled_current_production_preflight_revalidation"
+              }
+            },
+            "required": ["evidence_type"]
+          },
+          "then": {
+            "properties": {
+              "production_preflight_status": {"const": "production_preflight_pass"},
+              "production_preflight_issue_count": {"const": 0}
+            },
+            "not": {
+              "anyOf": [
+                {"required": ["production_validation_replay"]},
+                {"required": ["historical_validation_report"]},
+                {"required": ["historical_validation_report_sha256"]},
+                {"required": ["current_validation_report"]},
+                {"required": ["current_validation_report_sha256"]},
+                {"required": ["current_validation_status"]},
+                {"required": ["current_validation_issue_count"]},
+                {"required": ["current_validation_error_histogram"]},
+                {"required": ["current_production_pass_claimed"]},
+                {"required": ["current_preflight_cache_reusable"]},
+                {"required": ["requires_full_current_independent_audit"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evidence_type": {
+                "const": "controlled_historical_production_preflight_attestation"
+              }
+            },
+            "required": ["evidence_type"]
+          },
+          "then": {
+            "required": [
+              "production_validation_replay",
+              "historical_validation_report",
+              "historical_validation_report_sha256",
+              "current_validation_report",
+              "current_validation_report_sha256",
+              "current_validation_status",
+              "current_validation_issue_count",
+              "current_validation_error_histogram",
+              "current_production_pass_claimed",
+              "current_preflight_cache_reusable",
+              "conclusion_reusable_for_independent_audit",
+              "requires_full_current_independent_audit"
+            ],
+            "properties": {
+              "production_preflight_status": {"const": "historical_contract_pass"},
+              "production_preflight_issue_count": {"const": 0},
+              "independent_audit_status": {"const": "PENDING_AUDIT"},
+              "first_draft_grade_reconstructed": {"const": false},
+              "authored_artifacts_modified": {"const": false},
+              "history_records_modified": {"const": 0},
+              "independent_audit_verdict_issued": {"const": false},
+              "current_validation_status": {"const": "fail_current"},
+              "current_validation_issue_count": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "current_production_pass_claimed": {"const": false},
+              "current_preflight_cache_reusable": {"const": false},
+              "conclusion_reusable_for_independent_audit": {"const": false},
+              "requires_full_current_independent_audit": {"const": true}
+            }
+          }
+        },
+        {
+          "if": {"required": ["production_validation_replay"]},
+          "then": {
+            "properties": {
+              "evidence_type": {
+                "const": "controlled_historical_production_preflight_attestation"
+              }
+            },
+            "required": ["evidence_type"]
+          }
+        },
         {
           "if": {"properties": {"status": {"const": "committed"}}, "required": ["status"]},
           "then": {
@@ -893,6 +1272,179 @@
             }
           }
         }
+      }
+    },
+    "production_validation_replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spec",
+        "basis",
+        "historical_contract_status",
+        "historical_contract_issue_count",
+        "historical_report_sha256",
+        "current_validation_status",
+        "current_validation_issue_count",
+        "current_report_sha256",
+        "current_validation_error_histogram",
+        "frozen_validator_provenance",
+        "current_validator_version",
+        "current_production_pass_claimed",
+        "current_preflight_cache_reusable",
+        "conclusion_reusable_for_independent_audit",
+        "requires_full_current_independent_audit",
+        "proof_sha256"
+      ],
+      "properties": {
+        "spec": {
+          "const": "controlled-historical-production-preflight-replay-v1"
+        },
+        "basis": {"const": "legacy_frozen_validator_replay"},
+        "historical_contract_status": {"const": "historical_contract_pass"},
+        "historical_contract_issue_count": {"const": 0},
+        "historical_report_sha256": {"$ref": "#/$defs/sha256"},
+        "current_validation_status": {"const": "fail_current"},
+        "current_validation_issue_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "current_report_sha256": {"$ref": "#/$defs/sha256"},
+        "current_validation_error_histogram": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"type": "string", "minLength": 1},
+          "additionalProperties": {"type": "integer", "minimum": 1}
+        },
+        "frozen_validator_provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "plugin_version",
+            "source_snapshot_kind",
+            "source_lineage_runtime_verified",
+            "source_commit",
+            "source_tree",
+            "init_git_blob",
+            "init_sha256",
+            "validator_git_blob",
+            "validator_sha256",
+            "rules_profile",
+            "rules_git_blob",
+            "rules_sha256",
+            "error_catalog_git_blob",
+            "error_catalog_sha256",
+            "manifest_git_blob",
+            "manifest_sha256",
+            "composite_validator_version"
+          ],
+          "properties": {
+            "plugin_version": {"enum": ["0.5.2", "0.5.3"]},
+            "source_snapshot_kind": {
+              "enum": ["sealed_git_snapshot_export", "sealed_local_package"]
+            },
+            "source_lineage_runtime_verified": {"const": false},
+            "source_commit": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[A-Fa-f0-9]{40}$"},
+                {"type": "null"}
+              ]
+            },
+            "source_tree": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[A-Fa-f0-9]{40}$"},
+                {"type": "null"}
+              ]
+            },
+            "init_git_blob": {
+              "const": "9f6be08c26620b351d23046b8aaa6e29156bd119"
+            },
+            "init_sha256": {
+              "const": "a0593ff9a660ba95db23093d55ca4db4ac38c9f6ac48715084ff2d13629d6590"
+            },
+            "validator_git_blob": {
+              "const": "b2a2edede374912d7fb134fecd3e344552a6c01a"
+            },
+            "validator_sha256": {
+              "const": "7142f4fc89a4cd1d537eb5c0b102d4162f40c237ead483c3067631ad71607866"
+            },
+            "rules_profile": {
+              "enum": [
+                "V16.3-148-R10-StableRuntime:R10-PG1:c0867f81158ffca0",
+                "V16.3-148-R10-StableRuntime:R10-PG1:d8841a2f52d86bed"
+              ]
+            },
+            "rules_git_blob": {
+              "type": "string",
+              "pattern": "^[A-Fa-f0-9]{40}$"
+            },
+            "rules_sha256": {"$ref": "#/$defs/sha256"},
+            "error_catalog_git_blob": {
+              "const": "8b1914d2a30679f4d1c915f1bfa2d38d455234d7"
+            },
+            "error_catalog_sha256": {
+              "const": "996933db8905239ace156903f872f1a177ff495841f9559ee9926ba23ac6b1e4"
+            },
+            "manifest_git_blob": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[A-Fa-f0-9]{40}$"},
+                {"type": "null"}
+              ]
+            },
+            "manifest_sha256": {
+              "anyOf": [
+                {"$ref": "#/$defs/sha256"},
+                {"type": "null"}
+              ]
+            },
+            "composite_validator_version": {
+              "const": "V16.3-148-R10-StableRuntime:R10.1:R10-PG1:7142f4fc89a4cd1d"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {"source_snapshot_kind": {"const": "sealed_git_snapshot_export"}},
+                "required": ["source_snapshot_kind"]
+              },
+              "then": {
+                "properties": {
+                  "plugin_version": {"const": "0.5.3"},
+                  "source_commit": {"const": "9deb528db3f9eb27e0f406634036e98b8a3d1f80"},
+                  "source_tree": {"const": "3d8837d26f1dbc6c5bacb0953e1a51927fc6ab39"},
+                  "rules_profile": {"const": "V16.3-148-R10-StableRuntime:R10-PG1:c0867f81158ffca0"},
+                  "rules_git_blob": {"const": "09bd3f5f5e33f2c03000b29dd3ad2676a39da98c"},
+                  "rules_sha256": {"const": "395e4ca65f342e5c884187bb6e4058e697b6b74e478337c99bf8976ab98511f5"},
+                  "manifest_git_blob": {"type": "null"},
+                  "manifest_sha256": {"type": "null"}
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {"source_snapshot_kind": {"const": "sealed_local_package"}},
+                "required": ["source_snapshot_kind"]
+              },
+              "then": {
+                "properties": {
+                  "plugin_version": {"const": "0.5.2"},
+                  "source_commit": {"type": "null"},
+                  "source_tree": {"type": "null"},
+                  "rules_profile": {"const": "V16.3-148-R10-StableRuntime:R10-PG1:d8841a2f52d86bed"},
+                  "rules_git_blob": {"const": "d29984c5005317de9c42b3b7b0b2503bbd84184b"},
+                  "rules_sha256": {"const": "774a71e242f20e99da3d403e8fd43fdd337d18d0218c331eb4378f5577e3c7b2"},
+                  "manifest_git_blob": {"const": "0aced1b7520f8a7e5bce90314b9bc157eb370cbd"},
+                  "manifest_sha256": {"const": "5901712e30a33ae88d861eabb6d04ef7eea23e86e489fe977be430503f033320"}
+                }
+              }
+            }
+          ]
+        },
+        "current_validator_version": {"type": "string", "minLength": 1},
+        "current_production_pass_claimed": {"const": false},
+        "current_preflight_cache_reusable": {"const": false},
+        "conclusion_reusable_for_independent_audit": {"const": false},
+        "requires_full_current_independent_audit": {"const": true},
+        "proof_sha256": {"$ref": "#/$defs/sha256"}
       }
     },
     "workbook_projection_revalidation": {

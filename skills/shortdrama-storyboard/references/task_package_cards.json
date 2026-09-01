@@ -1491,7 +1491,8 @@
     "0.5.8历史Hub交接投影只读兼容必须覆盖exact stripped与exact full signed正例，以及部分信封、额外字段、缺失字段、业务字段或签名信封漂移的零写入失败关闭；兼容读取不迁移历史，未来生产Hub只写stripped投影",
     "0.5.9省略或null phase兼容必须先校验当前session和精确production工单权限，再只从唯一recognized controlled_phase token推断；缺失、重复、多阶段、未知、大小写/空白漂移、混合或任意额外target均须在plan/execute前零写入失败关闭，且不得默认handoff_recovery",
     "0.5.10旧交接生产预检补签内部复验必须覆盖精确签名0.5.4/当前投影和冻结0.5.3基线正例，以及表头/单元格/侧车/投影签名/来源/旧handoff-证书-trace-raw-canonical任一漂移的零写入失败关闭；普通extract_xlsx不得因此放宽，不得改写原件或历史",
-    "插件当前发布版本、清单与活跃发布报告统一标记0.5.10；0.5.9受控phase推断、0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门、compact_master_version与历史升级文档保留其原始语义"
+    "0.5.11历史生产预检证明必须覆盖GAP-1bb91d83751b422f精确有序六条、逐handoff规则画像、冻结报告与原签名报告完全相等、仅E-I2V-INDEP-002/THG-01缺少逐字9:16竖屏措辞的当前FAIL、双报告完整封存、HISTCACHE不可复用、GAP-0e5d48969c4c494e精确有序11条恢复及当前独审强制；任一其他current FAIL、provenance/profile/列表/顺序/证据/计数漂移均须零写入失败关闭",
+    "插件当前发布版本、清单与活跃发布报告统一标记0.5.11；0.5.10历史投影复验、0.5.9受控phase推断、0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门、compact_master_version与历史升级文档保留其原始语义"
     ],
     "minimum_input_required": [
       "用户任务范围",

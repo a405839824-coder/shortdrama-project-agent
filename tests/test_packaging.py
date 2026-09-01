@@ -33,8 +33,34 @@ class PackagingTests(unittest.IsolatedAsyncioTestCase):
     async def test_manifest_paths_and_cloud_security_schemes(self) -> None:
         manifest = json.loads((PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "shortdrama-project-agent")
-        self.assertEqual(__version__, "0.5.10")
+        self.assertEqual(__version__, "0.5.11")
         self.assertEqual(manifest["version"], __version__)
+        runtime_rules = json.loads(
+            (
+                PLUGIN_ROOT
+                / "skills"
+                / "shortdrama-storyboard"
+                / "references"
+                / "storyboard_runtime_rules.json"
+            ).read_text(encoding="utf-8")
+        )
+        capabilities = json.loads(
+            (
+                PLUGIN_ROOT
+                / "skills"
+                / "shortdrama-storyboard"
+                / "references"
+                / "project_agent_capabilities.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            runtime_rules["compact_master_contract"]["plugin_version"],
+            __version__,
+        )
+        self.assertEqual(
+            capabilities["compact_master_contract"]["plugin_version"],
+            __version__,
+        )
         for key in ("skills", "mcpServers"):
             self.assertTrue((PLUGIN_ROOT / manifest[key]).exists(), key)
         bundled_mcp = json.loads((PLUGIN_ROOT / manifest["mcpServers"]).read_text(encoding="utf-8"))

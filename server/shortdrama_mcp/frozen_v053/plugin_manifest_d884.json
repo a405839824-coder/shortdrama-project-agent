@@ -1,0 +1,38 @@
+{
+  "name": "shortdrama-project-agent",
+  "version": "0.5.2",
+  "description": "Chinese short-drama production with an R10.1 compact master, the R10-SPC-1 strict prompt/export contract, canonical delta commits, independent audit, conditional repair, and zero duplicate background prompt generation.",
+  "author": {
+    "name": "Storyboard Project Agent"
+  },
+  "keywords": [
+    "short-drama",
+    "storyboard",
+    "script",
+    "seedance",
+    "audit",
+    "production"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "分镜项目 Agent",
+    "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格提示词/导出契约执行短剧项目：完整章节理解、剧情取舍与节拍规划、全量或受保护范围的增量分镜、公共场景人物和环境音生态、正式母版单镜执行完整性、生产与独立审计双窗口常驻，以及审计失败后才启用的证书约束修复窗口。canonical仅保存27个语义字段，不预生成或保存独立Seedance批次。",
+    "developerName": "Storyboard Project Agent",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg",
+    "defaultPrompt": [
+      "创建一个新的短剧项目，并告诉我还缺哪些输入。",
+      "在生产窗口完整读取授权原文，只生成受影响的语义原子并提交生产预检；不要在本窗口审计。",
+      "在独立审计窗口只审计精确生产交接包；首次审计提交八层语义证据，失败后等待我授权独立修复。"
+    ],
+    "brandColor": "#1F6F5F"
+  }
+}

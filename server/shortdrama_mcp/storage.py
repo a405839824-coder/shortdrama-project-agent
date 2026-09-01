@@ -63,6 +63,14 @@ DOWNLOAD_COPY_CHUNK_BYTES = 1024 * 1024
 LEGACY_DOWNLOAD_TOKEN_WINDOW_SECONDS = 86_400
 SUCCESSOR_KINDS = frozenset({"patch", "delta", "repair"})
 UNPUBLISHED_ARTIFACT_STATES = frozenset({"pending", "aborted", "rejected"})
+CONTROLLED_HISTORICAL_PREFLIGHT_HANDOFF_IDS = (
+    "HND-f6fd29730a074d2c",
+    "HND-95e3b1c141a64783",
+    "HND-c88ee199d5fb4676",
+    "HND-e8ca409208134104",
+    "HND-0dd8fa51a9e24cd0",
+    "HND-9029110f35d74270",
+)
 REAUDIT_IMMUTABLE_IDENTITY_KEYS = (
     "work_order_id",
     "audit_cycle_id",
@@ -89,6 +97,12 @@ REAUDIT_IMMUTABLE_IDENTITY_KEYS = (
     "cache_components",
     "production_preflight_status",
     "production_preflight_issue_count",
+    "production_validation_replay",
+    "current_validation_status",
+    "current_validation_issue_count",
+    "current_production_pass_claimed",
+    "current_preflight_cache_reusable",
+    "requires_full_current_independent_audit",
     "preflight_evidence_source",
     "preflight_evidence_reissue_id",
     "source_preflight_certificate_id",
@@ -100,6 +114,7 @@ REAUDIT_IMMUTABLE_IDENTITY_KEYS = (
     "recovery_plan_sha256",
     "recovery_plan_item",
     "recovery_cache_status",
+    "recovery_publication_fenced",
     "workbook_projection_revalidation",
     "history_preserved",
     "checked_shot_count",
@@ -2933,6 +2948,55 @@ class ProjectStore:
             )
         return latest_legacy[0]
 
+    @staticmethod
+    def _controlled_preflight_evidence_identity(
+        *,
+        project_id: str,
+        work_order_id: str,
+        gap_id: str,
+        handoff_id: str,
+        old_record_sha256: str,
+        current_fingerprints_sha256: str,
+        runtime_test_certificate_id: str,
+        workbook_projection_proof_sha256: str,
+        production_validation_replay_sha256: str,
+    ) -> tuple[str, str, str, str]:
+        """Rebuild the deterministic PFE authority minted by the service."""
+
+        evidence_key = sha256_bytes(
+            canonical_json_bytes(
+                {
+                    "spec": "controlled-preflight-evidence-reissue-v1",
+                    "project_id": project_id,
+                    "work_order_id": work_order_id,
+                    "gap_id": gap_id,
+                    "old_handoff_id": handoff_id,
+                    "old_record_sha256": old_record_sha256,
+                    "current_fingerprints_sha256": (
+                        current_fingerprints_sha256
+                    ),
+                    "runtime_test_certificate_id": (
+                        runtime_test_certificate_id
+                    ),
+                    "workbook_projection_proof_sha256": (
+                        workbook_projection_proof_sha256
+                    ),
+                    "production_validation_replay_sha256": (
+                        production_validation_replay_sha256
+                    ),
+                }
+            )
+        )
+        return (
+            evidence_key,
+            "PFE-"
+            + sha256_bytes((evidence_key + ":evidence").encode())[:20],
+            "CERT-"
+            + sha256_bytes((evidence_key + ":certificate").encode())[:20],
+            "TRC-"
+            + sha256_bytes((evidence_key + ":evidence-trace").encode())[:20],
+        )
+
     def handoff_is_published(
         self,
         namespace: str,
@@ -3043,11 +3107,30 @@ class ProjectStore:
                 ):
                     return False
                 report = certificate.get("report")
+                historical = (
+                    certificate.get("certificate_type")
+                    == "historical_production_preflight_attestation"
+                )
+                expected_certificate_class = (
+                    "historical_production_preflight_attestation"
+                    if historical
+                    else "production_preflight"
+                )
+                expected_preflight_status = (
+                    "historical_contract_pass"
+                    if historical
+                    else "production_preflight_pass"
+                )
+                expected_evidence_origin = (
+                    "controlled_historical_contract_replay"
+                    if historical
+                    else "controlled_handoff_recovery_revalidation"
+                )
                 if (
                     certificate.get("certificate_type")
-                    != "production_preflight"
+                    != expected_certificate_class
                     or certificate.get("audit_class")
-                    != "production_preflight"
+                    != expected_certificate_class
                     or certificate.get("certificate_id")
                     != handoff.get("certificate_id")
                     or certificate.get("work_order_id")
@@ -3075,12 +3158,12 @@ class ProjectStore:
                     or certificate.get("checked_shot_count")
                     != handoff.get("checked_shot_count")
                     or certificate.get("preflight_status")
-                    != "production_preflight_pass"
+                    != expected_preflight_status
                     or certificate.get("preflight_issue_count") != 0
                     or certificate.get("independent_audit_status")
                     != "PENDING_AUDIT"
                     or certificate.get("evidence_origin")
-                    != "controlled_handoff_recovery_revalidation"
+                    != expected_evidence_origin
                     or certificate.get("issuing_work_order_id")
                     != journal.get("work_order_id")
                     or certificate.get("recovery_work_order_id")
@@ -3134,6 +3217,588 @@ class ProjectStore:
                     != handoff.get("storyboard_artifact_id")
                     or stage_trace.get("input_fingerprints")
                     != handoff.get("fingerprints")
+                ):
+                    return False
+
+                if historical:
+                    replay = certificate.get("production_validation_replay")
+                    if not isinstance(replay, dict):
+                        return False
+                    replay_without_proof = copy.deepcopy(replay)
+                    replay_proof = replay_without_proof.pop(
+                        "proof_sha256", None
+                    )
+                    current_report = certificate.get(
+                        "current_validation_report"
+                    )
+                    historical_report = certificate.get(
+                        "historical_validation_report"
+                    )
+                    evidence_id = str(
+                        handoff.get("preflight_evidence_reissue_id") or ""
+                    )
+                    source_certificate_id = str(
+                        handoff.get("source_preflight_certificate_id") or ""
+                    )
+                    evidence_work_order_id = ""
+                    try:
+                        clean_evidence_id = safe_id(
+                            evidence_id, "preflight_evidence_id"
+                        )
+                        clean_source_certificate_id = safe_id(
+                            source_certificate_id, "certificate_id"
+                        )
+                        evidence = self.read_json(
+                            directory
+                            / "preflight_evidence_reissues"
+                            / f"{clean_evidence_id}.json"
+                        )
+                        evidence_work_order_id = safe_id(
+                            str(evidence.get("work_order_id") or ""),
+                            "work_order_id",
+                        )
+                        clean_runtime_certificate_id = safe_id(
+                            str(
+                                evidence.get("runtime_test_certificate_id")
+                                or ""
+                            ),
+                            "certificate_id",
+                        )
+                        clean_evidence_trace_id = safe_id(
+                            str(evidence.get("trace_id") or ""),
+                            "stage_trace_id",
+                        )
+                        clean_batch_trace_id = safe_id(
+                            str(evidence.get("batch_trace_id") or ""),
+                            "stage_trace_id",
+                        )
+                        clean_original_certificate_id = safe_id(
+                            str(
+                                evidence.get("original_certificate_id")
+                                or ""
+                            ),
+                            "certificate_id",
+                        )
+                        clean_original_trace_id = safe_id(
+                            str(
+                                evidence.get(
+                                    "original_production_trace_id"
+                                )
+                                or ""
+                            ),
+                            "stage_trace_id",
+                        )
+                        source_certificate = self.read_json(
+                            directory
+                            / "certificates"
+                            / f"{clean_source_certificate_id}.json"
+                        )
+                        evidence_trace = self.read_json(
+                            directory
+                            / "telemetry"
+                            / f"{clean_evidence_trace_id}.json"
+                        )
+                        batch_trace = self.read_json(
+                            directory
+                            / "telemetry"
+                            / f"{clean_batch_trace_id}.json"
+                        )
+                        original_certificate = self.read_json(
+                            directory
+                            / "certificates"
+                            / f"{clean_original_certificate_id}.json"
+                        )
+                        original_trace = self.read_json(
+                            directory
+                            / "telemetry"
+                            / f"{clean_original_trace_id}.json"
+                        )
+                        runtime_certificate = self.read_json(
+                            directory
+                            / "certificates"
+                            / f"{clean_runtime_certificate_id}.json"
+                        )
+                        for value, record_id, kind in (
+                            (
+                                evidence,
+                                clean_evidence_id,
+                                "preflight_evidence_reissues",
+                            ),
+                            (
+                                source_certificate,
+                                clean_source_certificate_id,
+                                "certificates",
+                            ),
+                            (
+                                evidence_trace,
+                                clean_evidence_trace_id,
+                                "telemetry",
+                            ),
+                            (
+                                batch_trace,
+                                clean_batch_trace_id,
+                                "telemetry",
+                            ),
+                            (
+                                original_certificate,
+                                clean_original_certificate_id,
+                                "certificates",
+                            ),
+                            (
+                                original_trace,
+                                clean_original_trace_id,
+                                "telemetry",
+                            ),
+                            (
+                                runtime_certificate,
+                                clean_runtime_certificate_id,
+                                "certificates",
+                            ),
+                        ):
+                            self._verify_record_integrity(
+                                value, record_id=record_id
+                            )
+                            self._verify_project_record_primary_id(
+                                kind, value, record_id=record_id
+                            )
+                            if not self.project_record_is_signed(value):
+                                return False
+                    except (OSError, TypeError, ValueError):
+                        return False
+                    journal_old_before = journal.get("old_before")
+                    evidence_current_report = evidence.get(
+                        "current_validation_report"
+                    )
+                    evidence_histogram: dict[str, int] = {}
+                    if isinstance(evidence_current_report, dict):
+                        for issue in evidence_current_report.get(
+                            "issues", []
+                        ):
+                            if not isinstance(issue, dict):
+                                continue
+                            code = str(issue.get("error_code") or "UNKNOWN")
+                            evidence_histogram[code] = (
+                                evidence_histogram.get(code, 0) + 1
+                            )
+                    expected_batch_trace_id = (
+                        "TRC-"
+                        + sha256_bytes(
+                            (
+                                str(evidence.get("plan_sha256") or "")
+                                + ":preflight-evidence-trace"
+                            ).encode()
+                        )[:20]
+                    )
+                    evidence_fingerprints = evidence.get(
+                        "current_fingerprints"
+                    )
+                    projection_proof = evidence.get(
+                        "workbook_projection_revalidation"
+                    )
+                    if (
+                        not isinstance(evidence_fingerprints, dict)
+                        or not isinstance(projection_proof, dict)
+                    ):
+                        return False
+                    evidence_fingerprints_sha256 = sha256_bytes(
+                        canonical_json_bytes(evidence_fingerprints)
+                    )
+                    (
+                        expected_evidence_key,
+                        expected_evidence_id,
+                        expected_source_certificate_id,
+                        expected_evidence_trace_id,
+                    ) = self._controlled_preflight_evidence_identity(
+                        project_id=project_id,
+                        work_order_id=evidence_work_order_id,
+                        gap_id=str(evidence.get("gap_id") or ""),
+                        handoff_id=str(
+                            evidence.get("old_handoff_id") or ""
+                        ),
+                        old_record_sha256=str(
+                            evidence.get("old_handoff_sha256") or ""
+                        ),
+                        current_fingerprints_sha256=str(
+                            evidence.get("current_fingerprints_sha256") or ""
+                        ),
+                        runtime_test_certificate_id=(
+                            clean_runtime_certificate_id
+                        ),
+                        workbook_projection_proof_sha256=str(
+                            projection_proof.get("proof_sha256") or ""
+                        ),
+                        production_validation_replay_sha256=str(
+                            replay.get("proof_sha256") or ""
+                        ),
+                    )
+                    authority_hub = self.read_json(directory / "hub.json")
+                    evidence_work_orders = [
+                        row
+                        for row in authority_hub.get("work_orders", [])
+                        if isinstance(row, dict)
+                        and row.get("work_order_id")
+                        == evidence_work_order_id
+                    ]
+                    expected_work_order_targets = {
+                        "GAP-1bb91d83751b422f",
+                        *CONTROLLED_HISTORICAL_PREFLIGHT_HANDOFF_IDS,
+                        "controlled_phase:preflight_evidence_backfill",
+                    }
+                    if len(evidence_work_orders) != 1:
+                        return False
+                    evidence_work_order = evidence_work_orders[0]
+                    if (
+                        not str(certificate.get("cache_key") or "").startswith(
+                            "HISTCACHE-"
+                        )
+                        or handoff.get("audit_class")
+                        != "historical_production_preflight_attestation"
+                        or handoff.get("preflight_evidence_source")
+                        != "controlled_historical_contract_replay"
+                        or handoff.get("production_preflight_status")
+                        != "historical_contract_pass"
+                        or handoff.get("production_validation_replay")
+                        != replay
+                        or stage_trace.get("production_validation_replay")
+                        != replay
+                        or replay_proof
+                        != sha256_bytes(
+                            canonical_json_bytes(replay_without_proof)
+                        )
+                        or replay.get("historical_contract_status")
+                        != "historical_contract_pass"
+                        or replay.get("historical_contract_issue_count") != 0
+                        or replay.get("current_validation_status")
+                        != "fail_current"
+                        or not isinstance(
+                            replay.get("current_validation_issue_count"), int
+                        )
+                        or isinstance(
+                            replay.get("current_validation_issue_count"), bool
+                        )
+                        or replay.get("current_validation_issue_count") < 1
+                        or not isinstance(current_report, dict)
+                        or not isinstance(historical_report, dict)
+                        or historical_report != report
+                        or sha256_bytes(
+                            canonical_json_bytes(historical_report)
+                        )
+                        != replay.get("historical_report_sha256")
+                        or sha256_bytes(canonical_json_bytes(current_report))
+                        != replay.get("current_report_sha256")
+                        or len(current_report.get("issues", []))
+                        != replay.get("current_validation_issue_count")
+                        or certificate.get("current_validation_status")
+                        != "fail_current"
+                        or certificate.get("current_validation_issue_count")
+                        != replay.get("current_validation_issue_count")
+                        or handoff.get("current_validation_status")
+                        != "fail_current"
+                        or handoff.get("current_validation_issue_count")
+                        != replay.get("current_validation_issue_count")
+                        or stage_trace.get("current_validation_status")
+                        != "fail_current"
+                        or stage_trace.get("current_validation_issue_count")
+                        != replay.get("current_validation_issue_count")
+                        or any(
+                            value.get("current_production_pass_claimed")
+                            is not False
+                            or value.get("current_preflight_cache_reusable")
+                            is not False
+                            or value.get(
+                                "conclusion_reusable_for_independent_audit"
+                            )
+                            is not False
+                            or value.get(
+                                "requires_full_current_independent_audit"
+                            )
+                            is not True
+                            for value in (certificate, handoff, stage_trace)
+                        )
+                        or certificate.get("source_preflight_evidence_id")
+                        != evidence_id
+                        or certificate.get(
+                            "source_preflight_evidence_certificate_id"
+                        )
+                        != source_certificate_id
+                        or evidence.get("status") != "committed"
+                        or evidence.get("project_id") != project_id
+                        or evidence.get("gap_id")
+                        != "GAP-1bb91d83751b422f"
+                        or evidence.get("work_order_id")
+                        != evidence_work_order_id
+                        or evidence_work_order.get("operation")
+                        != "rule_improvement"
+                        or evidence_work_order.get("mode") != "execute"
+                        or evidence_work_order.get("authorization")
+                        != "explicit_execute"
+                        or evidence_work_order.get("server_actor_role")
+                        != "production"
+                        or {
+                            str(value)
+                            for value in evidence_work_order.get(
+                                "targets", []
+                            )
+                        }
+                        != expected_work_order_targets
+                        or evidence.get("confirmation")
+                        != "REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE"
+                        or evidence.get("authorized_handoff_ids")
+                        != list(CONTROLLED_HISTORICAL_PREFLIGHT_HANDOFF_IDS)
+                        or evidence.get("batch_trace_id")
+                        != expected_batch_trace_id
+                        or not isinstance(journal_old_before, dict)
+                        or evidence.get("old_handoff_sha256")
+                        != self.project_state_sha256(journal_old_before)
+                        or evidence.get("original_certificate_id")
+                        != journal_old_before.get("certificate_id")
+                        or evidence.get("original_production_trace_id")
+                        != journal_old_before.get("stage_trace_id")
+                        or evidence.get("evidence_type")
+                        != "controlled_historical_production_preflight_attestation"
+                        or evidence.get("old_handoff_id")
+                        != journal.get("old_handoff_id")
+                        or evidence.get("preflight_evidence_id")
+                        != evidence_id
+                        or evidence.get("evidence_key")
+                        != expected_evidence_key
+                        or evidence_id != expected_evidence_id
+                        or evidence.get("certificate_id")
+                        != source_certificate_id
+                        or source_certificate_id
+                        != expected_source_certificate_id
+                        or evidence.get("trace_id")
+                        != expected_evidence_trace_id
+                        or evidence.get("runtime_test_certificate_id")
+                        != clean_runtime_certificate_id
+                        or evidence.get("current_fingerprints")
+                        != handoff.get("fingerprints")
+                        or evidence.get("current_fingerprints_sha256")
+                        != evidence_fingerprints_sha256
+                        or evidence.get("current_fingerprints_sha256")
+                        != handoff.get("recovery_plan_item", {}).get(
+                            "current_fingerprints_sha256"
+                        )
+                        or evidence.get("artifact_id")
+                        != handoff.get("storyboard_artifact_id")
+                        or evidence.get("canonical_artifact_id")
+                        != handoff.get("canonical_artifact_id")
+                        or evidence.get("canonical_sha256")
+                        != handoff.get("canonical_sha256")
+                        or evidence.get("validation_report_sha256")
+                        != replay.get("historical_report_sha256")
+                        or evidence.get("checked_shot_count")
+                        != handoff.get("checked_shot_count")
+                        or not isinstance(
+                            evidence.get("production_preflight_issue_count"),
+                            int,
+                        )
+                        or isinstance(
+                            evidence.get("production_preflight_issue_count"),
+                            bool,
+                        )
+                        or evidence.get("production_preflight_issue_count")
+                        != 0
+                        or evidence.get("independent_audit_status")
+                        != "PENDING_AUDIT"
+                        or evidence.get("first_draft_grade_reconstructed")
+                        is not False
+                        or evidence.get("authored_artifacts_modified")
+                        is not False
+                        or not isinstance(
+                            evidence.get("history_records_modified"), int
+                        )
+                        or isinstance(
+                            evidence.get("history_records_modified"), bool
+                        )
+                        or evidence.get("history_records_modified") != 0
+                        or evidence.get("independent_audit_verdict_issued")
+                        is not False
+                        or evidence.get("production_validation_replay")
+                        != replay
+                        or evidence.get("production_preflight_status")
+                        != "historical_contract_pass"
+                        or evidence.get("current_validation_status")
+                        != "fail_current"
+                        or evidence.get("current_validation_issue_count")
+                        != replay.get("current_validation_issue_count")
+                        or evidence.get(
+                            "historical_validation_report_sha256"
+                        )
+                        != replay.get("historical_report_sha256")
+                        or evidence.get(
+                            "current_validation_report_sha256"
+                        )
+                        != replay.get("current_report_sha256")
+                        or evidence.get(
+                            "current_validation_error_histogram"
+                        )
+                        != dict(sorted(evidence_histogram.items()))
+                        or evidence.get(
+                            "current_validation_error_histogram"
+                        )
+                        != replay.get("current_validation_error_histogram")
+                        or not isinstance(
+                            evidence.get("historical_validation_report"),
+                            dict,
+                        )
+                        or sha256_bytes(
+                            canonical_json_bytes(
+                                evidence["historical_validation_report"]
+                            )
+                        )
+                        != replay.get("historical_report_sha256")
+                        or not isinstance(evidence_current_report, dict)
+                        or sha256_bytes(
+                            canonical_json_bytes(evidence_current_report)
+                        )
+                        != replay.get("current_report_sha256")
+                        or evidence.get("certificate_after")
+                        != source_certificate
+                        or self.project_state_sha256(source_certificate)
+                        != evidence.get("certificate_after_sha256")
+                        or source_certificate.get("certificate_type")
+                        != "historical_production_preflight_attestation"
+                        or source_certificate.get("work_order_id")
+                        != evidence_work_order_id
+                        or source_certificate.get(
+                            "evidence_reissue_work_order_id"
+                        )
+                        != evidence_work_order_id
+                        or source_certificate.get("evidence_reissue_gap_id")
+                        != evidence.get("gap_id")
+                        or source_certificate.get("preflight_evidence_id")
+                        != evidence_id
+                        or source_certificate.get("evidence_trace_id")
+                        != expected_evidence_trace_id
+                        or source_certificate.get(
+                            "runtime_test_certificate_id"
+                        )
+                        != clean_runtime_certificate_id
+                        or source_certificate.get("cache_components", {}).get(
+                            "runtime_test_certificate_id"
+                        )
+                        != clean_runtime_certificate_id
+                        or source_certificate.get("artifact_id")
+                        != evidence.get("artifact_id")
+                        or source_certificate.get("canonical_artifact_id")
+                        != evidence.get("canonical_artifact_id")
+                        or source_certificate.get("canonical_sha256")
+                        != evidence.get("canonical_sha256")
+                        or source_certificate.get("current_fingerprints")
+                        != evidence_fingerprints
+                        or source_certificate.get(
+                            "current_fingerprints_sha256"
+                        )
+                        != evidence_fingerprints_sha256
+                        or source_certificate.get("preflight_status")
+                        != "historical_contract_pass"
+                        or source_certificate.get("preflight_issue_count")
+                        != 0
+                        or source_certificate.get("checked_shot_count")
+                        != evidence.get("checked_shot_count")
+                        or source_certificate.get(
+                            "first_draft_grade_reconstructed"
+                        )
+                        is not False
+                        or source_certificate.get("authored_artifacts_modified")
+                        is not False
+                        or source_certificate.get(
+                            "independent_audit_verdict_issued"
+                        )
+                        is not False
+                        or source_certificate.get(
+                            "production_validation_replay"
+                        )
+                        != replay
+                        or runtime_certificate.get("certificate_id")
+                        != clean_runtime_certificate_id
+                        or runtime_certificate.get("certificate_type")
+                        != "runtime_full_regression"
+                        or runtime_certificate.get("result") != "pass"
+                        or certificate.get("cache_components", {}).get(
+                            "runtime_test_certificate_id"
+                        )
+                        != clean_runtime_certificate_id
+                        or evidence_trace.get("trace_id")
+                        != evidence.get("trace_id")
+                        or evidence_trace.get("telemetry_id")
+                        != evidence.get("trace_id")
+                        or evidence_trace.get("operation")
+                        != "recover_storyboard_handoff"
+                        or evidence_trace.get("phase")
+                        != "preflight_evidence_backfill"
+                        or evidence_trace.get("work_order_id")
+                        != evidence_work_order_id
+                        or evidence_trace.get("authority_record_id")
+                        != evidence_id
+                        or evidence_trace.get("gap_id")
+                        != evidence.get("gap_id")
+                        or evidence_trace.get("plan_sha256")
+                        != evidence.get("plan_sha256")
+                        or evidence_trace.get("authorized_handoff_ids")
+                        != evidence.get("authorized_handoff_ids")
+                        or evidence_trace.get("artifact_id")
+                        != evidence.get("artifact_id")
+                        or evidence_trace.get("input_fingerprints")
+                        != evidence_fingerprints
+                        or evidence_trace.get(
+                            "production_validation_replay"
+                        )
+                        != replay
+                        or evidence.get("stage_trace_after")
+                        != evidence_trace
+                        or self.project_state_sha256(evidence_trace)
+                        != evidence.get("stage_trace_after_sha256")
+                        or batch_trace.get("trace_id")
+                        != evidence.get("batch_trace_id")
+                        or batch_trace.get("telemetry_id")
+                        != evidence.get("batch_trace_id")
+                        or batch_trace.get("operation")
+                        != "recover_storyboard_handoff"
+                        or batch_trace.get("phase")
+                        != "preflight_evidence_backfill"
+                        or batch_trace.get("work_order_id")
+                        != evidence_work_order_id
+                        or batch_trace.get("gap_id")
+                        != evidence.get("gap_id")
+                        or batch_trace.get("plan_sha256")
+                        != evidence.get("plan_sha256")
+                        or batch_trace.get("authorized_handoff_ids")
+                        != evidence.get("authorized_handoff_ids")
+                        or original_certificate.get("certificate_id")
+                        != evidence.get("original_certificate_id")
+                        or self.project_state_sha256(original_certificate)
+                        != evidence.get(
+                            "workbook_projection_revalidation", {}
+                        ).get("old_certificate_sha256")
+                        or original_trace.get("trace_id")
+                        != evidence.get("original_production_trace_id")
+                        or original_trace.get("telemetry_id")
+                        != evidence.get("original_production_trace_id")
+                        or original_trace.get("operation")
+                        != "commit_storyboard"
+                        or original_trace.get("window_role") != "production"
+                        or original_trace.get("task_type")
+                        != "production_preflight"
+                        or self.project_state_sha256(original_trace)
+                        != evidence.get(
+                            "workbook_projection_revalidation", {}
+                        ).get("original_production_trace_sha256")
+                        or evidence.get(
+                            "workbook_projection_revalidation", {}
+                        ).get("old_handoff_sha256")
+                        != evidence.get("old_handoff_sha256")
+                    ):
+                        return False
+                elif (
+                    not str(certificate.get("cache_key") or "").startswith(
+                        "AUDCACHE-"
+                    )
+                    or any(
+                        value.get("production_validation_replay") is not None
+                        for value in (certificate, handoff, stage_trace)
+                    )
                 ):
                     return False
 

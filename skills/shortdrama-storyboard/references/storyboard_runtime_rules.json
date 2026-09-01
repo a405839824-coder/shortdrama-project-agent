@@ -60,7 +60,7 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.10",
+    "plugin_version": "0.5.11",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
     "canonical_atomic_field_count": 27,
@@ -459,6 +459,7 @@
       "controlled_recovery": {
         "minimum_plugin_version": "0.5.8",
         "legacy_handoff_recovery_introduced_in": "0.5.6",
+        "historical_contract_attestation_introduced_in": "0.5.11",
         "public_tool_contract": {
           "exact_tool_count": 19,
           "tool": "recover_storyboard_handoff",
@@ -486,6 +487,50 @@
           "action_sequence": ["plan", "execute"],
           "exact_confirmation": "REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE",
           "evidence_policy": "append_only",
+          "historical_contract_attestation": {
+            "gap_id": "GAP-1bb91d83751b422f",
+            "exact_ordered_handoff_ids": [
+              "HND-f6fd29730a074d2c",
+              "HND-95e3b1c141a64783",
+              "HND-c88ee199d5fb4676",
+              "HND-e8ca409208134104",
+              "HND-0dd8fa51a9e24cd0",
+              "HND-9029110f35d74270"
+            ],
+            "exact_rules_profile_by_handoff": {
+              "HND-f6fd29730a074d2c": ["V16.3-148-R10-StableRuntime:R10-PG1:c0867f81158ffca0", "c0867f81158ffca02cd5f2b3d53e527e0dcddf5a7ad02341758a54954636f5b9"],
+              "HND-95e3b1c141a64783": ["V16.3-148-R10-StableRuntime:R10-PG1:c0867f81158ffca0", "c0867f81158ffca02cd5f2b3d53e527e0dcddf5a7ad02341758a54954636f5b9"],
+              "HND-c88ee199d5fb4676": ["V16.3-148-R10-StableRuntime:R10-PG1:d8841a2f52d86bed", "d8841a2f52d86bed8554b21c3543e85f753b4b6f01a1b0a94964a9da4bcf90dc"],
+              "HND-e8ca409208134104": ["V16.3-148-R10-StableRuntime:R10-PG1:d8841a2f52d86bed", "d8841a2f52d86bed8554b21c3543e85f753b4b6f01a1b0a94964a9da4bcf90dc"],
+              "HND-0dd8fa51a9e24cd0": ["V16.3-148-R10-StableRuntime:R10-PG1:d8841a2f52d86bed", "d8841a2f52d86bed8554b21c3543e85f753b4b6f01a1b0a94964a9da4bcf90dc"],
+              "HND-9029110f35d74270": ["V16.3-148-R10-StableRuntime:R10-PG1:d8841a2f52d86bed", "d8841a2f52d86bed8554b21c3543e85f753b4b6f01a1b0a94964a9da4bcf90dc"]
+            },
+            "evidence_type": "controlled_historical_production_preflight_attestation",
+            "certificate_class": "historical_production_preflight_attestation",
+            "evidence_origin": "controlled_historical_contract_replay",
+            "historical_contract_status": "historical_contract_pass",
+            "historical_contract_issue_count": 0,
+            "historical_validator_policy": "frozen_report_must_exactly_equal_signed_original_production_report",
+            "current_validation_status": "fail_current",
+            "allowed_current_failure_scope": {
+              "error_code": "E-I2V-INDEP-002",
+              "template_gate_id": "THG-01",
+              "severity": "fail",
+              "blocking": true,
+              "location_pattern": "^shots\\[[1-9][0-9]*\\]\\.生成限制$",
+              "exact_evidence": "逐字短语'9:16竖屏'应恰好出现1次，当前=0",
+              "warning_count": 0,
+              "report_issue_error_and_shot_counts_must_close": true,
+              "other_current_failures": "fail_closed_before_mutation"
+            },
+            "current_validation_report_policy": "preserve_complete_current_validator_failure_diagnostics_unchanged",
+            "current_production_pass_claimed": false,
+            "current_preflight_cache_reusable": false,
+            "conclusion_reusable_for_independent_audit": false,
+            "requires_full_current_independent_audit": true,
+            "cache_domain": "HISTCACHE",
+            "cache_reuse_policy": "never_as_current_preflight_or_independent_audit_evidence"
+          },
           "workbook_projection_revalidation": {
             "scope": "internal_controlled_backfill_and_recovery_only",
             "accepted_contracts": ["exact_signed_current_projection", "exact_signed_shortdrama_projector_0.5.4", "exact_legacy_v0.5.3_baseline_replayed_by_frozen_projector"],
@@ -500,6 +545,20 @@
         "handoff_recovery": {
           "phase": "handoff_recovery",
           "work_order_target_token": "controlled_phase:handoff_recovery",
+          "gap_id": "GAP-0e5d48969c4c494e",
+          "exact_ordered_handoff_ids": [
+            "HND-5394638be5fe4a55",
+            "HND-ea122cf3048e482a",
+            "HND-3a090b4f44c74929",
+            "HND-c765ba78aab840ff",
+            "HND-7738fa25ce4044c9",
+            "HND-f6fd29730a074d2c",
+            "HND-95e3b1c141a64783",
+            "HND-c88ee199d5fb4676",
+            "HND-e8ca409208134104",
+            "HND-0dd8fa51a9e24cd0",
+            "HND-9029110f35d74270"
+          ],
           "action_sequence": ["plan", "execute"],
           "exact_confirmation": "SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT"
         },
@@ -511,7 +570,7 @@
         "old_record_policy": "preserve_and_mark_superseded",
         "new_record_policy": "one_current_complete_fingerprint_prepared_successor",
         "independent_audit_status": "PENDING_AUDIT",
-        "forbid": ["history_delete", "artifact_or_canonical_rewrite", "independent_audit_verdict", "audit_cache_reuse"]
+        "forbid": ["history_delete", "artifact_or_canonical_rewrite", "independent_audit_verdict", "audit_cache_reuse", "historical_attestation_as_current_production_pass", "histcache_as_current_or_independent_audit_cache"]
       },
       "independent_reaudit_successor": {
         "root_policy": "consumed_root_and_prior_successors_are_immutable_history",
