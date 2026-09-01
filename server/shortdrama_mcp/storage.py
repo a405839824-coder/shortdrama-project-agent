@@ -100,6 +100,7 @@ REAUDIT_IMMUTABLE_IDENTITY_KEYS = (
     "recovery_plan_sha256",
     "recovery_plan_item",
     "recovery_cache_status",
+    "workbook_projection_revalidation",
     "history_preserved",
     "checked_shot_count",
     "facts_reusable",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import io
 import unittest
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,14 @@ from unittest.mock import patch
 
 from openpyxl import load_workbook
 
+from shortdrama_mcp.file_io import (
+    CANONICAL_SIDECAR_SHEET,
+    extract_xlsx,
+)
+from shortdrama_mcp.materializer import (
+    MOTHER_TEMPLATE_COLUMNS,
+    legacy_v053_mother_template_rows,
+)
 import shortdrama_mcp.service as service_module
 
 import test_v056_handoff_recovery as recovery_tests
@@ -143,6 +152,166 @@ class V057PreflightEvidenceReissueTests(
             str(handoff["storyboard_artifact_id"]),
         )
         return Path(path).read_bytes()
+
+    def _install_v053_transitional_workbook_fixture(
+        self,
+    ) -> dict[str, Any]:
+        """Make the fixture look exactly like one signed v0.5.3 export.
+
+        The base fixture is first produced with today's writer.  Rebinding all
+        historical authorities here models the same workbook having originally
+        been emitted by v0.5.3; the recovery operation itself must still leave
+        every old record and authored byte untouched.
+        """
+
+        handoff = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=self.old_handoff_id,
+        )
+        artifact_id = str(handoff["storyboard_artifact_id"])
+        storyboard, artifact_record = self.service._storyboard_from_artifact(
+            self.namespace,
+            self.project_id,
+            artifact_id,
+            persist_recovered_canonical=False,
+            require_bound_projection=True,
+        )
+        _verified_record, artifact_path = self.service.store.get_artifact(
+            self.namespace,
+            self.project_id,
+            artifact_id,
+        )
+        workbook = load_workbook(artifact_path, data_only=False)
+        formal_sheet = workbook["正式生产母版"]
+        self.assertEqual(
+            [cell.value for cell in formal_sheet[1]],
+            list(MOTHER_TEMPLATE_COLUMNS),
+        )
+        expected_rows = legacy_v053_mother_template_rows(storyboard)
+        self.assertEqual(formal_sheet.max_row, len(expected_rows) + 1)
+        for row_index, row in enumerate(expected_rows, start=2):
+            for column_index, header in enumerate(
+                MOTHER_TEMPLATE_COLUMNS, start=1
+            ):
+                formal_sheet.cell(row_index, column_index).value = row.get(
+                    header
+                )
+        sidecar = workbook[CANONICAL_SIDECAR_SHEET]
+        self.assertEqual(sidecar.sheet_state, "veryHidden")
+        sidecar.delete_cols(9, 3)
+        payload_buffer = io.BytesIO()
+        workbook.save(payload_buffer)
+        workbook.close()
+        payload = payload_buffer.getvalue()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "visible header does not match signed projection contract",
+        ):
+            extract_xlsx(payload)
+
+        artifact_raw_sha256 = service_module.sha256_bytes(payload)
+        self.service.store.atomic_write_bytes(artifact_path, payload)
+        artifact_record["fingerprint"] = artifact_raw_sha256
+        artifact_record["size_bytes"] = len(payload)
+        artifact_meta_path = (
+            self.service.store.project_dir(
+                self.namespace, self.project_id
+            )
+            / "artifacts"
+            / f"{artifact_id}.meta.json"
+        )
+        self.service.store.atomic_write_json(
+            artifact_meta_path, artifact_record
+        )
+
+        cache_components = copy.deepcopy(handoff["cache_components"])
+        cache_components["artifact"] = artifact_raw_sha256
+        cache_key = self.service._cache_key_from_components(
+            cache_components
+        )
+        with self.service.store.mutate_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=self.old_handoff_id,
+        ) as rebound_handoff:
+            rebound_handoff["fingerprints"][
+                "artifact_raw"
+            ] = artifact_raw_sha256
+            rebound_handoff["cache_components"] = copy.deepcopy(
+                cache_components
+            )
+            rebound_handoff["cache_key"] = cache_key
+            for cache_entry in rebound_handoff["cache_manifest"]:
+                cache_entry["cache_key"] = cache_key
+                cache_entry["dependency_fingerprints"][
+                    "artifact_raw"
+                ] = artifact_raw_sha256
+            workbook_manifest = rebound_handoff["objective_evidence"][
+                "workbook_manifest"
+            ]
+            workbook_manifest["raw_sha256"] = artifact_raw_sha256
+            workbook_manifest["size_bytes"] = len(payload)
+
+        rebound_handoff = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=self.old_handoff_id,
+        )
+        original_certificate_id = str(
+            rebound_handoff["certificate_id"]
+        )
+        with self.service.store.mutate_project_record(
+            self.namespace,
+            self.project_id,
+            kind="certificates",
+            record_id=original_certificate_id,
+        ) as rebound_certificate:
+            rebound_certificate["cache_components"] = copy.deepcopy(
+                cache_components
+            )
+            rebound_certificate["cache_key"] = cache_key
+
+        original_trace_id = str(rebound_handoff["stage_trace_id"])
+        with self.service.store.mutate_project_record(
+            self.namespace,
+            self.project_id,
+            kind="telemetry",
+            record_id=original_trace_id,
+        ) as rebound_trace:
+            rebound_trace["input_fingerprints"] = copy.deepcopy(
+                rebound_handoff["fingerprints"]
+            )
+            rebound_trace["input_payload_bytes"] = len(payload)
+            rebound_trace["output_payload_bytes"] = len(payload)
+            for stage in rebound_trace.get("stages", []):
+                stage["payload_bytes"] = len(payload)
+
+        self._replace_hub_handoff_rows(
+            self.old_handoff_id,
+            [self.service._handoff_record_projection(rebound_handoff)],
+        )
+        return {
+            "artifact_bytes": payload,
+            "artifact_raw_sha256": artifact_raw_sha256,
+            "old_handoff": rebound_handoff,
+            "old_certificate": self.service.store.get_project_record(
+                self.namespace,
+                self.project_id,
+                kind="certificates",
+                record_id=original_certificate_id,
+            ),
+            "original_trace": self.service.store.get_project_record(
+                self.namespace,
+                self.project_id,
+                kind="telemetry",
+                record_id=original_trace_id,
+            ),
+        }
 
     def _remove_handoff_preflight_summary(self, handoff_id: str) -> None:
         fields = (
@@ -637,6 +806,209 @@ class V057PreflightEvidenceReissueTests(
             1,
         )
 
+    async def test_v053_transitional_workbook_backfill_full_chain(
+        self,
+    ) -> None:
+        fixture = self._install_v053_transitional_workbook_fixture()
+        old_handoff = fixture["old_handoff"]
+        old_certificate = fixture["old_certificate"]
+        original_trace = fixture["original_trace"]
+        old_handoff_sha256 = self.service.store.project_state_sha256(
+            old_handoff
+        )
+        old_certificate_sha256 = self.service.store.project_state_sha256(
+            old_certificate
+        )
+        original_trace_sha256 = self.service.store.project_state_sha256(
+            original_trace
+        )
+        _canonical_record, canonical_path = self.service.store.get_artifact(
+            self.namespace,
+            self.project_id,
+            str(old_handoff["canonical_artifact_id"]),
+        )
+        canonical_bytes_before = canonical_path.read_bytes()
+        authority_before_plan = self._recovery_authority_snapshot()
+
+        response = self._backfill_plan()
+        self.assertEqual(
+            response.status, "preflight_evidence_reissue_plan_ready"
+        )
+        self.assertEqual(
+            self._recovery_authority_snapshot(), authority_before_plan
+        )
+        self.assertEqual(
+            self._artifact_bytes(), fixture["artifact_bytes"]
+        )
+        self.assertEqual(canonical_path.read_bytes(), canonical_bytes_before)
+
+        plan = response.data["preflight_evidence_plan"]
+        item = plan["items"][0]
+        proof = item["workbook_projection_revalidation"]
+        self.assertEqual(
+            proof["mode"],
+            "legacy_envelope_short_header_v053_rows",
+        )
+        self.assertTrue(proof["compatibility_applied"])
+        self.assertEqual(
+            proof["sidecar_projection_contract"],
+            "shortdrama-projector/0.5.0",
+        )
+        self.assertEqual(
+            proof["selected_projector"],
+            "shortdrama-projector/0.5.3-frozen",
+        )
+        self.assertTrue(proof["visible_rows_match_selected_projector"])
+        self.assertFalse(proof["visible_projection_matches_sidecar"])
+        self.assertFalse(proof["visible_audit_page_matches_sidecar"])
+        self.assertIsNone(proof["sidecar_projection_sha256"])
+        self.assertIsNone(proof["sidecar_audit_page_sha256"])
+        self.assertEqual(
+            proof["audit_page_integrity_source"],
+            "signed_original_artifact_raw_sha256",
+        )
+        self.assertTrue(
+            proof["artifact_raw_bound_by_original_certificate"]
+        )
+        self.assertEqual(
+            proof["artifact_raw_sha256"],
+            fixture["artifact_raw_sha256"],
+        )
+        self.assertEqual(
+            proof["canonical_sha256"], old_handoff["canonical_sha256"]
+        )
+        self.assertEqual(
+            proof["old_handoff_sha256"], old_handoff_sha256
+        )
+        self.assertEqual(
+            proof["old_certificate_id"], old_certificate["certificate_id"]
+        )
+        self.assertEqual(
+            proof["old_certificate_sha256"], old_certificate_sha256
+        )
+        self.assertEqual(
+            proof["original_production_trace_id"],
+            original_trace["trace_id"],
+        )
+        self.assertEqual(
+            proof["original_production_trace_sha256"],
+            original_trace_sha256,
+        )
+        proof_without_identity = copy.deepcopy(proof)
+        proof_sha256 = proof_without_identity.pop("proof_sha256")
+        self.assertEqual(
+            proof_sha256,
+            service_module.sha256_bytes(
+                service_module._stable_json_bytes(proof_without_identity)
+            ),
+        )
+
+        result = self._backfill_execute(plan["plan_sha256"])
+        self.assertEqual(result.status, "preflight_evidence_reissued")
+        mapping = result.data["mappings"][0]
+        self.assertEqual(
+            mapping["workbook_projection_mode"], proof["mode"]
+        )
+        self.assertEqual(
+            mapping["workbook_projection_proof_sha256"], proof_sha256
+        )
+        self.assertFalse(mapping["idempotent_replay"])
+        evidence = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="preflight_evidence_reissues",
+            record_id=str(mapping["preflight_evidence_id"]),
+        )
+        certificate = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="certificates",
+            record_id=str(mapping["certificate_id"]),
+        )
+        evidence_trace = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="telemetry",
+            record_id=str(mapping["trace_id"]),
+        )
+        for record in (evidence, certificate, evidence_trace):
+            self.assertTrue(
+                self.service.store.project_record_is_signed(record)
+            )
+        self.assertEqual(evidence["status"], "committed")
+        self.assertEqual(
+            evidence["workbook_projection_revalidation"], proof
+        )
+        self.assertEqual(
+            certificate["workbook_projection_revalidation"], proof
+        )
+        self.assertEqual(
+            evidence["original_production_trace_id"],
+            original_trace["trace_id"],
+        )
+        self.assertEqual(
+            certificate["original_certificate_id"],
+            old_certificate["certificate_id"],
+        )
+
+        self.assertEqual(
+            self.service.store.project_state_sha256(
+                self.service.store.get_project_record(
+                    self.namespace,
+                    self.project_id,
+                    kind="handoffs",
+                    record_id=self.old_handoff_id,
+                )
+            ),
+            old_handoff_sha256,
+        )
+        self.assertEqual(
+            self.service.store.project_state_sha256(
+                self.service.store.get_project_record(
+                    self.namespace,
+                    self.project_id,
+                    kind="certificates",
+                    record_id=str(old_certificate["certificate_id"]),
+                )
+            ),
+            old_certificate_sha256,
+        )
+        self.assertEqual(
+            self.service.store.project_state_sha256(
+                self.service.store.get_project_record(
+                    self.namespace,
+                    self.project_id,
+                    kind="telemetry",
+                    record_id=str(original_trace["trace_id"]),
+                )
+            ),
+            original_trace_sha256,
+        )
+        self.assertEqual(
+            self._artifact_bytes(), fixture["artifact_bytes"]
+        )
+        self.assertEqual(canonical_path.read_bytes(), canonical_bytes_before)
+
+        authority_after_execute = self._recovery_authority_snapshot()
+        replay = self._backfill_execute(plan["plan_sha256"])
+        replay_mapping = replay.data["mappings"][0]
+        for field in (
+            "preflight_evidence_id",
+            "certificate_id",
+            "trace_id",
+            "workbook_projection_mode",
+            "workbook_projection_proof_sha256",
+        ):
+            self.assertEqual(replay_mapping[field], mapping[field])
+        self.assertTrue(replay_mapping["idempotent_replay"])
+        self.assertEqual(
+            self._recovery_authority_snapshot(), authority_after_execute
+        )
+        self.assertEqual(
+            self._artifact_bytes(), fixture["artifact_bytes"]
+        )
+        self.assertEqual(canonical_path.read_bytes(), canonical_bytes_before)
+
     async def test_exact_legacy_signed_hub_envelope_supports_full_chain(
         self,
     ) -> None:
@@ -986,7 +1358,8 @@ class V057PreflightEvidenceReissueTests(
             row.pop("production_preflight_issue_count", None)
             row["fingerprints"]["artifact_raw"] = "1" * 64
         with self.assertRaisesRegex(
-            ValueError, "handoff_recovery_content_changed"
+            ValueError,
+            "handoff_recovery_(?:certificate_invalid|content_changed)",
         ):
             self._backfill_plan()
 
@@ -1628,6 +2001,28 @@ class V057PreflightEvidenceReissueTests(
                 self.namespace, self.project_id, committed
             )
         )
+        replay = self.service.recover_storyboard_handoff(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=self.recovery_work_order_id,
+            gap_id=self.gap_id,
+            handoff_ids=[self.old_handoff_id],
+            action="execute",
+            expected_plan_sha256=recovery_plan["plan_sha256"],
+            confirmation=service_module.HANDOFF_RECOVERY_CONFIRMATION,
+            request_session_id=self.session_id,
+        )
+        replay_mapping = replay.data["mappings"][0]
+        retry_mapping = retry.data["mappings"][0]
+        for field in (
+            "new_handoff_id",
+            "recovery_id",
+            "trace_id",
+            "workbook_projection_mode",
+            "workbook_projection_proof_sha256",
+        ):
+            self.assertEqual(replay_mapping[field], retry_mapping[field])
+        self.assertTrue(replay_mapping["idempotent_replay"])
 
 
 if __name__ == "__main__":
