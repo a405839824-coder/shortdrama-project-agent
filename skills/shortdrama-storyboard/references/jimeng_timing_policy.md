@@ -1,6 +1,6 @@
 # 即梦/Seedance 单镜时间描述路由
 
-适用于即梦、Dreamina、Seedance及其他图生视频/文生视频任务。当前 v0.5.8 compact canonical 不再维护独立 Seedance 列、生成批次或第二份视频提示词；R10-SPC-1 十列导出的`正式分镜母版`是唯一单镜执行母版。新生成、重建、修正和导出同时读取 `strict_prompt_contract.md`。
+适用于即梦、Dreamina、Seedance及其他图生视频/文生视频任务。当前 v0.5.9 compact canonical 不再维护独立 Seedance 列、生成批次或第二份视频提示词；R10-SPC-1 十列导出的`正式分镜母版`是唯一单镜执行母版。新生成、重建、修正和导出同时读取 `strict_prompt_contract.md`。
 
 ## 唯一写入位置
 

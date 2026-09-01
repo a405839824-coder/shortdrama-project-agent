@@ -371,7 +371,7 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         )
         current_sequence = int(current["certificate_sequence"])
         report_base = {
-            "version": "0.5.8",
+            "version": "0.5.9",
             "workflow_revision": "R10-PG1",
         }
         with patch(

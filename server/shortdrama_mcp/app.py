@@ -187,8 +187,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         title="受控恢复失效分镜交接",
         description=(
             "仅供production窗口在已登记能力缺口且用户明确授权后使用。phase=preflight_evidence_backfill"
-            "可对缺少旧生产预检字段的不可变交接执行当前验证器复验并追加签名证据；默认"
-            "phase=handoff_recovery恢复失效交接。两阶段均须先action=plan预演，execute回传精确"
+            "可对缺少旧生产预检字段的不可变交接执行当前验证器复验并追加签名证据；"
+            "省略phase时只允许从当前会话绑定工单中唯一且精确的controlled_phase令牌推断。"
+            "两阶段均须先action=plan预演，execute回传精确"
             "plan_sha256和对应确认字面量。恢复逐条使用签名日志与CAS，将失效的prepared "
             "production_to_audit handoff原子标记为superseded并按当前完整指纹重新签发；"
             "不删除历史、不改写分镜/canonical/XLSX、不签发独立审计结论，新handoff仍为PENDING_AUDIT。"
@@ -211,7 +212,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         action: Literal["plan", "execute"] = "plan",
         phase: Literal[
             "handoff_recovery", "preflight_evidence_backfill"
-        ] = "handoff_recovery",
+        ] | None = None,
         expected_plan_sha256: str | None = None,
         confirmation: str | None = None,
     ) -> ToolResponse:

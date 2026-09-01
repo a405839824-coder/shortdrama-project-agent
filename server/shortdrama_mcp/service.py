@@ -4760,6 +4760,32 @@ class StoryboardService:
         expected_projection = cls._handoff_record_projection(signed_handoff)
         return hub_handoff == expected_projection or hub_handoff == signed_handoff
 
+    def _assert_handoff_recovery_work_order(
+        self,
+        namespace: str,
+        work_order: dict[str, Any],
+        *,
+        request_session_id: str | None,
+    ) -> None:
+        self._assert_work_order_session(
+            namespace, work_order, request_session_id
+        )
+        if work_order.get("operation") != "rule_improvement":
+            raise ValueError(
+                "handoff_recovery_authority_required: use an explicit "
+                "rule_improvement production work order"
+            )
+        if (
+            work_order.get("mode") != "execute"
+            or work_order.get("authorization") != "explicit_execute"
+            or work_order.get("server_actor_role") != "production"
+        ):
+            raise ValueError(
+                "project_migration_authority_required: use an explicit rule_improvement "
+                "or version_management production work order"
+            )
+        self._assert_work_order_write_ready(work_order)
+
     def _assert_handoff_recovery_authority(
         self,
         namespace: str,
@@ -4770,15 +4796,17 @@ class StoryboardService:
         phase: str,
         request_session_id: str | None,
     ) -> None:
-        if work_order.get("operation") != "rule_improvement":
-            raise ValueError(
-                "handoff_recovery_authority_required: use an explicit "
-                "rule_improvement production work order"
-            )
-        self._assert_project_migration_authority(
-            namespace, work_order, request_session_id
+        self._assert_handoff_recovery_work_order(
+            namespace,
+            work_order,
+            request_session_id=request_session_id,
         )
-        targets = {str(value) for value in work_order.get("targets", [])}
+        raw_targets = [str(value) for value in work_order.get("targets", [])]
+        if len(raw_targets) != len(set(raw_targets)):
+            raise ValueError(
+                "handoff_recovery_scope_mismatch: work order targets must not contain duplicates"
+            )
+        targets = set(raw_targets)
         required = {
             gap_id,
             *handoff_ids,
@@ -7148,15 +7176,43 @@ class StoryboardService:
         expected_plan_sha256: str | None,
         confirmation: str | None,
         request_session_id: str | None,
-        phase: str = "handoff_recovery",
+        phase: str | None = None,
     ) -> ToolResponse:
         """Plan/execute evidence backfill or stale-handoff recovery."""
 
         self._require_runtime()
-        if phase not in {
+        supported_phases = {
             "handoff_recovery",
             "preflight_evidence_backfill",
-        }:
+        }
+        if phase is None:
+            hub = self.store.load_hub(namespace, project_id)
+            work_order = _find_work_order(hub, work_order_id)
+            self._assert_handoff_recovery_work_order(
+                namespace,
+                work_order,
+                request_session_id=request_session_id,
+            )
+            controlled_targets = [
+                str(value)
+                for value in work_order.get("targets", [])
+                if str(value).startswith("controlled_phase:")
+            ]
+            recognized_targets = [
+                value
+                for value in controlled_targets
+                if value.removeprefix("controlled_phase:") in supported_phases
+            ]
+            if (
+                len(controlled_targets) != 1
+                or len(recognized_targets) != 1
+            ):
+                raise ValueError(
+                    "handoff_recovery_phase_required: omitted phase requires "
+                    "exactly one recognized controlled_phase work-order target"
+                )
+            phase = recognized_targets[0].removeprefix("controlled_phase:")
+        if phase not in supported_phases:
             raise ValueError(
                 "handoff recovery phase must be handoff_recovery or preflight_evidence_backfill"
             )
@@ -14795,7 +14851,7 @@ class StoryboardService:
             and not draft_preflight_id
         ):
             raise ValueError(
-                "draft_preflight_required: cloud 0.5.8 full commits require a signed full-draft preflight"
+                "draft_preflight_required: cloud 0.5.9 full commits require a signed full-draft preflight"
             )
         stage_trace_id = _new_id("TRC")
         materialize_started_ns = time.perf_counter_ns()

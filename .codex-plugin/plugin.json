@@ -1,6 +1,6 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "description": "Chinese short-drama production with controlled storyboard-handoff recovery, project-state migration, scene/full draft preflight, cross-batch issue prevention, first-draft quality gates, the R10-SPC-1 strict single-shot contract, independent audit, and conditional repair.",
   "author": {
     "name": "Storyboard Project Agent"
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.8为历史Hub交接投影增加严格只读兼容：只接受精确去签名信封投影或精确完整签名记录，其他形态一律失败关闭；未来生产写入统一为去签名信封投影，不迁移或改写历史。0.5.7的旧prepared生产交接受控补签与0.5.6的受控恢复继续保持追加式证据、签名预演、精确确认、逐条CAS和待独立审计边界。生产负责先把已知问题清零，程序负责确定性阻断，独立审计独占最终100%通过结论。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.9为宿主缓存旧工具参数表提供失败关闭的受控阶段推断：只有当前会话绑定工单含唯一且精确的controlled_phase令牌时，省略phase才可继续；缺失、重复、未知或多阶段令牌均在写入前拒绝。0.5.8的历史Hub严格投影兼容、0.5.7的旧prepared生产交接受控补签与0.5.6的受控恢复继续保持追加式证据、签名预演、精确确认、逐条CAS和待独立审计边界。生产负责先把已知问题清零，程序负责确定性阻断，独立审计独占最终100%通过结论。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [
