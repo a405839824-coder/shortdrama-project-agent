@@ -16,8 +16,13 @@
 - 精确 10 列 Excel：`分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`
 - 0.5.5 初稿质量门：生成前读取跨批次问题画像，逐场景执行无产物预检，再对完整 canonical 签发全量预检证书；总体正确率与直接可用率均须至少98%，每集至少96%，新增局部问题率最多2%，硬错、重大问题、已知问题复发和系统性重复均为0
 - 0.5.5 模板硬门禁：逐镜`9:16竖屏`、转场去重、静态关键帧、无跨镜代指、对白逐字与说话人一致、主角人数/单机位/状态/道具/时长容量闭合；单镜执行字段禁止`BGM`字面量
+- 0.5.6 源文对白权威：只从服务器登记的导入源文运行闭集 parser v6，并交叉核对 payload SHA、Hub authority entry 与 artifact metadata 中的 source role；逐 occurrence 绑定精确文本、标点、说话人和源文位置。候选 inventory/`source_lock`/台账/认知/锚点不能反向教解析器。任何歧义整批失败关闭且零正式产物
 - 0.5.6 受控交接恢复：`recover_storyboard_handoff`先预演并返回精确`plan_sha256`，执行时要求原样回传哈希和确认字面量；每条失效`prepared production_to_audit`使用签名日志与CAS保留旧记录并标记`superseded`，再按当前15项完整指纹签发新的`PENDING_AUDIT`交接。该路线不改写分镜/canonical/XLSX，也不签发或复用独立审计结论
-- 审计状态隔离：生产文件只写`PENDING_AUDIT／待独立审计`，独立审计签发后才回填问题计数、trace、canonical哈希与文件指纹
+- 0.5.6 独立复审血缘：每轮强制复审使用新的服务器签名 successor handoff 和 route/event trace，保留已消费 root；阻断问题必须落到 canonical 镜头，只有最新失败血缘的修复包可用。FAIL 转 PASS 必须先生成新修复 artifact/canonical，并更换 file/source_version/artifact/canonical/handoff/trace 绑定，不能在同一字节上换标签翻绿
+- 0.5.6 证据桥与修复生命周期：现代证书绑定精确 event SHA，successor 绑定父证书 HMAC 与父 event SHA；旧证书只能经强制新独审降为历史祖先。修复包只允许 issued/consuming/consumed，删除已消费包或伪造 consumed 不能复活授权
+- 0.5.6 Schema/存储同口径：任一 successor 标记都会触发完整权威与 claim 状态约束，并继承根交接的 production、repair 或 external-input 路线而不伪装成生产血缘；full-repair 区分“记录缺失”和“已存在记录完整性损坏”。运行时全量证书只保存在签名 certificate store，不在 Hub 复制一份易漂移投影；旧 Hub 副本由控制态迁移清除，签名证书不变；prepared/replaying/rolling_back 迁移全项目封写，rolled-back 重执行先签 replaying 意图并在项目锁内复验当前 PASS 证书
+- 0.5.6 崩溃恢复与台账重放：event-only 半写只在重交 semantic/event/trace/指纹完全一致时确定性补证书，certificate-only 和变体重试失败关闭；旧台账 checkpoint 必须由独立签名 migration journal/CAS 授权，检查点后的 issue/history/location/counter 全部从新增 event 重放
+- 审计状态隔离：生产文件只写`PENDING_AUDIT／待独立审计`且永不就地回填；独立审计签发后创建新的不可变签名 overlay successor，并只在新工件中写入问题计数、trace、canonical 哈希与文件指纹
 - GPT 导出投影：`GPT关键帧生成指令`只在导出时从同一 canonical 确定性生成，不写回 canonical；投影会移除时间段、对白、口型和声音指令
 - 跨聊天：同一用户命名空间 + 同一 `project_id` 共用项目中枢和问题台账
 - 窗口架构：生产与独立审计为两个常驻独立 authority；只有审计失败且用户授权修复时才启用第三个 repair authority，修复结果必须返回原审计 authority 复核
@@ -101,7 +106,7 @@ ChatGPT 不能直接访问普通的 `localhost`。先保持本地服务运行，
 
 判断是否真的走完优化流程，要同时看到同一 artifact/canonical 绑定的草稿预检证书、生产 `trace_id` 和独立审计 `trace_id`，以及 handoff 与 audit certificate；缺少任一追踪只能记为 `fast_path_incomplete`。只有文字说明而没有这些标识，等于没有执行。
 
-0.5.6 的受控交接恢复见 [docs/UPGRADE_0.5.6.md](docs/UPGRADE_0.5.6.md)；0.5.5 的初稿质量门、项目迁移和发布验收见 [docs/UPGRADE_0.5.5.md](docs/UPGRADE_0.5.5.md)；0.5.4 的集成升级历史见 [docs/UPGRADE_0.5.4.md](docs/UPGRADE_0.5.4.md)。十二项模板硬门禁的原始设计见 [docs/UPGRADE_0.5.1.md](docs/UPGRADE_0.5.1.md)，无API性能诊断见 [docs/UPGRADE_0.5.3.md](docs/UPGRADE_0.5.3.md)。
+0.5.6 的源文权威、独立复审、台账重放与受控交接恢复见 [docs/UPGRADE_0.5.6.md](docs/UPGRADE_0.5.6.md)；0.5.5 的初稿质量门、项目迁移和发布验收见 [docs/UPGRADE_0.5.5.md](docs/UPGRADE_0.5.5.md)；0.5.4 的集成升级历史见 [docs/UPGRADE_0.5.4.md](docs/UPGRADE_0.5.4.md)。十二项模板硬门禁的原始设计见 [docs/UPGRADE_0.5.1.md](docs/UPGRADE_0.5.1.md)，无API性能诊断见 [docs/UPGRADE_0.5.3.md](docs/UPGRADE_0.5.3.md)。
 
 ## 云端 MCP
 

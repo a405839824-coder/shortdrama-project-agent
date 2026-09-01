@@ -31,6 +31,7 @@ Do not create a third resident window at task start. Create `repair` only when a
 - the independent audit returned `fail_current`;
 - repair is explicitly authorized by the current work order or by a later user instruction;
 - the auditor issued a signed, unexpired, immutable repair package for the exact artifact and audit cycle;
+- that package belongs to the newest completed failed event in the immutable root/successor re-audit lineage; no later completed audit supersedes it;
 - the repair package identifies the authorized targets, issue codes, protected scope, fingerprints, and required regression scope.
 
 An `audit_only` task may produce findings and a repair package, but it must not activate repair without execution authorization. A clean audit never creates a repair window.
@@ -175,7 +176,7 @@ Trace data must never contain source prose, dialogue, prompt bodies, private dow
 
 1. Production calls status; if required, authorized migration runs first and status is revalidated.
 2. Production locks source, scope, base canonical, boundaries, protection, runtime certificate, and the current issue-pattern prevention profile.
-3. It selects full or delta routing, generates only the required semantic content, and runs mandatory scene draft preflight after each scene.
+3. It selects full or delta routing, generates only the required semantic content, and runs mandatory scene draft preflight after each scene. The server first derives the source-dialogue v6 authority manifest only from the server-registered source file after payload SHA, Hub authority entry and artifact-metadata role cross-bind; candidate inventory, `source_lock`, ledger and anchors cannot authorize parsing. The manifest SHA directly binds source fingerprint, role, occurrences and grammar SHA, while grammar SHA transitively binds implementation source; any closed-grammar ambiguity fails the scene/full preflight without a formal artifact.
 4. For the full route, the service signs a clean full-draft preflight; production passes that exact certificate into commit. Failed drafts remain ledger evidence only and never create formal artifacts.
 5. The service compare-and-sets the base, merges by stable UID, validates the compact canonical, deterministically projects the ten-column workbook, exports a new version without Seedance/batch artifacts, and records the trace.
 6. Production issues `production_preflight` plus `production_to_audit`; its immutable workbook reports `PENDING_AUDIT` / `待独立审计` with null issue counts and trace.
@@ -188,13 +189,15 @@ For an unchanged-runtime ordinary task, keep execution on the fast-safe path: ve
 
 ## Failure and repair flow
 
-1. The independent auditor records the immutable issue baseline and returns `fail_current`.
+1. The independent auditor records the immutable issue baseline and returns `fail_current`. Every blocking issue must resolve to a non-empty canonical shot set; explicit `shot_ids` are authoritative and an optional location must resolve to the same set.
 2. For `audit_only`, stop and wait for explicit repair authorization. For authorized `audit_and_repair`, issue one signed repair package and `audit_to_repair` handoff.
 3. Create a distinct, single-use repair binding for that package.
 4. Use certificate-bound patch only for eligible non-structural fields; otherwise rebuild the complete affected scene or episode through the package-bound full repair route. The production-only delta tool cannot be used by repair authority.
 5. The service validates and exports a new compact artifact, records residual and introduced issues, consumes the package, closes repair, and creates `repair_to_audit`.
-6. The original audit window verifies the successor and performs the independent final audit.
+6. The original audit window verifies the successor and performs the independent final audit through a fresh server-minted single-use successor handoff. A fail cannot turn into PASS on the same file/source_version/artifact/canonical bindings.
 7. Prefer closure within two repair rounds. At the third recurrence, stop patching and require the defined upstream rebuild.
+
+On restart, resume only the exact signed lineage and normalized semantic submission. Normalize only a valid 64-hex caller `semantic_audit.canonical_sha256` to lowercase; a hex-case-only replay returns the same signed receipt without another successor, event, certificate or round, and no other semantic/evidence/identity field is case-normalized. An event-only half-write may deterministically recover its missing certificate after all event/report/handoff/trace/cache/fingerprint/result/issue/summary fields match. The certificate content itself must exactly match that deterministic binding: a mismatched certificate re-signed with a valid service HMAC, certificate-only, different-semantic, stale-package or cross-lineage state fails closed with zero authority/projection mutation. A completed signed receipt is a read-only idempotent no-op. Recover a missing repair-package or Hub projection only inside the same storage lock after revalidating the latest lineage, exact certificate HMAC and fenced single-finisher claim by CAS; if authority advances, the stale replay neither writes a projection nor returns the old verdict.
 
 If CAS, authorization, fingerprint, canonicalization, export projection, outside-scope integrity, trace persistence, or final validation fails, do not publish a successor handoff and do not claim completion. Preserve the last valid artifact and name the exact blocker.
 

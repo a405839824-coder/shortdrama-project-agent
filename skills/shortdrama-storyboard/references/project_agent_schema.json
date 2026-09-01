@@ -25,6 +25,7 @@
     "human_signoffs",
     "counters"
   ],
+  "not": {"required": ["runtime_test_certificates"]},
   "properties": {
     "schema_version": {"const": "R10-PROJECT-AGENT-1"},
     "project_id": {"type": "string", "minLength": 1},
@@ -98,7 +99,6 @@
     "human_signoffs": {"type": "array"},
     "handoffs": {"type": "array", "items": {"$ref": "#/$defs/handoff_manifest"}},
     "performance_traces": {"type": "array", "items": {"$ref": "#/$defs/stage_timing_trace"}},
-    "runtime_test_certificates": {"type": "array", "items": {"$ref": "#/$defs/runtime_test_certificate"}},
     "repair_packages": {"type": "array", "items": {"$ref": "#/$defs/immutable_repair_package"}},
     "counters": {"type": "object"}
   },
@@ -396,7 +396,58 @@
             "preflight_findings": {"type": "array"}
           }
         },
-        "audit_certificate_id": {"type": "string"},
+        "audit_certificate_id": {"type": "string", "minLength": 1},
+        "previous_audit_certificate_id": {"type": "string", "minLength": 1},
+        "previous_audit_certificate_hmac": {"$ref": "#/$defs/sha256"},
+        "previous_audit_event_sha256": {"$ref": "#/$defs/sha256"},
+        "production_stage_trace_id": {"type": "string", "minLength": 1},
+        "reaudit_kind": {"const": "independent_audit_successor"},
+        "reaudit_root_handoff_id": {"type": "string", "minLength": 1},
+        "reaudit_parent_handoff_id": {"type": "string", "minLength": 1},
+        "reaudit_sequence": {"type": "integer", "minimum": 1},
+        "reaudit_route_trace_id": {"type": "string", "minLength": 1},
+        "reaudit_event_trace_id": {"type": "string", "minLength": 1},
+        "claim_authority_work_order_id": {"type": "string", "minLength": 1},
+        "reaudit_audit_window_binding_id": {"type": "string", "minLength": 1},
+        "reaudit_audit_actor_binding_id": {"type": "string", "minLength": 1},
+        "reaudit_audit_session_fingerprint": {
+          "anyOf": [
+            {"$ref": "#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "server_minted_lineage": {"const": true},
+        "reaudit_lineage_sha256": {"$ref": "#/$defs/sha256"},
+        "claimed_by_work_order_id": {"type": "string", "minLength": 1},
+        "claim_token": {"type": "string", "minLength": 1},
+        "claim_generation": {"type": "integer", "minimum": 1},
+        "claim_epoch_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 253402300799},
+        "claim_lease_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "claim_lease_expires_at": {"type": "string", "minLength": 1},
+        "claim_lease_expires_epoch_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 253402300799},
+        "reaudit_preclaim_projection_sha256": {"$ref": "#/$defs/sha256"},
+        "reaudit_prerelease_projection_sha256": {"$ref": "#/$defs/sha256"},
+        "consumed_by_work_order_id": {"type": "string", "minLength": 1},
+        "latest_audit_certificate_id": {"type": "string", "minLength": 1},
+        "consumed_at": {"type": "string", "minLength": 1},
+        "consumption_claim": {
+          "type": "object",
+          "required": [
+            "claim_token", "claim_generation", "claim_epoch_seconds",
+            "claim_lease_seconds", "claim_lease_expires_at",
+            "claim_lease_expires_epoch_seconds"
+          ],
+          "properties": {
+            "claim_token": {"type": "string", "minLength": 1},
+            "claim_generation": {"type": "integer", "minimum": 1},
+            "claim_epoch_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 253402300799},
+            "claim_lease_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+            "claim_lease_expires_at": {"type": "string", "minLength": 1},
+            "claim_lease_expires_epoch_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 253402300799}
+          },
+          "additionalProperties": false
+        },
+        "claim_history": {"type": "array"},
         "audit_certificate_ids": {
           "type": "array",
           "uniqueItems": true,
@@ -440,6 +491,112 @@
         "status": {"enum": ["prepared", "consuming", "verified", "rejected", "consumed", "superseded"]}
       },
       "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {"required": ["reaudit_kind"]},
+              {"required": ["reaudit_root_handoff_id"]},
+              {"required": ["reaudit_parent_handoff_id"]},
+              {"required": ["reaudit_sequence"]},
+              {"required": ["reaudit_route_trace_id"]},
+              {"required": ["reaudit_event_trace_id"]},
+              {"required": ["previous_audit_certificate_id"]},
+              {"required": ["previous_audit_certificate_hmac"]},
+              {"required": ["previous_audit_event_sha256"]},
+              {"required": ["reaudit_audit_window_binding_id"]},
+              {"required": ["reaudit_audit_actor_binding_id"]},
+              {"required": ["reaudit_audit_session_fingerprint"]},
+              {"required": ["server_minted_lineage"]},
+              {"required": ["reaudit_lineage_sha256"]},
+              {"required": ["reaudit_preclaim_projection_sha256"]},
+              {"required": ["reaudit_prerelease_projection_sha256"]},
+              {"required": ["latest_audit_certificate_id"]},
+              {"required": ["consumption_claim"]}
+            ]
+          },
+          "then": {
+            "required": [
+              "reaudit_kind", "reaudit_root_handoff_id",
+              "reaudit_parent_handoff_id", "reaudit_sequence",
+              "reaudit_route_trace_id", "reaudit_event_trace_id",
+              "production_stage_trace_id", "previous_audit_certificate_id",
+              "previous_audit_certificate_hmac", "previous_audit_event_sha256",
+              "claim_authority_work_order_id",
+              "reaudit_audit_window_binding_id",
+              "reaudit_audit_actor_binding_id",
+              "reaudit_audit_session_fingerprint",
+              "server_minted_lineage", "reaudit_lineage_sha256"
+            ],
+            "properties": {
+              "to_window_role": {"const": "independent_audit"},
+              "status": {"enum": ["prepared", "consuming", "consumed"]}
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"status": {"const": "prepared"}}, "required": ["status"]},
+                "then": {
+                  "not": {
+                    "anyOf": [
+                      {"required": ["claimed_by_work_order_id"]},
+                      {"required": ["claim_token"]},
+                      {"required": ["claim_epoch_seconds"]},
+                      {"required": ["claim_lease_seconds"]},
+                      {"required": ["claim_lease_expires_at"]},
+                      {"required": ["claim_lease_expires_epoch_seconds"]},
+                      {"required": ["consumed_by_work_order_id"]},
+                      {"required": ["audit_certificate_id"]},
+                      {"required": ["latest_audit_certificate_id"]},
+                      {"required": ["consumed_at"]},
+                      {"required": ["consumption_claim"]}
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {"properties": {"status": {"const": "consuming"}}, "required": ["status"]},
+                "then": {
+                  "required": [
+                    "claimed_by_work_order_id", "claim_token",
+                    "claim_generation", "claim_epoch_seconds",
+                    "claim_lease_seconds", "claim_lease_expires_at",
+                    "claim_lease_expires_epoch_seconds",
+                    "reaudit_preclaim_projection_sha256"
+                  ],
+                  "not": {
+                    "anyOf": [
+                      {"required": ["consumed_by_work_order_id"]},
+                      {"required": ["audit_certificate_id"]},
+                      {"required": ["latest_audit_certificate_id"]},
+                      {"required": ["consumed_at"]},
+                      {"required": ["consumption_claim"]}
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {"properties": {"status": {"const": "consumed"}}, "required": ["status"]},
+                "then": {
+                  "required": [
+                    "consumed_by_work_order_id", "audit_certificate_id",
+                    "latest_audit_certificate_id", "consumed_at",
+                    "consumption_claim", "claim_generation",
+                    "reaudit_preclaim_projection_sha256"
+                  ],
+                  "not": {
+                    "anyOf": [
+                      {"required": ["claimed_by_work_order_id"]},
+                      {"required": ["claim_token"]},
+                      {"required": ["claim_epoch_seconds"]},
+                      {"required": ["claim_lease_seconds"]},
+                      {"required": ["claim_lease_expires_at"]},
+                      {"required": ["claim_lease_expires_epoch_seconds"]}
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
         {
           "if": {"properties": {"handoff_type": {"const": "production_to_audit"}}, "required": ["handoff_type"]},
           "then": {"properties": {"from_window_role": {"const": "production"}, "to_window_role": {"const": "independent_audit"}}}
@@ -508,81 +665,7 @@
         }
       }
     },
-    "runtime_test_certificate": {
-      "type": "object",
-      "required": ["certificate_id", "created_at", "generator_version", "fingerprints", "suite_results", "status"],
-      "properties": {
-        "certificate_id": {"type": "string", "minLength": 1},
-        "created_at": {"type": "string", "minLength": 1},
-        "generator_version": {"type": "string", "minLength": 1},
-        "fingerprints": {
-          "type": "object",
-          "required": ["runtime", "rules", "schema", "validator", "scripts", "dependencies_environment"],
-          "properties": {
-            "runtime": {"$ref": "#/$defs/sha256"},
-            "rules": {"$ref": "#/$defs/sha256"},
-            "schema": {"$ref": "#/$defs/sha256"},
-            "validator": {"$ref": "#/$defs/sha256"},
-            "scripts": {"$ref": "#/$defs/sha256"},
-            "dependencies_environment": {"$ref": "#/$defs/sha256"}
-          },
-          "additionalProperties": false
-        },
-        "suite_results": {
-          "type": "object",
-          "required": ["golden_tests", "public_scene_tests", "agent_tests", "project_agent_tests"],
-          "properties": {
-            "golden_tests": {"$ref": "#/$defs/golden_suite_result"},
-            "public_scene_tests": {"$ref": "#/$defs/public_scene_suite_result"},
-            "agent_tests": {"$ref": "#/$defs/agent_suite_result"},
-            "project_agent_tests": {"$ref": "#/$defs/project_agent_suite_result"}
-          },
-          "additionalProperties": false
-        },
-        "status": {"const": "pass"}
-      }
-    },
     "sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"},
-    "golden_suite_result": {
-      "type": "object",
-      "required": ["test_count", "test_pass_count", "test_fail_count", "status"],
-      "properties": {
-        "test_count": {"const": 73},
-        "test_pass_count": {"const": 73},
-        "test_fail_count": {"const": 0},
-        "status": {"const": "pass"}
-      }
-    },
-    "public_scene_suite_result": {
-      "type": "object",
-      "required": ["test_count", "test_pass_count", "test_fail_count", "status"],
-      "properties": {
-        "test_count": {"const": 11},
-        "test_pass_count": {"const": 11},
-        "test_fail_count": {"const": 0},
-        "status": {"const": "pass"}
-      }
-    },
-    "agent_suite_result": {
-      "type": "object",
-      "required": ["test_count", "test_pass_count", "test_fail_count", "status"],
-      "properties": {
-        "test_count": {"const": 16},
-        "test_pass_count": {"const": 16},
-        "test_fail_count": {"const": 0},
-        "status": {"const": "pass"}
-      }
-    },
-    "project_agent_suite_result": {
-      "type": "object",
-      "required": ["test_count", "test_pass_count", "test_fail_count", "status"],
-      "properties": {
-        "test_count": {"const": 22},
-        "test_pass_count": {"const": 22},
-        "test_fail_count": {"const": 0},
-        "status": {"const": "pass"}
-      }
-    },
     "change_operation": {
       "type": "object",
       "required": [
@@ -600,19 +683,26 @@
       "type": "object",
       "required": [
         "repair_package_id", "audit_certificate_id", "audit_event_id",
-        "audit_to_repair_handoff_id", "production_work_order_id", "production_window_binding_id",
+        "audit_to_repair_handoff_id", "production_handoff_id",
+        "production_work_order_id", "production_window_binding_id",
         "production_actor_binding_id", "production_session_fingerprint", "audit_work_order_id",
         "audit_window_binding_id", "audit_actor_binding_id", "audit_session_fingerprint",
         "created_at", "expires_at", "status",
         "base_artifact_id", "base_canonical_sha256", "fingerprints",
-        "authorized_scope", "protected_scope_hash", "issue_targets", "topology_fingerprint"
+        "authorized_scope", "protected_scope_hash", "issue_targets", "topology_fingerprint",
+        "source_audit_handoff_id", "source_audit_event_trace_id",
+        "source_audit_route_trace_id", "source_production_stage_trace_id"
       ],
       "properties": {
+        "record_id": {"type": "string", "minLength": 1},
+        "project_id": {"type": "string", "minLength": 1},
+        "integrity_hmac": {"$ref": "#/$defs/sha256"},
         "repair_package_id": {"type": "string", "minLength": 1},
         "audit_certificate_id": {"type": "string", "minLength": 1},
         "audit_event_id": {"type": "string", "minLength": 1},
         "audit_to_repair_handoff_id": {"type": "string", "minLength": 1},
         "repair_to_audit_handoff_id": {"type": "string", "minLength": 1},
+        "production_handoff_id": {"type": "string", "minLength": 1},
         "production_work_order_id": {"type": "string", "minLength": 1},
         "production_window_binding_id": {"type": "string", "minLength": 1},
         "production_actor_binding_id": {"type": "string", "minLength": 1},
@@ -623,7 +713,7 @@
         "audit_session_fingerprint": {"type": "string", "minLength": 1},
         "created_at": {"type": "string", "minLength": 1},
         "expires_at": {"type": "string", "minLength": 1},
-        "status": {"enum": ["issued", "consuming", "consumed", "expired", "revoked"]},
+        "status": {"enum": ["issued", "consuming", "consumed"]},
         "base_artifact_id": {"type": "string", "minLength": 1},
         "base_canonical_sha256": {"$ref": "#/$defs/sha256"},
         "fingerprints": {"$ref": "#/$defs/handoff_manifest/properties/fingerprints"},
@@ -634,7 +724,8 @@
             "shot_ids": {"type": "array", "items": {"type": "string"}},
             "fields": {"type": "array", "items": {"type": "string"}},
             "issue_codes": {"type": "array", "items": {"type": "string"}}
-          }
+          },
+          "additionalProperties": false
         },
         "protected_scope_hash": {"$ref": "#/$defs/sha256"},
         "issue_targets": {
@@ -642,20 +733,64 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["issue_code", "shot_id", "field", "location"],
+            "required": ["issue_id", "issue_code", "shot_id", "field", "location"],
             "properties": {
+              "issue_id": {"type": "string", "minLength": 1},
               "issue_code": {"type": "string", "minLength": 1},
               "shot_id": {"type": "string", "minLength": 1},
               "field": {"type": "string", "minLength": 1},
               "location": {"type": "string", "minLength": 1}
-            }
+            },
+            "additionalProperties": false
           }
         },
         "topology_fingerprint": {"$ref": "#/$defs/sha256"},
-        "consumed_by_work_order_id": {"type": "string"},
-        "successor_artifact_id": {"type": "string"},
-        "successor_canonical_sha256": {"$ref": "#/$defs/sha256"}
-      }
+        "consumed_by_work_order_id": {"type": "string", "minLength": 1},
+        "successor_artifact_id": {"type": "string", "minLength": 1},
+        "successor_canonical_sha256": {"$ref": "#/$defs/sha256"},
+        "source_audit_handoff_id": {"type": "string", "minLength": 1},
+        "source_audit_event_trace_id": {"type": "string", "minLength": 1},
+        "source_audit_route_trace_id": {"type": "string", "minLength": 1},
+        "source_production_stage_trace_id": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "issued"}}, "required": ["status"]},
+          "then": {
+            "not": {
+              "anyOf": [
+                {"required": ["consumed_by_work_order_id"]},
+                {"required": ["successor_artifact_id"]},
+                {"required": ["successor_canonical_sha256"]},
+                {"required": ["repair_to_audit_handoff_id"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "consuming"}}, "required": ["status"]},
+          "then": {
+            "required": ["consumed_by_work_order_id"],
+            "not": {
+              "anyOf": [
+                {"required": ["successor_artifact_id"]},
+                {"required": ["successor_canonical_sha256"]},
+                {"required": ["repair_to_audit_handoff_id"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "consumed"}}, "required": ["status"]},
+          "then": {
+            "required": [
+              "consumed_by_work_order_id", "successor_artifact_id",
+              "successor_canonical_sha256", "repair_to_audit_handoff_id"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
     },
     "change_request": {
       "type": "object",

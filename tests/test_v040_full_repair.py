@@ -55,11 +55,12 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
         mode: str,
         authorization: str,
         window_key: str,
+        project_id: str | None = None,
     ) -> str:
         task = await self.call(
             "begin_project_task",
             {
-                "project_id": self.project_id,
+                "project_id": project_id or self.project_id,
                 "operation": operation,
                 "mode": mode,
                 "authorization": authorization,
@@ -205,6 +206,347 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(final["status"], "pass")
 
+    async def test_failed_repair_return_can_authorize_a_second_full_repair(
+        self,
+    ) -> None:
+        """A failed repair successor remains an exact, package-bound source.
+
+        The second repair must be authorized by the new failed-audit package,
+        whose source handoff is the first ``repair_to_audit`` route.  It must
+        not fall back to the original production handoff or reuse the first
+        repair package.
+        """
+
+        first_storyboard = three_shot_storyboard()
+        first_repair = await self.call(
+            "commit_storyboard", self.full_arguments(first_storyboard)
+        )
+        first_handoff = first_repair["data"]["handoff"]
+        self.assertEqual(first_handoff["handoff_type"], "repair_to_audit")
+
+        second_failure = failing_semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            self.project_id,
+            str(first_repair["artifact_id"]),
+            shot_id="EP01-001",
+            field="画面内容",
+            error_code="E-SHOTLOAD-001",
+            issue_id="shots[1].repair_return_still_incomplete",
+            evidence="原独审窗口复核修复返件，确认第一镜仍缺少必要的动作细化。",
+            repair_action="仅在新修复包授权下补足第一镜动作，再返回同一独审窗口。",
+        )
+        second_audit = await self.call(
+            "audit_storyboard",
+            {
+                "project_id": self.project_id,
+                "artifact_id": first_repair["artifact_id"],
+                "work_order_id": self.original_audit_order,
+                "handoff_artifact_id": first_handoff["handoff_id"],
+                "semantic_audit": second_failure,
+            },
+        )
+        self.assertEqual(second_audit["status"], "fail_current")
+        second_package = second_audit["data"]["repair_package"]
+        self.assertNotEqual(
+            second_package["repair_package_id"], self.package_id
+        )
+        self.assertEqual(
+            second_package["production_handoff_id"],
+            first_handoff["handoff_id"],
+        )
+
+        source_handoff = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=str(second_package["production_handoff_id"]),
+        )
+        self.assertTrue(self.service.store.project_record_is_signed(source_handoff))
+        self.assertEqual(source_handoff["handoff_type"], "repair_to_audit")
+        self.assertEqual(
+            source_handoff["audit_certificate_id"],
+            second_package["audit_certificate_id"],
+        )
+
+        second_repair_order = await self.begin(
+            "storyboard_repair",
+            mode="audit_and_repair",
+            authorization="explicit_execute",
+            window_key="full-repair-window-round-2",
+        )
+        second_storyboard = copy.deepcopy(first_storyboard)
+        second_storyboard["shots"][0]["画面内容"] = second_storyboard[
+            "shots"
+        ][0]["画面内容"].replace(
+            "女主转动视线", "女主缓慢转动视线"
+        )
+        second_repair = await self.call(
+            "commit_storyboard",
+            {
+                "project_id": self.project_id,
+                "work_order_id": second_repair_order,
+                "storyboard": second_storyboard,
+                "file_name": "第二轮完整结构修复版.xlsx",
+                "source_artifact_id": first_repair["artifact_id"],
+                "repair_package_id": second_package["repair_package_id"],
+            },
+        )
+        self.assertEqual(second_repair["status"], "production_preflight_pass")
+        self.assertEqual(
+            second_repair["data"]["base_artifact_id"],
+            first_repair["artifact_id"],
+        )
+        self.assertEqual(
+            second_repair["data"]["repair_package"]["status"], "consumed"
+        )
+        self.assertEqual(
+            second_repair["data"]["repair_package_id"],
+            second_package["repair_package_id"],
+        )
+        self.assertEqual(
+            second_repair["data"]["handoff"]["handoff_type"],
+            "repair_to_audit",
+        )
+        self.assertEqual(
+            second_repair["data"]["return_to_audit_work_order_id"],
+            self.original_audit_order,
+        )
+
+    async def test_external_audit_intake_failure_authorizes_full_repair(
+        self,
+    ) -> None:
+        """External intake has no producer trace; its audit trace stays exact."""
+
+        created = await self.call(
+            "create_project", {"project_name": "外部 intake 完整修复闭环"}
+        )
+        project_id = str(created["project_id"])
+        await self.call(
+            "get_agent_status",
+            {"project_id": project_id, "full_self_test": True},
+        )
+        external = self.service.store.save_artifact_json(
+            self.namespace,
+            project_id,
+            self.broken_storyboard(),
+            file_name="外部待审结构基线.json",
+            artifact_type="storyboard_json",
+            version="external-v1",
+        )
+        artifact_id = str(external["artifact_id"])
+        audit_order = await self.begin(
+            "storyboard_audit",
+            mode="audit_only",
+            authorization="read_only",
+            window_key="external-intake-audit",
+            project_id=project_id,
+        )
+        semantic_failure = failing_semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            project_id,
+            artifact_id,
+            shot_id="EP01-001",
+            field="画面内容",
+            error_code="E-SHOTLOAD-001",
+            issue_id="shots[1].external_structure_incomplete",
+            evidence="外部输入只覆盖第一阶段，独审要求在锁定边界内完整重建。",
+            repair_action="使用服务器签发的修复包完整重建三镜后返回原独审窗口。",
+        )
+        audited = await self.call(
+            "audit_storyboard",
+            {
+                "project_id": project_id,
+                "artifact_id": artifact_id,
+                "work_order_id": audit_order,
+                "semantic_audit": semantic_failure,
+            },
+        )
+        self.assertEqual(audited["status"], "fail_current")
+        intake_handoff = audited["data"]["handoff"]
+        certificate = audited["data"]["certificate"]
+        package = audited["data"]["repair_package"]
+        self.assertEqual(intake_handoff["handoff_type"], "audit_intake")
+        self.assertEqual(intake_handoff["from_window_role"], "external_input")
+        self.assertEqual(
+            certificate["stage_trace_id"],
+            certificate["production_stage_trace_id"],
+        )
+        self.assertEqual(
+            package["production_handoff_id"], intake_handoff["handoff_id"]
+        )
+        audit_trace = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="telemetry",
+            record_id=str(certificate["stage_trace_id"]),
+        )
+        self.assertEqual(audit_trace["operation"], "audit_storyboard")
+        self.assertEqual(audit_trace["window_role"], "independent_audit")
+
+        repair_order = await self.begin(
+            "storyboard_repair",
+            mode="audit_and_repair",
+            authorization="explicit_execute",
+            window_key="external-intake-full-repair",
+            project_id=project_id,
+        )
+        repair_arguments = {
+            "project_id": project_id,
+            "work_order_id": repair_order,
+            "storyboard": three_shot_storyboard(),
+            "file_name": "外部 intake 完整修复版.xlsx",
+            "source_artifact_id": artifact_id,
+            "repair_package_id": package["repair_package_id"],
+        }
+
+        # The intake handoff's source role is external_input, but the aliased
+        # trace is still an independent-audit event.  Even a server-resigned
+        # record using the source role must fail the exact trace-role binding
+        # before the one-time package is claimed.
+        package_before = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="repair_packages",
+            record_id=str(package["repair_package_id"]),
+        )
+        original_trace = copy.deepcopy(audit_trace)
+        with self.service.store.mutate_project_record(
+            self.namespace,
+            project_id,
+            kind="telemetry",
+            record_id=str(certificate["stage_trace_id"]),
+        ) as trace:
+            trace["window_role"] = "external_input"
+        rejected = await self.rejection("commit_storyboard", repair_arguments)
+        self.assertIn(
+            "production or audit trace changed identity", rejected
+        )
+        self.assertEqual(
+            self.service.store.get_project_record(
+                self.namespace,
+                project_id,
+                kind="repair_packages",
+                record_id=str(package["repair_package_id"]),
+            ),
+            package_before,
+        )
+        with self.service.store.mutate_project_record(
+            self.namespace,
+            project_id,
+            kind="telemetry",
+            record_id=str(certificate["stage_trace_id"]),
+        ) as trace:
+            trace.clear()
+            trace.update(copy.deepcopy(original_trace))
+
+        repaired = await self.call("commit_storyboard", repair_arguments)
+        self.assertEqual(repaired["status"], "production_preflight_pass")
+        self.assertEqual(repaired["data"]["base_artifact_id"], artifact_id)
+        self.assertEqual(repaired["data"]["repair_package"]["status"], "consumed")
+        self.assertEqual(
+            repaired["data"]["return_to_audit_work_order_id"], audit_order
+        )
+
+    async def test_external_audit_intake_failure_authorizes_patch_repair(
+        self,
+    ) -> None:
+        """The same exact intake trace authority is shared by patch repair."""
+
+        created = await self.call(
+            "create_project", {"project_name": "外部 intake 局部修复闭环"}
+        )
+        project_id = str(created["project_id"])
+        await self.call(
+            "get_agent_status",
+            {"project_id": project_id, "full_self_test": True},
+        )
+        base_storyboard = self.broken_storyboard()
+        base_storyboard["shots"][0]["光源来源"] = "右侧木格窗透入的日光"
+        external = self.service.store.save_artifact_json(
+            self.namespace,
+            project_id,
+            base_storyboard,
+            file_name="外部待审光源基线.json",
+            artifact_type="storyboard_json",
+            version="external-v1",
+        )
+        artifact_id = str(external["artifact_id"])
+        audit_order = await self.begin(
+            "storyboard_audit",
+            mode="audit_only",
+            authorization="read_only",
+            window_key="external-intake-patch-audit",
+            project_id=project_id,
+        )
+        semantic_failure = failing_semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            project_id,
+            artifact_id,
+            shot_id="EP01-001",
+            field="光源来源",
+            error_code="E-TEMPLATE-008",
+            issue_id="shots[1].external_light_source_mismatch",
+            evidence="外部分镜的右侧窗光与锁定场景中的左侧窗光冲突。",
+            repair_action="仅把该镜光源来源修正为左侧木格窗日光。",
+        )
+        audited = await self.call(
+            "audit_storyboard",
+            {
+                "project_id": project_id,
+                "artifact_id": artifact_id,
+                "work_order_id": audit_order,
+                "semantic_audit": semantic_failure,
+            },
+        )
+        self.assertEqual(audited["status"], "fail_current")
+        self.assertEqual(
+            audited["data"]["handoff"]["handoff_type"], "audit_intake"
+        )
+        certificate = audited["data"]["certificate"]
+        repair_order = await self.begin(
+            "storyboard_repair",
+            mode="audit_and_repair",
+            authorization="explicit_execute",
+            window_key="external-intake-patch-repair",
+            project_id=project_id,
+        )
+        patched = await self.call(
+            "commit_storyboard_patch",
+            {
+                "project_id": project_id,
+                "work_order_id": repair_order,
+                "base_artifact_id": artifact_id,
+                "expected_canonical_hash": certificate["canonical_sha256"],
+                "expected_raw_artifact_fingerprint": external["fingerprint"],
+                "audit_certificate_id": certificate["certificate_id"],
+                "operations": [
+                    {
+                        "op": "replace_field",
+                        "shot_id": "EP01-001",
+                        "field": "光源来源",
+                        "value": "左侧木格窗透入的日光",
+                        "issue_ids": ["E-TEMPLATE-008"],
+                        "reason": "仅修复独审证书确认的光源语义错位",
+                    }
+                ],
+                "impact_scope": ["EP01-001"],
+                "file_name": "外部 intake 局部修复版.xlsx",
+            },
+        )
+        self.assertEqual(patched["status"], "production_preflight_pass")
+        self.assertEqual(patched["data"]["base_artifact_id"], artifact_id)
+        self.assertEqual(patched["data"]["repair_package"]["status"], "consumed")
+        self.assertEqual(
+            patched["data"]["handoff"]["handoff_type"], "repair_to_audit"
+        )
+        self.assertEqual(
+            patched["data"]["handoff"]["return_to_audit_work_order_id"],
+            audit_order,
+        )
+
     async def test_wrong_package_and_wrong_base_are_rejected_before_claim(self) -> None:
         wrong_package = self.full_arguments()
         wrong_package["repair_package_id"] = "RPK-does-not-exist"
@@ -224,6 +566,95 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
             record_id=self.package_id,
         )
         self.assertEqual(package["status"], "issued")
+
+    async def test_damaged_authority_records_preserve_integrity_error_and_zero_mutation(
+        self,
+    ) -> None:
+        project_dir = self.service.store.project_dir(
+            self.namespace, self.project_id
+        )
+        authority_records = (
+            ("repair_packages", self.package_id),
+            ("certificates", str(self.package["audit_certificate_id"])),
+            ("handoffs", str(self.package["audit_to_repair_handoff_id"])),
+            ("handoffs", str(self.package["production_handoff_id"])),
+        )
+        for kind, record_id in authority_records:
+            with self.subTest(kind=kind, record_id=record_id):
+                record_path = project_dir / kind / f"{record_id}.json"
+                original = self.service.store.read_json(record_path)
+                damaged = copy.deepcopy(original)
+                damaged["tamper_marker"] = f"damaged-{kind}-{record_id}"
+                self.service.store.atomic_write_json(record_path, damaged)
+                try:
+                    damaged_bytes = record_path.read_bytes()
+                    before = {
+                        str(path.relative_to(project_dir)): path.read_bytes()
+                        for path in sorted(project_dir.rglob("*"))
+                        if path.is_file()
+                    }
+
+                    rejected = await self.rejection(
+                        "commit_storyboard", self.full_arguments()
+                    )
+                    self.assertIn("project_record_integrity_mismatch", rejected)
+                    self.assertIn(record_id, rejected)
+                    self.assertEqual(record_path.read_bytes(), damaged_bytes)
+                    self.assertEqual(
+                        {
+                            str(path.relative_to(project_dir)): path.read_bytes()
+                            for path in sorted(project_dir.rglob("*"))
+                            if path.is_file()
+                        },
+                        before,
+                    )
+                finally:
+                    self.service.store.atomic_write_json(record_path, original)
+
+    async def test_missing_production_handoff_is_domain_error_and_zero_mutation(
+        self,
+    ) -> None:
+        project_dir = self.service.store.project_dir(
+            self.namespace, self.project_id
+        )
+        handoff_id = str(self.package["production_handoff_id"])
+        handoff_path = project_dir / "handoffs" / f"{handoff_id}.json"
+        original = self.service.store.read_json(handoff_path)
+        handoff_path.unlink()
+        try:
+            before = {
+                str(path.relative_to(project_dir)): path.read_bytes()
+                for path in sorted(project_dir.rglob("*"))
+                if path.is_file()
+            }
+            rejected = await self.rejection(
+                "commit_storyboard", self.full_arguments()
+            )
+            self.assertIn(
+                "repair_package_binding_mismatch: original production "
+                "handoff is missing",
+                rejected,
+            )
+            self.assertNotIn(
+                f"unknown handoffs record_id: {handoff_id}", rejected
+            )
+            self.assertEqual(
+                {
+                    str(path.relative_to(project_dir)): path.read_bytes()
+                    for path in sorted(project_dir.rglob("*"))
+                    if path.is_file()
+                },
+                before,
+            )
+            package = self.service.store.get_project_record(
+                self.namespace,
+                self.project_id,
+                kind="repair_packages",
+                record_id=self.package_id,
+            )
+            self.assertEqual(package["status"], "issued")
+        finally:
+            self.service.store.atomic_write_json(handoff_path, original)
 
     async def test_repair_cannot_reuse_original_audit_window(self) -> None:
         with self.service.store.mutate_project(
