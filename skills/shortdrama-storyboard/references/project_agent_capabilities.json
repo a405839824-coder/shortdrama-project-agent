@@ -3,7 +3,7 @@
   "runtime_version": "V16.3-148-R10-StableRuntime",
   "workflow_revision": "R10-PG1",
   "compact_master_contract": {
-    "plugin_version": "0.5.10",
+    "plugin_version": "0.5.11",
     "schema_version": "R10.1",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
@@ -35,6 +35,39 @@
     "legacy_certificate_policy": "missing_event_sha_requires_explicit_forced_modern_successor_before_replay_or_signoff",
     "repair_package_authority": "latest_completed_failed_lineage_only; issued_requires_zero_downstream_evidence; consumed_requires_complete_repair_successor_cas_return_handoff_hub_closure; no_resurrection",
     "legacy_hub_handoff_projection_compatibility": "read_only_exact_stripped_or_exact_full_signed_record_only; every_other_shape_fails_closed; future_writes_are_stripped",
+    "controlled_historical_preflight_attestation": {
+      "introduced_in": "0.5.11",
+      "scope": "GAP-1bb91d83751b422f exact ordered six handoffs only",
+      "gap_id": "GAP-1bb91d83751b422f",
+      "exact_ordered_handoff_ids": [
+        "HND-f6fd29730a074d2c",
+        "HND-95e3b1c141a64783",
+        "HND-c88ee199d5fb4676",
+        "HND-e8ca409208134104",
+        "HND-0dd8fa51a9e24cd0",
+        "HND-9029110f35d74270"
+      ],
+      "evidence": "frozen_historical_contract_pass_plus_complete_current_validator_fail_diagnostics_for_sealed_E-I2V-INDEP-002_THG-01_missing_exact_9:16_wording_only",
+      "other_current_failures": "fail_closed_before_mutation",
+      "current_production_pass_claimed": false,
+      "cache_domain": "HISTCACHE",
+      "cache_reusable_for_current_preflight_or_independent_audit": false,
+      "requires_full_current_independent_audit": true,
+      "recovery_gap_id": "GAP-0e5d48969c4c494e",
+      "recovery_exact_ordered_handoff_ids": [
+        "HND-5394638be5fe4a55",
+        "HND-ea122cf3048e482a",
+        "HND-3a090b4f44c74929",
+        "HND-c765ba78aab840ff",
+        "HND-7738fa25ce4044c9",
+        "HND-f6fd29730a074d2c",
+        "HND-95e3b1c141a64783",
+        "HND-c88ee199d5fb4676",
+        "HND-e8ca409208134104",
+        "HND-0dd8fa51a9e24cd0",
+        "HND-9029110f35d74270"
+      ]
+    },
     "quality_contract": "生产初稿总体正确率与直接可用率>=98%、单集>=96%、新增局部问题镜率<=2%，硬错/重大/已知复发/系统性重复=0；49项validator + G0-G13 + THG-01至THG-12 + 多行XLSX round-trip；最终独立审计仍须100%且零问题"
   },
   "change_operations": [
@@ -369,7 +402,7 @@
     },
     {
       "id": "delta_no_structural_edit_v054",
-      "description": "历史稳定ID（保留v054标识用于兼容，请勿改名）：当前0.5.10增量路线只支持稳定UID、同数量且精确对白与说话人不变的视觉或其他非认知执行变化；不支持任何对白/说话人增删改、重排、拆并或改归属，也不支持镜头插入、删除、移动、拆分、合并或重编号；这些变化及原文/认知/保护对白/边界/拓扑失效必须完整重建受影响场景或分集。"
+      "description": "历史稳定ID（保留v054标识用于兼容，请勿改名）：当前0.5.11增量路线只支持稳定UID、同数量且精确对白与说话人不变的视觉或其他非认知执行变化；不支持任何对白/说话人增删改、重排、拆并或改归属，也不支持镜头插入、删除、移动、拆分、合并或重编号；这些变化及原文/认知/保护对白/边界/拓扑失效必须完整重建受影响场景或分集。"
     }
   ]
 }

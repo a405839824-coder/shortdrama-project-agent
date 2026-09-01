@@ -1,0 +1,2425 @@
+{
+  "version": "V16.3-148-R10-StableRuntime",
+  "schema_version": "R10.1",
+  "workflow_revision": "R10-PG1",
+  "authority": "本文件与同版本DOCX正文共同表达R10唯一运行时规则；若旧规则冲突，以R10为准。",
+  "load_order": [
+    "AGENTS.md",
+    "SKILL.md",
+    "R10_BOOTSTRAP.md",
+    "rules/storyboard_runtime_rules.json",
+    "rules/storyboard_schema.json",
+    "rules/conflict_crosswalk.json",
+    "rules/task_package_cards.json"
+  ],
+  "global_priority": [
+    "安全合规",
+    "源文忠实",
+    "分集边界",
+    "台词容量",
+    "统计闭合",
+    "可见性",
+    "图生视频可执行性",
+    "节奏留存",
+    "美学细节"
+  ],
+  "canonical_shot_fields": [
+    "镜头编号",
+    "时长",
+    "累计时长",
+    "功能类型",
+    "场景连续性ID",
+    "镜头类型",
+    "可见主体",
+    "空间站位描述",
+    "起始状态",
+    "机位",
+    "运镜方式",
+    "画面内容",
+    "音色",
+    "心理音轨",
+    "环境音效",
+    "环境动态",
+    "光影",
+    "光源来源",
+    "光源方向",
+    "色温倾向",
+    "生成限制",
+    "转场类型",
+    "切镜/转场提示词",
+    "参考图锚定",
+    "覆盖原文",
+    "原文依据类型",
+    "原文支撑句"
+  ],
+  "field_aliases": {
+    "镜头": "镜头类型",
+    "拍摄方式": "机位",
+    "切镜": "切镜/转场提示词",
+    "参考锚定": "参考图锚定",
+    "原文依据": "原文支撑句"
+  },
+  "compact_master_contract": {
+    "plugin_version": "0.5.3",
+    "output_contract": "R10-SPC-1",
+    "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
+    "canonical_atomic_field_count": 27,
+    "removed_new_write_fields": ["运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气", "心理音轨属性", "生成批次"],
+    "picture_content_single_write": ["可见动作", "表情", "精确对白", "声音强弱", "语速", "呼吸", "停顿", "重音", "尾音", "标点效果", "口型一致", "不看镜头", "听者错峰反应", "镜尾状态", "恰好三个Seedance 2.5单镜时间阶段"],
+    "standalone_required": ["空间站位描述", "起始状态", "音色", "光影", "光源来源", "光源方向", "色温倾向"],
+    "mother_template_columns": ["分镜序号", "时长", "累计时长", "功能类型/场景连续性ID", "正式分镜母版", "GPT关键帧生成指令", "参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句"],
+    "single_execution_master": "正式分镜母版",
+    "display_shot_id_pattern": "^EP\\d{2}-\\d{3}$",
+    "cumulative_time_scope": "episode_local",
+    "formal_master_first_line": "镜头序号：EP##-###（x.xs；累计x.xs）",
+    "formal_master_paragraph_contract": "strict_prompt_contract.md",
+    "seedance_25_stage_count": 3,
+    "forbidden_fixed_prompt_phrases": ["9:16竖屏真人古装短剧截图质感", "9:16竖屏", "9:16竖屏真人古装短剧单帧"],
+    "gpt_projection": "deterministic_export_only",
+    "forbid_canonical_derived_text": true,
+    "forbid_top_level_batches": true,
+    "forbid_seedance_column_or_sheet": true,
+    "forbid_background_seedance_generation": true,
+    "legacy_policy": "read_only_migration_without_retired_field_writeback"
+  },
+  "dialogue_policy": {
+    "default_cjk_chars_per_second": 2.8,
+    "plain_reference_cjk_chars_per_second": 3.5,
+    "plain_reference_may_not_be_used_for_boundary_pass": true,
+    "strong_pause_extra_seconds_each": 0.3,
+    "psych_audio_counts_as_role_dialogue": false
+  },
+  "blink_policy": {
+    "only_when_eyes_visible": true,
+    "three_to_five_seconds": "0-1次",
+    "over_five_to_ten_seconds": "1-2次",
+    "shock_or_recognition": "可先停眨1-2秒",
+    "two_people": "不得同步或同频眨眼",
+    "forbidden": [
+      "每镜强制眨眼",
+      "4秒2-3次眨眼",
+      "机械等间隔眨眼"
+    ]
+  },
+  "gates": {
+    "ordered_preventive_gates": [
+      "G0 版本与范围锁",
+      "G1 章节完整读取与边界锁（小说条件门）",
+      "G2 剧情地图与人物状态锁（小说条件门）",
+      "G3 内容取舍、对白与预算锁（小说条件门）",
+      "G4 源文与对白锁",
+      "G5 场景状态锁",
+      "G6 节拍与拆镜锁",
+      "G7 机位与可见性锁",
+      "G8 演员表演链锁",
+      "G9 正式分镜生成锁",
+      "G10 compact单镜母版独立执行锁",
+      "G11 转场与声音锁",
+      "G12 分层审计锁",
+      "G13 修正回归锁"
+    ],
+    "preflight": [
+      "版本锁",
+      "Source Lock",
+      "章节完整读取与剧情地图（小说条件门）",
+      "源文取舍、对白保护与改编预算（小说条件门）",
+      "Source Beat",
+      "Ledger/Borrow/E级",
+      "字段模板"
+    ],
+    "shot": [
+      "可见性",
+      "机位",
+      "运镜叙事功能",
+      "表演微表情",
+      "台词容量",
+      "发声",
+      "标点",
+      "心理音轨",
+      "景别光影",
+      "参考锚定"
+    ],
+    "compact_master": [
+      "27字段原子顺序精确",
+      "正式分镜母版唯一且按R10-SPC-1空白上下文可执行",
+      "Seedance 2.5恰好3个一位小数方括号时间阶段并闭合单镜时长",
+      "GPT关键帧为无时间/对白/声音的确定性导出投影",
+      "无batches、Seedance列、生成批次表或后台重复生成"
+    ],
+    "release": [
+      "统计闭合",
+      "功能黄金测试",
+      "母版镜像一致",
+      "真实人工终审"
+    ]
+  },
+  "preventive_gate_policy": {
+    "profile": "R10-PG1",
+    "principle": "上一门禁未通过，不得进入下一门禁；不得用末端反复审计替代前置证据。",
+    "required_top_level_fields": [
+      "workflow_profile",
+      "prevention_evidence"
+    ],
+    "required_evidence_blocks": [
+      "scope_lock",
+      "source_ledger",
+      "change_lock",
+      "cognition_matrix",
+      "scene_state_ledger",
+      "shot_plan",
+      "performance_chains",
+      "audio_workflow",
+      "audit_layers",
+      "repair_history"
+    ],
+    "state_vector_fields": [
+      "人物位置",
+      "身体朝向",
+      "视线落点",
+      "手持道具",
+      "门窗状态",
+      "动作进度",
+      "光源方向"
+    ],
+    "performance_chain_fields": [
+      "stimulus",
+      "listen_or_observe_reaction",
+      "gaze_path",
+      "micro_expression",
+      "ecological_action",
+      "body_or_breath",
+      "end_state"
+    ],
+    "compact_master_execution_evidence": [
+      "空间站位描述",
+      "起始状态",
+      "画面内容中的动作过程/对白发声/听者反应/结束状态",
+      "机位与运镜方式",
+      "环境音效",
+      "环境动态",
+      "光影",
+      "光源来源",
+      "光源方向",
+      "色温倾向"
+    ],
+    "i2v_forbidden_context_terms": [
+      "承接上一镜",
+      "延续之前",
+      "保持关键帧",
+      "按照上一张",
+      "沿用上一张",
+      "同上",
+      "继续原动作",
+      "保持上一镜",
+      "承接关键帧"
+    ],
+    "audit_layer_order": [
+      "源文对白",
+      "机位可见性",
+      "空间连续",
+      "表演链",
+      "镜头节奏",
+      "正式母版单镜执行完整性",
+      "禁项与声音",
+      "统计闭合"
+    ],
+    "repair_impact_scope": {
+      "台词或剧情": "当前剧情节拍、源文台账、人物认知",
+      "动作或眼神": "当前镜、前后相邻镜、可见性",
+      "站位朝向或道具": "整个连续场景",
+      "插入或删除镜头": "后续镜号、累计时长、转场、公式、统计和十列投影",
+      "时间或光影": "同一场景全部镜头",
+      "单镜时间或模型契约": "当前正式母版与GPT导出投影",
+      "项目规则或校验器": "全部功能黄金测试"
+    },
+    "systemic_escalation": {
+      "first_occurrence": "local_fix_and_neighbor_regression",
+      "second_consecutive_round": "root_cause_repair",
+      "third_or_more_consecutive_rounds": "rebuild_upstream",
+      "forbid_endless_patching": true
+    },
+    "quality_thresholds": {
+      "source_and_key_dialogue_mapping_percent": 100,
+      "first_repair_effectiveness_min_percent": 95,
+      "residual_rate_max_percent_before_next_round": 5,
+      "side_effect_rate_max_percent": 2,
+      "final_blocking_error_count": 0,
+      "final_old_content_hit_count": 0,
+      "final_cross_context_term_count": 0,
+      "final_shot_pass_percent": 100,
+      "chapter_core_event_coverage_percent": 100,
+      "chapter_causal_link_coverage_percent": 100,
+      "chapter_character_state_change_coverage_percent": 100,
+      "chapter_protected_dialogue_coverage_percent": 100,
+      "chapter_source_treatment_percent": 100
+    },
+    "systemic_problem_map": {
+      "S01": "动作缺少刺激—反应—动作因果链",
+      "S02": "眼神、眨眼与微表情机械化",
+      "S03": "镜头碎片化",
+      "S04": "单镜多动作、多视角与隐形切镜",
+      "S05": "正式单镜母版仍依赖GPT历史上下文或重复Seedance文本",
+      "S06": "修改后旧内容残留",
+      "S07": "一次修正闭环率不足",
+      "S08": "章节未读完即逐段生成",
+      "S09": "内容取舍无证据或关键对白遗漏",
+      "S10": "人物状态、认知或因果链断裂",
+      "S11": "为视觉效果新增原文外剧情"
+    }
+  },
+  "windowed_execution_policy": {
+    "principle": "生产与独立审计两个窗口常驻；仅审计失败且获修复授权时启用第三个repair窗口；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、八层审计或质量阈值。",
+    "activation": {
+      "always_required": ["production", "independent_audit"],
+      "conditional": "repair",
+      "repair_activation_condition": "independent_audit_fail_and_explicit_repair_authorization",
+      "clean_audit_forbids_repair_window": true
+    },
+    "window_roles": {
+      "production": "创建全量或用户授权的增量新版本，只能签发production_preflight和handoff，不能签发最终审计通过。",
+      "independent_audit": "只读源文与产物，独立重算质量结论，独占最终pass/fail签发权。",
+      "repair": "仅依据一次性不可变修复包生成新版本，不能签发最终结论，必须返回原independent_audit工单、窗口、会话与审计周期。"
+    },
+    "exact_role_matrix": [
+      {"role": "production", "operations": ["storyboard_create", "storyboard_regenerate", "storyboard_change"], "mode": "execute", "authorization": "explicit_execute"},
+      {"role": "independent_audit", "operations": ["storyboard_audit"], "mode": "audit_only", "authorization": "read_only"},
+      {"role": "repair", "operations": ["storyboard_repair"], "mode": "audit_and_repair", "authorization": "explicit_execute"}
+    ],
+    "cloud_session_policy": {
+      "trusted_transport_session_required": true,
+      "roles_must_be_pairwise_distinct": true,
+      "logical_window_name_is_not_proof": true,
+      "missing_or_reused_session": "block"
+    },
+    "audit_types": {
+      "production_preflight": {
+        "may_mutate_artifact": true,
+        "may_issue_release_verdict": false,
+        "purpose": "在交接前发现结构、字段、覆盖、连续性、单镜母版执行完整性和统计问题。"
+      },
+      "independent_audit": {
+        "may_mutate_artifact": false,
+        "may_issue_release_verdict": true,
+        "must_recompute_all_quality_conclusions": true
+      }
+    },
+    "canonical_policy": {
+      "single_structured_truth_per_artifact_version": true,
+      "derived_consumers": [
+        "正式镜头",
+        "10列母版",
+        "GPT关键帧导出投影",
+        "覆盖映射",
+        "统计"
+      ],
+      "required_fingerprints": [
+        "source_bytes",
+        "normalized_source",
+        "episode_boundary",
+        "artifact_raw",
+        "artifact_semantic",
+        "canonical",
+        "parser",
+        "schema",
+        "runtime",
+        "rules",
+        "validator",
+        "project_anchors",
+        "target_model_contract"
+      ],
+      "reject_competing_or_stale_canonical": true
+    },
+    "handoff_policy": {
+      "types": [
+        "production_to_audit",
+        "audit_to_repair",
+        "repair_to_audit",
+        "audit_intake"
+      ],
+      "required_blocks": [
+        "identity_and_scope",
+        "fingerprints",
+        "objective_evidence",
+        "producer_claims",
+        "cache_manifest",
+        "stage_trace",
+        "cycle_ids"
+      ],
+      "receiver_must_verify_fingerprints": true,
+      "atomic_state_machine": ["prepared", "consuming", "consumed_or_rejected"],
+      "single_consumer_cas": true,
+      "explicit_handoff_id_required_in_cloud": true,
+      "repair_return_requires_original_audit_authority": true,
+      "audit_cycle_is_server_signed_not_caller_selected": true,
+      "missing_or_mismatch": "cache_miss_or_block",
+      "forbid_silent_stale_fallback": true
+    },
+    "incremental_execution_policy": {
+      "full_route": "首次全量分镜，或认知、分集边界、场景拓扑、核心镜头计划导致整个场/集失效。",
+      "delta_route": "已有canonical上的用户授权稳定UID、同数量视觉或其他非认知执行变化；精确对白文本、标点、顺序/分句和说话人必须与base一致，输入只含完整受影响27字段原子镜头、更新后的镜头级证据和精确左右边界；禁止batches或派生正文。任何对白/说话人增删改、重排、拆并或改归属必须完整重建受影响场景或分集。",
+      "patch_route": "独立审计证书确认的稳定镜头非结构字段修复。",
+      "stable_internal_ids": ["episode_id", "scene_uid", "shot_uid"],
+      "compare_and_set": ["base_canonical_sha256", "base_raw_artifact_fingerprint", "single_successor_claim"],
+      "must_reject": ["stale_base", "wrong_boundary", "protected_scope", "noncontiguous_range", "dialogue_or_speaker_change", "retired_field_or_batch_write", "handoff_before_validation_and_export"],
+      "untouched_semantic_hash_must_match": true,
+      "server_computed_values": ["累计时长", "总时长", "公式", "统计"],
+      "export_only_projections": ["正式分镜母版", "GPT关键帧生成指令"],
+      "materializer_must_be_deterministic_and_noncreative": true,
+      "final_outputs": ["完整canonical JSON", "完整XLSX", "production_preflight", "signed handoff", "stage trace"],
+      "full_validation_after_delta": true
+    },
+    "cross_window_fact_reuse_whitelist": [
+      "exact_source_text_and_chunk_manifest",
+      "deterministic_workbook_cells_formulas_and_inventory",
+      "canonical_serialization_verified_against_artifact",
+      "approved_human_decisions_boundaries_and_project_anchors",
+      "deterministic_file_statistics",
+      "unchanged_runtime_full_test_certificate"
+    ],
+    "producer_claims_requiring_independent_recalculation": [
+      "chapter_and_causal_maps",
+      "source_treatment_and_deletion_authority",
+      "protected_dialogue",
+      "cognition_matrix",
+      "seven_field_scene_state",
+      "shot_plan_and_performance_chain",
+      "public_scene_people_and_audio_ecology",
+      "compact_master_blank_context_independence",
+      "coverage_metrics",
+      "residual_and_introduced_issues",
+      "final_verdict"
+    ],
+    "cache_policy": {
+      "content_addressed_only": true,
+      "base_key_fields": [
+        "source",
+        "boundary",
+        "artifact_raw",
+        "artifact_semantic",
+        "canonical",
+        "parser",
+        "schema",
+        "runtime",
+        "rules",
+        "validator",
+        "scripts",
+        "dependencies_environment",
+        "project_anchors",
+        "target_model_contract",
+        "scope"
+      ],
+      "explicit_fresh_audit": "reuse_extraction_and_parsing_only_then_recompute_semantic_verdict",
+      "semantic_audit_contract": "semantic-audit-v2-compact-master",
+      "invalidation": {
+        "dialogue_or_story": "beat_source_mapping_protected_dialogue_cognition",
+        "action_or_gaze": "current_shot_neighbors_visibility",
+        "position_direction_prop_door_window_action_progress_light": "continuous_scene",
+        "shot_insert_or_delete": "downstream_numbering_duration_transition_formula_statistics_export_projection",
+        "time_or_lighting": "continuous_scene",
+        "single_shot_timing_or_model_contract": "formal_master_and_gpt_export_projection",
+        "episode_boundary_cognition_scene_topology_core_shot_plan": "affected_scene_or_episode",
+        "runtime_rules_schema_validator_scripts_dependencies_parser_or_model_contract": "all_dependent_certificates_and_full_regression"
+      }
+    },
+    "functional_test_policy": {
+      "ordinary_content_task": "verify_matching_certificate_only",
+      "forbid_modules_in_ordinary_content_audit": [
+        "ALL_RUNTIME_MODULES",
+        "FUNCTIONAL_TEST"
+      ],
+      "full_regression_triggers": [
+        "runtime_change",
+        "rule_change",
+        "schema_change",
+        "validator_change",
+        "script_change",
+        "dependency_or_environment_change",
+        "parser_contract_change",
+        "target_model_contract_change",
+        "certificate_missing_or_mismatch",
+        "validator_certificate_inconsistency"
+      ],
+      "certificate_fingerprints": [
+        "runtime",
+        "rules",
+        "schema",
+        "validator",
+        "scripts",
+        "dependencies_environment"
+      ]
+    },
+    "stage_timing_policy": {
+      "required_stages_when_applicable": [
+        "bootstrap_status",
+        "source_read",
+        "canonicalization",
+        "delta_base_load",
+        "delta_scope_check",
+        "delta_merge",
+        "export_projection",
+        "planning",
+        "generation",
+        "validation",
+        "repair",
+        "export",
+        "ledger_handoff"
+      ],
+      "always_required_metrics": [
+        "measurement_scope",
+        "unmeasured_stages",
+        "trace_id",
+        "wall_duration_ms",
+        "shot_count",
+        "materialization_passes",
+        "legacy_generation_calls",
+        "seedance_batches_generated",
+        "model_authored_derived_chars",
+        "cache_status_and_reason",
+        "error_status"
+      ],
+      "reported_only_when_server_observed": [
+        "started_at",
+        "ended_at",
+        "duration_ms",
+        "tool_call_count",
+        "source_character_count",
+        "input_payload_bytes",
+        "output_payload_bytes",
+        "affected_shot_count",
+        "preserved_semantic_count",
+        "shot_count",
+        "materialization_passes",
+        "seedance_batches_generated",
+        "cache_status_and_reason",
+        "retry_count",
+        "error_status"
+      ],
+      "measurement_scope": "server_only",
+      "compact_zero_metrics": {"legacy_generation_calls": 0, "seedance_batches_generated": 0, "model_authored_derived_chars": 0},
+      "legacy_stage_aliases": {"materialization": "legacy trace only; new compact route uses canonicalization and export_projection"},
+      "unobserved_chatgpt_planning_and_generation": "unmeasured_not_zero",
+      "forbid_inferred_or_placeholder_measurements": true,
+      "parallel_wall_clock_rule": "父阶段墙钟时间不得重复累加并行子阶段耗时。",
+      "efficiency_claim_rule": "只比较相同源文、边界、规则、服务等级和输出契约的可比trace。"
+    },
+    "quality_equivalence": {
+      "preserve_validator_count": 49,
+      "preserve_ordered_gates": "G0-G13",
+      "preserve_audit_layers": 8,
+      "preserve_quality_thresholds": true,
+      "performance_never_overrides_quality_failure": true,
+      "human_signoff_still_required": true
+    }
+  },
+  "modules": {
+    "EXPRESSION": {
+      "formula": "情绪=嘴角状态+眼神变化+面部状态",
+      "actor_formula": "情绪状态=表情细节+手部动作+身体姿态+视线方向",
+      "important_shot_minimum_categories": 4,
+      "detail_categories": [
+        "嘴角/嘴唇",
+        "眼神/目光",
+        "面部/眉眼",
+        "手部",
+        "身体/肩颈",
+        "视线",
+        "呼吸",
+        "头部角度"
+      ],
+      "emotion_catalog": [
+        {
+          "name": "开心",
+          "mouth": "嘴角轻抬",
+          "eyes": "眼神柔和、眼形微弯",
+          "face": "面部放松、脸颊略提"
+        },
+        {
+          "name": "委屈",
+          "mouth": "嘴角轻压",
+          "eyes": "眼眶微红或泪光聚起",
+          "face": "表情短暂停住"
+        },
+        {
+          "name": "紧张",
+          "mouth": "嘴唇轻抿",
+          "eyes": "目光游移",
+          "face": "眉眼与面部肌肉绷紧"
+        },
+        {
+          "name": "生气",
+          "mouth": "嘴角压平或唇线绷紧",
+          "eyes": "目光集中而锐利",
+          "face": "眉心收紧、下颌发力"
+        },
+        {
+          "name": "惊讶",
+          "mouth": "嘴微张",
+          "eyes": "眼睛睁大、瞳孔变化",
+          "face": "眉毛上抬、额头舒展"
+        },
+        {
+          "name": "害怕",
+          "mouth": "嘴角下拉、唇部轻颤",
+          "eyes": "睁大但目光不稳",
+          "face": "眉毛收紧或上挑、面部僵住"
+        },
+        {
+          "name": "悲伤",
+          "mouth": "嘴角下垂",
+          "eyes": "目光黯淡、眼眶湿润",
+          "face": "眉毛内收、面部下沉"
+        },
+        {
+          "name": "厌恶",
+          "mouth": "上唇微抬、下唇收紧",
+          "eyes": "眼睛微眯或偏开",
+          "face": "鼻梁轻皱、面颊紧绷"
+        },
+        {
+          "name": "惊喜",
+          "mouth": "嘴角明显上扬",
+          "eyes": "目光发亮、眼形弯起",
+          "face": "脸颊上提、额头放松"
+        },
+        {
+          "name": "困惑",
+          "mouth": "嘴角偏斜或抿住",
+          "eyes": "目光寻找信息",
+          "face": "眉毛一高一低或轻皱"
+        },
+        {
+          "name": "自豪",
+          "mouth": "嘴角克制上扬",
+          "eyes": "眼神坚定",
+          "face": "眉眼舒展、面部有支撑"
+        },
+        {
+          "name": "羞涩",
+          "mouth": "嘴角轻扬或抿住",
+          "eyes": "目光闪躲",
+          "face": "脸颊微热、表情略僵"
+        },
+        {
+          "name": "惆怅",
+          "mouth": "嘴角轻压",
+          "eyes": "凝视远处或失焦",
+          "face": "眉头微皱、面部松弛"
+        },
+        {
+          "name": "平静",
+          "mouth": "唇线自然",
+          "eyes": "目光稳定柔和",
+          "face": "面部完全放松"
+        },
+        {
+          "name": "调皮",
+          "mouth": "嘴角带轻微歪斜",
+          "eyes": "眼神闪动",
+          "face": "眉毛微挑、头部轻偏"
+        },
+        {
+          "name": "冷漠",
+          "mouth": "嘴角平直",
+          "eyes": "目光淡或空",
+          "face": "面部变化极少"
+        },
+        {
+          "name": "焦虑",
+          "mouth": "嘴唇抿紧或轻咬",
+          "eyes": "目光快速游移",
+          "face": "眉心微皱、肌肉紧张"
+        },
+        {
+          "name": "惊恐",
+          "mouth": "嘴张开并可能颤动",
+          "eyes": "眼睛与瞳孔明显放大",
+          "face": "眉毛高抬、面部僵硬"
+        },
+        {
+          "name": "欣慰",
+          "mouth": "嘴角轻扬",
+          "eyes": "眼神温暖",
+          "face": "眉眼与面部逐渐放松"
+        },
+        {
+          "name": "期待",
+          "mouth": "嘴角轻扬",
+          "eyes": "目光明亮并锁定目标",
+          "face": "放松中保留轻微紧张"
+        }
+      ],
+      "actor_state_catalog": [
+        {
+          "name": "开心",
+          "face": "嘴角上扬、眼形微弯",
+          "hands": "手部自然或轻拍",
+          "body": "身体略前倾、肩膀放松",
+          "gaze": "看向带来快乐的人或物"
+        },
+        {
+          "name": "开心大笑",
+          "face": "嘴张开、眼形弯起",
+          "hands": "捂嘴或自然打开",
+          "body": "身体前倾、肩膀轻颤",
+          "gaze": "看向引发笑意的人"
+        },
+        {
+          "name": "感动",
+          "face": "嘴唇轻抿、眼角微湿",
+          "hands": "手轻握或触碰胸口/脸颊",
+          "body": "身体略前倾、肩线收紧",
+          "gaze": "注视情绪来源后缓慢移开"
+        },
+        {
+          "name": "害羞",
+          "face": "嘴角轻扬",
+          "hands": "手指交错或轻遮面",
+          "body": "肩膀内收",
+          "gaze": "快速移开视线"
+        },
+        {
+          "name": "生气",
+          "face": "眉心紧、唇线绷",
+          "hands": "握拳或抱臂",
+          "body": "上身前倾、肩线僵硬",
+          "gaze": "直视对方"
+        },
+        {
+          "name": "伤心",
+          "face": "嘴角下垂、眼眶发红",
+          "hands": "抱住自己或抚脸",
+          "body": "身体轻蜷",
+          "gaze": "目光低垂"
+        },
+        {
+          "name": "紧张",
+          "face": "嘴唇轻抿",
+          "hands": "搓手、抓衣角",
+          "body": "身体僵硬、肩膀微抬",
+          "gaze": "游移并回避直视"
+        },
+        {
+          "name": "惊讶",
+          "face": "眉毛抬起、眼睛睁大、嘴微张",
+          "hands": "手自然抬起或捂嘴",
+          "body": "身体后仰",
+          "gaze": "锁定突发事件"
+        },
+        {
+          "name": "尴尬",
+          "face": "嘴角僵硬",
+          "hands": "搓手或摸后颈",
+          "body": "耸肩、身体偏转",
+          "gaze": "目光闪避"
+        },
+        {
+          "name": "自豪",
+          "face": "眉毛轻挑、嘴角上扬",
+          "hands": "自然垂放或扶腰",
+          "body": "胸口打开、身体略后仰",
+          "gaze": "坚定直视"
+        },
+        {
+          "name": "放松",
+          "face": "眼睑放松、唇线自然",
+          "hands": "手放在膝上或自然交叠",
+          "body": "身体靠后、肩颈松开",
+          "gaze": "从容扫视"
+        },
+        {
+          "name": "思考",
+          "face": "眉头轻皱、嘴角收住",
+          "hands": "托下巴或轻触嘴唇",
+          "body": "上身略前倾",
+          "gaze": "停在一点或向上寻找"
+        },
+        {
+          "name": "爱慕",
+          "face": "嘴角含笑、眼神柔和",
+          "hands": "轻触自己或靠近对象",
+          "body": "身体微微前倾",
+          "gaze": "持续注视喜欢的人"
+        },
+        {
+          "name": "焦虑",
+          "face": "眉心紧、唇部用力",
+          "hands": "握拳、敲腿或反复动作",
+          "body": "上身前倾、身体紧绷",
+          "gaze": "四处寻找出口/答案"
+        },
+        {
+          "name": "惊喜",
+          "face": "眼睛睁大、嘴微张后上扬",
+          "hands": "双手抬起或靠近胸口",
+          "body": "身体前倾",
+          "gaze": "锁定惊喜来源"
+        }
+      ]
+    },
+    "MOTION": {
+      "formula": "运镜=类型+主体+移动路径+触发原因+叙事效果",
+      "batch_max_main_motions": 1,
+      "catalog": [
+        {
+          "id": "push_in",
+          "name": "推镜头",
+          "aliases": [
+            "Dolly In",
+            "Push In"
+          ],
+          "rule": "镜头向明确主体靠近",
+          "functions": [
+            "强化情绪",
+            "聚焦注意力",
+            "制造压迫感"
+          ],
+          "uses": [
+            "意识到真相",
+            "质问",
+            "告白前后",
+            "眼神变化"
+          ],
+          "keywords": [
+            "dolly in",
+            "slow push in"
+          ]
+        },
+        {
+          "id": "pull_back",
+          "name": "拉镜头",
+          "aliases": [
+            "Dolly Out",
+            "Pull Back"
+          ],
+          "rule": "镜头从近处退出并揭示有效环境信息",
+          "functions": [
+            "孤独感",
+            "反转",
+            "信息揭示",
+            "关系疏离"
+          ],
+          "uses": [
+            "真相揭开",
+            "人物被留在空间",
+            "关系断裂"
+          ],
+          "keywords": [
+            "dolly out",
+            "pull back"
+          ]
+        },
+        {
+          "id": "follow_behind",
+          "name": "后跟镜头",
+          "aliases": [
+            "Follow Behind",
+            "Rear Tracking"
+          ],
+          "rule": "镜头位于人物后方并跟随移动",
+          "functions": [
+            "代入感",
+            "沉浸式叙事"
+          ],
+          "uses": [
+            "进入新场景",
+            "逃离",
+            "长廊行走"
+          ],
+          "keywords": [
+            "follow behind",
+            "rear tracking shot"
+          ]
+        },
+        {
+          "id": "lateral_tracking",
+          "name": "侧跟镜头",
+          "aliases": [
+            "Lateral Tracking"
+          ],
+          "rule": "镜头与主体平行移动",
+          "functions": [
+            "展示动作",
+            "增强节奏",
+            "表现并行关系"
+          ],
+          "uses": [
+            "并肩行走",
+            "追逐",
+            "护送"
+          ],
+          "keywords": [
+            "lateral tracking shot",
+            "side follow camera"
+          ]
+        },
+        {
+          "id": "front_tracking",
+          "name": "前跟镜头",
+          "aliases": [
+            "Front Tracking"
+          ],
+          "rule": "镜头在人物前方后退，人物朝镜头前进",
+          "functions": [
+            "情绪冲击",
+            "主角压迫感"
+          ],
+          "uses": [
+            "逼近",
+            "质问",
+            "决断",
+            "强势登场"
+          ],
+          "keywords": [
+            "front tracking shot",
+            "camera moving backward"
+          ]
+        },
+        {
+          "id": "orbit_360",
+          "name": "360°环绕镜头",
+          "aliases": [
+            "360 Orbit",
+            "环绕镜头"
+          ],
+          "rule": "镜头围绕唯一核心主体旋转",
+          "functions": [
+            "主角感",
+            "高光时刻",
+            "情绪放大",
+            "仪式感"
+          ],
+          "uses": [
+            "身份揭露",
+            "承诺",
+            "册封",
+            "强情绪爆点"
+          ],
+          "keywords": [
+            "360 orbit shot",
+            "camera circling subject"
+          ]
+        },
+        {
+          "id": "crane_up",
+          "name": "升镜头",
+          "aliases": [
+            "Tilt Up",
+            "Crane Up"
+          ],
+          "rule": "镜头由下向上展示主体或空间体量",
+          "functions": [
+            "宏伟",
+            "压迫感",
+            "权威感"
+          ],
+          "uses": [
+            "宫殿",
+            "权势登场",
+            "高大空间"
+          ],
+          "keywords": [
+            "tilt up",
+            "crane up shot"
+          ]
+        },
+        {
+          "id": "crane_down",
+          "name": "降镜头",
+          "aliases": [
+            "Tilt Down",
+            "Crane Down"
+          ],
+          "rule": "镜头由上向下落到主体或空间",
+          "functions": [
+            "渺小感",
+            "命运感",
+            "脆弱感"
+          ],
+          "uses": [
+            "人物孤立",
+            "空旷空间",
+            "命运转折"
+          ],
+          "keywords": [
+            "tilt down",
+            "crane down shot"
+          ]
+        },
+        {
+          "id": "pan",
+          "name": "摇镜头",
+          "aliases": [
+            "Pan"
+          ],
+          "rule": "机位基本不移，镜头水平旋转",
+          "functions": [
+            "信息展示",
+            "空间展开",
+            "关系揭示"
+          ],
+          "uses": [
+            "场景建立",
+            "多人站位",
+            "朝堂宴席"
+          ],
+          "keywords": [
+            "pan shot",
+            "horizontal camera movement"
+          ]
+        },
+        {
+          "id": "dutch_angle",
+          "name": "斜俯镜头",
+          "aliases": [
+            "Dutch Angle",
+            "倾斜镜头"
+          ],
+          "rule": "画面轴线有意倾斜",
+          "functions": [
+            "不安",
+            "紧张",
+            "失控感",
+            "心理不稳定"
+          ],
+          "uses": [
+            "毒发",
+            "惊惧",
+            "危险临近"
+          ],
+          "forbidden": [
+            "普通甜宠对话"
+          ],
+          "keywords": [
+            "dutch angle",
+            "tilted frame"
+          ]
+        },
+        {
+          "id": "slide_truck",
+          "name": "平移镜头",
+          "aliases": [
+            "Slide",
+            "Truck"
+          ],
+          "rule": "镜头平稳横向移动",
+          "functions": [
+            "空间流动",
+            "质感",
+            "秩序感"
+          ],
+          "uses": [
+            "宫殿",
+            "长廊",
+            "礼制场面"
+          ],
+          "keywords": [
+            "smooth slide shot",
+            "truck movement"
+          ]
+        },
+        {
+          "id": "dolly_zoom",
+          "name": "希区柯克变焦",
+          "aliases": [
+            "Dolly Zoom",
+            "Vertigo Effect"
+          ],
+          "rule": "推拉机位与反向变焦同步",
+          "functions": [
+            "恐惧",
+            "心理冲击",
+            "失重感"
+          ],
+          "uses": [
+            "噩耗",
+            "毒发",
+            "真相打击"
+          ],
+          "keywords": [
+            "dolly zoom",
+            "vertigo effect"
+          ]
+        },
+        {
+          "id": "dolly_slider",
+          "name": "轨道镜头",
+          "aliases": [
+            "Dolly",
+            "Slider"
+          ],
+          "rule": "镜头沿直线或弧线轨道稳定移动",
+          "functions": [
+            "稳定推进",
+            "专业感",
+            "电影感"
+          ],
+          "uses": [
+            "人物入场",
+            "仪式场面",
+            "关系推进"
+          ],
+          "keywords": [
+            "dolly track shot",
+            "slider shot"
+          ]
+        },
+        {
+          "id": "handheld",
+          "name": "手持镜头",
+          "aliases": [
+            "Handheld"
+          ],
+          "rule": "保留受控的不稳定感但主体清楚",
+          "functions": [
+            "真实感",
+            "紧张感",
+            "突发临场感"
+          ],
+          "uses": [
+            "逃跑",
+            "火灾",
+            "混乱",
+            "追赶"
+          ],
+          "keywords": [
+            "handheld camera",
+            "controlled camera shake"
+          ]
+        },
+        {
+          "id": "shoulder_rig",
+          "name": "肩扛镜头",
+          "aliases": [
+            "Shoulder Rig"
+          ],
+          "rule": "轻微晃动且比纯手持稳定",
+          "functions": [
+            "纪实感",
+            "电影感平衡",
+            "压迫性临场"
+          ],
+          "uses": [
+            "紧张跟随",
+            "对峙",
+            "现场对话"
+          ],
+          "keywords": [
+            "shoulder rig shot",
+            "slight camera shake"
+          ]
+        },
+        {
+          "id": "spin_roll",
+          "name": "旋转镜头",
+          "aliases": [
+            "Spin",
+            "Roll"
+          ],
+          "rule": "镜头绕光轴旋转并限制持续时间",
+          "functions": [
+            "眩晕",
+            "混乱",
+            "情绪爆发",
+            "失控"
+          ],
+          "uses": [
+            "昏厥",
+            "毒发",
+            "火场",
+            "心理崩溃"
+          ],
+          "keywords": [
+            "camera spin",
+            "roll shot"
+          ]
+        }
+      ],
+      "static_options": [
+        "无运镜",
+        "固定镜头",
+        "静态镜头",
+        "固定机位"
+      ]
+    },
+    "CINEMATIC": {
+      "core": "不要把所有信息塞进一个镜头；景别决定叙事节奏，光影决定故事氛围。",
+      "default_shot_chain": [
+        "远景",
+        "中景",
+        "近景",
+        "特写"
+      ],
+      "shot_sizes": [
+        {
+          "name": "远景",
+          "function": "交代环境、时间、空间关系和场面",
+          "attention": "先让观众知道人物身处何处"
+        },
+        {
+          "name": "中景",
+          "function": "承接动作、站位和人物与环境关系",
+          "attention": "让动作和关系距离可读"
+        },
+        {
+          "name": "近景",
+          "function": "传递情绪、眼神和即时反应",
+          "attention": "把注意力移到人物感受"
+        },
+        {
+          "name": "特写",
+          "function": "放大手、道具、泪光等有剧情功能的细节",
+          "attention": "只强调推动剧情或心理外化的细节"
+        }
+      ],
+      "lighting": [
+        {
+          "name": "冷色顶光",
+          "functions": [
+            "紧张",
+            "压迫",
+            "审讯",
+            "危险"
+          ],
+          "source_translations": [
+            "冷月光",
+            "高窗冷光",
+            "阴冷廊光",
+            "偏冷天光"
+          ],
+          "forbidden": [
+            "甜宠温情场景"
+          ]
+        },
+        {
+          "name": "逆光",
+          "functions": [
+            "浪漫",
+            "轮廓",
+            "发丝光",
+            "宿命感"
+          ],
+          "source_translations": [
+            "夕阳逆光",
+            "窗纸透光",
+            "烛火背光",
+            "灯会暖光"
+          ]
+        },
+        {
+          "name": "底光",
+          "functions": [
+            "恐怖",
+            "诡异",
+            "反常",
+            "不安"
+          ],
+          "source_translations": [
+            "火光",
+            "药炉光",
+            "烛火下照",
+            "火场反光"
+          ],
+          "forbidden": [
+            "无源底光",
+            "普通关系戏"
+          ]
+        },
+        {
+          "name": "丁达尔光",
+          "functions": [
+            "神圣",
+            "宏伟",
+            "仪式感",
+            "命运感",
+            "空间层次"
+          ],
+          "source_translations": [
+            "寺庙光束",
+            "宫殿高窗光束",
+            "晨雾斜光",
+            "香火烟尘",
+            "窗棂光束"
+          ]
+        }
+      ],
+      "continuity": [
+        "同场景连续镜主光源一致",
+        "光源方向一致",
+        "色温倾向一致",
+        "暗部有层次",
+        "亮部不过曝"
+      ]
+    },
+    "VOICE": {
+      "scene_formula": "场景+人物状态+音色+画面内容中的发声与精确对白",
+      "base_formula": "语气=声音大小+语速快慢+停顿位置+尾音变化",
+      "full_formula": "情绪语气=声音强弱+语速节奏+呼吸状态+停顿位置+重音位置+尾音变化",
+      "dimensions": [
+        "声音强弱",
+        "语速节奏",
+        "呼吸状态",
+        "停顿位置",
+        "重音位置",
+        "尾音变化"
+      ],
+      "punctuation": [
+        {
+          "symbol": "，",
+          "name": "逗号",
+          "effect": "真实短停顿与语义分层",
+          "uses": [
+            "思考",
+            "犹豫",
+            "试探",
+            "撒娇",
+            "安慰"
+          ]
+        },
+        {
+          "symbol": "。",
+          "name": "句号",
+          "effect": "尾音收住、情绪落地",
+          "uses": [
+            "平静",
+            "冷淡",
+            "克制",
+            "陈述"
+          ]
+        },
+        {
+          "symbol": "！",
+          "name": "感叹号",
+          "effect": "加强情绪和重音",
+          "uses": [
+            "警告",
+            "愤怒",
+            "兴奋",
+            "震惊"
+          ]
+        },
+        {
+          "symbol": "？",
+          "name": "问号",
+          "effect": "疑问、试探或尾音变化",
+          "uses": [
+            "疑问",
+            "怀疑",
+            "不确定",
+            "撒娇式询问"
+          ]
+        },
+        {
+          "symbol": "？！",
+          "name": "问号加感叹号",
+          "effect": "质问与爆发叠加",
+          "uses": [
+            "愤怒",
+            "震惊",
+            "强质问"
+          ]
+        },
+        {
+          "symbol": "……",
+          "name": "省略号",
+          "effect": "情绪卡住并产生明显停顿",
+          "uses": [
+            "难过",
+            "委屈",
+            "害怕",
+            "紧张",
+            "舍不得"
+          ]
+        },
+        {
+          "symbol": "～",
+          "name": "波浪号",
+          "effect": "尾音轻快、柔软或拉长",
+          "uses": [
+            "开心",
+            "撒娇",
+            "亲近",
+            "温柔"
+          ],
+          "warning": "古装短剧慎用"
+        },
+        {
+          "symbol": "——",
+          "name": "破折号",
+          "effect": "转折、打断、强调或情绪断裂",
+          "uses": [
+            "震惊",
+            "迟疑",
+            "突然意识到",
+            "强调"
+          ]
+        }
+      ],
+      "templates": [
+        {
+          "name": "开心/兴奋",
+          "delivery": "声音变亮；语速略快；气息轻快；停顿少而自然；好消息词加重；尾音自然上扬"
+        },
+        {
+          "name": "难过/委屈",
+          "delivery": "声音放轻；语速变慢；气息不稳；中间停顿明显；真正受伤的词轻重变化；尾音发虚"
+        },
+        {
+          "name": "愤怒/质问",
+          "delivery": "声音压低；语速放慢；呼吸变重；爆发前短停；后半句重音加强；尾音带压迫感"
+        },
+        {
+          "name": "警告/压迫感",
+          "delivery": "声音压低且稳定；语速慢；呼吸受控；关键词前停顿；警告词加重；尾音下压不收软"
+        },
+        {
+          "name": "紧张/害怕",
+          "delivery": "声音放轻；语速慢或断续；呼吸变浅；中间容易卡住；危险词轻重不稳；尾音发虚"
+        },
+        {
+          "name": "怀疑/试探",
+          "delivery": "声音略压低；语速放慢；呼吸克制；观察对方时停顿；疑点词加重；末尾微上扬或收住"
+        },
+        {
+          "name": "安慰/温柔坚定",
+          "delivery": "前半句声音放轻、后半句变稳；语速慢；先轻吸气；分层停顿；承诺词加重；尾音柔和落下"
+        },
+        {
+          "name": "思考/犹豫",
+          "delivery": "音量偏轻；语速慢；呼吸自然；开口前与句中停顿；真正问题轻重突出；尾音暂不完全落地"
+        },
+        {
+          "name": "舍不得/挽留",
+          "delivery": "声音很轻；语速慢；气息不稳；开口前和中间停顿；挽留词轻重克制；尾音发虚"
+        },
+        {
+          "name": "反派/掌控感",
+          "delivery": "声音压低；语速很慢；呼吸稳定；故意留停顿；控制性关键词加重；尾音下压"
+        },
+        {
+          "name": "撒娇/亲近",
+          "delivery": "声音放软；语速稍慢；气息轻；句中小停顿；亲近词轻点；尾音轻轻拉长"
+        },
+        {
+          "name": "惊讶/不敢相信",
+          "delivery": "声音先停后抬高；语速先停顿再加快；短促吸气；意外信息前停；关键词突然加重；尾音上扬"
+        }
+      ]
+    },
+    "VISIBILITY": {
+      "priority_over_expression": true,
+      "rule": "先判断镜头主体与可见范围，再写表演；不可见部位不得强行描述。",
+      "book_split": "书页内容镜与人物反应镜分开，除非明确过肩/侧脸同框且相应部位可见。"
+    },
+    "CHAPTER_INTAKE": {
+      "trigger": "source_ingestion.mode=chapter_to_storyboard",
+      "complete_read_rule": "允许分块提取，但所有分块读完并合并为唯一章节地图前禁止规划节拍和镜头。",
+      "required_fields": [
+        "chapter_id",
+        "complete_read",
+        "chunk_count",
+        "chunks_read",
+        "boundary_context",
+        "chapter_goal",
+        "events",
+        "causal_links",
+        "character_state_changes",
+        "source_treatment_ledger",
+        "protected_dialogue",
+        "adaptation_budget",
+        "beat_plan",
+        "visualization_license",
+        "new_plot_events",
+        "uncertainty_status",
+        "coverage_metrics"
+      ],
+      "boundary_fields": [
+        "previous_end",
+        "current_start",
+        "current_end",
+        "next_start"
+      ],
+      "coverage_fields": [
+        "core_event_coverage_percent",
+        "causal_link_coverage_percent",
+        "character_state_change_coverage_percent",
+        "protected_dialogue_coverage_percent",
+        "source_treatment_percent"
+      ],
+      "coverage_required_percent": 100
+    },
+    "SOURCE_SELECTION": {
+      "value_axes": [
+        "causal_necessity",
+        "information_value",
+        "character_or_relationship_change",
+        "conflict_reversal_payoff",
+        "emotional_setup_or_payoff",
+        "hook_value",
+        "cinematic_function",
+        "redundancy",
+        "production_feasibility"
+      ],
+      "allowed_grades": [
+        "S",
+        "A",
+        "B",
+        "C"
+      ],
+      "allowed_treatments": [
+        "保留",
+        "合并",
+        "压缩",
+        "移动",
+        "删除"
+      ],
+      "delete_rule": "C级不得自动删除；删除必须有authorization或redundancy_evidence，承担电影功能时还需retained_function_in。",
+      "protected_dialogue_functions": [
+        "信息",
+        "认知变化",
+        "关系变化",
+        "决定承诺威胁拒绝",
+        "冲突反转爽点回报",
+        "因果桥",
+        "人物声音",
+        "章节钩子"
+      ]
+    },
+    "ADAPTATION_BUDGET": {
+      "transform_layers": "源文单元→剧情事件/节拍→正式镜头",
+      "dialogue_rate_cjk_per_second": 2.8,
+      "required_budget_fields": [
+        "target_duration_seconds",
+        "dialogue_seconds",
+        "action_seconds",
+        "transition_seconds",
+        "shot_count_min",
+        "shot_count_max"
+      ],
+      "beat_required_fields": [
+        "beat_id",
+        "core_stage",
+        "event_ids",
+        "source_unit_ids",
+        "entry_state",
+        "exit_state",
+        "target_duration_seconds",
+        "shot_count_range",
+        "function"
+      ],
+      "shot_rule": "单镜一个核心叙事或情绪阶段和一个视角；允许同阶段连续动作链，禁止第二个独立转折、跨时空跳跃或隐形切镜。"
+    },
+    "SOURCE_EXPANSION": {
+      "allowed": [
+        "有源依据的表情眼神呼吸手部身体连带",
+        "已有道具与环境反应",
+        "机位景别运镜光影色彩声音设计"
+      ],
+      "conditional": "内心外化必须有源文依据且plot_change=false。",
+      "forbidden": [
+        "新事件",
+        "新冲突",
+        "新角色行为",
+        "新决定",
+        "新动机",
+        "新信息",
+        "新结果"
+      ]
+    },
+    "PUBLIC_SCENE_ECOLOGY": {
+      "reference": "public_scene_ecology.md",
+      "trigger_locations": [
+        "街道",
+        "闹市",
+        "市集",
+        "商街",
+        "巷道",
+        "城门",
+        "码头",
+        "驿站",
+        "茶馆",
+        "酒楼",
+        "餐馆",
+        "客栈大堂",
+        "庙会",
+        "店铺公共区",
+        "衙门外",
+        "宫门"
+      ],
+      "visual_requirements": [
+        "场景事实决定的人流密度或明确人数",
+        "地点和时代匹配的普通人物角色",
+        "彼此错峰且不抢主角的生活动作",
+        "建立/全景/远景至少两层空间分布，其他景别至少一层可读公共活动",
+        "同场连续镜的人流密度、方向、出入口和关键背景角色连续"
+      ],
+      "audio_requirements": {
+        "wide_shot": "至少三类具体声源与近中远三层声场",
+        "other_shot": "至少两类具体声源与两层声场",
+        "dialogue": "环境底声必须压低、退至底层或明确不遮盖对白",
+        "source_match": "可识别声音必须有可见声源或可信画外来源",
+        "formal_master": "环境音效和环境动态必须在唯一正式母版中从零复现镜头生态"
+      },
+      "empty_scene_exception": "必须同时写出可见空场状态与宵禁、闭市、封锁、疏散、戒严、灾后、停业、危险或用户明确要求等原因。",
+      "forbidden": [
+        "只有人群/路人/环境声/街道嘈杂声占位",
+        "同步或复制群演",
+        "匿名群演清晰完整对白",
+        "时代错位声源",
+        "公共人物遮挡关键动作或眼神",
+        "同场密度或声床无过渡跳变"
+      ],
+      "error_codes": [
+        "E-PUBLIC-ECOLOGY-001",
+        "E-PUBLIC-CROWD-001",
+        "E-PUBLIC-AUDIO-001",
+        "E-PUBLIC-AVSYNC-001",
+        "E-PUBLIC-CONT-001"
+      ]
+    },
+    "JIMENG_TIMING": {
+      "formal_visual_description": "画面内容是动作、表情、精确对白、发声、口型、视线、听者错峰反应和三个单镜时间阶段的唯一写入位置。",
+      "single_shot_timeline": "目标锁定Seedance 2.5时，画面内容必须恰好3个【0.0—x.x秒】一位小数阶段，从0.0开始、连续不重叠并以本镜时长结束；旧自然阶段仅作只读迁移输入。",
+      "image_prompt": "GPT关键帧确定性投影禁止时间码、对白、口型、发声与音效指令。",
+      "formal_execution_column": "正式分镜母版",
+      "default_video_model": "Seedance 2.5",
+      "retired_batch_duration_seconds": [4, 15],
+      "single_shot_uses_declared_duration": true,
+      "generic_video_prompt": "即梦通用、未知版本与历史Seedance 2.0兼容输入使用起始状态—主要动作—镜尾状态，不承诺精确秒点。",
+      "timestamp_prompt": "Seedance 2.5目标必须在画面内容使用恰好3个连续、不重叠、闭合且一位小数的单镜阶段；不得另生成独立提示词。",
+      "officially_verified_timestamp_models": [
+        "Seedance 2.5"
+      ],
+      "verified_on": "2026-08-25"
+    },
+    "CANONICAL_AUTHORITY": {
+      "policy_ref": "windowed_execution_policy.canonical_policy",
+      "rule": "每个产物版本只允许一个经全量指纹绑定的canonical，所有正式消费者必须由它派生。"
+    },
+    "HANDOFF_BUILD": {
+      "policy_ref": "windowed_execution_policy.handoff_policy",
+      "rule": "生产、审计、修复窗口交接时创建版本化manifest，分开客观证据与待审声明。"
+    },
+    "HANDOFF_VERIFY": {
+      "policy_ref": "windowed_execution_policy.handoff_policy",
+      "rule": "消费交接包前验证全部依赖指纹；不一致时拒绝缓存并按影响范围重建或阻塞。"
+    },
+    "PRODUCTION_PREFLIGHT": {
+      "policy_ref": "windowed_execution_policy.audit_types.production_preflight",
+      "rule": "生产窗口执行全部适用前置检查，但不得签发独立审计结论。"
+    },
+    "INDEPENDENT_AUDIT": {
+      "policy_ref": "windowed_execution_policy.audit_types.independent_audit",
+      "rule": "只读审计窗口独立重算全部质量结论并独占最终pass/fail签发权。"
+    },
+    "RUNTIME_TEST_CERTIFICATE_VERIFY": {
+      "policy_ref": "windowed_execution_policy.functional_test_policy",
+      "rule": "普通内容任务验证匹配的全回归证书；任何依赖变化、缺失或不一致都触发完整回归。"
+    },
+    "CACHE_POLICY": {
+      "policy_ref": "windowed_execution_policy.cache_policy",
+      "rule": "只复用内容寻址的客观证据，按依赖与影响范围失效；禁止静默使用陈旧缓存。"
+    },
+    "STAGE_TIMING": {
+      "policy_ref": "windowed_execution_policy.stage_timing_policy",
+      "rule": "记录可比较的分阶段墙钟时间、调用量、数据量、缓存和重试证据。"
+    },
+    "AUDIT_INTAKE_IF_NO_HANDOFF": {
+      "policy_ref": "windowed_execution_policy.handoff_policy",
+      "rule": "外部或旧产物缺handoff时，由只读审计窗口建立audit_intake canonical；已有handoff失配才阻塞。"
+    },
+    "AUDIT_CERTIFICATE_VERIFY": {
+      "policy_ref": "windowed_execution_policy.cross_window_fact_reuse_whitelist",
+      "rule": "验证独立审计证书与源文、边界、raw/semantic产物、canonical及全部规则依赖指纹完全一致。"
+    },
+    "INDEPENDENT_AUDIT_IF_NEEDED": {
+      "policy_ref": "windowed_execution_policy.cache_policy.explicit_fresh_audit",
+      "rule": "仅在独立审计证书缺失、失配或用户明确要求fresh audit时重跑；相同有效证书可用于归档验证。"
+    },
+    "PREVENTIVE_GATE_CERT_VERIFY": {
+      "policy_ref": "windowed_execution_policy.quality_equivalence",
+      "rule": "归档先验证同指纹证书中的G0-G13唯一门禁证据；缺失或失配才重跑。"
+    },
+    "LAYERED_AUDIT_IF_NEEDED": {
+      "policy_ref": "windowed_execution_policy.cache_policy.explicit_fresh_audit",
+      "rule": "归档先验证同指纹证书的八层唯一结果；缺失、失配或fresh请求才重跑八层。"
+    },
+    "QUALITY_METRICS_CERT_VERIFY": {
+      "policy_ref": "windowed_execution_policy.quality_equivalence",
+      "rule": "归档验证同指纹证书的全部R10质量阈值，不复制生产预检指标。"
+    }
+  },
+  "certificate_bound_patch_policy": {
+    "tool": "commit_storyboard_patch",
+    "allowed_operation": "replace_field",
+    "requires": [
+      "storyboard_repair_or_storyboard_change_work_order",
+      "explicit_execute",
+      "exact_base_canonical_hash",
+      "exact_raw_artifact_fingerprint",
+      "current_independent_audit_certificate",
+      "certificate_issue_code_for_each_operation",
+      "stable_unique_shot_id",
+      "work_order_protected_scope_check",
+      "complete_impact_scope",
+      "full_table_R10_validation",
+      "new_version_without_overwrite",
+      "separate_independent_final_audit"
+    ],
+    "forbidden_field_families": [
+      "shot_identity_order_or_timing",
+      "episode_or_scene_boundary",
+      "character_cognition_or_information_permission",
+      "source_evidence_or_source_mapping",
+      "scene_topology_or_core_shot_plan"
+    ],
+    "errors": {
+      "stale_base": "canonical_hash_conflict",
+      "invalid_certificate": "invalid_audit_certificate",
+      "protected_scope": "protected_scope_violation",
+      "structural_change": "full_rebuild_required"
+    },
+    "quality_rule": "局部补丁只减少重传和重写，不减少全表机器门禁，也不得由修复窗口签发最终审计通过。"
+  },
+  "deprecated_rules": [
+    {
+      "deprecated": "旧总优先级（缺安全合规/可见性）",
+      "replacement": "R10.GLOBAL_PRIORITY",
+      "reason": "第116章裁决已升级为唯一优先级"
+    },
+    {
+      "deprecated": "普通台词默认3.5字/秒",
+      "replacement": "R10.DIALOGUE_RATE_2_8",
+      "reason": "统一按2.8字/秒保守计算；3.5仅作非贴线参考"
+    },
+    {
+      "deprecated": "4秒说话镜2-3次眨眼",
+      "replacement": "R10.BLINK_NATURAL",
+      "reason": "更新为3-5秒0-1次、6-10秒1-2次"
+    },
+    {
+      "deprecated": "每镜强制写眨眼",
+      "replacement": "R10.BLINK_VISIBILITY",
+      "reason": "只有眼睛可见且需要防呆滞时才写"
+    },
+    {
+      "deprecated": "镜头/拍摄方式/切镜旧字段名",
+      "replacement": "R10.CANONICAL_SHOT_FIELDS",
+      "reason": "统一机位、镜头类型、切镜/转场提示词并保留只读别名"
+    },
+    {
+      "deprecated": "Golden Tests仅检查schema",
+      "replacement": "R10.FUNCTIONAL_GOLDEN_TESTS",
+      "reason": "测试必须实际调用分镜校验器"
+    },
+    {
+      "deprecated": "4167条同构关键词校验器",
+      "replacement": "R10.EXECUTABLE_VALIDATORS",
+      "reason": "改为按模块执行的确定性检查"
+    },
+    {
+      "deprecated": "分镜完成后再集中检查102项",
+      "replacement": "R10-PG1.PREVENTIVE_GATES",
+      "reason": "把高频问题前移到十道门禁，上一门禁未通过不得进入下一层"
+    },
+    {
+      "deprecated": "同一问题无限局部补丁",
+      "replacement": "R10-PG1.SYSTEMIC_ESCALATION",
+      "reason": "第2轮根因修复，第3轮及以后回退对应上游产物重建"
+    }
+  ],
+  "error_catalog": [
+    {
+      "error_code": "E-BOOTSTRAP-001",
+      "module": "BOOTSTRAP",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "未加载R10启动文件或版本不一致",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "加载AGENTS/SKILL/R10_BOOTSTRAP并重跑",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-VERSION-001",
+      "module": "VERSION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "运行时使用旧版本或新旧规则并行active",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "统一到R10并应用废弃映射",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-TEMPLATE-001",
+      "module": "TEMPLATE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "缺正式模板",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "使用R10 canonical shot schema",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-TEMPLATE-008",
+      "module": "TEMPLATE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "镜头缺必填字段",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "补齐字段，无法填写时写无/不适用+原因",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-FIELDORDER-001",
+      "module": "TEMPLATE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "字段顺序与R10不一致",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "按canonical_shot_fields重排",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-VIS-001",
+      "module": "VISIBILITY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "主体与可见部位不一致",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "删除不可见表演或拆镜",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-VIS-005",
+      "module": "VISIBILITY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "书页/手部/背影/远景写不可见面部表演",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "改为书页镜+人物反应镜",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-EXPRESSION-001",
+      "module": "EXPRESSION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "只写抽象情绪词",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "按嘴角/眼神/面部/手部/身体/视线拆解",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-EXPRESSION-002",
+      "module": "EXPRESSION",
+      "severity": "warning",
+      "blocking": false,
+      "trigger_condition": "重要情绪镜可见细节少于4类",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "补到至少4类可观察细节",
+      "final_status_if_unfixed": "warning",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-EXPRESSION-003",
+      "module": "EXPRESSION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "眨眼频率机械、超限或双人同频",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "按R10自然眨眼规则重写",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-MOTION-001",
+      "module": "MOTION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "运镜空泛或不在允许菜单",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "选择16种之一或明确无运镜",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-MOTION-002",
+      "module": "MOTION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "移动镜头的运镜方式字段未写明运镜主体",
+      "required_evidence": "镜头编号、运镜方式及缺失的主体描述",
+      "repair_action": "在运镜方式同一字段补充运镜主体，不创建运镜主体字段",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-MOTION-003",
+      "module": "MOTION",
+      "severity": "warning",
+      "blocking": false,
+      "trigger_condition": "运镜功能与类型弱匹配",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "写明为什么移动及叙事效果",
+      "final_status_if_unfixed": "warning",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-CAMERA-001",
+      "module": "CAMERA",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "机位为空或不可执行",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "明确机位高度、方向或视角",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-LIGHT-001",
+      "module": "CINEMATIC",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "光影四项缺失或空泛；光源来源/方向存在二选一‘或’；色温倾向含Kelvin/K数值、只有暖中性等泛词或缺场景暖冷空间关系",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "分别重写主要受光关系、唯一有源光源、画面方向/衰减和无Kelvin的定性暖冷空间关系",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-LIGHT-002",
+      "module": "CINEMATIC",
+      "severity": "warning",
+      "blocking": false,
+      "trigger_condition": "连续镜光源方向或色温冲突",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "统一同一场景连续性字段",
+      "final_status_if_unfixed": "warning",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-VOICE-001",
+      "module": "VOICE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "画面内容含具名对白但音色为空，或画面内容未包含声音强弱、语速、呼吸、停顿、重音、尾音",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "音色字段独立补齐；六维发声只补入画面内容，不创建发声方式字段",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-VOICE-002",
+      "module": "VOICE",
+      "severity": "warning",
+      "blocking": false,
+      "trigger_condition": "画面内容中的普通对白发声维度少于4项",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "补足至少4项；核心情绪补足6项",
+      "final_status_if_unfixed": "warning",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUNCT-001",
+      "module": "PUNCT",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "画面内容中的对白标点未通过停顿、上扬、重落或收住体现语气作用",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "逐句把标点效果写入画面内容，不创建标点语气字段",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUNCT-004",
+      "module": "PUNCT",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "画面内容中的对白标点效果与发声不匹配",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "按R10标点映射修正",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-DIALOGUE-003",
+      "module": "DIALOGUE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "台词加停顿预算超过镜头时长",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "拆句、延长或压缩",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-DIALOGUE-004",
+      "module": "DIALOGUE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "按3.5字/秒贴线放行",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "统一按2.8字/秒重算",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PSYCH-001",
+      "module": "PSYCH",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "心理音轨字段内缺不张嘴/不口型/不字幕/不计入对白安全属性",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "在心理音轨同一字段内补不张嘴、不口型、不字幕、不计入，不创建心理音轨属性字段",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PSYCH-005",
+      "module": "PSYCH",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "心理原句作为口型对白进入画面内容或GPT关键帧投影",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "移至唯一心理音轨字段并标明不口型；GPT投影删除心理原句",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-BATCH-001",
+      "module": "COMPACT_MASTER",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "新canonical或XLSX出现batches、生成批次、Seedance独立列/工作表或旧独立字段回写",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "只读迁移旧数据，创建无退休字段和无批次的compact successor",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-BATCH-002",
+      "module": "COMPACT_MASTER",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "R10-SPC-1画面内容不是恰好3个【0.0—x.x秒】一位小数阶段，或未从0.0开始、存在空段/间隙/重叠、末段不等于镜头时长",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "在画面内容内重排为恰好3个一位小数连续阶段；不得生成4秒包装批次",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-BATCH-003",
+      "module": "COMPACT_MASTER",
+      "severity": "warning",
+      "blocking": false,
+      "trigger_condition": "单镜动作负载、对白容量或时间阶段密度过高，存在模型执行风险",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "按第二个独立转折、视角或动作阶段拆镜，不创建生成批次",
+      "final_status_if_unfixed": "warning",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-BATCH-004",
+      "module": "COMPACT_MASTER",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "单镜含多个主机位、多个主运镜或第二个独立核心阶段",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "拆为独立镜头并各保留一个主机位/主运镜，不创建批次",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-SOURCE-001",
+      "module": "SOURCE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "Source Lock/边界/支撑句缺失",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "补齐源文边界与逐镜证据",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-SOURCE-004",
+      "module": "SOURCE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "新增无源剧情或动作因果",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "删除或登记用户授权",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-REFERENCE-001",
+      "module": "REFERENCE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "参考图锚定缺失或污染",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "明确继承与排除",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-STAT-001",
+      "module": "STAT",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "时长、镜数、十列投影或统计不闭合",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "复算并同步JSON",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-ARCHIVE-001",
+      "module": "ARCHIVE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "缺真实人工终审签核",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "完成签核后再归档",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-ARCHIVE-002",
+      "module": "ARCHIVE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "例外授权越过安全硬线",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "撤销例外",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-INTEGRATION-001",
+      "module": "INTEGRATION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "母版与镜像文件不一致/文件损坏",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "从R10数据源重建全部资产",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-INTEGRATION-002",
+      "module": "INTEGRATION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "黄金测试未实际执行校验器",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "运行功能黄金测试",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-INTEGRATION-003",
+      "module": "INTEGRATION",
+      "severity": "warning",
+      "blocking": false,
+      "trigger_condition": "路径布局与AGENTS不一致",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "使用R10根目录或兼容搜索",
+      "final_status_if_unfixed": "warning",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-GATE-001",
+      "module": "PREVENTIVE_GATES",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "R10-PG1流程档案、范围锁或分层审计证据缺失",
+      "required_evidence": "workflow_profile、scope_lock、audit_layers及缺失字段",
+      "repair_action": "补齐R10-PG1前置门禁证据后重跑",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-SOURCE-005",
+      "module": "SOURCE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "源文台账未覆盖镜头、关键必含内容缺失或删合压无授权",
+      "required_evidence": "source_id、source_text、treatment、target_shots、缺失必含词",
+      "repair_action": "重建源文—对白—镜头映射并补齐授权",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-CHANGELOCK-001",
+      "module": "CHANGE_LOCK",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "旧剧情、旧对白或本轮明确删除内容仍残留",
+      "required_evidence": "must_exclude命中词及命中的镜头或导出字段",
+      "repair_action": "删除残留并对保护范围执行正反向差异检查",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-COGNITION-001",
+      "module": "COGNITION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "人物认知、关系或情感阶段表缺失/不完整",
+      "required_evidence": "人物、已知、未知、关系阶段、情感阶段和禁止项",
+      "repair_action": "补齐人物认知矩阵并回查全部相关台词与动作",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-CONTINUITY-001",
+      "module": "CONTINUITY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "同场景上镜结束状态与下镜起始状态不一致且无画面交代",
+      "required_evidence": "scene_id、相邻shot_id、状态字段及前后值",
+      "repair_action": "统一状态向量或增加可见动作/转场说明",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-SHOTLOAD-001",
+      "module": "SHOT_GRANULARITY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "单镜缺核心功能、含多个视角/摄影机位置或隐形切镜",
+      "required_evidence": "shot_id、core_function、viewpoint_count和camera_position",
+      "repair_action": "按核心叙事阶段重切，单镜保留一个视角与摄影机位置",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-SHOTFRAG-001",
+      "module": "SHOT_GRANULARITY",
+      "severity": "warning",
+      "blocking": false,
+      "trigger_condition": "特写未说明剧情、信息或情绪功能，存在碎片化风险",
+      "required_evidence": "shot_id、镜头类型和detail_shot_function",
+      "repair_action": "补叙事功能；无功能则合并或删除特写",
+      "final_status_if_unfixed": "warning",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PERFORMANCE-001",
+      "module": "PERFORMANCE_CHAIN",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "台词/重要情绪镜缺刺激—反应—视线—表情—身体—结束状态链",
+      "required_evidence": "shot_id及缺失的performance_chain字段",
+      "repair_action": "按可见性重写完整演员反应链，并回查听话人反应",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-JIMENG-TIMING-001",
+      "module": "JIMENG_TIMING",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "未知/旧模型的画面内容出现硬时间码，R10-SPC-1 Seedance 2.5画面内容不是恰好3个标准阶段，或GPT关键帧投影含时间码",
+      "required_evidence": "shot_id、目标模型、镜头时长、画面内容阶段边界及GPT投影命中",
+      "repair_action": "未知/旧模型改自然阶段；R10-SPC-1 Seedance 2.5改为恰好3个标准闭合单镜阶段；重新确定性投影无时间码GPT列。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-I2V-INDEP-001",
+      "module": "COMPACT_MASTER",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "正式分镜母版出现依赖上一镜、关键帧或历史上下文的代指",
+      "required_evidence": "shot_id、正式母版及命中的跨上下文禁词",
+      "repair_action": "从27字段原子从零投影空间站位、起始状态、动作过程与结束状态",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-I2V-INDEP-002",
+      "module": "COMPACT_MASTER",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "正式分镜母版缺镜头序号首行、固定段落顺序、三阶段动作/对白发声/听者反应/结束状态、摄影机、声音、环境或四项光线中的适用内容",
+      "required_evidence": "shot_id、27字段原子及正式母版缺失项",
+      "repair_action": "补齐compact原子并重做确定性正式母版投影与空白上下文测试",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-AUDIO-STAGE-001",
+      "module": "AUDIO_WORKFLOW",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "在正式单镜执行母版中要求播放BGM，或未把BGM放到画面锁定后的独立阶段",
+      "required_evidence": "shot_id、正式母版命中内容或audio_workflow字段",
+      "repair_action": "生成提示词禁止BGM；画面锁定后再独立设计音乐Cue",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-REGRESSION-001",
+      "module": "REGRESSION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "修正后仍残留原问题",
+      "required_evidence": "审计轮次、初审数、残留数、镜头和错误码",
+      "repair_action": "扩大到规定影响范围，修净后重跑原错误与相邻镜头",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-REGRESSION-002",
+      "module": "REGRESSION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "修正引入新的问题或越界修改保护字段",
+      "required_evidence": "审计轮次、新增错误数、差异范围和受影响镜头",
+      "repair_action": "撤销副作用，按影响范围回归并比较修正前后差异",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-SYSTEMIC-001",
+      "module": "SYSTEMIC_ESCALATION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "连续两轮仍局部补丁，或连续三轮仍未回退上游重建",
+      "required_evidence": "问题类别、连续轮数和实际修复动作",
+      "repair_action": "第二轮执行根因修复；第三轮停止补丁并重建对应上游产物",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-CHAPTER-INTAKE-001",
+      "module": "CHAPTER_INTAKE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "章节未完整读取、边界/剧情地图/因果/人物状态缺失，或歧义未解决仍进入分镜生成",
+      "required_evidence": "chapter_id、chunk_count、chunks_read、boundary_context、events、causal_links、character_state_changes和uncertainty_status",
+      "repair_action": "停止生成，补齐全部章节分块与边界，重建章节剧情地图后重跑。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-SOURCE-SELECT-001",
+      "module": "SOURCE_SELECTION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "源文单元无处理去向、C级自动删除、删除无授权/冗余证据、电影功能丢失或保护对白映射不足100%",
+      "required_evidence": "source_unit_id、value_axes、value_grade、treatment、target_beats、authorization/redundancy_evidence及protected_dialogue映射",
+      "repair_action": "重建多轴价值与无损取舍台账，恢复或重新映射缺失内容。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-CHAPTER-BUDGET-001",
+      "module": "ADAPTATION_BUDGET",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "保护对白/动作/转场最低时长超过目标、镜头数范围非法或核心事件未进入节拍",
+      "required_evidence": "target_duration_seconds、dialogue_seconds、action_seconds、transition_seconds、shot_count_min/max、beat_id和event_ids",
+      "repair_action": "重新取舍、调整目标时长或重排节拍，不得把过量内容塞入镜头。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-SOURCE-EXPANSION-001",
+      "module": "SOURCE_EXPANSION",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "为视觉效果新增原文不存在的事件、冲突、行为、决定、动机、信息或结果",
+      "required_evidence": "new_plot_events或visualization_license中的source_unit_ids、category和plot_change",
+      "repair_action": "删除新增剧情，用有源依据且不改变剧情的可见微动作、摄影或环境表达替代。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-SEEDANCE-VERSION-001",
+      "module": "COMPACT_MASTER",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "正式母版导出不是精确十列，出现Seedance 2.0/2.5独立列、生成批次工作表或后台Seedance产物",
+      "required_evidence": "mother_template_columns、sheet_names、canonical keys及后台生成计数",
+      "repair_action": "迁移为R10-SPC-1精确十列，以正式分镜母版为唯一执行列并停止后台Seedance生成。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUBLIC-ECOLOGY-001",
+      "module": "PUBLIC_SCENE_ECOLOGY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "公共流动场景没有与地点/时代匹配的普通人物生态，生成限制排除必要普通人物，或空场缺可核验原因",
+      "required_evidence": "镜头编号、场景词、人物角色、空场描述、豁免原因及生成限制命中内容",
+      "repair_action": "按地点补齐普通人物角色与可见活动；若剧情要求空场，同时写明空场状态和宵禁/闭市/封锁/疏散等原因。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUBLIC-CROWD-001",
+      "module": "PUBLIC_SCENE_ECOLOGY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "公共场景只写人群/路人泛称，缺密度、地点角色、错峰动作或空间层次",
+      "required_evidence": "镜头编号及空间站位描述、起始状态、画面内容、环境动态中的缺失项",
+      "repair_action": "补齐人流密度、地点角色、彼此独立的生活动作和与景别匹配的前中后景分布。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUBLIC-AUDIO-001",
+      "module": "PUBLIC_SCENE_ECOLOGY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "公共场景环境音缺具体声源或声场层次，只有泛称环境声，或对白镜未做环境声避让",
+      "required_evidence": "镜头编号、景别、环境音效、具体声源族、近中远声场和对白避让描述",
+      "repair_action": "按景别补齐至少两至三类具体声源和两至三层声场；对白出现时写明环境底声压低且不遮盖台词。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUBLIC-AVSYNC-001",
+      "module": "PUBLIC_SCENE_ECOLOGY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "公共场景可识别声音无画内/可信画外声源，匿名群演说清晰完整对白，出现时代错位声源，或唯一正式母版未复现人物与声音生态",
+      "required_evidence": "镜头编号、声源词、可见来源、环境音效、环境动态和正式母版",
+      "repair_action": "对齐画内/画外声源，删除匿名群演完整对白和时代错位声音，并在compact原子与正式母版中从零复现。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-PUBLIC-CONT-001",
+      "module": "PUBLIC_SCENE_ECOLOGY",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "同一公共场景连续镜的人流密度、流向或环境声床无画面原因跳变",
+      "required_evidence": "场景连续性ID、相邻镜头编号、前后密度/声源和缺失的过渡",
+      "repair_action": "统一相邻镜的公共人物和环境声状态，或用涌入、散开、疏散、离开、时间推进等可见过渡解释变化。",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
+      "error_code": "E-FINAL-999",
+      "module": "FINAL",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "存在未处理阻塞项却声明pass",
+      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
+      "repair_action": "修复全部fail后重跑",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    }
+  ]
+}

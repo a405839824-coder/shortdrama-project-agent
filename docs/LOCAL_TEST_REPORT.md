@@ -1,62 +1,51 @@
-# 本地测试报告（0.5.10 待验证候选）
+# 本地测试报告（0.5.11 冻结候选）
 
-- 目标插件版本：`0.5.10`
+- 目标插件版本：`0.5.11`
 - 目标分镜 Schema：`R10.1`
 - 工作流：`R10-PG1`
 - 输出契约：`R10-SPC-1`
 - 规则运行时：`V16.3-148-R10-StableRuntime`
 - 源文对白语法：`source-dialogue-closed-grammar-v6.3`
-- 验证日期：2026-09-01 UTC
-- 当前状态：0.5.3/0.5.4受控投影读取专项17/17、旧交接补签/恢复服务专项29/29、完整回归455/455、stdio/HTTP冒烟、技能与静态检查全部通过；冻结提交、部署及线上补签/恢复待执行
+- 验证日期：2026-09-01
+- 当前状态：冻结候选连续两轮完整回归通过；等待部署后运行时证书与受控线上执行
 
-本报告只记录当前 0.5.10 工作树的实际结果。0.5.9 的 449/449 完整回归及省略phase专项23/23是历史基线，不计作 0.5.10 结果；未在新候选上实际执行的项目仍标为待执行。
+本报告只记录 0.5.11 冻结候选的实际结果。0.5.10 的完整回归、受控投影和补签/恢复结果只作为历史基线，不得计作 0.5.11 通过；任何未在最终冻结提交上实际执行的项目都保持“待执行”。
 
-## 0.5.10 候选契约
+## 0.5.11 候选契约
 
-- 模型只提交一份 27 字段 compact canonical；`正式分镜母版`和`GPT关键帧生成指令`只在导出时从同一 canonical 确定性投影。
-- 源文对白由服务端闭集语法逐 occurrence 建立权威清单；说话人、正文和字符偏移必须精确匹配。候选 inventory、台账、认知矩阵和人物锚点只能是待审声明，不能反向授权源文解析。
-- 无法唯一解析的 cue/role、视觉标签粘连、未知动作残留或派生 stage/visual 姓名一律失败关闭；预检失败不产生正式 artifact、版本、导出或 handoff。
-- 独立审计 PASS 必须绑定实际检查镜头、零 issue、零 blocker、独立 handoff/trace 和完整工件指纹。复审使用服务器签发的一次性 successor handoff，不复用上一轮证据。
-- 失败后的合法复审必须经过不可变修复包、新修复产物、新 handoff、新 trace 和新指纹；跨周期、改文件名、大小写或首尾空白不能把旧失败证据伪装成新证据。
-- 迁移使用签名 WAL、项目级非终态 fence、调用方版本 CAS 和锁内运行时证书复核；`prepared`、`replaying`、`rolling_back` 均阻断普通写入，精确迁移 ID 才能恢复或回滚。
-- 运行时完整回归证书使用项目锁内单调 `certificate_sequence` 排序；纯 legacy 同秒并列失败关闭，迁移只能接受锁内复核到的最新签名 PASS。
-- 正式 XLSX 固定十列并保持 canonical/侧车反向一致；生产、审计、修复和签核均通过不可变事件、签名工件及 CAS 约束串联。
-- `preflight_evidence_backfill` 只允许当前 production 窗口凭独立 `rule_improvement + execute + explicit_execute` 工单，对授权的 legacy `prepared production_to_audit` 交接重新验证并追加签名生产预检证据；不覆盖旧记录，不改分镜、对白、canonical、XLSX、生产证书或历史审计记录。
-- 补签计划绑定有序 handoff 清单、完整当前指纹、预计证据 ID、计划 SHA 与确认字面量；执行使用项目锁、签名 WAL、CAS 和逐项原子提交，重放返回同一证据而不重复签发。
-- `handoff_recovery` 使用另一个独立工单和计划；恢复只把旧 handoff 标记为 `superseded` 并签发新的 `prepared + PENDING_AUDIT` handoff，保留原生产血缘、补签来源、恢复记录和逐项/批次 trace，且 production 窗口不得代行独立审计。
-- 历史 Hub 交接投影只读兼容两种精确形态：去掉 `record_id`、`project_id`、`integrity_hmac` 的签名记录投影，或包含这三个信封字段的完整签名记录。任何混合、额外、缺失或变更字段都失败关闭。
-- 兼容读取不迁移、不规范化、不改写历史记录；未来生产 Hub 写入统一使用去信封投影。
-- 宿主缓存旧工具参数表而省略或提交null `phase`时，服务端先校验transport session与当前production工单权限，再仅从唯一精确recognized `controlled_phase` token推断；不再默认handoff_recovery。
-- 无token、重复target、双阶段token、未知/混合token、大小写或空白漂移、缺失/额外scope均在plan或execute前零写入失败关闭；显式phase仍须与精确targets一致。
-- 受控补签/恢复内部读取只接受两类历史工作簿：精确签名的`shortdrama-projector/0.5.4`或当前投影；以及8列canonical侧车信封、10列短表头与冻结0.5.3投影器逐格一致的合法基线组合。
-- 0.5.3路线必须固定冻结投影器身份/来源、精确表头、可见单元格、侧车状态与canonical回读；0.5.4/当前路线必须校验投影与审计签名。任一漂移均在写入前失败关闭。
-- 复验证明同时绑定raw XLSX、canonical、旧handoff、旧生产证书、原生产trace、选定投影器与冻结来源；一般`extract_xlsx`仍只接受当前严格契约。
-- 该兼容不更改工作簿、分镜、对白、canonical、旧生产证书或任何历史审计记录，也不赋予production独立审计权限；公共工具总数保持精确19个。
+- 公共工具必须仍精确为 19 个并包含 `recover_storyboard_handoff`；manifest、服务 `__version__`、runtime rules、capabilities、stdio/HTTP 冒烟与 packaging 期望统一为 0.5.11。
+- 0.5.10 的历史工作簿受控投影复验保持原义；一般 `extract_xlsx`、普通导入、生产提交和独立审计路径均不放宽。
+- `GAP-1bb91d83751b422f` 只接受 `UPGRADE_0.5.11.md` 中精确有序的后六条 handoff；补签工单必须绑定当前 production 窗口，且为 `rule_improvement + execute + explicit_execute`。
+- 冻结历史报告必须 PASS、问题数为 0，并与原签名生产证书中的报告逐字段相等；冻结 validator、规则、error catalog、manifest、提交/树及逐 handoff rules profile 的 provenance 必须精确匹配。
+- 当前 validator 必须完整运行并保留 FAIL 报告。唯一允许的 current FAIL 是全部问题均为 `E-I2V-INDEP-002` / `THG-01`、blocking fail、位置匹配 `shots[n].生成限制`、evidence 精确为 `逐字短语'9:16竖屏'应恰好出现1次，当前=0`，且 warning 为 0、issue/error/shot 数闭合。任何其他当前问题必须零写入失败关闭。
+- 后六条只能追加 `controlled_historical_production_preflight_attestation` / `historical_production_preflight_attestation`，状态为 `historical_contract_pass`；不得签成普通当前 `production_preflight_pass`。
+- 证明必须同时保存冻结历史报告和当前失败报告，并设置 `current_production_pass_claimed=false`、`current_preflight_cache_reusable=false`、`conclusion_reusable_for_independent_audit=false`、`requires_full_current_independent_audit=true`。
+- 历史证明使用独立 `HISTCACHE-` 域；不得作为当前生产预检或独立审计缓存命中，也不得替代当前 validator 或八层语义审计。
+- 补签全部成功后，`GAP-0e5d48969c4c494e` 只接受 `UPGRADE_0.5.11.md` 中精确有序的原 11 条。恢复只把旧 handoff 标记为 `superseded`，不删除历史；每条只签发一个 `prepared + PENDING_AUDIT` 后继。
+- 不修改分镜、对白、canonical、XLSX、旧生产证书、原 production trace 或历史审计记录；production 窗口不执行独立审计。
+- plan 零写入；execute 使用完全相同的有序列表、`plan_sha256` 和确认字面量逐条原子提交；同参 replay 返回原记录，不重复签发。
 
-## 0.5.10 实测记录
+## 0.5.11 实测记录
 
 | 验证项 | 实际结果 |
-| --- | ---: |
-| R10 黄金测试 | 73/73 通过 |
-| R10-SPC-1 严格提示词契约 | 25/25 通过 |
-| 公共场景人物与环境音专项 | 11/11 通过 |
-| Agent 生命周期 | 38/38 通过 |
-| 全项目 Agent | 22/22 通过 |
-| V040/V051/V055/V056/V057/V058 + 0.5.9兼容 + 0.5.10受控投影专项当前树组合回归 | 通过；纳入完整455项回归 |
-| 插件单元、集成、安全、事务、迁移、解析与 XLSX 完整回归 | 455/455 通过；420.928秒 |
-| 0.5.3/0.5.4工作簿受控读取专项 | 17/17 通过；含一般extract拒绝、纯0.5.0拒绝、逐格漂移和侧车状态负例 |
-| 旧交接补签/恢复服务专项 | 29/29 通过；其中补签/恢复24项、原恢复5项 |
-| 混合、额外、缺失、业务及三个信封字段漂移失败关闭矩阵 | 通过；计划失败且权威存储零写入 |
-| 真实 production commit Hub stripped writer | 1/1 通过 |
-| 用户形状补签→恢复及幂等专项 | 通过 |
-| 省略phase补签 plan→execute→replay及显式计划等价 | 通过 |
-| 省略phase恢复 plan→execute→replay | 通过；原0.5.6恢复链继续有效 |
-| 5类歧义token、3类显式重复target、跨session错误次序 | 通过；全部完整权威快照零写入 |
-| 公开MCP工具完全省略phase预演 | 通过 |
-| stdio MCP 冒烟 | 通过；版本0.5.10、精确19工具，包含recover_storyboard_handoff |
-| HTTP MCP 冒烟 | 通过；版本0.5.10、精确19工具，包含recover_storyboard_handoff |
-| 插件与技能清单验证 | 通过；技能自检、服务自检和packaging验证均PASS |
-| JSON、Python 编译与差异检查 | 通过；Draft 2020-12 schema、json.tool、py_compile、diff-check均PASS |
+| --- | --- |
+| R10 黄金测试 | PASS，73/73 |
+| R10-SPC-1 严格提示词契约 | PASS，25/25 |
+| 公共场景人物与环境音专项 | PASS，11/11 |
+| Agent 生命周期 | PASS，38/38 |
+| 全项目 Agent | PASS，22/22 |
+| 0.5.10 受控投影历史回归 | PASS，v0.5.7/v0.5.10 链路回归 24/24 |
+| 0.5.11 历史生产预检证明专项 | PASS，专项 9/9；连同导入回归共 33/33 |
+| 六条补签 plan→execute→replay | PASS，精确顺序、双报告、append-only 与幂等重放均验证 |
+| 十一条恢复 plan→execute→replay | PASS，旧 superseded、新 prepared + PENDING_AUDIT 与幂等重放均验证 |
+| 当前失败范围、rules profile、provenance、报告与 PFE 投毒负向矩阵 | PASS，含 19 个逐字段重签投毒、冻结入口、布尔计数及运行时合同漂移 |
+| HISTCACHE 与独立审计隔离 | PASS，当前 validator、首次独审与 force re-audit lineage 均验证 |
+| 插件完整回归总数与墙钟 | 第一轮 PASS 488/488，单元测试 441.132 秒，完整入口 7分29.768秒；第二轮 PASS 488/488，单元测试 443.452 秒，完整入口 7分32.465秒 |
+| stdio MCP 冒烟：版本 0.5.11、精确 19 工具 | PASS，含 `recover_storyboard_handoff` |
+| HTTP MCP 冒烟：版本 0.5.11、精确 19 工具 | PASS，健康检查与 MCP inspection 均通过 |
+| 插件与技能清单验证 | PASS，manifest、服务、runtime rules、capabilities 版本一致，skill quick validation 通过 |
+| JSON、Python 编译与差异检查 | PASS |
+| 冻结提交第二轮完整回归 | PASS，488/488；两路冒烟再次通过 |
 
 完整测试入口：
 
@@ -64,16 +53,12 @@
 ./scripts/run_tests.sh
 ```
 
-该入口应先执行技能运行时自检和技能专项，再执行服务自检、插件测试以及 stdio/HTTP 两路冒烟。0.5.10 的测试总数与墙钟必须以实际运行结果填写，不能复制 0.5.9 的数字。
+该入口应先执行技能运行时自检和技能专项，再执行服务自检、插件测试以及 stdio/HTTP 两路冒烟。0.5.11 的测试总数、通过数和墙钟只能填写冻结候选的实测值。
 
-## 历史失败样本回归
+## 负向矩阵
 
-0.5.10 负向矩阵除原0.5.9全部样本外，新增：0.5.3信封搭配当前投影行、长/错表头、任意可见单元格漂移、canonical侧车非`veryHidden`、侧车块/哈希漂移、未知投影器、0.5.4/当前投影或审计签名不符、原XLSX或canonical与旧handoff/生产证书/原trace任一不绑定。全部必须在计划或执行写入前失败关闭，一般`extract_xlsx`对历史特例仍须拒绝。
-
-旧错误样本必须 FAIL，对应修正样本必须 PASS；任一回归失败都阻断冻结、打包、部署和迁移。
+除全部历史回归外，0.5.11 至少覆盖：错误 gap、handoff 缺项/多项/乱序/重复；逐 handoff rules profile 错配；冻结依赖、原报告、当前报告或任一 lineage 指纹篡改；current FAIL 混入其他 error code、gate、severity、blocking、location、evidence、warning 或计数漂移；把历史证明伪装为当前 PASS；`HISTCACHE` 被当前预检或独立审计复用；PFE/certificate/trace/handoff 任一双报告或不可复用标志缺失/漂移；恢复前后清单不一致；旧记录删除或新记录非 `prepared + PENDING_AUDIT`。所有负例必须在对应 plan/execute 权威写入前失败关闭。
 
 ## 发布边界
 
-未来测试通过也不等于发布完成。本报告写入后必须冻结提交哈希，并在该哈希上运行完整入口；任一失败或受测文件变化都会使已有轮次作废。
-
-只有冻结提交完整回归通过，且授权部署环境更新服务、刷新 ChatGPT 插件/技能连接，并调用 `get_agent_status(full_self_test=true)` 取得绑定当前规则、验证器、脚本和服务指纹的新证书后，才能声明 0.5.10 云端同步完成。线上受控补签和恢复必须在新证书有效且精确 19 工具集保持不变后另行执行；受控历史投影复验本身不写权威数据，只有用户授权且哈希/确认闭合的事务可追加证据或恢复交接，历史 0.5.x artifact 仍保持字节级只读。
+测试通过不等于发布完成。本报告必须在冻结提交上实跑并填写；任一受测文件变化都会使已有轮次作废。只有完整回归、第二轮冻结复验、stdio/HTTP 精确 19 工具冒烟与部署检查都通过，且部署后 `get_agent_status(full_self_test=true)` 签发绑定 0.5.11 当前规则、validator、脚本、依赖和服务指纹的新 PASS 证书，才可声明云端同步完成并新建补签/恢复工单。
