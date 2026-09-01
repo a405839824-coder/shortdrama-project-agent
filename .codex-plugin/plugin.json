@@ -1,6 +1,6 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.9",
+  "version": "0.5.10",
   "description": "Chinese short-drama production with controlled storyboard-handoff recovery, project-state migration, scene/full draft preflight, cross-batch issue prevention, first-draft quality gates, the R10-SPC-1 strict single-shot contract, independent audit, and conditional repair.",
   "author": {
     "name": "Storyboard Project Agent"
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.9为宿主缓存旧工具参数表提供失败关闭的受控阶段推断：只有当前会话绑定工单含唯一且精确的controlled_phase令牌时，省略phase才可继续；缺失、重复、未知或多阶段令牌均在写入前拒绝。0.5.8的历史Hub严格投影兼容、0.5.7的旧prepared生产交接受控补签与0.5.6的受控恢复继续保持追加式证据、签名预演、精确确认、逐条CAS和待独立审计边界。生产负责先把已知问题清零，程序负责确定性阻断，独立审计独占最终100%通过结论。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.10只在旧交接受控生产预检补签内部增加精确历史投影复验：接受经冻结0.5.3投影器逐格证明的合法基线组合，或带精确签名投影契约的0.5.4/当前工作簿；一般XLSX读取仍保持当前严格契约。补签证据绑定原始XLSX、canonical、旧交接、旧生产证书与原生产trace，原件及审计历史不修改；0.5.9受控phase推断和既有交接恢复边界继续有效，公共工具仍精确为19个。生产负责先把已知问题清零，程序负责确定性阻断，独立审计独占最终100%通过结论。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [

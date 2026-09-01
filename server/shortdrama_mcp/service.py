@@ -41,6 +41,7 @@ from .file_io import (
     _seal_service_verified_audit_overlay,
     download_openai_file,
     extract_file,
+    extract_xlsx_for_controlled_handoff_revalidation,
     preview_extracted,
     storyboard_to_xlsx,
 )
@@ -5009,6 +5010,17 @@ class StoryboardService:
             "cache_components"
         ):
             return True
+        certificate_projection_proof = certificate.get(
+            "workbook_projection_revalidation"
+        )
+        handoff_projection_proof = handoff.get(
+            "workbook_projection_revalidation"
+        )
+        if (
+            certificate_projection_proof is not None
+            or handoff_projection_proof is not None
+        ) and certificate_projection_proof != handoff_projection_proof:
+            return True
         for field in (
             "certificate_id",
             "work_order_id",
@@ -5153,10 +5165,10 @@ class StoryboardService:
             raise ValueError(
                 f"handoff_recovery_binding_mismatch: {handoff_id} production artifact is not a workbook"
             )
-        extracted_workbook = extract_file(
-            artifact_bytes,
-            str(artifact_record.get("file_name") or artifact_path.name),
-            artifact_record.get("metadata", {}).get("mime_type"),
+        extracted_workbook = (
+            extract_xlsx_for_controlled_handoff_revalidation(
+                artifact_bytes
+            )
         )
         if (
             extracted_workbook.get("kind") != "workbook"
@@ -5165,6 +5177,62 @@ class StoryboardService:
         ):
             raise ValueError(
                 f"handoff_recovery_binding_mismatch: {handoff_id} visible workbook, embedded sidecar, and canonical artifact differ"
+            )
+        projection_revalidation = copy.deepcopy(
+            extracted_workbook.get("controlled_projection_revalidation")
+        )
+        if (
+            not isinstance(projection_revalidation, dict)
+            or projection_revalidation.get("spec")
+            != "controlled-workbook-projection-revalidation-v1"
+            or projection_revalidation.get(
+                "visible_rows_match_selected_projector"
+            )
+            is not True
+            or projection_revalidation.get("visible_header_contract")
+            != "current"
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} workbook projection proof is incomplete"
+            )
+        projection_mode = str(
+            projection_revalidation.get("mode") or ""
+        )
+        if projection_mode == "strict_projection_contract":
+            if (
+                projection_revalidation.get(
+                    "visible_projection_matches_sidecar"
+                )
+                is not True
+                or projection_revalidation.get(
+                    "visible_audit_page_matches_sidecar"
+                )
+                is not True
+            ):
+                raise ValueError(
+                    f"handoff_recovery_binding_mismatch: {handoff_id} signed workbook projection proof differs"
+                )
+        elif projection_mode == "legacy_envelope_short_header_v053_rows":
+            if (
+                projection_revalidation.get("compatibility_applied")
+                is not True
+                or projection_revalidation.get("selected_projector")
+                != "shortdrama-projector/0.5.3-frozen"
+                or projection_revalidation.get(
+                    "sidecar_projection_sha256"
+                )
+                is not None
+                or projection_revalidation.get(
+                    "sidecar_audit_page_sha256"
+                )
+                is not None
+            ):
+                raise ValueError(
+                    f"handoff_recovery_binding_mismatch: {handoff_id} transitional workbook proof differs"
+                )
+        else:
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} workbook projection mode is unsupported"
             )
         artifact_metadata = artifact_record.get("metadata")
         if not isinstance(artifact_metadata, dict):
@@ -5192,6 +5260,14 @@ class StoryboardService:
             raise ValueError(
                 f"handoff_recovery_binding_mismatch: {handoff_id} canonical hash differs"
             )
+        projection_revalidation.update(
+            {
+                "artifact_raw_sha256": str(
+                    artifact_record.get("fingerprint") or ""
+                ),
+                "canonical_sha256": canonical_hash,
+            }
+        )
 
         source_fingerprint = str(
             artifact_metadata.get("source_fingerprint")
@@ -5234,6 +5310,20 @@ class StoryboardService:
             raise ValueError(
                 f"handoff_recovery_certificate_invalid: {handoff_id} production preflight certificate is invalid"
             )
+        artifact_raw_sha256 = str(
+            artifact_record.get("fingerprint") or ""
+        )
+        if (
+            handoff.get("fingerprints", {}).get("artifact_raw")
+            != artifact_raw_sha256
+            or old_certificate.get("cache_components", {}).get(
+                "artifact"
+            )
+            != artifact_raw_sha256
+        ):
+            raise ValueError(
+                f"handoff_recovery_certificate_invalid: {handoff_id} original certificate does not bind the workbook bytes"
+            )
         for field, expected in (
             ("production_preflight_status", PRODUCTION_PREFLIGHT_PASS),
             ("production_preflight_issue_count", 0),
@@ -5273,6 +5363,61 @@ class StoryboardService:
             raise ValueError(
                 f"handoff_recovery_identity_invalid: {handoff_id} has no complete fingerprints"
             )
+        original_trace_id = str(handoff.get("stage_trace_id") or "")
+        original_trace = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="telemetry",
+            record_id=original_trace_id,
+        )
+        self._validate_schema_record(
+            self._project_schema, "stage_timing_trace", original_trace
+        )
+        if (
+            not self.store.project_record_is_signed(original_trace)
+            or original_trace.get("trace_id") != original_trace_id
+            or original_trace.get("telemetry_id") != original_trace_id
+            or original_trace.get("operation") != "commit_storyboard"
+            or original_trace.get("window_role") != "production"
+            or original_trace.get("task_type") != "production_preflight"
+            or original_trace.get("artifact_id") != artifact_id
+            or original_trace.get("input_fingerprints")
+            != old_fingerprints
+            or original_trace.get("work_order_id")
+            not in {None, handoff.get("work_order_id")}
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} original production trace does not bind the workbook"
+            )
+        projection_revalidation.update(
+            {
+                "old_handoff_sha256": self.store.project_state_sha256(
+                    handoff
+                ),
+                "old_certificate_id": old_certificate.get(
+                    "certificate_id"
+                ),
+                "old_certificate_sha256": (
+                    self.store.project_state_sha256(old_certificate)
+                ),
+                "original_production_trace_id": original_trace_id,
+                "original_production_trace_sha256": (
+                    self.store.project_state_sha256(original_trace)
+                ),
+                "artifact_raw_bound_by_original_certificate": True,
+                "audit_page_integrity_source": (
+                    "signed_sidecar_sha256"
+                    if projection_revalidation.get(
+                        "visible_audit_page_matches_sidecar"
+                    )
+                    is True
+                    else "signed_original_artifact_raw_sha256"
+                ),
+            }
+        )
+        projection_revalidation["proof_sha256"] = sha256_bytes(
+            _stable_json_bytes(projection_revalidation)
+        )
         content_changes = sorted(
             key
             for key in HANDOFF_IMMUTABLE_CONTENT_FINGERPRINTS
@@ -5324,6 +5469,9 @@ class StoryboardService:
             "canonical_hash": canonical_hash,
             "source_fingerprint": source_fingerprint,
             "boundary_hash": boundary_hash,
+            "workbook_projection_revalidation": (
+                projection_revalidation
+            ),
             "old_record_sha256": self.store.project_state_sha256(handoff),
             "current_fingerprints_sha256": sha256_bytes(
                 _stable_json_bytes(current_fingerprints)
@@ -5345,6 +5493,7 @@ class StoryboardService:
         old_record_sha256: str,
         current_fingerprints_sha256: str,
         runtime_test_certificate_id: str,
+        workbook_projection_proof_sha256: str,
     ) -> tuple[str, str, str]:
         evidence_key = sha256_bytes(
             _stable_json_bytes(
@@ -5357,6 +5506,9 @@ class StoryboardService:
                     "old_record_sha256": old_record_sha256,
                     "current_fingerprints_sha256": current_fingerprints_sha256,
                     "runtime_test_certificate_id": runtime_test_certificate_id,
+                    "workbook_projection_proof_sha256": (
+                        workbook_projection_proof_sha256
+                    ),
                 }
             )
         )
@@ -5657,6 +5809,11 @@ class StoryboardService:
                 runtime_test_certificate_id=str(
                     runtime_certificate["certificate_id"]
                 ),
+                workbook_projection_proof_sha256=str(
+                    context["workbook_projection_revalidation"][
+                        "proof_sha256"
+                    ]
+                ),
             )
         )
         expected_report_sha256 = sha256_bytes(
@@ -5718,6 +5875,8 @@ class StoryboardService:
             != context["current_fingerprints"]
             or evidence.get("runtime_test_certificate_id")
             != runtime_certificate["certificate_id"]
+            or evidence.get("workbook_projection_revalidation")
+            != context["workbook_projection_revalidation"]
             or evidence.get("validation_report_sha256")
             != expected_report_sha256
             or evidence.get("checked_shot_count") != expected_shot_count
@@ -5787,6 +5946,14 @@ class StoryboardService:
             or current_mapping[0].get("preflight_evidence_id") != evidence_id
             or current_mapping[0].get("certificate_id") != certificate_id
             or current_mapping[0].get("trace_id") != expected_trace_id
+            or current_mapping[0].get("workbook_projection_mode")
+            != context["workbook_projection_revalidation"]["mode"]
+            or current_mapping[0].get(
+                "workbook_projection_proof_sha256"
+            )
+            != context["workbook_projection_revalidation"][
+                "proof_sha256"
+            ]
             or current_mapping[0].get("production_preflight_status")
             != PRODUCTION_PREFLIGHT_PASS
             or current_mapping[0].get("production_preflight_issue_count") != 0
@@ -5890,6 +6057,8 @@ class StoryboardService:
             != authorized_handoff_ids
             or certificate.get("runtime_test_certificate_id")
             != runtime_certificate["certificate_id"]
+            or certificate.get("workbook_projection_revalidation")
+            != context["workbook_projection_revalidation"]
             or certificate.get("report_sha256") != expected_report_sha256
             or not isinstance(certificate_report, dict)
             or certificate_report != context["report"]
@@ -6027,6 +6196,15 @@ class StoryboardService:
                     "effective_preflight_certificate_id": (
                         effective_certificate_id
                     ),
+                    "workbook_projection_revalidation_sha256": (
+                        sha256_bytes(
+                            _stable_json_bytes(
+                                context[
+                                    "workbook_projection_revalidation"
+                                ]
+                            )
+                        )
+                    ),
                 }
             )
         )
@@ -6060,6 +6238,9 @@ class StoryboardService:
             "preflight_evidence_source": evidence_source,
             "preflight_evidence_id": evidence_id,
             "effective_preflight_certificate_id": effective_certificate_id,
+            "workbook_projection_revalidation": copy.deepcopy(
+                context["workbook_projection_revalidation"]
+            ),
             "cache_status": "miss",
             "cache_reason": (
                 "complete fingerprint changed; current production preflight was revalidated"
@@ -6078,6 +6259,9 @@ class StoryboardService:
             "revalidation_measurement": context[
                 "revalidation_measurement"
             ],
+            "workbook_projection_revalidation": copy.deepcopy(
+                context["workbook_projection_revalidation"]
+            ),
         }
 
     def _prepare_handoff_preflight_evidence_item(
@@ -6180,6 +6364,11 @@ class StoryboardService:
                 runtime_test_certificate_id=str(
                     runtime_certificate["certificate_id"]
                 ),
+                workbook_projection_proof_sha256=str(
+                    context["workbook_projection_revalidation"][
+                        "proof_sha256"
+                    ]
+                ),
             )
         )
         report_sha256 = sha256_bytes(_stable_json_bytes(context["report"]))
@@ -6206,6 +6395,9 @@ class StoryboardService:
             "validation_report_sha256": report_sha256,
             "checked_shot_count": int(context["report"].get("shot_count", 0)),
             "stale_components": copy.deepcopy(context["stale_components"]),
+            "workbook_projection_revalidation": copy.deepcopy(
+                context["workbook_projection_revalidation"]
+            ),
             "production_preflight_status": PRODUCTION_PREFLIGHT_PASS,
             "production_preflight_issue_count": 0,
             "independent_audit_status": "PENDING_AUDIT",
@@ -6316,6 +6508,9 @@ class StoryboardService:
                 "runtime_test_certificate_id": prepared[
                     "runtime_test_certificate_id"
                 ],
+                "workbook_projection_revalidation": copy.deepcopy(
+                    context["workbook_projection_revalidation"]
+                ),
                 "first_draft_grade_reconstructed": False,
                 "authored_artifacts_modified": False,
                 "independent_audit_verdict_issued": False,
@@ -6357,6 +6552,9 @@ class StoryboardService:
             "runtime_test_certificate_id": prepared[
                 "runtime_test_certificate_id"
             ],
+            "workbook_projection_revalidation": copy.deepcopy(
+                context["workbook_projection_revalidation"]
+            ),
             "validation_report_sha256": public[
                 "validation_report_sha256"
             ],
@@ -6419,6 +6617,10 @@ class StoryboardService:
                 != authorized_handoff_ids
                 or existing_evidence.get("old_handoff_id")
                 != public["old_handoff_id"]
+                or existing_evidence.get(
+                    "workbook_projection_revalidation"
+                )
+                != context["workbook_projection_revalidation"]
                 or not isinstance(
                     existing_evidence.get("stage_trace_after"), dict
                 )
@@ -6459,6 +6661,12 @@ class StoryboardService:
             "canonical_artifact_id": public["canonical_artifact_id"],
             "canonical_sha256": public["canonical_sha256"],
             "trace_id": public["evidence_trace_id"],
+            "workbook_projection_mode": context[
+                "workbook_projection_revalidation"
+            ]["mode"],
+            "workbook_projection_proof_sha256": context[
+                "workbook_projection_revalidation"
+            ]["proof_sha256"],
             "production_preflight_status": PRODUCTION_PREFLIGHT_PASS,
             "production_preflight_issue_count": 0,
             "independent_audit_status": "PENDING_AUDIT",
@@ -6752,6 +6960,9 @@ class StoryboardService:
                 "source_preflight_evidence_certificate_id": public.get(
                     "effective_preflight_certificate_id"
                 ),
+                "workbook_projection_revalidation": copy.deepcopy(
+                    prepared["workbook_projection_revalidation"]
+                ),
                 "first_draft_grade_reconstructed": False,
                 "authored_artifacts_modified": False,
                 "independent_audit_verdict_issued": False,
@@ -6867,6 +7078,9 @@ class StoryboardService:
                 "source_preflight_certificate_id": public[
                     "effective_preflight_certificate_id"
                 ],
+                "workbook_projection_revalidation": copy.deepcopy(
+                    prepared["workbook_projection_revalidation"]
+                ),
                 "history_preserved": True,
             }
         )
@@ -7001,6 +7215,12 @@ class StoryboardService:
             "canonical_artifact_id": public["canonical_artifact_id"],
             "canonical_sha256": public["canonical_sha256"],
             "certificate_id": successor["certificate_id"],
+            "workbook_projection_mode": prepared[
+                "workbook_projection_revalidation"
+            ]["mode"],
+            "workbook_projection_proof_sha256": prepared[
+                "workbook_projection_revalidation"
+            ]["proof_sha256"],
             "preflight_evidence_source": public[
                 "preflight_evidence_source"
             ],
@@ -7076,6 +7296,12 @@ class StoryboardService:
                 ],
                 "canonical_sha256": successor["canonical_sha256"],
                 "certificate_id": successor["certificate_id"],
+                "workbook_projection_mode": successor.get(
+                    "workbook_projection_revalidation", {}
+                ).get("mode"),
+                "workbook_projection_proof_sha256": successor.get(
+                    "workbook_projection_revalidation", {}
+                ).get("proof_sha256"),
                 "preflight_evidence_source": successor.get(
                     "preflight_evidence_source"
                 ),
@@ -7151,6 +7377,12 @@ class StoryboardService:
             "canonical_artifact_id": successor["canonical_artifact_id"],
             "canonical_sha256": successor["canonical_sha256"],
             "certificate_id": successor["certificate_id"],
+            "workbook_projection_mode": successor.get(
+                "workbook_projection_revalidation", {}
+            ).get("mode"),
+            "workbook_projection_proof_sha256": successor.get(
+                "workbook_projection_revalidation", {}
+            ).get("proof_sha256"),
             "preflight_evidence_source": successor.get(
                 "preflight_evidence_source"
             ),
@@ -10049,6 +10281,7 @@ class StoryboardService:
             "recovery_work_order_id",
             "recovery_trace_id",
             "recovery_plan_sha256",
+            "workbook_projection_revalidation",
             "reaudit_kind",
             "reaudit_root_handoff_id",
             "reaudit_parent_handoff_id",
@@ -10105,6 +10338,7 @@ class StoryboardService:
             "recovery_plan_sha256",
             "recovery_plan_item",
             "recovery_cache_status",
+            "workbook_projection_revalidation",
             "history_preserved",
             "checked_shot_count",
             "facts_reusable",

@@ -1348,6 +1348,234 @@ def legacy_v050_mother_template_rows(
     ]
 
 
+# Frozen v0.5.3 transitional projector.  A short-lived deployed exporter used
+# the current short ten-column header while still writing the eight-column
+# canonical sidecar envelope.  Those immutable workbooks cannot be verified by
+# either the v0.5.0 projector or today's stricter projector.  This code is
+# read-only compatibility for the controlled handoff revalidation path; new
+# exports never call it.
+LEGACY_V053_FORMAL_FIELDS = (
+    "镜头类型",
+    "可见主体",
+    "空间站位描述",
+    "起始状态",
+    "机位",
+    "运镜方式",
+    "画面内容",
+    "音色",
+    "心理音轨",
+    "环境音效",
+    "环境动态",
+    "光影",
+    "光源来源",
+    "光源方向",
+    "色温倾向",
+    "生成限制",
+    "转场类型",
+    "切镜/转场提示词",
+)
+LEGACY_V053_TIMECODE_RE = re.compile(
+    r"(?:\[|【)?\s*\d+(?:\.\d+)?\s*(?:秒|s)?\s*[-—–~至]\s*"
+    r"\d+(?:\.\d+)?\s*(?:秒|s)\s*(?:\]|】|[:：])?",
+    flags=re.IGNORECASE,
+)
+LEGACY_V053_AUDIO_ONLY_CLAUSE_MARKERS = (
+    "口型",
+    "说话时",
+    "开口",
+    "对白",
+    "动作声",
+    "环境声",
+    "脚步",
+    "问句",
+    "陈述句",
+    "感叹句",
+    "对白节奏",
+    "声音强弱",
+    "语速节奏",
+    "呼吸状态",
+    "停顿位置",
+    "重音位置",
+    "尾音变化",
+    "声量",
+    "语速",
+    "停顿",
+    "重音",
+    "尾音",
+    "发声",
+    "环境音",
+    "音效",
+    "配乐",
+    "音乐",
+    "BGM",
+    "声音",
+    "鸟声",
+    "脚步声",
+    "呼吸声",
+    "衣料声",
+    "器物声",
+    "叶声",
+    "鸟鸣",
+    "虫鸣",
+    "风声",
+    "声线",
+    "音轨",
+    "音频",
+)
+
+
+def _legacy_v053_text(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    return str(value).strip()
+
+
+def _legacy_v053_seconds_label(value: Any) -> str:
+    text = _legacy_v053_text(value)
+    if not text:
+        return ""
+    text = re.sub(
+        r"\s*(?:秒|s)$", "", text, flags=re.IGNORECASE
+    ).strip()
+    if re.fullmatch(r"[+-]?\d+(?:\.0+)?", text):
+        text = f"{float(text):.1f}"
+    return f"{text}s"
+
+
+def _legacy_v053_visual_only_clauses(value: Any) -> str:
+    result = LEGACY_V053_TIMECODE_RE.sub(
+        "", _legacy_v053_text(value)
+    )
+    result = re.sub(
+        r"[\u3400-\u9fffA-Za-z·]{1,20}说道[：:]?\s*[“\"]"
+        r"[^”\"\n]+[”\"]",
+        "",
+        result,
+    )
+    result = re.sub(
+        r"【(?!\d+\.\d—|参考图锚点)[^】\n]{1,20}】\s*[“\"]?"
+        r"[^。！？!?；;\n]*[”\"]?",
+        "",
+        result,
+    )
+    forbidden = re.compile(
+        r"对白|台词|说道|口型|音色|音量|语速|重音|尾音|环境音|声源|"
+        r"脚步|衣料|呼吸|听见|画外音|配乐|BGM|鸟声|鸟鸣|虫鸣|风声|"
+        r"水声|声线|声音|声响|发声|开口|问句|陈述句|感叹句|时间码"
+    )
+    visible: list[str] = []
+    for major in re.split(r"[；;\n]", result):
+        minor_visible = []
+        for minor in re.split(
+            r"[，,、]|并伴随|同时伴随|伴随", major
+        ):
+            clause = minor.strip(" 。；;")
+            if not clause or forbidden.search(clause):
+                continue
+            minor_visible.append(clause)
+        if minor_visible:
+            visible.append("，".join(minor_visible))
+    return "；".join(visible).strip("；。 ")
+
+
+def _legacy_v053_function_scene_cell(shot: dict[str, Any]) -> str:
+    function = _legacy_v053_text(shot.get("功能类型"))
+    scene = _legacy_v053_text(shot.get("场景连续性ID"))
+    if function and scene:
+        return f"功能类型：{function}\n场景连续性ID：{scene}"
+    if function:
+        return f"功能类型：{function}"
+    if scene:
+        return f"场景连续性ID：{scene}"
+    return ""
+
+
+def _legacy_v053_formal_master(shot: dict[str, Any]) -> str:
+    shot_id = _legacy_v053_text(shot.get("镜头编号"))
+    duration = _legacy_v053_seconds_label(shot.get("时长"))
+    cumulative = _legacy_v053_seconds_label(shot.get("累计时长"))
+    timing = ""
+    if duration and cumulative:
+        timing = f"（{duration}；累计{cumulative}）"
+    elif duration:
+        timing = f"（{duration}）"
+    paragraphs = [
+        f"镜头序号：{shot_id}{timing}" if shot_id else "镜头序号：",
+        (
+            f"镜头类型：{_legacy_v053_text(shot.get('镜头类型'))}"
+            f"｜可见主体：{_legacy_v053_text(shot.get('可见主体'))}"
+        ),
+    ]
+    paragraphs.extend(
+        f"{field}：{_legacy_v053_text(shot.get(field))}"
+        for field in LEGACY_V053_FORMAL_FIELDS
+        if field not in {"镜头类型", "可见主体"}
+    )
+    return "\n\n".join(paragraphs)
+
+
+def _legacy_v053_gpt_keyframe(shot: dict[str, Any]) -> str:
+    start_state = _legacy_v053_visual_only_clauses(
+        shot.get("起始状态")
+    ) or "人物保持本镜开场的可见站位、朝向、姿态与道具状态"
+    environment = _legacy_v053_visual_only_clauses(
+        shot.get("环境动态")
+    ) or "场景内可见物保持真实、克制的自然状态"
+    anchor = _legacy_v053_text(shot.get("参考图锚定")) or "无"
+    return (
+        "真人古装短剧，真实摄影机拍摄质感；"
+        f"镜头类型与主体：{_legacy_v053_text(shot.get('镜头类型'))}，"
+        f"{_legacy_v053_text(shot.get('可见主体'))}；"
+        f"空间站位：{_legacy_v053_visual_only_clauses(shot.get('空间站位描述'))}；"
+        f"定格状态：{start_state}；"
+        f"摄影机：{_legacy_v053_visual_only_clauses(shot.get('机位'))}；"
+        f"光影：{_legacy_v053_visual_only_clauses(shot.get('光影'))}；"
+        f"光源来源：{_legacy_v053_visual_only_clauses(shot.get('光源来源'))}；"
+        f"光源方向：{_legacy_v053_visual_only_clauses(shot.get('光源方向'))}；"
+        f"色彩：{_legacy_v053_visual_only_clauses(shot.get('色温倾向'))}；"
+        f"环境可见状态：{environment}；"
+        f"参考图锚定：{_legacy_v053_visual_only_clauses(anchor)}；"
+        "单一稳定视觉时刻，禁止字幕、水印、现代物件、人物看镜头、"
+        "复制脸、上下黑边、无来源光、重HDR、塑料皮肤与海报摆拍。"
+    )
+
+
+def legacy_v053_mother_template_rows(
+    storyboard: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Reproduce the immutable transitional v0.5.3 projection."""
+
+    shots = storyboard.get("shots")
+    if not isinstance(shots, list):
+        raise ValueError(
+            "materialization_storyboard_invalid: shots must be an array"
+        )
+    return [
+        {
+            "分镜序号": shot.get("镜头编号"),
+            "时长": shot.get("时长"),
+            "累计时长": shot.get("累计时长"),
+            "功能类型/场景连续性ID": (
+                _legacy_v053_function_scene_cell(shot)
+            ),
+            FORMAL_MERGED_FIELD: _legacy_v053_formal_master(shot),
+            GPT_KEYFRAME_FIELD: _legacy_v053_gpt_keyframe(shot),
+            "参考图锚定": shot.get("参考图锚定"),
+            "覆盖原文": shot.get("覆盖原文"),
+            "原文依据类型": shot.get("原文依据类型"),
+            "原文支撑句": shot.get("原文支撑句"),
+        }
+        for shot in shots
+    ]
+
+
 def formal_mother_template_rows(
     storyboard: dict[str, Any],
     *,

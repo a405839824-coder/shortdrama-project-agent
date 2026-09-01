@@ -11,6 +11,7 @@ from openpyxl import load_workbook
 import shortdrama_mcp.file_io as file_io
 from shortdrama_mcp.file_io import (
     extract_xlsx,
+    extract_xlsx_for_controlled_handoff_revalidation,
     storyboard_to_xlsx,
     workbook_to_storyboard,
 )
@@ -18,8 +19,10 @@ from shortdrama_mcp.materializer import (
     COMPACT_SHOT_FIELDS,
     FORMAL_MERGED_FIELD,
     GPT_KEYFRAME_FIELD,
+    LEGACY_FORMAL_MERGED_FIELD,
     MOTHER_TEMPLATE_COLUMNS,
     legacy_v050_mother_template_rows,
+    legacy_v053_mother_template_rows,
 )
 
 
@@ -348,6 +351,147 @@ class V051XlsxGuardTests(unittest.TestCase):
         recovered = extract_xlsx(_saved_workbook(workbook))["canonical_storyboard"]
 
         self.assertEqual(recovered["shots"][0]["镜头编号"], "EP01-001")
+
+    def test_controlled_revalidation_accepts_only_v053_rows_under_short_header(
+        self,
+    ) -> None:
+        payload = storyboard_to_xlsx(
+            _compact_storyboard(), {"issues": []}, assume_compact=True
+        )
+        workbook = load_workbook(io.BytesIO(payload), data_only=False)
+        formal_sheet = workbook["正式生产母版"]
+        transitional_row = legacy_v053_mother_template_rows(
+            _compact_storyboard()
+        )[0]
+        for column, header in enumerate(MOTHER_TEMPLATE_COLUMNS, 1):
+            formal_sheet.cell(2, column).value = transitional_row.get(
+                header
+            )
+        sidecar = workbook[file_io.CANONICAL_SIDECAR_SHEET]
+        sidecar.delete_cols(9, 3)
+        transitional_payload = _saved_workbook(workbook)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "visible header does not match signed projection contract",
+        ):
+            extract_xlsx(transitional_payload)
+
+        recovered = extract_xlsx_for_controlled_handoff_revalidation(
+            transitional_payload
+        )
+        proof = recovered["controlled_projection_revalidation"]
+        self.assertEqual(
+            proof["mode"],
+            "legacy_envelope_short_header_v053_rows",
+        )
+        self.assertTrue(proof["compatibility_applied"])
+        self.assertEqual(
+            proof["selected_projector"],
+            "shortdrama-projector/0.5.3-frozen",
+        )
+        self.assertTrue(
+            proof["visible_rows_match_selected_projector"]
+        )
+        self.assertFalse(
+            proof["visible_projection_matches_sidecar"]
+        )
+        self.assertEqual(proof["sidecar_sheet_state"], "veryHidden")
+        self.assertEqual(
+            recovered["canonical_storyboard"], _compact_storyboard()
+        )
+
+    def test_controlled_revalidation_rejects_current_rows_under_legacy_envelope(
+        self,
+    ) -> None:
+        payload = storyboard_to_xlsx(
+            _compact_storyboard(), {"issues": []}, assume_compact=True
+        )
+        workbook = load_workbook(io.BytesIO(payload), data_only=False)
+        sidecar = workbook[file_io.CANONICAL_SIDECAR_SHEET]
+        sidecar.delete_cols(9, 3)
+
+        with self.assertRaisesRegex(
+            ValueError, "visible formal-master projection mismatch"
+        ):
+            extract_xlsx_for_controlled_handoff_revalidation(
+                _saved_workbook(workbook)
+            )
+
+    def test_controlled_revalidation_rejects_v050_long_header_projection(
+        self,
+    ) -> None:
+        payload = storyboard_to_xlsx(
+            _compact_storyboard(), {"issues": []}, assume_compact=True
+        )
+        workbook = load_workbook(io.BytesIO(payload), data_only=False)
+        formal_sheet = workbook["正式生产母版"]
+        formal_sheet.cell(1, 5).value = LEGACY_FORMAL_MERGED_FIELD
+        formal_sheet.cell(2, 5).value = legacy_v050_mother_template_rows(
+            _compact_storyboard()
+        )[0][file_io.FORMAL_MERGED_FIELD]
+        sidecar = workbook[file_io.CANONICAL_SIDECAR_SHEET]
+        sidecar.delete_cols(9, 3)
+
+        with self.assertRaisesRegex(
+            ValueError, "supports only the exact v0.5.3 unsigned projection"
+        ):
+            extract_xlsx_for_controlled_handoff_revalidation(
+                _saved_workbook(workbook)
+            )
+
+    def test_controlled_revalidation_accepts_signed_v054_projection_only(
+        self,
+    ) -> None:
+        payload = storyboard_to_xlsx(
+            _compact_storyboard(), {"issues": []}, assume_compact=True
+        )
+        workbook = load_workbook(io.BytesIO(payload), data_only=False)
+        sidecar = workbook[file_io.CANONICAL_SIDECAR_SHEET]
+        for row in range(2, sidecar.max_row + 1):
+            sidecar.cell(row, 9).value = "shortdrama-projector/0.5.4"
+        historical_payload = _saved_workbook(workbook)
+
+        with self.assertRaisesRegex(
+            ValueError, "projection contract marker mismatch"
+        ):
+            extract_xlsx(historical_payload)
+
+        recovered = extract_xlsx_for_controlled_handoff_revalidation(
+            historical_payload
+        )
+        proof = recovered["controlled_projection_revalidation"]
+        self.assertEqual(proof["mode"], "strict_projection_contract")
+        self.assertEqual(
+            proof["selected_projector"],
+            "shortdrama-projector/0.5.4",
+        )
+        self.assertTrue(proof["visible_projection_matches_sidecar"])
+        self.assertTrue(proof["visible_audit_page_matches_sidecar"])
+
+    def test_controlled_revalidation_rejects_non_very_hidden_sidecar(
+        self,
+    ) -> None:
+        payload = storyboard_to_xlsx(
+            _compact_storyboard(), {"issues": []}, assume_compact=True
+        )
+        workbook = load_workbook(io.BytesIO(payload), data_only=False)
+        sidecar = workbook[file_io.CANONICAL_SIDECAR_SHEET]
+        transitional_row = legacy_v053_mother_template_rows(
+            _compact_storyboard()
+        )[0]
+        formal_sheet = workbook["正式生产母版"]
+        for column, header in enumerate(MOTHER_TEMPLATE_COLUMNS, 1):
+            formal_sheet.cell(2, column).value = transitional_row.get(
+                header
+            )
+        sidecar.delete_cols(9, 3)
+        sidecar.sheet_state = "hidden"
+
+        with self.assertRaisesRegex(ValueError, "must remain veryHidden"):
+            extract_xlsx_for_controlled_handoff_revalidation(
+                _saved_workbook(workbook)
+            )
 
     def test_current_sidecar_cannot_be_downgraded_to_legacy_projection(self) -> None:
         payload = storyboard_to_xlsx(

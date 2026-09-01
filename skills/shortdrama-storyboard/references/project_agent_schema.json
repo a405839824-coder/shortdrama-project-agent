@@ -468,6 +468,9 @@
         "recovery_gap_id": {"type": "string", "minLength": 1},
         "recovery_work_order_id": {"type": "string", "minLength": 1},
         "recovery_trace_id": {"type": "string", "minLength": 1},
+        "workbook_projection_revalidation": {
+          "$ref": "#/$defs/workbook_projection_revalidation"
+        },
         "recovery_plan_sha256": {"$ref": "#/$defs/sha256"},
         "recovery_plan_item": {"type": "object", "minProperties": 1},
         "recovery_cache_status": {"enum": ["invalidated_and_reissued"]},
@@ -700,6 +703,9 @@
         "current_fingerprints": {"$ref": "#/$defs/handoff_manifest/properties/fingerprints"},
         "current_fingerprints_sha256": {"$ref": "#/$defs/sha256"},
         "runtime_test_certificate_id": {"type": "string", "minLength": 1},
+        "workbook_projection_revalidation": {
+          "$ref": "#/$defs/workbook_projection_revalidation"
+        },
         "authorized_handoff_ids": {
           "type": "array", "minItems": 1, "uniqueItems": true,
           "items": {"type": "string", "minLength": 1}
@@ -805,6 +811,9 @@
         "current_fingerprints": {"$ref": "#/$defs/handoff_manifest/properties/fingerprints"},
         "current_fingerprints_sha256": {"$ref": "#/$defs/sha256"},
         "runtime_test_certificate_id": {"type": "string", "minLength": 1},
+        "workbook_projection_revalidation": {
+          "$ref": "#/$defs/workbook_projection_revalidation"
+        },
         "validation_report_sha256": {"$ref": "#/$defs/sha256"},
         "checked_shot_count": {"type": "integer", "minimum": 0},
         "production_preflight_status": {"const": "production_preflight_pass"},
@@ -885,6 +894,119 @@
           }
         }
       }
+    },
+    "workbook_projection_revalidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spec", "mode", "compatibility_applied",
+        "sidecar_projection_contract", "visible_header_contract",
+        "visible_header_sha256", "sidecar_projection_sha256",
+        "visible_projection_sha256", "sidecar_audit_page_sha256",
+        "visible_audit_page_sha256", "canonical_payload_sha256",
+        "sidecar_sheet_state", "selected_projector",
+        "selected_projector_source_commit",
+        "selected_projector_source_git_blob",
+        "visible_rows_match_selected_projector",
+        "visible_projection_matches_sidecar",
+        "visible_audit_page_matches_sidecar", "artifact_raw_sha256",
+        "canonical_sha256", "old_handoff_sha256",
+        "old_certificate_id", "old_certificate_sha256",
+        "original_production_trace_id",
+        "original_production_trace_sha256",
+        "artifact_raw_bound_by_original_certificate",
+        "audit_page_integrity_source", "proof_sha256"
+      ],
+      "properties": {
+        "spec": {"const": "controlled-workbook-projection-revalidation-v1"},
+        "mode": {
+          "enum": [
+            "strict_projection_contract",
+            "legacy_envelope_short_header_v053_rows"
+          ]
+        },
+        "compatibility_applied": {"type": "boolean"},
+        "sidecar_projection_contract": {"type": "string", "minLength": 1},
+        "visible_header_contract": {"const": "current"},
+        "visible_header_sha256": {"$ref": "#/$defs/sha256"},
+        "sidecar_projection_sha256": {
+          "anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]
+        },
+        "visible_projection_sha256": {"$ref": "#/$defs/sha256"},
+        "sidecar_audit_page_sha256": {
+          "anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]
+        },
+        "visible_audit_page_sha256": {"$ref": "#/$defs/sha256"},
+        "canonical_payload_sha256": {"$ref": "#/$defs/sha256"},
+        "sidecar_sheet_state": {"const": "veryHidden"},
+        "selected_projector": {"type": "string", "minLength": 1},
+        "selected_projector_source_commit": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Fa-f0-9]{40}$"
+        },
+        "selected_projector_source_git_blob": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Fa-f0-9]{40}$"
+        },
+        "visible_rows_match_selected_projector": {"const": true},
+        "visible_projection_matches_sidecar": {"type": "boolean"},
+        "visible_audit_page_matches_sidecar": {"type": "boolean"},
+        "artifact_raw_sha256": {"$ref": "#/$defs/sha256"},
+        "canonical_sha256": {"$ref": "#/$defs/sha256"},
+        "old_handoff_sha256": {"$ref": "#/$defs/sha256"},
+        "old_certificate_id": {"type": "string", "minLength": 1},
+        "old_certificate_sha256": {"$ref": "#/$defs/sha256"},
+        "original_production_trace_id": {"type": "string", "minLength": 1},
+        "original_production_trace_sha256": {"$ref": "#/$defs/sha256"},
+        "artifact_raw_bound_by_original_certificate": {"const": true},
+        "audit_page_integrity_source": {
+          "enum": [
+            "signed_sidecar_sha256",
+            "signed_original_artifact_raw_sha256"
+          ]
+        },
+        "proof_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"mode": {"const": "strict_projection_contract"}},
+            "required": ["mode"]
+          },
+          "then": {
+            "properties": {
+              "compatibility_applied": {"const": false},
+              "sidecar_projection_sha256": {"$ref": "#/$defs/sha256"},
+              "sidecar_audit_page_sha256": {"$ref": "#/$defs/sha256"},
+              "selected_projector_source_commit": {"type": "null"},
+              "selected_projector_source_git_blob": {"type": "null"},
+              "visible_projection_matches_sidecar": {"const": true},
+              "visible_audit_page_matches_sidecar": {"const": true},
+              "audit_page_integrity_source": {"const": "signed_sidecar_sha256"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"mode": {"const": "legacy_envelope_short_header_v053_rows"}},
+            "required": ["mode"]
+          },
+          "then": {
+            "properties": {
+              "compatibility_applied": {"const": true},
+              "sidecar_projection_contract": {"const": "shortdrama-projector/0.5.0"},
+              "sidecar_projection_sha256": {"type": "null"},
+              "sidecar_audit_page_sha256": {"type": "null"},
+              "selected_projector": {"const": "shortdrama-projector/0.5.3-frozen"},
+              "selected_projector_source_commit": {"const": "9deb528db3f9eb27e0f406634036e98b8a3d1f80"},
+              "selected_projector_source_git_blob": {"const": "d8d4cce11a50c40d5594867a9de8ae89d717fde1"},
+              "visible_projection_matches_sidecar": {"const": false},
+              "visible_audit_page_matches_sidecar": {"const": false},
+              "audit_page_integrity_source": {"const": "signed_original_artifact_raw_sha256"}
+            }
+          }
+        }
+      ]
     },
     "sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"},
     "change_operation": {

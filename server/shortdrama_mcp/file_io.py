@@ -37,6 +37,7 @@ from .materializer import (
     MOTHER_TEMPLATE_COLUMNS,
     formal_mother_template_rows,
     legacy_v050_mother_template_rows,
+    legacy_v053_mother_template_rows,
     migrate_legacy_shot,
     migrate_storyboard_to_compact,
 )
@@ -81,6 +82,9 @@ CANONICAL_SIDECAR_HEADERS = [
 LEGACY_CANONICAL_SIDECAR_HEADERS = CANONICAL_SIDECAR_HEADERS[:-3]
 CURRENT_PROJECTION_CONTRACT = "shortdrama-projector/0.5.5"
 LEGACY_PROJECTION_CONTRACT = "shortdrama-projector/0.5.0"
+CONTROLLED_HISTORICAL_PROJECTION_CONTRACTS = frozenset(
+    {CURRENT_PROJECTION_CONTRACT, "shortdrama-projector/0.5.4"}
+)
 
 
 _VERIFIED_AUDIT_OVERLAY_SEAL = object()
@@ -322,6 +326,8 @@ def _canonical_positive_int(value: Any, field: str) -> int:
 
 def _canonical_storyboard_from_sidecar(
     sheets: list[dict[str, Any]],
+    *,
+    _allowed_projection_contracts: frozenset[str] | None = None,
 ) -> tuple[dict[str, Any], str, str | None, str | None] | None:
     sidecars = [sheet for sheet in sheets if sheet.get("name") == CANONICAL_SIDECAR_SHEET]
     if not sidecars:
@@ -350,7 +356,12 @@ def _canonical_storyboard_from_sidecar(
     manifest = manifests[0]
     if sidecar_headers == CANONICAL_SIDECAR_HEADERS:
         projection_contract = manifest.get("projection_contract")
-        if projection_contract != CURRENT_PROJECTION_CONTRACT:
+        allowed_projection_contracts = (
+            _allowed_projection_contracts
+            if _allowed_projection_contracts is not None
+            else frozenset({CURRENT_PROJECTION_CONTRACT})
+        )
+        if projection_contract not in allowed_projection_contracts:
             raise _canonical_sidecar_error("projection contract marker mismatch")
         projection_sha256 = manifest.get("projection_sha256")
         if not isinstance(projection_sha256, str) or re.fullmatch(
@@ -722,8 +733,13 @@ def workbook_to_storyboard(
     sheets: list[dict[str, Any]],
     *,
     migrate: bool = False,
+    _allow_controlled_transitional_short_header: bool = False,
+    _allowed_projection_contracts: frozenset[str] | None = None,
 ) -> dict[str, Any] | None:
-    sidecar_result = _canonical_storyboard_from_sidecar(sheets)
+    sidecar_result = _canonical_storyboard_from_sidecar(
+        sheets,
+        _allowed_projection_contracts=_allowed_projection_contracts,
+    )
     if sidecar_result is not None:
         (
             sidecar_storyboard,
@@ -737,15 +753,25 @@ def workbook_to_storyboard(
         # therefore never enough to bypass visible/canonical verification.
         visible_contract = _visible_projection_contract(sheets)
         expected_visible_contract = (
-            "current"
-            if projection_contract == CURRENT_PROJECTION_CONTRACT
-            else "legacy"
+            "current" if projection_sha256 is not None else "legacy"
         )
-        if visible_contract != expected_visible_contract:
+        controlled_transitional_short_header = bool(
+            _allow_controlled_transitional_short_header
+            and projection_contract == LEGACY_PROJECTION_CONTRACT
+            and projection_sha256 is None
+            and audit_page_sha256 is None
+            and visible_contract == "current"
+        )
+        if (
+            visible_contract != expected_visible_contract
+            and not controlled_transitional_short_header
+        ):
             raise _canonical_sidecar_error(
                 "visible header does not match signed projection contract"
             )
-        if visible_contract == "current":
+        # The transitional branch uses the frozen v0.5.3 projector.  It never
+        # treats those rows as v0.5.0 and never invokes today's projector.
+        if projection_sha256 is not None:
             visible_names = [
                 str(sheet.get("name") or "")
                 for sheet in sheets
@@ -769,6 +795,22 @@ def workbook_to_storyboard(
                     "visible audit page SHA-256 mismatch"
                 )
             expected_rows = formal_mother_template_rows(sidecar_storyboard)
+            _assert_visible_projection_rows_match(sheets, expected_rows)
+        elif controlled_transitional_short_header:
+            visible_names = [
+                str(sheet.get("name") or "")
+                for sheet in sheets
+                if sheet.get("name") != CANONICAL_SIDECAR_SHEET
+            ]
+            if sorted(visible_names) != sorted(
+                ["00_范围与审计", "正式生产母版"]
+            ):
+                raise _canonical_sidecar_error(
+                    "transitional workbook has unexpected visible sheets"
+                )
+            expected_rows = legacy_v053_mother_template_rows(
+                sidecar_storyboard
+            )
             _assert_visible_projection_rows_match(sheets, expected_rows)
         else:
             expected_rows = legacy_v050_mother_template_rows(sidecar_storyboard)
@@ -915,6 +957,218 @@ def extract_xlsx(data: bytes) -> dict[str, Any]:
         "sheets": public_sheets,
         "canonical_storyboard": canonical,
         "canonical_sidecar_present": canonical_sidecar_present,
+    }
+
+
+def extract_xlsx_for_controlled_handoff_revalidation(
+    data: bytes,
+) -> dict[str, Any]:
+    """Verify one immutable workbook for controlled handoff revalidation.
+
+    This is deliberately narrower than :func:`extract_xlsx`.  General reads
+    keep rejecting the transitional eight-column sidecar paired with the short
+    formal-master header.  The recovery service may use this helper only after
+    its production/session/work-order gates.  The sole unsigned-projector
+    compatibility case must match the frozen v0.5.3 projector exactly; current
+    eleven-column sidecars retain their projection and audit-page SHA guards.
+    """
+
+    _validate_zip_archive(data)
+    workbook = load_workbook(
+        io.BytesIO(data), data_only=False, read_only=True
+    )
+    sheets = []
+    for sheet in workbook.worksheets:
+        headers, rows = _rows_from_sheet(sheet)
+        sheets.append(
+            {
+                "name": sheet.title,
+                "headers": headers,
+                "row_count": len(rows),
+                "rows": rows,
+                "matrix": _sheet_value_matrix(sheet),
+                "sheet_state": sheet.sheet_state,
+            }
+        )
+
+    sidecar_result = _canonical_storyboard_from_sidecar(
+        sheets,
+        _allowed_projection_contracts=(
+            CONTROLLED_HISTORICAL_PROJECTION_CONTRACTS
+        ),
+    )
+    if sidecar_result is None:
+        raise _canonical_sidecar_error(
+            "controlled handoff revalidation requires a canonical sidecar"
+        )
+    sidecar_sheet = next(
+        sheet
+        for sheet in sheets
+        if sheet.get("name") == CANONICAL_SIDECAR_SHEET
+    )
+    if sidecar_sheet.get("sheet_state") != "veryHidden":
+        raise _canonical_sidecar_error(
+            "controlled handoff sidecar must remain veryHidden"
+        )
+    (
+        sidecar_storyboard,
+        projection_contract,
+        projection_sha256,
+        audit_page_sha256,
+    ) = sidecar_result
+    visible_contract = _visible_projection_contract(sheets)
+    expected_visible_contract = (
+        "current" if projection_sha256 is not None else "legacy"
+    )
+    compatibility_applied = bool(
+        projection_contract == LEGACY_PROJECTION_CONTRACT
+        and projection_sha256 is None
+        and audit_page_sha256 is None
+        and visible_contract == "current"
+    )
+    if projection_sha256 is None and not compatibility_applied:
+        raise _canonical_sidecar_error(
+            "controlled handoff revalidation supports only the exact v0.5.3 unsigned projection"
+        )
+    if (
+        visible_contract != expected_visible_contract
+        and not compatibility_applied
+    ):
+        raise _canonical_sidecar_error(
+            "visible header does not match signed projection contract"
+        )
+
+    canonical = workbook_to_storyboard(
+        sheets,
+        _allow_controlled_transitional_short_header=(
+            compatibility_applied
+        ),
+        _allowed_projection_contracts=(
+            CONTROLLED_HISTORICAL_PROJECTION_CONTRACTS
+        ),
+    )
+    if canonical != sidecar_storyboard:
+        raise _canonical_sidecar_error(
+            "controlled handoff canonical round-trip mismatch"
+        )
+
+    mother_sheet = _mother_sheet_candidates(sheets)[0]
+    exact_headers = [
+        str(value or "").strip()
+        for value in mother_sheet.get("headers", [])
+    ]
+    exact_header_row = list(
+        (mother_sheet.get("matrix") or [[]])[0]
+    )
+    if compatibility_applied and exact_header_row != list(
+        MOTHER_TEMPLATE_COLUMNS
+    ):
+        raise _canonical_sidecar_error(
+            "transitional workbook header is not the exact short ten-column contract"
+        )
+    header_sha256 = hashlib.sha256(
+        json.dumps(
+            exact_headers,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    canonical_payload_sha256 = hashlib.sha256(
+        json.dumps(
+            json_safe(sidecar_storyboard),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    expected_rows = (
+        legacy_v053_mother_template_rows(sidecar_storyboard)
+        if compatibility_applied
+        else (
+            formal_mother_template_rows(sidecar_storyboard)
+            if projection_sha256 is not None
+            else legacy_v050_mother_template_rows(sidecar_storyboard)
+        )
+    )
+    visible_projection_sha256 = projection_rows_sha256(expected_rows)
+
+    visible_names = [
+        str(sheet.get("name") or "")
+        for sheet in sheets
+        if sheet.get("name") != CANONICAL_SIDECAR_SHEET
+    ]
+    if sorted(visible_names) != sorted(
+        ["00_范围与审计", "正式生产母版"]
+    ):
+        raise _canonical_sidecar_error(
+            "controlled workbook has unexpected visible sheets"
+        )
+    scope_sheet = next(
+        sheet for sheet in sheets if sheet.get("name") == "00_范围与审计"
+    )
+    visible_audit_page_sha256 = _visible_sheet_sha256(
+        "00_范围与审计", list(scope_sheet.get("matrix") or [])
+    )
+
+    public_sheets = [
+        sheet
+        for sheet in sheets
+        if sheet.get("name") != CANONICAL_SIDECAR_SHEET
+    ]
+    return {
+        "kind": "workbook",
+        "sheet_count": len(public_sheets),
+        "sheets": public_sheets,
+        "canonical_storyboard": canonical,
+        "canonical_sidecar_present": True,
+        "controlled_projection_revalidation": {
+            "spec": "controlled-workbook-projection-revalidation-v1",
+            "mode": (
+                "legacy_envelope_short_header_v053_rows"
+                if compatibility_applied
+                else "strict_projection_contract"
+            ),
+            "compatibility_applied": compatibility_applied,
+            "sidecar_projection_contract": projection_contract,
+            "visible_header_contract": visible_contract,
+            "visible_header_sha256": header_sha256,
+            "sidecar_projection_sha256": projection_sha256,
+            "visible_projection_sha256": (
+                visible_projection_sha256
+            ),
+            "sidecar_audit_page_sha256": audit_page_sha256,
+            "visible_audit_page_sha256": (
+                visible_audit_page_sha256
+            ),
+            "canonical_payload_sha256": canonical_payload_sha256,
+            "sidecar_sheet_state": "veryHidden",
+            "selected_projector": (
+                "shortdrama-projector/0.5.3-frozen"
+                if compatibility_applied
+                else projection_contract
+            ),
+            "selected_projector_source_commit": (
+                "9deb528db3f9eb27e0f406634036e98b8a3d1f80"
+                if compatibility_applied
+                else None
+            ),
+            "selected_projector_source_git_blob": (
+                "d8d4cce11a50c40d5594867a9de8ae89d717fde1"
+                if compatibility_applied
+                else None
+            ),
+            "visible_rows_match_selected_projector": True,
+            "visible_projection_matches_sidecar": bool(
+                projection_sha256 is not None
+                and visible_projection_sha256 == projection_sha256
+            ),
+            "visible_audit_page_matches_sidecar": bool(
+                audit_page_sha256 is not None
+                and visible_audit_page_sha256 == audit_page_sha256
+            ),
+        },
     }
 
 
