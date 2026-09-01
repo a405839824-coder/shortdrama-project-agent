@@ -7,6 +7,9 @@
     "schema_version": "R10.1",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
+    "source_dialogue_parser_version": "source-dialogue-authority-v6",
+    "source_dialogue_grammar_version": "source-dialogue-closed-grammar-v6.3",
+    "source_dialogue_authority": "server_registered_source_payload_sha_hub_authority_entry_and_artifact_metadata_role_cross_binding",
     "canonical_atomic_field_count": 27,
     "mother_template_column_count": 10,
     "single_execution_master": "正式分镜母版",
@@ -20,13 +23,17 @@
     "audit_result_artifact_policy": "immutable_signed_overlay_successor",
     "forbid_new_writes": ["人物调度", "动作与表演", "台词", "发声方式", "标点语气", "心理音轨属性", "生成批次", "batches", "Seedance 2.5独立正式执行分镜"],
     "background_seedance_generation": false,
-    "legacy_policy": "read_only_migration_to_compact_successor"
+    "legacy_policy": "read_only_migration_to_compact_successor",
+    "legacy_ledger_replay_checkpoint": "hmac_signed_committed_migration_journal_plus_before_after_ledger_cas"
   },
   "storyboard_window_architecture": {
     "always_required": ["production", "independent_audit"],
     "conditional": "repair",
     "repair_activation": "independent_audit_fail_and_explicit_authorization",
     "repair_return": "original_independent_audit_authority",
+    "reaudit_route": "fresh_server_minted_single_use_successor_with_immutable_root_parent_lineage_and_parent_certificate_hmac_event_sha_bridge",
+    "legacy_certificate_policy": "missing_event_sha_requires_explicit_forced_modern_successor_before_replay_or_signoff",
+    "repair_package_authority": "latest_completed_failed_lineage_only; issued_requires_zero_downstream_evidence; consumed_requires_complete_repair_successor_cas_return_handoff_hub_closure; no_resurrection",
     "quality_contract": "生产初稿总体正确率与直接可用率>=98%、单集>=96%、新增局部问题镜率<=2%，硬错/重大/已知复发/系统性重复=0；49项validator + G0-G13 + THG-01至THG-12 + 多行XLSX round-trip；最终独立审计仍须100%且零问题"
   },
   "change_operations": [
@@ -183,14 +190,14 @@
       "operation": "storyboard_audit",
       "group": "审计闭环",
       "status": "supported",
-      "output": "原审计窗口对精确compact canonical提交八层语义证据，服务端合并新鲜机器校验并创建不可变签名audit overlay新工件/后继工作簿；原生产XLSX不就地改写；仅精确缓存命中可省略提交，审计过程禁止再生成内容",
+      "output": "原审计窗口对精确compact canonical提交八层语义证据，服务端合并源文对白v6权威与新鲜机器校验并创建不可变签名audit overlay新工件/后继工作簿；每轮复审使用新server-minted successor handoff，原生产XLSX和已消费root不就地改写；仅精确缓存/完成回执命中可无副作用重放，审计过程禁止再生成内容",
       "approval_policy": "read_only"
     },
     {
       "operation": "storyboard_repair",
       "group": "审计闭环",
       "status": "supported",
-      "output": "仅在审计失败且授权后按一次性修复包生成新版本，完整回归并返回原审计窗口",
+      "output": "仅在审计失败且授权后消费最新完成失败血缘的一次性修复包，生成新artifact/canonical与新鲜file/source_version/handoff/trace绑定，完整回归并返回原审计窗口；旧包和同字节翻绿失败关闭",
       "approval_policy": "explicit_execute"
     },
     {
@@ -271,7 +278,7 @@
       "group": "项目管理",
       "status": "guarded",
       "condition": "旧项目控制状态且用户已明确授权迁移",
-      "output": "dry-run、签名快照、双哈希CAS、幂等恢复或安全回滚；历史分镜与审计证据只读",
+      "output": "dry-run、签名快照、双哈希CAS、幂等恢复或安全回滚；历史event台账的replay checkpoint只由独立HMAC签名且已提交的migration journal授权，并绑定project/migration身份、before/after ledger SHA与完全相同checkpoint；历史分镜与审计证据只读",
       "approval_policy": "explicit_execute_plus_full_regression_certificate"
     },
     {
@@ -353,7 +360,7 @@
     },
     {
       "id": "delta_no_structural_edit_v054",
-      "description": "0.5.4增量路线只支持稳定UID、同数量且精确对白与说话人不变的视觉或其他非认知执行变化；不支持任何对白/说话人增删改、重排、拆并或改归属，也不支持镜头插入、删除、移动、拆分、合并或重编号；这些变化及原文/认知/保护对白/边界/拓扑失效必须完整重建受影响场景或分集。"
+      "description": "历史稳定ID（保留v054标识用于兼容，请勿改名）：0.5.6增量路线只支持稳定UID、同数量且精确对白与说话人不变的视觉或其他非认知执行变化；不支持任何对白/说话人增删改、重排、拆并或改归属，也不支持镜头插入、删除、移动、拆分、合并或重编号；这些变化及原文/认知/保护对白/边界/拓扑失效必须完整重建受影响场景或分集。"
     }
   ]
 }

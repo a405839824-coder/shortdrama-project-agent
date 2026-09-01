@@ -520,8 +520,30 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             certificate["tests"]["strict_prompt_tests"]["test_pass_count"], 25
         )
         self.assertEqual(certificate["tests"]["public_scene_tests"]["test_pass_count"], 11)
-        self.assertEqual(certificate["tests"]["agent_tests"]["test_pass_count"], 16)
+        self.assertEqual(certificate["tests"]["agent_tests"]["test_pass_count"], 38)
         self.assertEqual(certificate["tests"]["project_agent_tests"]["test_pass_count"], 22)
+        persisted_certificate = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="certificates",
+            record_id=str(certificate["certificate_id"]),
+        )
+        self.assertEqual(persisted_certificate, certificate)
+        self.assertTrue(
+            self.service.store.project_record_is_signed(persisted_certificate)
+        )
+        self.assertNotIn(
+            "runtime_test_certificates",
+            self.service.store.load_hub(self.namespace, project_id),
+        )
+        self.assertNotIn(
+            "runtime_test_certificates",
+            self.service._project_schema["properties"],
+        )
+        self.assertNotIn(
+            "runtime_test_certificate",
+            self.service._project_schema["$defs"],
+        )
 
         with patch.object(
             service_module.r10_bootstrap,
@@ -863,6 +885,19 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         self.service._validate_schema_record(
             self.service._project_schema, "immutable_repair_package", consumed
         )
+        for field in ("consumed_by_work_order_id", "successor_artifact_id"):
+            with self.subTest(empty_consumed_binding=field):
+                invalid_consumed = copy.deepcopy(consumed)
+                invalid_consumed[field] = ""
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"lifecycle_schema_mismatch: immutable_repair_package\.{field}",
+                ):
+                    self.service._validate_schema_record(
+                        self.service._project_schema,
+                        "immutable_repair_package",
+                        invalid_consumed,
+                    )
         self.service._validate_schema_record(
             self.service._project_schema,
             "handoff_manifest",
@@ -889,24 +924,134 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
                 work_order_id=work_order_id,
             )
 
+    async def test_consumed_repair_package_cannot_be_resurrected_after_deletion(
+        self,
+    ) -> None:
+        project_id, work_order_id, committed, audited = (
+            await self._prepare_patch_base(
+                project_name="已消费维修包删除后禁止复活测试"
+            )
+        )
+        result = await self.call(
+            "commit_storyboard_patch",
+            self._patch_arguments(
+                project_id, work_order_id, committed, audited
+            ),
+        )
+        package_id = str(
+            audited["data"]["repair_package"]["repair_package_id"]
+        )
+        consumed = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="repair_packages",
+            record_id=package_id,
+        )
+        self.assertEqual(consumed["status"], "consumed")
+        self.assertEqual(
+            consumed["successor_artifact_id"], result["artifact_id"]
+        )
+        project_dir = self.service.store.project_dir(
+            self.namespace, project_id
+        )
+        package_path = (
+            project_dir / "repair_packages" / f"{package_id}.json"
+        )
+        with self.service.store.mutate_project(
+            self.namespace, project_id
+        ) as (hub, _ledger):
+            hub["repair_packages"] = [
+                row
+                for row in hub.get("repair_packages", [])
+                if row.get("repair_package_id") != package_id
+            ]
+        package_path.unlink()
+        before = {
+            str(path.relative_to(project_dir)): path.read_bytes()
+            for path in sorted(project_dir.rglob("*"))
+            if path.is_file()
+        }
+        certificate = audited["data"]["certificate"]
+
+        # Bypass the service precheck to prove the storage-layer project-lock
+        # CAS independently closes the same resurrection/TOCTOU window.
+        with patch.object(
+            self.service,
+            "_repair_package_downstream_evidence",
+            return_value=[],
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "consumed repair authorization cannot be resurrected",
+            ):
+                self.service.audit_storyboard(
+                    self.namespace,
+                    project_id=project_id,
+                    artifact_id=str(committed["artifact_id"]),
+                    audit_cycle_id=None,
+                    work_order_id=str(certificate["work_order_id"]),
+                    handoff_artifact_id=str(
+                        committed["data"]["handoff"]["handoff_id"]
+                    ),
+                    force_machine_recheck=False,
+                    semantic_audit=None,
+                    request_session_id=None,
+                )
+
+        self.assertFalse(package_path.exists())
+        self.assertEqual(
+            sum(
+                row.get("repair_package_id") == package_id
+                for row in self.service.store.load_hub(
+                    self.namespace, project_id
+                ).get("repair_packages", [])
+            ),
+            0,
+        )
+        self.assertEqual(
+            {
+                str(path.relative_to(project_dir)): path.read_bytes()
+                for path in sorted(project_dir.rglob("*"))
+                if path.is_file()
+            },
+            before,
+        )
+
     async def test_storyboard_patch_rejects_tampered_repair_package(self) -> None:
         project_id, work_order_id, committed, audited = await self._prepare_patch_base(
             project_name="维修包篡改阻断测试"
         )
-        package_id = audited["data"]["repair_package"]["repair_package_id"]
+        package_id = str(audited["data"]["repair_package"]["repair_package_id"])
+        project_dir = self.service.store.project_dir(self.namespace, project_id)
         package_path = (
-            self.service.store.project_dir(self.namespace, project_id)
+            project_dir
             / "repair_packages"
             / f"{package_id}.json"
         )
         tampered = self.service.store.read_json(package_path)
         tampered["authorized_scope"]["fields"] = ["任意字段"]
         self.service.store.atomic_write_json(package_path, tampered)
+        tampered_bytes = package_path.read_bytes()
+        before = {
+            str(path.relative_to(project_dir)): path.read_bytes()
+            for path in sorted(project_dir.rglob("*"))
+            if path.is_file()
+        }
         rejection = await self.rejection_text(
             "commit_storyboard_patch",
             self._patch_arguments(project_id, work_order_id, committed, audited),
         )
-        self.assertIn("repair_package_required", rejection)
+        self.assertIn("project_record_integrity_mismatch", rejection)
+        self.assertIn(package_id, rejection)
+        self.assertEqual(package_path.read_bytes(), tampered_bytes)
+        self.assertEqual(
+            {
+                str(path.relative_to(project_dir)): path.read_bytes()
+                for path in sorted(project_dir.rglob("*"))
+                if path.is_file()
+            },
+            before,
+        )
 
     async def test_failed_production_preflight_has_zero_publication_side_effects(self) -> None:
         project_id = await self.create_project("预检失败零发布副作用测试")

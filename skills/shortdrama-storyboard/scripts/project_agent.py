@@ -215,6 +215,10 @@ def migrate_hub_to_current(
     migrated = copy.deepcopy(hub)
     changed: list[str] = []
 
+    if "runtime_test_certificates" in migrated:
+        migrated.pop("runtime_test_certificates")
+        changed.append("runtime_test_certificates")
+
     def set_value(container: dict[str, Any], key: str, value: Any, path: str) -> None:
         if container.get(key) != value:
             container[key] = copy.deepcopy(value)
@@ -958,6 +962,11 @@ def validate_hub(hub: Any) -> list[str]:
     errors: list[str] = []
     if not isinstance(hub, dict):
         return ["hub must be an object"]
+    if "runtime_test_certificates" in hub:
+        errors.append(
+            "runtime_test_certificates is a retired duplicate projection; "
+            "use signed certificate records"
+        )
     required = [
         "schema_version", "project_id", "project_name", "runtime_version", "workflow_revision",
         "agent_mode", "created_at", "updated_at", "linked_shared_files", "policy",

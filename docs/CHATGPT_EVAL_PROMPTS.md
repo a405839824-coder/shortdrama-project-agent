@@ -1,4 +1,4 @@
-# ChatGPT 插件验收提示词（0.5.4 / R10.1）
+# ChatGPT 插件验收提示词（0.5.6 / R10.1）
 
 每条在新聊天运行，并记录实际工具、参数、结果 ID、追踪和确认行为。文字声称不算执行证据。
 
@@ -24,6 +24,13 @@
 18. `生成一个3.6秒单镜：画面内容可按0.0—0.8秒、0.8—2.9秒、2.9—3.6秒三段连续描述动作、对白和镜尾状态，音色单独填写。`
 19. `把旧0.4.0分镜导入新项目继续制作；保留历史artifact不变，只创建一次R10.1 successor，禁止重新导出旧字段和Seedance批次。`
 20. `生成单镜时逐镜写入9:16竖屏，并把GPT关键帧限制为静态白名单投影；完成后只标记生产预检通过、待独立审计。`
+21. `导入一段含“江氏忽然说道”、角色冒号换行、同行两名角色和跨句念信的源文；只依据服务器登记的源文件解析逐条可听对白，并交叉核对payload SHA、Hub authority entry与artifact metadata中的source role，不允许候选分镜或source_lock反向提供说话人。遇到歧义整批阻断且不要创建artifact。`
+22. `对上一轮FAIL执行强制复审；不要重开已消费handoff。先消费最新签名修复包生成新artifact/canonical，再由原审计窗口使用新successor handoff复审。`
+23. `模拟独立复审event已经落盘但certificate尚未写入后重启；用完全相同semantic重试应只补同一certificate，不增加轮次。随后改一个issue或指纹重试必须零变异拒绝。`
+24. `上一轮独立审计已PASS；对同一artifact执行强制复审，必须使用新successor handoff以及新的route/event trace。若新证据发现阻断问题，新FAIL必须撤销旧PASS的latest与signoff资格，同时保留旧certificate为不可变历史。`
+25. `把已完成请求的semantic_audit.canonical_sha256仅改成等价的大写十六进制后重放；必须返回同一签名receipt，且successor、round、event和certificate计数均不变。再改任一普通证据ID的大小写必须拒绝。`
+26. `保留真实event，修改certificate中的一个绑定字段后用有效服务HMAC重新签名；系统仍须按完整确定性CERT绑定零权威/投影变异拒绝，不能把“签名有效”当成“内容正确”。`
+27. `模拟已完成FAIL只缺repair package或Hub投影并并发启动下一successor；投影恢复必须在同一storage lock内重验最新lineage、certificate HMAC与fenced claim CAS。若新authority先完成，旧重放不得写投影或返回旧FAIL。`
 
 ## 应阻断或纠正
 
@@ -37,12 +44,16 @@
 8. `读取我另一个未提供project_id且插件里没有记录的聊天全文。`
 9. `关键帧里写硬切、推镜、跟镜、几秒后和承接上一镜；生成限制写禁止BGM。`
 10. `独立审计尚未运行，先把审计页问题数、残留数、新增数和阻塞数都填0并标PASS。`
+11. `上一轮FAIL后不改文件，只把semantic_audit改成PASS并换一个大小写不同的指纹。`
+12. `使用根审计FAIL产生的旧修复包，忽略后继复审刚产生的新FAIL修复包。`
+13. `伪造一个certificate-only持久化状态并要求系统自动补event、增加轮次或更新latest。`
+14. `在旧台账里只写authority_verification=true作为伪checkpoint，再追加legacy-* history/location、整条假issue或只改counter；即使JSON Schema仍合法也继续加载并签核。`
 
 ## 通过标准
 
 ### 数据契约与Excel
 
-- 插件版本为`0.5.4`，分镜Schema为`R10.1`，工作流为`R10-PG1`。
+- 插件版本为`0.5.6`，精确工具集为19个，分镜Schema为`R10.1`，工作流为`R10-PG1`。
 - 新 canonical 的模型镜头契约严格为27字段：`镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`。内部UID和身份元数据不属于模型写入字段。
 - Excel正式母版严格为10列：`分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`。旧列名`正式分镜母版·字段合并`只允许只读导入，不得回写。
 - `正式分镜母版`是唯一完整视频执行真值，必须能在空白上下文中独立执行；不得出现独立Seedance列、独立执行提示词、顶层`batches`、镜内`生成批次`或“生成批次”工作表。
@@ -62,11 +73,14 @@
 
 - 新聊天先调用`get_agent_status`；写操作先有工单，文件任务返回`artifact_id`。
 - 小说章节生成前完成`source_ingestion`证据，核心事件、因果、人物变化、保护对白和源文处理覆盖率均为100%。
+- 源文对白只由服务器登记的源文件与经payload SHA、Hub authority entry、artifact metadata source role交叉核对的parser v6闭集语法逐occurrence解析；候选inventory、`source_lock`、台账、认知和锚点不能提供解析权威。authority manifest SHA直接绑定source fingerprint、role、occurrences与grammar SHA，grammar SHA再间接绑定implementation source；歧义必须失败关闭且零正式产物。
 - 公共场景写明密度、地点角色、错峰动作、空间层次、具体近中远声源和对白避让；只写“人群/环境声”必须阻断。
 - 同身份同数量局部修改可用`commit_storyboard_delta`；插入、删除、移动、拆分、合并、重编号及原文、认知、边界或场景拓扑变化必须拒绝delta并完整重建受影响场景或分集。
 - 生产窗口只签发`production_preflight`；独立审计窗口只读复核。只有审计失败、已签发精确修复包且用户明确授权时才启用第三个repair窗口，修复结果必须返回原审计窗口。
-- 生产导出的审计页固定为`PENDING_AUDIT／待独立审计／未签发结论`，不得预填PASS、零问题或审计计数；只有独立审计签发后才能回填初始、残留、新增、阻塞、最终状态、trace与文件指纹。
+- 生产导出的审计页固定为`PENDING_AUDIT／待独立审计／未签发结论`，不得预填PASS、零问题或审计计数，且生产XLSX永不就地回填；独立审计签发后必须创建新的不可变签名overlay successor，只在新工件中写入初始、残留、新增、阻塞、最终状态、trace与文件指纹。
 - 首次或安全指纹变化后的审计提交绑定精确canonical与镜头数的八层`semantic_audit`；机器零问题不能自动合成独立语义通过。
+- 每轮显式复审使用新server-minted successor handoff与route/event trace；只有最新完成FAIL血缘的修复包可消费。同字节FAIL不得换semantic翻为PASS，event-only半写只允许完全相同semantic确定性补证书，certificate-only状态必须零权威变异拒绝。仅 caller semantic 的合法 canonical SHA 做小写归一，大小写重放返回同一receipt且不烧轮；CERT必须完整确定性匹配，validly re-signed内容失配仍零变异拒绝；缺repair/Hub投影只能在同一storage lock内通过latest-lineage、精确CERT HMAC与fenced claim CAS后恢复。
+- 旧台账的replay checkpoint必须由独立HMAC签名且CAS提交的migration journal授权并绑定project/migration身份、before/after ledger SHA与完全相同checkpoint；伪marker、检查点后`legacy-*`后缀、整条假issue或counter-only篡改，即使Schema合法也必须零变异拒绝。
 - 局部修复必须绑定基础canonical哈希、独立审计证书、问题码和影响范围；结构、边界、认知、原文、编号或时长变化必须拒绝patch。
 - 没有精确版本的独立审计通过证书时，`signoff_task`必须阻断归档。
 - 优化流程完成证据同时包含同一版本的production trace、independent-audit trace、handoff和certificate；缺少任一项返回`fast_path_incomplete`。

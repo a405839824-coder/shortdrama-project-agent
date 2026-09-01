@@ -264,6 +264,55 @@
       "禁项与声音",
       "统计闭合"
     ],
+    "source_dialogue_authority": {
+      "parser_version": "source-dialogue-authority-v6",
+      "grammar_version": "source-dialogue-closed-grammar-v6.3",
+      "authority_inputs": [
+        "server_registered_imported_source_payload",
+        "payload_sha_hub_authority_entry_and_artifact_metadata_role_cross_binding"
+      ],
+      "untrusted_claim_inputs": [
+        "candidate_storyboard_dialogue_inventory",
+        "source_lock_dialogue_claims",
+        "issue_ledger",
+        "cognition_or_anchor_records",
+        "candidate_speaker_names"
+      ],
+      "required_occurrence_facts": [
+        "exact_text",
+        "exact_punctuation",
+        "speaker_when_uniquely_resolvable",
+        "source_offset_and_line",
+        "audible_or_non_dialogue_classification"
+      ],
+      "closed_grammar_covers": [
+        "novel_speech_cues_and_action_adverbs",
+        "script_role_colon_and_role_newline",
+        "multiple_roles_on_one_line",
+        "quoted_and_unquoted_spoken_text",
+        "cross_sentence_read_aloud",
+        "written_object_and_visual_label_exclusion"
+      ],
+      "ambiguous_or_unsupported": "fail_closed_for_the_complete_preflight",
+      "failure_side_effects": "no_artifact_version_xlsx_projection_successor_or_handoff",
+      "manifest_binding": {
+        "authority_manifest_sha256_directly_binds": [
+          "source_fingerprint",
+          "role",
+          "occurrences",
+          "grammar_sha256"
+        ],
+        "grammar_sha256_transitively_binds": [
+          "implementation_source_sha256"
+        ],
+        "persisted_in": [
+          "preflight_report",
+          "signed_draft_preflight_record"
+        ],
+        "artifact_reference": "artifact_metadata_references_signed_draft_preflight_id"
+      },
+      "candidate_claims_must_not_authorize_source_parsing": true
+    },
     "repair_impact_scope": {
       "台词或剧情": "当前剧情节拍、源文台账、人物认知",
       "动作或眼神": "当前镜、前后相邻镜、可见性",
@@ -416,6 +465,52 @@
         "new_record_policy": "one_current_complete_fingerprint_prepared_successor",
         "independent_audit_status": "PENDING_AUDIT",
         "forbid": ["history_delete", "artifact_or_canonical_rewrite", "independent_audit_verdict", "audit_cache_reuse"]
+      },
+      "independent_reaudit_successor": {
+        "root_policy": "consumed_root_and_prior_successors_are_immutable_history",
+        "new_round_policy": "server_mints_one_fresh_single_use_successor_handoff_with_distinct_route_and_event_traces",
+        "lineage_binding": ["root_handoff_id", "parent_handoff_id", "previous_audit_certificate_id", "previous_audit_certificate_hmac", "previous_audit_event_sha256", "original_audit_work_order", "original_audit_cycle", "artifact_and_complete_fingerprints"],
+        "modern_certificate_event_binding": "event_sha256_must_equal_the_exact_durable_ledger_event",
+        "legacy_certificate_policy": "missing_event_sha256_cannot_replay_or_signoff; it_may_only_parent_an_explicit_forced_reaudit_and_becomes_history_after_a_modern_successor_seals_the_parent_certificate_hmac_and_event_sha",
+        "failed_to_pass_policy": "requires_repaired_successor_artifact_and_new_file_source_version_artifact_canonical_handoff_and_trace_bindings",
+        "repair_package_authority": "only_the_latest_completed_failed_lineage_package_is_usable",
+        "issue_target_policy": "every_blocking_issue_resolves_to_at_least_one_canonical_shot; explicit_shot_ids_are_authoritative_and_any_location_must_match",
+        "crash_recovery": "same_normalized_semantic_submission_may_complete_the_exact_prepared_or_event_only_route; different_semantics_fail_without_mutation",
+        "semantic_normalization": "lowercase_only_a_valid_64_hex_caller_semantic_audit_canonical_sha256; every_other_semantic_evidence_and_identity_field_remains_exact",
+        "canonical_sha_case_replay": "returns_the_same_signed_receipt_without_a_successor_event_certificate_or_round",
+        "event_only_policy": "derive_and_sign_the_deterministic_missing_certificate_only_after_exact_event_semantic_and_authority_match",
+        "certificate_exact_binding": "stored_certificate_content_must_equal_the_complete_deterministic_event_report_handoff_trace_cache_fingerprint_result_issue_summary_and_authority_binding; valid_hmac_alone_is_insufficient",
+        "validly_resigned_certificate_mismatch": "reject_without_authority_or_projection_mutation",
+        "certificate_only_policy": "reject_as_impossible_normal_write_order_or_corruption",
+        "completion_replay": "same_signed_completion_receipt_is_a_read_only_authority_noop",
+        "repair_package_lifecycle": "issued_requires_zero_downstream_evidence; consuming_is_not_completed_replay; consumed_requires_exact_repair_work_order_successor_artifact_canonical_committed_base_cas_metadata_return_handoff_and_hub_projection",
+        "projection_transaction": "missing_repair_package_or_hub_projection_recovers_only_inside_the_same_storage_lock_after_zero_downstream_evidence_latest_lineage_exact_certificate_hmac_and_fenced_single_finisher_claim_cas_revalidation; consumed_authorization_cannot_be_deleted_and_resurrected; stale_completed_replay_cannot_write_or_return_obsolete_authority"
+      },
+      "legacy_ledger_replay_checkpoint": {
+        "checkpoint_marker_is_authority": false,
+        "authority": "separate_hmac_signed_committed_migration_journal",
+        "journal_must_bind": [
+          "project_id",
+          "migration_id",
+          "before_ledger_canonical_sha256",
+          "after_ledger_canonical_sha256",
+          "identical_replay_checkpoint"
+        ],
+        "sealed_prefix": [
+          "events",
+          "issue_history",
+          "occurrence_locations",
+          "issue_baselines",
+          "scope_aliases",
+          "round_boundaries"
+        ],
+        "post_checkpoint_replay": [
+          "issues",
+          "history",
+          "occurrence_locations",
+          "counters"
+        ],
+        "tamper_policy": "schema_valid_fake_marker_legacy_suffix_issue_or_counter_rejects_without_mutation"
       }
     },
     "incremental_execution_policy": {

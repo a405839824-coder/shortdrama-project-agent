@@ -20,6 +20,7 @@
     "rule_candidates",
     "promotion_history",
     "human_signoffs",
+    "authority_reopens",
     "historical_patterns"
   ],
   "properties": {
@@ -42,6 +43,7 @@
         "formal_rule_auto_mutation",
         "exact_cross_window_claim_requires_shared_ledger",
         "pass_requires_zero_issues",
+        "ledger_replay_contract_version",
         "cross_batch_pattern_identity_required",
         "failed_draft_recording_required",
         "first_draft_correctness_threshold_percent",
@@ -59,6 +61,7 @@
         "formal_rule_auto_mutation": {"const": false},
         "exact_cross_window_claim_requires_shared_ledger": {"const": true},
         "pass_requires_zero_issues": {"const": true},
+        "ledger_replay_contract_version": {"const": "R10-LEDGER-REPLAY-1"},
         "cross_batch_pattern_identity_required": {"const": true},
         "failed_draft_recording_required": {"const": true},
         "first_draft_correctness_threshold_percent": {"const": 98.0},
@@ -76,31 +79,47 @@
     "issues": {"type": "array", "items": {"$ref": "#/$defs/issue_record"}},
     "rule_candidates": {"type": "array", "items": {"$ref": "#/$defs/rule_candidate"}},
     "promotion_history": {"type": "array"},
-    "human_signoffs": {"type": "array"},
+    "human_signoffs": {"type": "array", "items": {"$ref": "#/$defs/human_signoff"}},
     "authority_reopens": {
       "type": "array",
       "items": {
         "type": "object",
         "required": [
           "scope_key",
+          "basis_event_id",
           "authority",
           "reason",
           "trigger_event_id",
           "timestamp"
         ],
         "properties": {
-          "scope_key": {"type": "string", "minLength": 1},
+          "scope_key": {"$ref": "#/$defs/identifier"},
+          "basis_event_id": {"$ref": "#/$defs/identifier"},
           "authority": {"const": "independent_audit"},
           "reason": {"type": "string", "minLength": 1},
-          "trigger_event_id": {"type": "string", "minLength": 1},
-          "timestamp": {"type": "string", "minLength": 1}
+          "trigger_event_id": {"$ref": "#/$defs/identifier"},
+          "timestamp": {"$ref": "#/$defs/rfc3339"}
         },
         "additionalProperties": false
       }
     },
+    "replay_checkpoint": {"$ref": "#/$defs/replay_checkpoint"},
     "historical_patterns": {"type": "array"}
   },
+  "allOf": [
+    {
+      "if": {"not": {"required": ["replay_checkpoint"]}},
+      "then": {
+        "properties": {
+          "events": {"type": "array", "items": {"$ref": "#/$defs/current_audit_event"}}
+        }
+      }
+    }
+  ],
   "$defs": {
+    "identifier": {"type": "string", "pattern": "^\\S(?:.*\\S)?$"},
+    "nonblank_text": {"type": "string", "pattern": "\\S"},
+    "rfc3339": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"},
     "sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"},
     "event_issue": {
       "type": "object",
@@ -125,6 +144,7 @@
             "表演链",
             "镜头节奏",
             "正式母版单镜执行完整性",
+            "Seedance独立执行",
             "禁项与声音",
             "统计闭合"
           ]
@@ -135,7 +155,13 @@
         "field": {"type": "string", "minLength": 1},
         "issue_type": {"type": "string"},
         "problem_key": {"type": "string"},
-        "evidence": {"type": "string", "minLength": 1},
+        "evidence": {
+          "description": "Structured objects are read-only compatibility for an externally authorized sealed checkpoint prefix; modern ingest requires non-empty text and runtime enforces the prefix boundary.",
+          "oneOf": [
+            {"type": "string", "minLength": 1},
+            {"type": "object", "minProperties": 1}
+          ]
+        },
         "source_sentence": {"type": "string", "minLength": 1},
         "root_cause": {"type": "string"},
         "repair_action": {"type": "string", "minLength": 1},
@@ -160,18 +186,18 @@
         "issues"
       ],
       "properties": {
-        "event_id": {"type": "string", "minLength": 1},
-        "timestamp": {"type": "string", "minLength": 1},
+        "event_id": {"$ref": "#/$defs/identifier"},
+        "timestamp": {"$ref": "#/$defs/rfc3339"},
         "window_key": {"type": "string"},
-        "episode_id": {"type": "string", "minLength": 1},
-        "file_name": {"type": "string", "minLength": 1},
-        "file_fingerprint": {"type": "string", "minLength": 1},
-        "source_version": {"type": "string", "minLength": 1},
-        "audit_cycle_id": {"type": "string", "minLength": 1},
+        "episode_id": {"$ref": "#/$defs/nonblank_text"},
+        "file_name": {"$ref": "#/$defs/nonblank_text"},
+        "file_fingerprint": {"$ref": "#/$defs/identifier"},
+        "source_version": {"$ref": "#/$defs/nonblank_text"},
+        "audit_cycle_id": {"$ref": "#/$defs/identifier"},
         "task_type": {"enum": ["production_draft_preflight", "generation_audit", "audit", "audit_repair", "repair_regression", "bootstrap_import"]},
         "audit_class": {"enum": ["production_draft_preflight", "production_preflight", "independent_audit", "legacy"]},
         "validation_role": {"enum": ["production", "independent_audit", "repair", "bootstrap"]},
-        "handoff_id": {"type": "string"},
+        "handoff_id": {"$ref": "#/$defs/identifier"},
         "artifact_semantic_fingerprint": {"$ref": "#/$defs/sha256"},
         "canonical_fingerprint": {"$ref": "#/$defs/sha256"},
         "source_fingerprint": {"$ref": "#/$defs/sha256"},
@@ -179,8 +205,16 @@
         "runtime_fingerprint": {"$ref": "#/$defs/sha256"},
         "rules_fingerprint": {"$ref": "#/$defs/sha256"},
         "validator_fingerprint": {"$ref": "#/$defs/sha256"},
-        "runtime_test_certificate_id": {"type": "string"},
-        "stage_trace_id": {"type": "string"},
+        "runtime_test_certificate_id": {"$ref": "#/$defs/identifier"},
+        "stage_trace_id": {"$ref": "#/$defs/identifier"},
+        "semantic_audit_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "Content hash of the independent semantic-audit submission. Required for current independent-audit events; optional here only so an externally sealed legacy checkpoint prefix remains readable."
+        },
+        "semantic_report_input_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "Content hash of the normalized semantic report input used for event-only recovery. Required for current independent-audit events; optional here only so an externally sealed legacy checkpoint prefix remains readable."
+        },
         "cache_evidence": {"type": "array"},
         "independence_assertions": {
           "type": "object",
@@ -194,11 +228,31 @@
         "audit_round": {"type": "integer", "minimum": 1, "maximum": 3},
         "result": {"enum": ["pass", "fail_current", "blocked"]},
         "checked_shot_count": {"type": "integer", "minimum": 0},
-        "blockers": {"type": "array", "items": {"type": "string"}},
+        "scope_key": {"$ref": "#/$defs/identifier"},
+        "sequence": {"type": "integer", "minimum": 1},
+        "blockers": {"type": "array", "items": {"$ref": "#/$defs/identifier"}},
         "counts": {"type": "object"},
         "issues": {"type": "array", "items": {"$ref": "#/$defs/event_issue"}}
       },
       "allOf": [
+        {
+          "if": {"properties": {"result": {"const": "pass"}}, "required": ["result"]},
+          "then": {
+            "properties": {
+              "issues": {"type": "array", "maxItems": 0},
+              "blockers": {"type": "array", "maxItems": 0}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"result": {"enum": ["fail_current", "blocked"]}}, "required": ["result"]},
+          "then": {
+            "anyOf": [
+              {"properties": {"issues": {"type": "array", "minItems": 1}}, "required": ["issues"]},
+              {"properties": {"blockers": {"type": "array", "minItems": 1}}, "required": ["blockers"]}
+            ]
+          }
+        },
         {
           "if": {"properties": {"audit_class": {"const": "independent_audit"}}, "required": ["audit_class"]},
           "then": {
@@ -216,6 +270,67 @@
               }
             },
             "required": ["validation_role", "handoff_id", "artifact_semantic_fingerprint", "canonical_fingerprint", "source_fingerprint", "boundary_fingerprint", "runtime_fingerprint", "rules_fingerprint", "validator_fingerprint", "runtime_test_certificate_id", "stage_trace_id", "cache_evidence", "independence_assertions"]
+          }
+        },
+        {
+          "if": {"properties": {"validation_role": {"const": "independent_audit"}}, "required": ["validation_role"]},
+          "then": {"properties": {"audit_class": {"const": "independent_audit"}}, "required": ["audit_class"]}
+        },
+        {
+          "if": {
+            "properties": {
+              "audit_class": {"const": "independent_audit"},
+              "result": {"const": "pass"}
+            },
+            "required": ["audit_class", "result"]
+          },
+          "then": {"properties": {"checked_shot_count": {"type": "integer", "minimum": 1}}}
+        }
+      ]
+    },
+    "current_event_issue": {
+      "allOf": [
+        {"$ref": "#/$defs/event_issue"},
+        {
+          "properties": {
+            "category": {
+              "enum": [
+                "源文对白",
+                "机位可见性",
+                "空间连续",
+                "表演链",
+                "镜头节奏",
+                "正式母版单镜执行完整性",
+                "禁项与声音",
+                "统计闭合"
+              ]
+            },
+            "evidence": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "current_audit_event": {
+      "allOf": [
+        {"$ref": "#/$defs/audit_event"},
+        {
+          "properties": {
+            "issues": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/current_event_issue"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"audit_class": {"const": "independent_audit"}},
+            "required": ["audit_class"]
+          },
+          "then": {
+            "required": [
+              "semantic_audit_sha256",
+              "semantic_report_input_sha256"
+            ]
           }
         }
       ]
@@ -248,6 +363,7 @@
       "properties": {
         "certificate_id": {"type": "string", "minLength": 1},
         "event_id": {"type": "string", "minLength": 1},
+        "event_sha256": {"$ref": "#/$defs/sha256"},
         "handoff_id": {"type": "string", "minLength": 1},
         "work_order_id": {"type": "string", "minLength": 1},
         "audit_actor_binding_id": {"type": "string", "minLength": 1},
@@ -471,6 +587,19 @@
                   "residual_issue_count": {"const": 0},
                   "introduced_issue_count": {"const": 0}
                 }
+              },
+              "reviewed_shot_count": {"type": "integer", "minimum": 1},
+              "semantic_conclusion": {
+                "properties": {"status": {"const": "pass"}},
+                "required": ["status"]
+              },
+              "audit_summary": {
+                "properties": {
+                  "residual_issue_count": {"const": 0},
+                  "introduced_issue_count": {"const": 0},
+                  "blocking_issue_count": {"const": 0},
+                  "final_status": {"const": "pass"}
+                }
               }
             }
           }
@@ -622,6 +751,7 @@
         "field_class",
         "normalized_root_cause",
         "status",
+        "legacy_resolution_requires_reaudit",
         "open_scope_keys",
         "recurrence_state",
         "occurrence_count",
@@ -652,6 +782,7 @@
         "field_class": {"type": "string", "minLength": 1},
         "normalized_root_cause": {"type": "string", "minLength": 1},
         "status": {"enum": ["open", "resolved"]},
+        "legacy_resolution_requires_reaudit": {"type": "boolean"},
         "open_scope_keys": {
           "type": "array",
           "uniqueItems": true,
@@ -717,6 +848,134 @@
         "history": {"type": "array", "minItems": 1}
       }
     },
+    "replay_checkpoint": {
+      "type": "object",
+      "description": "Immutable legacy-prefix evidence. Schema validity is not migration authority; runtime also requires an external signed-journal/CAS authorizer.",
+      "required": [
+        "contract_version",
+        "migration_id",
+        "old_ledger_canonical_sha256",
+        "event_count",
+        "events_prefix_canonical_sha256",
+        "issue_histories_canonical_sha256",
+        "occurrence_locations_canonical_sha256",
+        "issue_prefixes",
+        "scope_boundaries",
+        "created_at",
+        "authority_verification"
+      ],
+      "properties": {
+        "contract_version": {"const": "R10-LEDGER-REPLAY-CHECKPOINT-1"},
+        "migration_id": {"$ref": "#/$defs/identifier"},
+        "old_ledger_canonical_sha256": {"$ref": "#/$defs/sha256"},
+        "event_count": {"type": "integer", "minimum": 1},
+        "events_prefix_canonical_sha256": {"$ref": "#/$defs/sha256"},
+        "issue_histories_canonical_sha256": {"$ref": "#/$defs/sha256"},
+        "occurrence_locations_canonical_sha256": {"$ref": "#/$defs/sha256"},
+        "issue_prefixes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "issue_id",
+              "history_count",
+              "occurrence_location_count",
+              "immutable_identity",
+              "baseline_open_scope_keys",
+              "baseline_status",
+              "baseline_legacy_resolution_requires_reaudit",
+              "baseline_occurrence_count",
+              "baseline_observation_count",
+              "baseline_introduced_by_repair_count",
+              "baseline_consecutive_rounds",
+              "baseline_max_consecutive_rounds",
+              "baseline_last_seen_at"
+            ],
+            "properties": {
+              "issue_id": {"$ref": "#/$defs/identifier"},
+              "history_count": {"type": "integer", "minimum": 0},
+              "occurrence_location_count": {"type": "integer", "minimum": 0},
+              "immutable_identity": {
+                "type": "object",
+                "required": [
+                  "dedup_key",
+                  "pattern_key",
+                  "error_code",
+                  "category",
+                  "logical_file",
+                  "episode_id",
+                  "issue_type",
+                  "field_class",
+                  "normalized_root_cause",
+                  "first_seen_at"
+                ],
+                "properties": {
+                  "dedup_key": {"type": "string", "minLength": 1},
+                  "pattern_key": {"type": "string", "pattern": "^PATTERN-[A-Fa-f0-9]{24}$"},
+                  "error_code": {"type": "string", "minLength": 1},
+                  "category": {"type": "string", "minLength": 1},
+                  "logical_file": {"type": "string", "minLength": 1},
+                  "episode_id": {"type": "string", "minLength": 1},
+                  "issue_type": {"type": "string", "minLength": 1},
+                  "field_class": {"type": "string", "minLength": 1},
+                  "normalized_root_cause": {"type": "string", "minLength": 1},
+                  "first_seen_at": {"$ref": "#/$defs/rfc3339"}
+                },
+                "additionalProperties": false
+              },
+              "baseline_open_scope_keys": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {"$ref": "#/$defs/identifier"}
+              },
+              "baseline_status": {"enum": ["open", "resolved"]},
+              "baseline_legacy_resolution_requires_reaudit": {"type": "boolean"},
+              "baseline_occurrence_count": {"type": "integer", "minimum": 0},
+              "baseline_observation_count": {"type": "integer", "minimum": 0},
+              "baseline_introduced_by_repair_count": {"type": "integer", "minimum": 0},
+              "baseline_consecutive_rounds": {"type": "integer", "minimum": 0},
+              "baseline_max_consecutive_rounds": {"type": "integer", "minimum": 0},
+              "baseline_last_seen_at": {"$ref": "#/$defs/rfc3339"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "scope_boundaries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "scope_key",
+              "legacy_scope_key",
+              "first_position",
+              "last_position",
+              "event_count",
+              "first_round",
+              "last_round",
+              "last_event_id"
+            ],
+            "properties": {
+              "scope_key": {"$ref": "#/$defs/identifier"},
+              "legacy_scope_key": {"$ref": "#/$defs/identifier"},
+              "first_position": {"type": "integer", "minimum": 1},
+              "last_position": {"type": "integer", "minimum": 1},
+              "event_count": {"type": "integer", "minimum": 1},
+              "first_round": {"type": "integer", "minimum": 1, "maximum": 3},
+              "last_round": {"type": "integer", "minimum": 1, "maximum": 3},
+              "last_event_id": {"$ref": "#/$defs/identifier"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "created_at": {"$ref": "#/$defs/rfc3339"},
+        "authority_verification": {
+          "const": "required_external_signed_cas",
+          "description": "A requirement marker only. It is never proof and must be verified outside the ledger against the signed migration journal."
+        }
+      },
+      "additionalProperties": false
+    },
     "scope_state": {
       "type": "object",
       "required": [
@@ -724,10 +983,52 @@
         "episode_id",
         "file_name",
         "audit_cycle_id",
+        "last_event_id",
+        "last_result",
+        "last_audit_round",
         "open_issue_ids",
         "closure_state",
-        "can_advance"
-      ]
+        "can_advance",
+        "human_signoff"
+      ],
+      "properties": {
+        "scope_key": {"$ref": "#/$defs/identifier"},
+        "episode_id": {"type": "string", "minLength": 1},
+        "file_name": {"type": "string", "minLength": 1},
+        "audit_cycle_id": {"$ref": "#/$defs/identifier"},
+        "last_event_id": {"$ref": "#/$defs/identifier"},
+        "last_result": {"enum": ["pass", "fail_current", "blocked"]},
+        "last_audit_round": {"type": "integer", "minimum": 1, "maximum": 3},
+        "open_issue_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}},
+        "closure_state": {"enum": ["open", "preflight_clean", "awaiting_human_signoff", "human_signed_off", "reopened_by_human", "reopened_by_independent_reaudit", "legacy_signoff_requires_reaudit", "legacy_resolution_requires_reaudit"]},
+        "can_advance": {"type": "boolean"},
+        "human_signoff": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/human_signoff"}]},
+        "authority_reopen": {
+          "type": "object",
+          "required": ["scope_key", "basis_event_id", "authority", "reason", "trigger_event_id", "timestamp"],
+          "properties": {
+            "scope_key": {"$ref": "#/$defs/identifier"},
+            "basis_event_id": {"$ref": "#/$defs/identifier"},
+            "authority": {"const": "independent_audit"},
+            "reason": {"type": "string", "minLength": 1},
+            "trigger_event_id": {"$ref": "#/$defs/identifier"},
+            "timestamp": {"$ref": "#/$defs/rfc3339"}
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "human_signoff": {
+      "type": "object",
+      "required": ["scope_key", "basis_event_id", "authority_class", "decision", "timestamp"],
+      "properties": {
+        "scope_key": {"$ref": "#/$defs/identifier"},
+        "basis_event_id": {"$ref": "#/$defs/identifier"},
+        "authority_class": {"enum": ["independent_audit", "legacy"]},
+        "decision": {"enum": ["approve", "reopen"]},
+        "timestamp": {"$ref": "#/$defs/rfc3339"}
+      },
+      "additionalProperties": false
     },
     "rule_candidate": {
       "type": "object",

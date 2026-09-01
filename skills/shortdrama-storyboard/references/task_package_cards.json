@@ -1482,7 +1482,11 @@
     "旧字段只读迁移且新版本禁止回写",
     "后台Seedance/批次生成计数为0",
     "每个历史错误负向样本必须FAIL且修复正例必须PASS；多行XLSX round-trip纳入回归",
-    "规则、模板、验证器、插件与活跃文档统一标记0.5.4"
+    "源文权威回归必须覆盖服务器登记源文件的payload SHA、Hub authority entry、artifact metadata role交叉绑定，以及authority manifest与grammar/implementation source传递绑定",
+    "独立复审回归必须覆盖PASS转FAIL撤销latest/signoff资格、event-only确定性补证书、certificate-only零变异拒绝、完整CERT绑定下validly-resigned内容失配零变异、现代CERT event_sha256、successor父CERT HMAC/父event SHA桥、旧CERT只能强制新独审不能普通重放/签核、仅caller semantic canonical SHA小写归一且大小写重放同receipt不烧轮，以及同一storage lock内latest-lineage/CERT HMAC/fenced claim CAS约束的repair/Hub投影恢复",
+    "修复包生命周期回归必须覆盖issued零下游恢复、真实consumed闭环、伪consumed零变异拒绝、consuming完成态拒绝、删除已消费包且保留下游证据不得复活，以及storage lock内绕过service预检仍失败关闭",
+    "台账重放回归必须覆盖签名migration journal checkpoint、伪authority marker、checkpoint后legacy-* suffix、整条假issue与counter-only篡改",
+    "插件当前发布版本、清单与活跃发布报告统一标记0.5.6；0.5.5质量门、compact_master_version与历史升级文档保留其原始语义"
     ],
     "minimum_input_required": [
       "用户任务范围",

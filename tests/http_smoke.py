@@ -17,6 +17,28 @@ from mcp.client.streamable_http import streamable_http_client
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_VERSION = "0.5.6"
+EXPECTED_TOOL_NAMES = {
+    "get_agent_status",
+    "migrate_project_state",
+    "recover_storyboard_handoff",
+    "query_project_issues",
+    "mark_performance_stage",
+    "create_project",
+    "begin_project_task",
+    "import_source_file",
+    "read_project_artifact",
+    "plan_change_request",
+    "commit_project_artifact",
+    "preflight_storyboard_draft",
+    "commit_storyboard",
+    "commit_storyboard_delta",
+    "commit_storyboard_patch",
+    "audit_storyboard",
+    "complete_task_validation",
+    "record_capability_gap",
+    "signoff_task",
+}
 
 
 def free_port() -> int:
@@ -79,7 +101,15 @@ def main() -> int:
                 raise RuntimeError(f"server did not become healthy\nstdout={stdout}\nstderr={stderr}")
             inspection = asyncio.run(inspect_endpoint(f"http://127.0.0.1:{port}/mcp"))
             result = {"status": "pass", "health": health, "inspection": inspection}
-            if inspection["tool_count"] != 19 or inspection["status_call_is_error"]:
+            tool_names = inspection["tool_names"]
+            if (
+                health.get("version") != EXPECTED_VERSION
+                or inspection["server"].get("version") != EXPECTED_VERSION
+                or inspection["tool_count"] != len(EXPECTED_TOOL_NAMES)
+                or len(tool_names) != len(set(tool_names))
+                or set(tool_names) != EXPECTED_TOOL_NAMES
+                or inspection["status_call_is_error"]
+            ):
                 result["status"] = "fail"
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result["status"] == "pass" else 1

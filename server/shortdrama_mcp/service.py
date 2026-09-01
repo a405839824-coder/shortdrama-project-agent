@@ -52,6 +52,21 @@ from .models import (
     ToolResponse,
 )
 from .storage import ProjectStore, sha256_bytes, slug_filename, utc_stamp
+from .source_dialogue import (
+    SOURCE_ACTION_LEXICON_SHA256,
+    SOURCE_ACTION_LEXICON_VERSION,
+    SOURCE_DIALOGUE_GRAMMAR_SHA256,
+    SOURCE_DIALOGUE_GRAMMAR_VERSION,
+    SOURCE_DIALOGUE_PARSER_VERSION,
+    SOURCE_SPEECH_LEXICON_SHA256,
+    SOURCE_SPEECH_LEXICON_VERSION,
+    SourceDialogueAuthorityError,
+    authority_claims_match_exactly,
+    candidate_protected_dialogue_claims,
+    extracted_source_text,
+    missing_authoritative_occurrences,
+    parse_source_dialogue_authority,
+)
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -137,6 +152,9 @@ MAX_HANDOFF_RECOVERY_ITEMS = 32
 
 AUDIT_CLASS_PRODUCTION_PREFLIGHT = "production_preflight"
 AUDIT_CLASS_INDEPENDENT = "independent_audit"
+AUDIT_SOURCE_HANDOFF_TYPES = frozenset(
+    {"production_to_audit", "repair_to_audit", "audit_intake"}
+)
 PRODUCTION_PREFLIGHT_PASS = "production_preflight_pass"
 PRODUCTION_PREFLIGHT_FAIL = "production_preflight_fail"
 DRAFT_PREFLIGHT_PASS = "draft_preflight_pass"
@@ -336,6 +354,24 @@ def _release_consumption_claims_on_error(method: Any) -> Any:
                             consumer_work_order_id=claim["consumer_work_order_id"],
                             claim_token=claim["claim_token"],
                             reason=f"handled {type(exc).__name__}",
+                        )
+                    elif claim.get("kind") == "reaudit_handoff":
+                        self.store.release_reaudit_successor_claim(
+                            claim["namespace"],
+                            claim["project_id"],
+                            claim["record_id"],
+                            consumer_work_order_id=claim[
+                                "consumer_work_order_id"
+                            ],
+                            claim_token=claim["claim_token"],
+                            reason=f"handled {type(exc).__name__}",
+                        )
+                    elif claim.get("kind") == "reaudit_successor":
+                        self.store.rollback_reaudit_successor(
+                            claim["namespace"],
+                            claim["project_id"],
+                            claim["record_id"],
+                            route_trace_id=claim["route_trace_id"],
                         )
                 except Exception:
                     # Preserve the original failure.  The bounded lease is the
@@ -1046,6 +1082,7 @@ class StoryboardService:
         parser_paths = [
             Path(__file__).with_name("canonical.py"),
             Path(__file__).with_name("file_io.py"),
+            Path(__file__).with_name("source_dialogue.py"),
         ]
         self._parser_fingerprint = sha256_bytes(
             _stable_json_bytes(
@@ -1147,13 +1184,35 @@ class StoryboardService:
     def _matching_runtime_certificate(
         self, namespace: str, project_id: str
     ) -> dict[str, Any] | None:
-        certificate = self.store.find_project_record(
-            namespace,
-            project_id,
-            kind="certificates",
-            field="certificate_key",
-            value=self._runtime_certificate_key(),
-        )
+        runtime_key = self._runtime_certificate_key()
+        try:
+            certificate = self.store.latest_runtime_certificate(
+                namespace,
+                project_id,
+                certificate_key=runtime_key,
+            )
+        except ValueError as exc:
+            if str(exc).startswith("runtime_certificate_storage_invalid:"):
+                raise
+            record_id = str(exc).rsplit(": ", 1)[-1]
+            record_path = (
+                self.store.project_dir(namespace, project_id)
+                / "certificates"
+                / f"{record_id}.json"
+            )
+            try:
+                damaged = self.store.read_json(record_path)
+            except (OSError, ValueError):
+                damaged = None
+            if isinstance(damaged, dict) and (
+                damaged.get("certificate_type")
+                == "runtime_full_regression"
+                or damaged.get("certificate_key") == runtime_key
+            ):
+                raise ValueError(
+                    "runtime_certificate_storage_invalid: persisted runtime certificate is tampered"
+                ) from exc
+            raise
         if certificate is None:
             return None
         if (
@@ -1171,7 +1230,18 @@ class StoryboardService:
     def _require_runtime_test_certificate(
         self, namespace: str, project_id: str
     ) -> dict[str, Any]:
-        certificate = self._matching_runtime_certificate(namespace, project_id)
+        try:
+            certificate = self._matching_runtime_certificate(
+                namespace, project_id
+            )
+        except ValueError as exc:
+            if str(exc).startswith(
+                "runtime_certificate_storage_invalid:"
+            ):
+                raise ValueError(
+                    "runtime_test_certificate_required: persisted runtime certificate is missing, stale, or tampered"
+                ) from exc
+            raise
         if certificate is None:
             raise ValueError(
                 "runtime_test_certificate_required: call get_agent_status with full_self_test=true after any runtime/rule/schema change"
@@ -1273,6 +1343,424 @@ class StoryboardService:
         source_lock = storyboard.get("source_lock") or {}
         explicit = source_lock.get("source_fingerprint") if isinstance(source_lock, dict) else None
         return str(explicit or sha256_bytes(_stable_json_bytes(source_lock)))
+
+    @staticmethod
+    def _source_dialogue_issue(
+        *,
+        location: str,
+        evidence: str,
+        repair_action: str,
+    ) -> dict[str, Any]:
+        return {
+            "error_code": "E-SOURCE-SELECT-001",
+            "location": location,
+            "field": "protected_dialogue",
+            "semantic_layer": "source_dialogue_authority",
+            "template_gate_id": "THG-05",
+            "severity": "blocking",
+            "blocking": True,
+            "evidence": evidence,
+            "repair_action": repair_action,
+        }
+
+    @staticmethod
+    def _selected_dialogue_source_entry(
+        hub: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Select authority only from server-persisted project state.
+
+        A derived script is preferred over the novel when both are current.
+        Crucially, no candidate inventory, ledger, cognition matrix, anchor, or
+        caller-authored speaker list participates in this selection.
+        """
+
+        state = hub.get("project_state") or {}
+        latest = state.get("latest_artifacts") or {}
+        if isinstance(latest, dict):
+            for key in ("source:script", "source:novel"):
+                entry = latest.get(key)
+                if isinstance(entry, dict) and entry.get("artifact_id"):
+                    return copy.deepcopy(entry)
+        sources = [
+            row
+            for row in state.get("authoritative_sources", [])
+            if isinstance(row, dict)
+            and row.get("artifact_id")
+            and str(row.get("source_role") or "").removeprefix("source:")
+            in {"novel", "script"}
+        ]
+        for role in ("script", "novel"):
+            matching = [
+                row
+                for row in sources
+                if str(row.get("source_role") or "").removeprefix("source:")
+                == role
+            ]
+            if matching:
+                return copy.deepcopy(matching[-1])
+        return None
+
+    def _source_dialogue_authority_manifest(
+        self,
+        namespace: str,
+        project_id: str,
+        candidate: dict[str, Any],
+        *,
+        hub: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Recompute THG-05 speaker/text authority from the imported source."""
+
+        active_hub = hub or self.store.load_hub(namespace, project_id)
+        entry = self._selected_dialogue_source_entry(active_hub)
+        base_manifest: dict[str, Any] = {
+            "parser_version": SOURCE_DIALOGUE_PARSER_VERSION,
+            "grammar_version": SOURCE_DIALOGUE_GRAMMAR_VERSION,
+            "grammar_sha256": SOURCE_DIALOGUE_GRAMMAR_SHA256,
+            "speech_lexicon_version": SOURCE_SPEECH_LEXICON_VERSION,
+            "speech_lexicon_sha256": SOURCE_SPEECH_LEXICON_SHA256,
+            "action_lexicon_version": SOURCE_ACTION_LEXICON_VERSION,
+            "action_lexicon_sha256": SOURCE_ACTION_LEXICON_SHA256,
+            "authority_source": "server_project_state_only",
+            "candidate_authority_fields_used": [],
+        }
+        claim_error: str | None = None
+        try:
+            claims = candidate_protected_dialogue_claims(candidate)
+        except SourceDialogueAuthorityError as exc:
+            claims = []
+            claim_error = str(exc)
+        if entry is None:
+            issues: list[dict[str, Any]] = []
+            raw_source_lock = candidate.get("source_lock")
+            authority_lock_groups = (
+                (
+                    ("source_artifact_id", "authoritative_source_artifact_id"),
+                    lambda value: value.strip(),
+                    "source_artifact_id",
+                ),
+                (
+                    ("source_fingerprint", "authoritative_source_fingerprint"),
+                    lambda value: value.strip().casefold(),
+                    "source_fingerprint",
+                ),
+                (
+                    ("source_role", "authoritative_source_role"),
+                    lambda value: value.strip().casefold().removeprefix("source:"),
+                    "source_role",
+                ),
+            )
+            declared_authority_lock = False
+            if "source_lock" in candidate and not isinstance(raw_source_lock, dict):
+                issues.append(
+                    self._source_dialogue_issue(
+                        location="source_lock",
+                        evidence=(
+                            "候选source_lock必须是对象；项目又没有服务端权威源，"
+                            "该畸形绑定不能按not_applicable忽略。"
+                        ),
+                        repair_action="导入服务端权威源并由服务端重签source_lock。",
+                    )
+                )
+            elif isinstance(raw_source_lock, dict):
+                for keys, normalize, label in authority_lock_groups:
+                    parsed: list[tuple[str, str]] = []
+                    for key in keys:
+                        if key not in raw_source_lock:
+                            continue
+                        declared_authority_lock = True
+                        raw_value = raw_source_lock.get(key)
+                        if not isinstance(raw_value, str) or not raw_value.strip():
+                            issues.append(
+                                self._source_dialogue_issue(
+                                    location=f"source_lock.{key}",
+                                    evidence=(
+                                        f"无权威源时仍声明了畸形{label}：{raw_value!r}"
+                                    ),
+                                    repair_action="移除伪绑定；导入权威源后由服务端重签。",
+                                )
+                            )
+                            continue
+                        parsed.append((key, normalize(raw_value)))
+                    if len({value for _key, value in parsed}) > 1:
+                        issues.append(
+                            self._source_dialogue_issue(
+                                location=f"source_lock.{label}_alias_conflict",
+                                evidence=f"无权威源时{label}别名仍互相冲突。",
+                                repair_action="移除冲突绑定；导入权威源后由服务端重签。",
+                            )
+                        )
+                if declared_authority_lock:
+                    issues.append(
+                        self._source_dialogue_issue(
+                            location="source_dialogue_authority.source",
+                            evidence=(
+                                "候选显式声明了authority-bearing source_lock字段，"
+                                "但项目没有服务端注册的权威源；候选锁不能自证。"
+                            ),
+                            repair_action="先导入并锁定服务端权威源，再重建候选。",
+                        )
+                    )
+            if claim_error:
+                issues.append(
+                    self._source_dialogue_issue(
+                        location="source_dialogue_authority.claims",
+                        evidence=claim_error,
+                        repair_action=(
+                            "修复每条候选protected_dialogue的结构，并确保顶层与"
+                            "source_ingestion镜像完全一致后重新预检。"
+                        ),
+                    )
+                )
+            if claims:
+                issues.append(
+                    self._source_dialogue_issue(
+                        location="source_dialogue_authority.source",
+                        evidence=(
+                            "候选声明了protected_dialogue，但项目没有服务端注册的"
+                            "source:novel/source:script权威源；候选字段不能自证对白。"
+                        ),
+                        repair_action=(
+                            "先导入并锁定权威原文/剧本，再由服务端authority parser重建"
+                            "protected_dialogue；不得用inventory/ledger/cognition/anchor授权。"
+                        ),
+                    )
+                )
+            manifest = {
+                **base_manifest,
+                "status": "fail_current" if issues else "not_applicable",
+                "reason": "no authoritative novel/script source is registered",
+                "source_artifact_id": None,
+                "source_role": None,
+                "source_fingerprint": None,
+                "source_extraction_sha256": None,
+                "occurrence_count": 0,
+                "claim_count": len(claims),
+                "missing_occurrence_count": 0,
+                "exact_claim_match": not claims,
+                "claim_validation_error": claim_error,
+                "occurrences": [],
+            }
+            manifest["manifest_sha256"] = sha256_bytes(
+                _stable_json_bytes(manifest)
+            )
+            return manifest, issues
+
+        source_artifact_id = str(entry.get("artifact_id") or "")
+        source_role = str(entry.get("source_role") or "").removeprefix("source:")
+        source_fingerprint = str(entry.get("fingerprint") or "")
+        raw_source_lock = candidate.get("source_lock")
+        source_lock = raw_source_lock if isinstance(raw_source_lock, dict) else {}
+        issues: list[dict[str, Any]] = []
+        if claim_error:
+            issues.append(
+                self._source_dialogue_issue(
+                    location="source_dialogue_authority.claims",
+                    evidence=claim_error,
+                    repair_action=(
+                        "修复每条候选protected_dialogue的speaker/text结构，并确保"
+                        "顶层与source_ingestion镜像的数量、顺序和内容完全一致。"
+                    ),
+                )
+            )
+        if "source_lock" in candidate and not isinstance(raw_source_lock, dict):
+            issues.append(
+                self._source_dialogue_issue(
+                    location="source_lock",
+                    evidence="候选source_lock必须是对象，不能以其他类型绕过权威源绑定。",
+                    repair_action="从服务端当前权威源重新签发完整source_lock对象。",
+                )
+            )
+
+        def validate_lock_aliases(
+            keys: tuple[str, ...],
+            *,
+            expected: str,
+            normalize: Any,
+            label: str,
+        ) -> None:
+            declared: list[tuple[str, str, Any]] = []
+            for key in keys:
+                if key not in source_lock:
+                    continue
+                raw_value = source_lock.get(key)
+                if not isinstance(raw_value, str) or not raw_value.strip():
+                    issues.append(
+                        self._source_dialogue_issue(
+                            location=f"source_lock.{key}",
+                            evidence=(
+                                f"候选source_lock的{label}声明必须是非空字符串；"
+                                f"actual={raw_value!r}"
+                            ),
+                            repair_action="从服务端当前权威源重新签发source lock。",
+                        )
+                    )
+                    continue
+                declared.append((key, raw_value, normalize(raw_value)))
+            normalized_values = {value for _key, _raw, value in declared}
+            if len(normalized_values) > 1:
+                issues.append(
+                    self._source_dialogue_issue(
+                        location=f"source_lock.{label}_alias_conflict",
+                        evidence=(
+                            f"候选source_lock的{label}别名互相冲突："
+                            + ", ".join(f"{key}={raw!r}" for key, raw, _ in declared)
+                        ),
+                        repair_action="删除冲突声明并由服务端重签唯一一致的source lock。",
+                    )
+                )
+            expected_value = normalize(expected)
+            for key, raw_value, normalized in declared:
+                if normalized == expected_value:
+                    continue
+                issues.append(
+                    self._source_dialogue_issue(
+                        location=f"source_lock.{key}",
+                        evidence=(
+                            f"候选source_lock的{label}与服务端权威源不一致："
+                            f"candidate={raw_value!r}, authoritative={expected!r}"
+                        ),
+                        repair_action="从服务端当前权威源重新签发source lock。",
+                    )
+                )
+
+        validate_lock_aliases(
+            ("source_artifact_id", "authoritative_source_artifact_id"),
+            expected=source_artifact_id,
+            normalize=lambda value: value.strip(),
+            label="source_artifact_id",
+        )
+        validate_lock_aliases(
+            ("source_fingerprint", "authoritative_source_fingerprint"),
+            expected=source_fingerprint,
+            normalize=lambda value: value.strip().casefold(),
+            label="source_fingerprint",
+        )
+        validate_lock_aliases(
+            ("source_role", "authoritative_source_role"),
+            expected=source_role,
+            normalize=lambda value: value.strip().casefold().removeprefix("source:"),
+            label="source_role",
+        )
+        extraction_sha = ""
+        occurrences: list[Any] = []
+        try:
+            extracted, source_record, _path = self._load_extracted_or_payload(
+                namespace, project_id, source_artifact_id
+            )
+            actual_fingerprint = str(source_record.get("fingerprint") or "")
+            if not source_fingerprint or actual_fingerprint != source_fingerprint:
+                raise SourceDialogueAuthorityError(
+                    "source_dialogue_authority_source_binding_mismatch: project source "
+                    "entry does not match stored artifact bytes"
+                )
+            recorded_role = str(
+                source_record.get("metadata", {}).get("source_role") or source_role
+            ).removeprefix("source:")
+            if recorded_role != source_role or source_role not in {"novel", "script"}:
+                raise SourceDialogueAuthorityError(
+                    "source_dialogue_authority_source_binding_mismatch: source role is "
+                    "not stable across project entry and artifact metadata"
+                )
+            source_text = extracted_source_text(extracted)
+            extraction_sha = sha256_bytes(_stable_json_bytes(extracted))
+            occurrences = parse_source_dialogue_authority(
+                source_text, source_role=source_role
+            )
+        except (OSError, TypeError, ValueError, SourceDialogueAuthorityError) as exc:
+            # SourceDialogueAuthorityError is a ValueError subclass; spelling
+            # it out documents that parser ambiguity is an expected gate, not
+            # an internal error eligible for warning-only fallback.
+            issues.append(
+                self._source_dialogue_issue(
+                    location="source_dialogue_authority.source",
+                    evidence=str(exc)[:4000],
+                    repair_action=(
+                        "修正或明确标注权威源中的说话人/发声语法，重新导入源文件后运行预检；"
+                        "不得用候选人物表反向授权。"
+                    ),
+                )
+            )
+
+        missing = missing_authoritative_occurrences(occurrences, claims)
+        expected_claims = [(row.speaker, row.text) for row in occurrences]
+        exact_claim_match = authority_claims_match_exactly(occurrences, claims)
+        if not exact_claim_match:
+            first_difference = next(
+                (
+                    index
+                    for index in range(max(len(expected_claims), len(claims)))
+                    if (
+                        expected_claims[index]
+                        if index < len(expected_claims)
+                        else None
+                    )
+                    != (claims[index] if index < len(claims) else None)
+                ),
+                0,
+            )
+            expected_at_difference = (
+                expected_claims[first_difference]
+                if first_difference < len(expected_claims)
+                else None
+            )
+            claim_at_difference = (
+                claims[first_difference]
+                if first_difference < len(claims)
+                else None
+            )
+            issues.append(
+                self._source_dialogue_issue(
+                    location=(
+                        "source_dialogue_authority.claims."
+                        f"index-{first_difference}"
+                    ),
+                    evidence=(
+                        "候选protected_dialogue必须与源文authority逐occurrence严格等值；"
+                        f"expected_count={len(expected_claims)}, claim_count={len(claims)}, "
+                        f"first_expected={expected_at_difference!r}, "
+                        f"first_claim={claim_at_difference!r}。"
+                        "前插、后插、中插或重复额外对白均不被源文授权。"
+                    ),
+                    repair_action=(
+                        "将protected_dialogue恢复为源文authority的精确说话人、正文、标点、"
+                        "重复次数和顺序；叙述转台词须走另一个明确授权且可审计的剧情变更流程。"
+                    ),
+                )
+            )
+        for occurrence in missing:
+            issues.append(
+                self._source_dialogue_issue(
+                    location=(
+                        "source_dialogue_authority.occurrence."
+                        f"line-{occurrence.line_number}.char-{occurrence.char_offset}"
+                    ),
+                    evidence=(
+                        "源文对白未按说话人、正文、标点、重复次数和顺序进入保护清单："
+                        f"speaker={occurrence.speaker!r}, text={occurrence.text!r}, "
+                        f"kind={occurrence.kind}"
+                    ),
+                    repair_action=(
+                        "从服务端源文authority重建protected_dialogue，并逐occurrence保持"
+                        "说话人、正文、标点、重复次数和顺序。"
+                    ),
+                )
+            )
+        manifest = {
+            **base_manifest,
+            "status": "pass" if not issues else "fail_current",
+            "source_artifact_id": source_artifact_id,
+            "source_role": source_role,
+            "source_fingerprint": source_fingerprint,
+            "source_extraction_sha256": extraction_sha or None,
+            "occurrence_count": len(occurrences),
+            "claim_count": len(claims),
+            "missing_occurrence_count": len(missing),
+            "exact_claim_match": exact_claim_match,
+            "claim_validation_error": claim_error,
+            "occurrences": [row.as_dict() for row in occurrences],
+        }
+        manifest["manifest_sha256"] = sha256_bytes(_stable_json_bytes(manifest))
+        return manifest, issues
 
     @staticmethod
     def _sha256_identity(value: Any) -> str:
@@ -1558,6 +2046,25 @@ class StoryboardService:
             "target_model_contract": self._target_model_fingerprint,
         }
 
+    @staticmethod
+    def _normalized_semantic_audit_submission(
+        semantic_audit: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the canonical identity of one semantic submission.
+
+        SHA-256 hexadecimal is case-insensitive at the artifact boundary, so
+        normalize only that machine identity before hashing. Human evidence,
+        issue identifiers and free text remain byte-for-byte unchanged.
+        """
+
+        submission = SemanticAuditInput.model_validate(
+            semantic_audit
+        ).model_dump(mode="python")
+        submission["canonical_sha256"] = str(
+            submission["canonical_sha256"]
+        ).lower()
+        return submission
+
     def _attach_independent_evidence_matrix(
         self,
         report: dict[str, Any],
@@ -1571,8 +2078,8 @@ class StoryboardService:
         complete review and concrete evidence references for this canonical.
         """
 
-        submission = SemanticAuditInput.model_validate(semantic_audit).model_dump(
-            mode="python"
+        submission = self._normalized_semantic_audit_submission(
+            semantic_audit
         )
         if str(storyboard.get("schema_version") or "") != COMPACT_SCHEMA_VERSION:
             raise ValueError(
@@ -1676,7 +2183,13 @@ class StoryboardService:
 
         normalized_semantic_issues: list[dict[str, Any]] = []
         for issue in semantic_issues:
-            unknown_shots = sorted(set(issue.get("shot_ids", [])) - shot_refs)
+            submitted_shot_ids = list(issue.get("shot_ids", []))
+            if not submitted_shot_ids:
+                raise ValueError(
+                    "semantic_audit_repair_target_required: every failing semantic issue "
+                    "must authorize at least one audited shot"
+                )
+            unknown_shots = sorted(set(submitted_shot_ids) - shot_refs)
             if issue.get("batch_ids"):
                 raise ValueError(
                     "semantic_audit_batch_removed: issue targets must bind formal-master shots/fields"
@@ -1685,6 +2198,22 @@ class StoryboardService:
                 raise ValueError(
                     "semantic_audit_reference_invalid: unknown issue targets "
                     + ", ".join(unknown_shots)
+                )
+            canonical_shot_ids = [
+                str(
+                    shot_by_ref[reference].get("镜头编号")
+                    or shot_by_ref[reference].get("shot_uid")
+                    or ""
+                ).strip()
+                for reference in submitted_shot_ids
+            ]
+            if any(not reference for reference in canonical_shot_ids):
+                raise ValueError(
+                    "semantic_audit_reference_invalid: issue target has no canonical shot identity"
+                )
+            if len(set(canonical_shot_ids)) != len(canonical_shot_ids):
+                raise ValueError(
+                    "semantic_audit_reference_invalid: aliases cannot repeat the same canonical shot"
                 )
             layer_evidence = set(layer_by_name[str(issue["layer"])]["evidence_ids"])
             issue_evidence = {str(value) for value in issue.get("evidence_ids", [])}
@@ -1701,7 +2230,7 @@ class StoryboardService:
                     "semantic_layer": str(issue["layer"]),
                     "severity": str(issue.get("severity") or "fail"),
                     "blocking": bool(issue.get("blocking", True)),
-                    "shot_ids": list(issue.get("shot_ids", [])),
+                    "shot_ids": canonical_shot_ids,
                     "batch_ids": list(issue.get("batch_ids", [])),
                     "field": str(issue.get("field") or "语义审计"),
                     "location": f"semantic_audit.{issue['issue_id']}",
@@ -2731,9 +3260,12 @@ class StoryboardService:
         if project_id:
             hub = self.store.load_hub(namespace, project_id)
             ledger = self.store.load_ledger(namespace, project_id)
-            runtime_certificate = self._matching_runtime_certificate(
-                namespace, project_id
-            )
+            try:
+                runtime_certificate = self._matching_runtime_certificate(
+                    namespace, project_id
+                )
+            except ValueError:
+                runtime_certificate = None
             runtime_certificate_valid = bool(
                 runtime_certificate is not None
                 and runtime_certificate.get("result") == "pass"
@@ -2756,7 +3288,9 @@ class StoryboardService:
                     and runtime_certificate.get("result") == "pass"
                     and self.store.project_record_is_signed(runtime_certificate)
                 )
-            state_errors = self._project_state_errors(hub, ledger)
+            state_errors = self._project_state_errors(
+                namespace, project_id, hub, ledger
+            )
             data["project"] = project_agent.summarize(hub)
             data["issues"] = storyboard_agent.summarize(ledger)
             reuse_summary = self._project_reuse_summary(namespace, project_id, hub)
@@ -3418,12 +3952,33 @@ class StoryboardService:
             errors.append(f"{location}: {error.message}")
         return errors
 
+    def _ledger_checkpoint_authorizer(
+        self, namespace: str, project_id: str
+    ) -> Any:
+        """Return the project-bound verifier for a persisted replay checkpoint."""
+
+        def authorize(checkpoint: dict[str, Any]) -> bool:
+            return self.store.ledger_replay_checkpoint_is_authorized(
+                namespace, project_id, checkpoint
+            )
+
+        return authorize
+
     def _project_state_errors(
-        self, hub: dict[str, Any], ledger: dict[str, Any]
+        self,
+        namespace: str,
+        project_id: str,
+        hub: dict[str, Any],
+        ledger: dict[str, Any],
     ) -> list[str]:
         return (
             project_agent.validate_hub(hub)
-            + storyboard_agent.validate_ledger(ledger)
+            + storyboard_agent.validate_ledger(
+                ledger,
+                checkpoint_authorizer=self._ledger_checkpoint_authorizer(
+                    namespace, project_id
+                ),
+            )
             + [
                 f"hub_schema.{value}"
                 for value in self._whole_schema_errors(self._project_schema, hub)
@@ -3439,12 +3994,186 @@ class StoryboardService:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         hub = self.store.load_hub(namespace, project_id)
         ledger = self.store.load_ledger(namespace, project_id)
-        errors = self._project_state_errors(hub, ledger)
+        errors = self._project_state_errors(
+            namespace, project_id, hub, ledger
+        )
         if errors:
             raise ValueError(
                 "project_state_migration_required: " + "; ".join(errors[:20])
             )
         return hub, ledger
+
+    @staticmethod
+    def _project_migration_key(
+        *,
+        project_id: str,
+        work_order_id: str,
+        from_version: str,
+        target_version: str,
+    ) -> str:
+        return sha256_bytes(
+            _stable_json_bytes(
+                {
+                    "project_id": project_id,
+                    "work_order_id": work_order_id,
+                    "from_version": from_version,
+                    "target_version": target_version,
+                    "spec": "project-state-migration-v055",
+                }
+            )
+        )
+
+    def _assert_project_migration_record_images(
+        self,
+        record: dict[str, Any],
+        *,
+        project_id: str,
+        migration_id: str,
+    ) -> None:
+        """Verify every signed journal image before any state-file write."""
+
+        image_bindings = (
+            ("hub_before", "hub_before_sha256"),
+            ("ledger_before", "ledger_before_sha256"),
+            ("hub_after", "hub_after_sha256"),
+            ("ledger_after", "ledger_after_sha256"),
+        )
+        if (
+            record.get("record_id") != migration_id
+            or record.get("migration_id") != migration_id
+            or record.get("project_id") != project_id
+            or record.get("preserves_artifacts") is not True
+            or not isinstance(record.get("changed_paths"), list)
+        ):
+            raise ValueError("migration_record_authority_conflict")
+        for image_field, sha_field in image_bindings:
+            image = record.get(image_field)
+            declared_sha = record.get(sha_field)
+            if (
+                not isinstance(image, dict)
+                or not isinstance(declared_sha, str)
+                or self.store.project_state_sha256(image) != declared_sha
+            ):
+                raise ValueError("migration_record_authority_conflict")
+
+    def _project_migration_candidate_errors(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        hub_before: dict[str, Any],
+        ledger_before: dict[str, Any],
+        candidate_hub: dict[str, Any],
+        candidate_ledger: dict[str, Any],
+        migration_id: str,
+        signed_journal: dict[str, Any] | None = None,
+    ) -> list[str]:
+        """Validate one migration after-image without authorizing a write."""
+
+        candidate_checkpoint = candidate_ledger.get("replay_checkpoint")
+        if (
+            isinstance(candidate_checkpoint, dict)
+            and candidate_checkpoint != ledger_before.get("replay_checkpoint")
+        ):
+            expected_old_ledger_sha = self.store.project_state_sha256(
+                ledger_before
+            )
+
+            def candidate_checkpoint_authorizer(
+                checkpoint: dict[str, Any],
+            ) -> bool:
+                journal_binding_valid = signed_journal is None or bool(
+                    self.store.project_record_is_signed(signed_journal)
+                    and signed_journal.get("record_id") == migration_id
+                    and signed_journal.get("migration_id") == migration_id
+                    and signed_journal.get("project_id") == project_id
+                    and signed_journal.get("ledger_before_sha256")
+                    == expected_old_ledger_sha
+                    and signed_journal.get("ledger_after")
+                    == candidate_ledger
+                    and signed_journal.get("ledger_after_sha256")
+                    == self.store.project_state_sha256(candidate_ledger)
+                )
+                return bool(
+                    journal_binding_valid
+                    and checkpoint == candidate_checkpoint
+                    and checkpoint.get("migration_id") == migration_id
+                    and checkpoint.get("old_ledger_canonical_sha256")
+                    == expected_old_ledger_sha
+                )
+
+        else:
+            candidate_checkpoint_authorizer = (
+                self._ledger_checkpoint_authorizer(namespace, project_id)
+            )
+        return (
+            project_agent.validate_hub(candidate_hub)
+            + storyboard_agent.validate_ledger(
+                candidate_ledger,
+                checkpoint_authorizer=candidate_checkpoint_authorizer,
+            )
+            + [
+                f"hub_schema.{value}"
+                for value in self._whole_schema_errors(
+                    self._project_schema, candidate_hub
+                )
+            ]
+            + [
+                f"ledger_schema.{value}"
+                for value in self._whole_schema_errors(
+                    self._ledger_schema, candidate_ledger
+                )
+            ]
+        )
+
+    def _assert_rolled_back_migration_candidate_matches(
+        self,
+        record: dict[str, Any],
+        *,
+        migration_id: str,
+    ) -> None:
+        """Rebuild a rolled-back candidate with its sealed timestamps."""
+
+        hub_after = record["hub_after"]
+        ledger_after = record["ledger_after"]
+        migration_history = next(
+            (
+                row
+                for row in reversed(hub_after.get("version_history", []))
+                if isinstance(row, dict)
+                and row.get("migration_id") == migration_id
+            ),
+            {},
+        )
+        hub_timestamp = str(
+            migration_history.get("timestamp")
+            or hub_after.get("updated_at")
+            or ""
+        )
+        ledger_timestamp = str(ledger_after.get("updated_at") or "")
+        if not hub_timestamp or not ledger_timestamp:
+            raise ValueError("migration_record_authority_conflict")
+        expected_hub, expected_hub_changes = (
+            project_agent.migrate_hub_to_current(
+                record["hub_before"],
+                timestamp=hub_timestamp,
+                migration_id=migration_id,
+            )
+        )
+        expected_ledger, expected_ledger_changes = (
+            storyboard_agent.migrate_ledger_to_current(
+                record["ledger_before"],
+                timestamp=ledger_timestamp,
+                migration_id=migration_id,
+            )
+        )
+        if (
+            expected_hub != hub_after
+            or expected_ledger != ledger_after
+            or expected_hub_changes + expected_ledger_changes
+            != record.get("changed_paths")
+        ):
+            raise ValueError("migration_record_authority_conflict")
 
     def migrate_project_state(
         self,
@@ -3463,6 +4192,10 @@ class StoryboardService:
         self._require_runtime()
         if action not in {"plan", "execute", "rollback"}:
             raise ValueError("migration action must be plan, execute, or rollback")
+        if action in {"execute", "rollback"} and not expected_current_version:
+            raise ValueError(
+                "expected_current_version is required for migration execute or rollback"
+            )
         if target_version != project_agent.COMPACT_MASTER_VERSION:
             raise ValueError(
                 f"unsupported migration target: expected {project_agent.COMPACT_MASTER_VERSION}"
@@ -3484,6 +4217,11 @@ class StoryboardService:
                 project_id,
                 kind="migrations",
                 record_id=migration_id,
+            )
+            self._assert_project_migration_record_images(
+                rollback_record,
+                project_id=project_id,
+                migration_id=migration_id,
             )
             if (
                 rollback_record.get("work_order_id") != work_order_id
@@ -3511,94 +4249,93 @@ class StoryboardService:
                 data={"migration": record, "authored_artifacts_modified": False},
             )
 
-        # A process can stop after replacing hub.json but before ledger.json.
-        # Resume the signed prepared journal before deriving a key from the
-        # now-partially-updated state; otherwise the changed version would make
-        # an exact retry calculate the wrong migration key.
+        # Resolve every journal strictly before selecting one.  An execute may
+        # never run beside a project rollback, and an explicit migration ID is
+        # authoritative rather than a hint that may fall back to another row.
+        migration_records: list[dict[str, Any]] = []
+        requested_migration: dict[str, Any] | None = None
         prepared_migration: dict[str, Any] | None = None
         if action == "execute":
+            migration_records = self.store.list_project_records_strict(
+                namespace, project_id, kind="migrations"
+            )
+            if any(
+                row.get("status") == "rolling_back"
+                for row in migration_records
+            ):
+                raise ValueError(
+                    "migration_rollback_in_progress: finish rollback before execute"
+                )
             if migration_id:
                 try:
-                    candidate_record = self.store.get_project_record(
+                    requested_migration = self.store.get_project_record(
                         namespace,
                         project_id,
                         kind="migrations",
                         record_id=migration_id,
                     )
-                except ValueError:
-                    candidate_record = None
-                if isinstance(candidate_record, dict) and (
-                    candidate_record.get("project_id") != project_id
-                    or candidate_record.get("work_order_id") != work_order_id
-                    or candidate_record.get("target_version") != target_version
-                    or (
-                        expected_current_version
-                        and candidate_record.get("from_version")
-                        != expected_current_version
-                    )
+                except ValueError as exc:
+                    if not self._is_unknown_project_record_error(
+                        exc,
+                        kind="migrations",
+                        record_id=migration_id,
+                    ):
+                        raise
+                    requested_migration = None
+                if requested_migration is None and any(
+                    row.get("status") in {"prepared", "replaying"}
+                    for row in migration_records
                 ):
                     raise ValueError("migration_record_authority_conflict")
                 if (
-                    isinstance(candidate_record, dict)
-                    and candidate_record.get("status") == "prepared"
+                    requested_migration is not None
+                    and requested_migration.get("status")
+                    in {"prepared", "replaying"}
                 ):
-                    expected_key = sha256_bytes(
-                        _stable_json_bytes(
-                            {
-                                "project_id": project_id,
-                                "work_order_id": work_order_id,
-                                "from_version": candidate_record.get("from_version"),
-                                "target_version": target_version,
-                                "spec": "project-state-migration-v055",
-                            }
-                        )
-                    )
-                    if (
-                        candidate_record.get("project_id") != project_id
-                        or candidate_record.get("work_order_id") != work_order_id
-                        or candidate_record.get("target_version") != target_version
-                        or (
-                            expected_current_version
-                            and candidate_record.get("from_version")
-                            != expected_current_version
-                        )
-                        or candidate_record.get("migration_key") != expected_key
-                        or candidate_record.get("ruleset_version")
-                        != self._ruleset_version
-                        or candidate_record.get("validator_version")
-                        != self._validator_version()
-                    ):
-                        raise ValueError("migration_record_authority_conflict")
-                    prepared_migration = candidate_record
-            if prepared_migration is None:
-                prepared_migration = next(
-                    (
-                        row
-                        for row in self.store.list_project_records(
-                            namespace, project_id, kind="migrations"
-                        )
-                        if row.get("status") == "prepared"
-                        and row.get("work_order_id") == work_order_id
-                        and row.get("target_version") == target_version
-                    ),
-                    None,
+                    prepared_migration = requested_migration
+            else:
+                matching_prepared = [
+                    row
+                    for row in migration_records
+                    if row.get("status") in {"prepared", "replaying"}
+                    and row.get("work_order_id") == work_order_id
+                    and row.get("target_version") == target_version
+                ]
+                if len(matching_prepared) > 1:
+                    raise ValueError("migration_record_authority_conflict")
+                prepared_migration = (
+                    matching_prepared[0] if matching_prepared else None
                 )
+            if prepared_migration is None and any(
+                row.get("status") in {"prepared", "replaying"}
+                for row in migration_records
+            ):
+                raise ValueError("migration_record_authority_conflict")
             if prepared_migration is not None:
-                expected_prepared_key = sha256_bytes(
-                    _stable_json_bytes(
-                        {
-                            "project_id": project_id,
-                            "work_order_id": work_order_id,
-                            "from_version": prepared_migration.get("from_version"),
-                            "target_version": target_version,
-                            "spec": "project-state-migration-v055",
-                        }
-                    )
+                prepared_id = str(prepared_migration.get("migration_id") or "")
+                prepared_from_version = str(
+                    prepared_migration.get("from_version") or ""
+                )
+                expected_prepared_key = self._project_migration_key(
+                    project_id=project_id,
+                    work_order_id=work_order_id,
+                    from_version=prepared_from_version,
+                    target_version=target_version,
                 )
                 if (
                     prepared_migration.get("project_id") != project_id
                     or prepared_migration.get("work_order_id") != work_order_id
                     or prepared_migration.get("target_version") != target_version
+                    or prepared_migration.get("status")
+                    not in {"prepared", "replaying"}
+                    or (
+                        migration_id is not None
+                        and prepared_id != migration_id
+                    )
+                    or (
+                        expected_current_version is not None
+                        and prepared_from_version != expected_current_version
+                    )
                     or prepared_migration.get("migration_key")
                     != expected_prepared_key
                     or prepared_migration.get("ruleset_version")
@@ -3607,6 +4344,26 @@ class StoryboardService:
                     != self._validator_version()
                 ):
                     raise ValueError("migration_record_authority_conflict")
+                self._assert_project_migration_record_images(
+                    prepared_migration,
+                    project_id=project_id,
+                    migration_id=prepared_id,
+                )
+                prepared_errors = self._project_migration_candidate_errors(
+                    namespace,
+                    project_id,
+                    hub_before=prepared_migration["hub_before"],
+                    ledger_before=prepared_migration["ledger_before"],
+                    candidate_hub=prepared_migration["hub_after"],
+                    candidate_ledger=prepared_migration["ledger_after"],
+                    migration_id=prepared_id,
+                    signed_journal=prepared_migration,
+                )
+                if prepared_errors:
+                    raise ValueError(
+                        "migration_candidate_invalid: "
+                        + "; ".join(prepared_errors[:20])
+                    )
                 current_certificate = self._require_runtime_test_certificate(
                     namespace, project_id
                 )
@@ -3617,11 +4374,11 @@ class StoryboardService:
                 recovered = self.store.commit_project_state_migration(
                     namespace,
                     project_id,
-                    migration_id=str(prepared_migration["migration_id"]),
-                    migration_key=str(prepared_migration["migration_key"]),
-                    work_order_id=str(prepared_migration["work_order_id"]),
-                    from_version=str(prepared_migration["from_version"]),
-                    target_version=str(prepared_migration["target_version"]),
+                    migration_id=prepared_id,
+                    migration_key=expected_prepared_key,
+                    work_order_id=work_order_id,
+                    from_version=prepared_from_version,
+                    target_version=target_version,
                     hub_before=prepared_migration["hub_before"],
                     ledger_before=prepared_migration["ledger_before"],
                     hub_after=prepared_migration["hub_after"],
@@ -3629,15 +4386,29 @@ class StoryboardService:
                     runtime_test_certificate_id=str(
                         current_certificate["certificate_id"]
                     ),
+                    runtime_test_certificate_key=self._runtime_certificate_key(),
                     ruleset_version=self._ruleset_version,
                     validator_version=self._validator_version(),
-                    changed_paths=list(prepared_migration.get("changed_paths", [])),
+                    changed_paths=list(prepared_migration["changed_paths"]),
                 )
+                recovered_hub = self.store.load_hub(namespace, project_id)
+                recovered_ledger = self.store.load_ledger(namespace, project_id)
+                recovered_errors = self._project_state_errors(
+                    namespace,
+                    project_id,
+                    recovered_hub,
+                    recovered_ledger,
+                )
+                if recovered_errors:
+                    raise RuntimeError(
+                        "migration_recovered_state_invalid: "
+                        + "; ".join(recovered_errors[:20])
+                    )
                 return ToolResponse(
                     status="migration_recovered",
                     summary=(
                         f"项目控制状态迁移已从签名日志恢复｜"
-                        f"{prepared_migration['from_version']}→{target_version}"
+                        f"{prepared_from_version}→{target_version}"
                     ),
                     project_id=project_id,
                     work_order_id=work_order_id,
@@ -3647,25 +4418,52 @@ class StoryboardService:
                     },
                 )
 
-        key_payload = {
-            "project_id": project_id,
-            "work_order_id": work_order_id,
-            # Use the caller's CAS version when present so an exact retry after a
-            # successful write resolves to the original migration key.
-            "from_version": expected_current_version or current_version,
-            "target_version": target_version,
-            "spec": "project-state-migration-v055",
-        }
-        migration_key = sha256_bytes(_stable_json_bytes(key_payload))
-        resolved_migration_id = migration_id or f"MIG-{migration_key[:20]}"
-        existing = self.store.find_project_record(
-            namespace,
-            project_id,
-            kind="migrations",
-            field="migration_key",
-            value=migration_key,
+        key_from_version = expected_current_version or current_version
+        migration_key = self._project_migration_key(
+            project_id=project_id,
+            work_order_id=work_order_id,
+            from_version=key_from_version,
+            target_version=target_version,
         )
+        resolved_migration_id = migration_id or f"MIG-{migration_key[:20]}"
+        existing: dict[str, Any] | None = None
+        if action == "execute":
+            if requested_migration is not None and (
+                requested_migration.get("migration_key") != migration_key
+                or requested_migration.get("migration_id")
+                != resolved_migration_id
+            ):
+                raise ValueError("migration_record_authority_conflict")
+            same_key_records = [
+                row
+                for row in migration_records
+                if row.get("migration_key") == migration_key
+            ]
+            if any(
+                row.get("migration_id") != resolved_migration_id
+                for row in same_key_records
+            ):
+                raise ValueError("migration_record_authority_conflict")
+            if len(same_key_records) > 1:
+                raise ValueError("migration_record_authority_conflict")
+            existing = (
+                requested_migration
+                if requested_migration is not None
+                else (same_key_records[0] if same_key_records else None)
+            )
+            if existing is not None and existing.get("status") not in {
+                "committed",
+                "rolled_back",
+                "replaying",
+            }:
+                raise ValueError("migration_record_authority_conflict")
         if existing and existing.get("status") == "committed":
+            existing_id = str(existing.get("migration_id") or "")
+            self._assert_project_migration_record_images(
+                existing,
+                project_id=project_id,
+                migration_id=existing_id,
+            )
             current_certificate = self._require_runtime_test_certificate(
                 namespace, project_id
             )
@@ -3674,19 +4472,23 @@ class StoryboardService:
                 or existing.get("project_id") != project_id
                 or existing.get("work_order_id") != work_order_id
                 or existing.get("migration_key") != migration_key
-                or existing.get("from_version")
-                != (expected_current_version or current_version)
+                or existing.get("from_version") != key_from_version
                 or existing.get("target_version") != target_version
-                or (
-                    migration_id
-                    and str(existing.get("migration_id") or "") != migration_id
-                )
+                or existing_id != resolved_migration_id
                 or existing.get("ruleset_version") != self._ruleset_version
                 or existing.get("validator_version") != self._validator_version()
                 or existing.get("runtime_test_certificate_id")
                 != str(current_certificate["certificate_id"])
             ):
                 raise ValueError("migration_record_authority_conflict")
+            current_errors = self._project_state_errors(
+                namespace, project_id, hub_before, ledger_before
+            )
+            if current_errors:
+                raise ValueError(
+                    "migration_committed_state_invalid: "
+                    + "; ".join(current_errors[:20])
+                )
             return ToolResponse(
                 status="already_migrated",
                 summary=f"项目迁移已完成且幂等｜{resolved_migration_id}",
@@ -3694,23 +4496,113 @@ class StoryboardService:
                 work_order_id=work_order_id,
                 data={"migration": existing, "authored_artifacts_modified": False},
             )
+        if existing and existing.get("status") == "rolled_back":
+            existing_id = str(existing.get("migration_id") or "")
+            self._assert_project_migration_record_images(
+                existing,
+                project_id=project_id,
+                migration_id=existing_id,
+            )
+            self._assert_rolled_back_migration_candidate_matches(
+                existing,
+                migration_id=existing_id,
+            )
+            current_certificate = self._require_runtime_test_certificate(
+                namespace, project_id
+            )
+            current_hub_sha = self.store.project_state_sha256(hub_before)
+            current_ledger_sha = self.store.project_state_sha256(ledger_before)
+            if (
+                existing.get("work_order_id") != work_order_id
+                or existing.get("migration_key") != migration_key
+                or existing.get("from_version") != key_from_version
+                or existing.get("target_version") != target_version
+                or existing_id != resolved_migration_id
+                or existing.get("ruleset_version") != self._ruleset_version
+                or existing.get("validator_version") != self._validator_version()
+                or existing.get("runtime_test_certificate_id")
+                != str(current_certificate["certificate_id"])
+                or current_hub_sha
+                not in {
+                    existing.get("hub_before_sha256"),
+                    existing.get("hub_after_sha256"),
+                }
+                or current_ledger_sha
+                not in {
+                    existing.get("ledger_before_sha256"),
+                    existing.get("ledger_after_sha256"),
+                }
+            ):
+                raise ValueError("migration_record_authority_conflict")
+            replay_errors = self._project_migration_candidate_errors(
+                namespace,
+                project_id,
+                hub_before=existing["hub_before"],
+                ledger_before=existing["ledger_before"],
+                candidate_hub=existing["hub_after"],
+                candidate_ledger=existing["ledger_after"],
+                migration_id=existing_id,
+                signed_journal=existing,
+            )
+            if replay_errors:
+                raise ValueError(
+                    "migration_candidate_invalid: "
+                    + "; ".join(replay_errors[:20])
+                )
+            replayed = self.store.commit_project_state_migration(
+                namespace,
+                project_id,
+                migration_id=existing_id,
+                migration_key=migration_key,
+                work_order_id=work_order_id,
+                from_version=key_from_version,
+                target_version=target_version,
+                hub_before=existing["hub_before"],
+                ledger_before=existing["ledger_before"],
+                hub_after=existing["hub_after"],
+                ledger_after=existing["ledger_after"],
+                runtime_test_certificate_id=str(
+                    current_certificate["certificate_id"]
+                ),
+                runtime_test_certificate_key=self._runtime_certificate_key(),
+                ruleset_version=self._ruleset_version,
+                validator_version=self._validator_version(),
+                changed_paths=list(existing["changed_paths"]),
+            )
+            replayed_hub = self.store.load_hub(namespace, project_id)
+            replayed_ledger = self.store.load_ledger(namespace, project_id)
+            replayed_errors = self._project_state_errors(
+                namespace,
+                project_id,
+                replayed_hub,
+                replayed_ledger,
+            )
+            if replayed_errors:
+                raise RuntimeError(
+                    "migration_committed_state_invalid: "
+                    + "; ".join(replayed_errors[:20])
+                )
+            return ToolResponse(
+                status="migrated",
+                summary=(
+                    f"项目控制状态迁移已按回滚日志精确重执行｜"
+                    f"{key_from_version}→{target_version}"
+                ),
+                project_id=project_id,
+                work_order_id=work_order_id,
+                data={
+                    "migration": replayed,
+                    "authored_artifacts_modified": False,
+                },
+            )
         if expected_current_version and current_version != expected_current_version:
             raise ValueError(
                 "migration_current_version_mismatch: "
                 f"expected {expected_current_version}, found {current_version}"
             )
         if current_version == target_version:
-            current_errors = (
-                project_agent.validate_hub(hub_before)
-                + storyboard_agent.validate_ledger(ledger_before)
-                + [
-                    f"hub_schema.{value}"
-                    for value in self._whole_schema_errors(self._project_schema, hub_before)
-                ]
-                + [
-                    f"ledger_schema.{value}"
-                    for value in self._whole_schema_errors(self._ledger_schema, ledger_before)
-                ]
+            current_errors = self._project_state_errors(
+                namespace, project_id, hub_before, ledger_before
             )
             if not current_errors:
                 return ToolResponse(
@@ -3724,30 +4616,25 @@ class StoryboardService:
                     },
                 )
 
+        migration_timestamp = utc_stamp()
         candidate_hub, hub_changes = project_agent.migrate_hub_to_current(
             hub_before,
-            timestamp=utc_stamp(),
+            timestamp=migration_timestamp,
             migration_id=resolved_migration_id,
         )
         candidate_ledger, ledger_changes = storyboard_agent.migrate_ledger_to_current(
             ledger_before,
-            timestamp=utc_stamp(),
+            timestamp=migration_timestamp,
+            migration_id=resolved_migration_id,
         )
-        validation_errors = (
-            project_agent.validate_hub(candidate_hub)
-            + storyboard_agent.validate_ledger(candidate_ledger)
-            + [
-                f"hub_schema.{value}"
-                for value in self._whole_schema_errors(
-                    self._project_schema, candidate_hub
-                )
-            ]
-            + [
-                f"ledger_schema.{value}"
-                for value in self._whole_schema_errors(
-                    self._ledger_schema, candidate_ledger
-                )
-            ]
+        validation_errors = self._project_migration_candidate_errors(
+            namespace,
+            project_id,
+            hub_before=hub_before,
+            ledger_before=ledger_before,
+            candidate_hub=candidate_hub,
+            candidate_ledger=candidate_ledger,
+            migration_id=resolved_migration_id,
         )
         report = {
             "migration_id": resolved_migration_id,
@@ -3804,10 +4691,24 @@ class StoryboardService:
             hub_after=candidate_hub,
             ledger_after=candidate_ledger,
             runtime_test_certificate_id=str(runtime_certificate["certificate_id"]),
+            runtime_test_certificate_key=self._runtime_certificate_key(),
             ruleset_version=self._ruleset_version,
             validator_version=self._validator_version(),
             changed_paths=hub_changes + ledger_changes,
         )
+        committed_hub = self.store.load_hub(namespace, project_id)
+        committed_ledger = self.store.load_ledger(namespace, project_id)
+        committed_errors = self._project_state_errors(
+            namespace,
+            project_id,
+            committed_hub,
+            committed_ledger,
+        )
+        if committed_errors:
+            raise RuntimeError(
+                "migration_committed_state_invalid: "
+                + "; ".join(committed_errors[:20])
+            )
         return ToolResponse(
             status="migrated",
             summary=f"项目控制状态迁移完成｜{current_version}→{target_version}｜历史分镜未改写",
@@ -4173,6 +5074,9 @@ class StoryboardService:
             "claim_lease_seconds",
             "claim_lease_expires_at",
             "claim_lease_expires_epoch_seconds",
+            "claim_history",
+            "idempotent_replay",
+            "consumption_claim",
             "consumed_by_work_order_id",
             "consumed_at",
             "audit_certificate_id",
@@ -4983,6 +5887,42 @@ class StoryboardService:
             report["shot_count"] = len(scoped_shots)
             report["status"] = "pass" if not scoped_issues else "fail_current"
             report["scope_status"] = report["status"]
+        if scope_kind == "full":
+            source_dialogue_authority, source_dialogue_issues = (
+                self._source_dialogue_authority_manifest(
+                    namespace,
+                    project_id,
+                    candidate,
+                    hub=hub,
+                )
+            )
+            report = copy.deepcopy(report)
+            report["source_dialogue_authority"] = copy.deepcopy(
+                source_dialogue_authority
+            )
+            report.setdefault("issues", []).extend(source_dialogue_issues)
+        else:
+            source_dialogue_authority = {
+                "parser_version": SOURCE_DIALOGUE_PARSER_VERSION,
+                "grammar_version": SOURCE_DIALOGUE_GRAMMAR_VERSION,
+                "grammar_sha256": SOURCE_DIALOGUE_GRAMMAR_SHA256,
+                "authority_source": "server_project_state_only",
+                "candidate_authority_fields_used": [],
+                "status": "not_evaluated",
+                "reason": (
+                    "source dialogue authority is bound at full-scope preflight"
+                    if preparation_error is None
+                    else "candidate preparation failed before source dialogue authority"
+                ),
+                "scope_kind": scope_kind,
+                "scope_id": scope_id,
+            }
+            source_dialogue_authority["manifest_sha256"] = sha256_bytes(
+                _stable_json_bytes(source_dialogue_authority)
+            )
+        source_dialogue_authority_sha = str(
+            source_dialogue_authority["manifest_sha256"]
+        )
         candidate_sha = canonical_storyboard_sha256(candidate)
         scene_groups = _scene_scope_groups(scoped_candidate) if scope_kind == "scene" else []
         stable_scene_id = (
@@ -5075,6 +6015,7 @@ class StoryboardService:
                     "validator": self._validator_version(),
                     "runtime_certificate_id": runtime_certificate["certificate_id"],
                     "session": self._session_fingerprint(namespace, request_session_id),
+                    "source_dialogue_authority_sha256": source_dialogue_authority_sha,
                 }
             )
         )
@@ -5195,7 +6136,11 @@ class StoryboardService:
                         ),
                         "category": str(
                             issue.get("semantic_layer")
-                            or _issue_category(str(issue.get("error_code") or ""))
+                            if issue.get("semantic_layer")
+                            in storyboard_agent.AUDIT_CATEGORIES
+                            else _issue_category(
+                                str(issue.get("error_code") or "")
+                            )
                         ),
                         "severity": (
                             severity
@@ -5256,7 +6201,13 @@ class StoryboardService:
             }
             post_profile: dict[str, Any]
             with self.store.mutate_project(namespace, project_id) as (_hub, ledger):
-                storyboard_agent.ingest_event(ledger, event)
+                storyboard_agent.ingest_event(
+                    ledger,
+                    event,
+                    checkpoint_authorizer=self._ledger_checkpoint_authorizer(
+                        namespace, project_id
+                    ),
+                )
                 post_profile = storyboard_agent.active_prevention_profile(ledger)
             post_profile_sha = sha256_bytes(_stable_json_bytes(post_profile))
             record_value = {
@@ -5283,6 +6234,10 @@ class StoryboardService:
                 "candidate_sha256": candidate_sha,
                 "ruleset_version": self._ruleset_version,
                 "validator_version": self._validator_version(),
+                "source_dialogue_authority_sha256": source_dialogue_authority_sha,
+                "source_dialogue_authority": copy.deepcopy(
+                    source_dialogue_authority
+                ),
                 "runtime_test_certificate_id": runtime_certificate["certificate_id"],
                 "session_fingerprint": self._session_fingerprint(
                     namespace, request_session_id
@@ -5334,7 +6289,13 @@ class StoryboardService:
                 if not isinstance(event, dict):
                     raise ValueError("draft_preflight_learning_record_incomplete")
                 with self.store.mutate_project(namespace, project_id) as (_hub, ledger):
-                    storyboard_agent.ingest_event(ledger, event)
+                    storyboard_agent.ingest_event(
+                        ledger,
+                        event,
+                        checkpoint_authorizer=self._ledger_checkpoint_authorizer(
+                            namespace, project_id
+                        ),
+                    )
                     post_profile = storyboard_agent.active_prevention_profile(ledger)
                 record["prevention_profile_sha256"] = sha256_bytes(
                     _stable_json_bytes(post_profile)
@@ -5408,6 +6369,17 @@ class StoryboardService:
         expected_profile_sha = sha256_bytes(_stable_json_bytes(profile))
         runtime_certificate = self._require_runtime_test_certificate(namespace, project_id)
         hub = self.store.load_hub(namespace, project_id)
+        source_dialogue_authority, source_dialogue_issues = (
+            self._source_dialogue_authority_manifest(
+                namespace,
+                project_id,
+                candidate,
+                hub=hub,
+            )
+        )
+        source_dialogue_authority_sha = str(
+            source_dialogue_authority.get("manifest_sha256") or ""
+        )
         coverage_required = bool(
             hub.get("policy", {}).get("scene_draft_preflight_required", False)
         )
@@ -5438,6 +6410,27 @@ class StoryboardService:
             "commit_ready": record.get("commit_ready") is True,
             "report": record.get("report_sha256")
             == sha256_bytes(_stable_json_bytes(record.get("report") or {})),
+            "source_dialogue_authority_clean": (
+                not source_dialogue_issues
+                and source_dialogue_authority.get("status")
+                in {"pass", "not_applicable"}
+            ),
+            "source_dialogue_authority_hash": (
+                bool(source_dialogue_authority_sha)
+                and record.get("source_dialogue_authority_sha256")
+                == source_dialogue_authority_sha
+            ),
+            "source_dialogue_authority_manifest": (
+                record.get("source_dialogue_authority")
+                == source_dialogue_authority
+            ),
+            "source_dialogue_authority_report_binding": (
+                isinstance(record.get("report"), dict)
+                and (record.get("report") or {})
+                .get("source_dialogue_authority", {})
+                .get("manifest_sha256")
+                == source_dialogue_authority_sha
+            ),
             "scene_coverage_required": record.get("scene_coverage_required")
             is coverage_required,
             "scene_coverage_complete": (
@@ -5540,7 +6533,9 @@ class StoryboardService:
             ),
         }
         with self.store.mutate_project(namespace, project_id) as (hub, ledger):
-            state_errors = self._project_state_errors(hub, ledger)
+            state_errors = self._project_state_errors(
+                namespace, project_id, hub, ledger
+            )
             reuse_summary = self._project_reuse_summary(
                 namespace, project_id, hub
             )
@@ -6278,6 +7273,296 @@ class StoryboardService:
             current = str(parent)
         return artifact_id
 
+    @staticmethod
+    def _audit_event_report_input_sha256(
+        report: dict[str, Any],
+    ) -> str:
+        """Hash the report shape that existed when its event was ingested."""
+
+        event_report = copy.deepcopy(report)
+        event_report.pop("audit_summary", None)
+        thresholds = (
+            event_report.get("independent_evidence_matrix", {}).get(
+                "quality_thresholds"
+            )
+        )
+        if isinstance(thresholds, dict):
+            thresholds["blocking_error_count"] = sum(
+                bool(issue.get("blocking", True))
+                for issue in event_report.get("issues", [])
+                if isinstance(issue, dict)
+            )
+            thresholds["residual_issue_count"] = 0
+            thresholds["introduced_issue_count"] = 0
+        return sha256_bytes(_stable_json_bytes(event_report))
+
+    @staticmethod
+    def _known_prevention_pattern_keys_before_event(
+        ledger: dict[str, Any], event_index: int
+    ) -> set[str]:
+        """Reconstruct the prevention profile visible before one event.
+
+        ``ledger.issues`` is a materialized projection of the full event
+        history.  Reusing it directly while validating a completed replay
+        would count patterns learned from the event being validated as prior
+        knowledge.  Select only issue histories whose authority event is in
+        the immutable prefix before ``event_index`` instead.
+        """
+
+        prefix_event_ids = {
+            str(row.get("event_id") or "").strip().casefold()
+            for row in ledger.get("events", [])[:event_index]
+            if isinstance(row, dict) and row.get("event_id")
+        }
+        checkpoint = ledger.get("replay_checkpoint")
+        sealed_issue_ids: set[str] = set()
+        if isinstance(checkpoint, dict):
+            checkpoint_event_count = checkpoint.get("event_count")
+            if (
+                isinstance(checkpoint_event_count, int)
+                and not isinstance(checkpoint_event_count, bool)
+                and event_index >= checkpoint_event_count
+            ):
+                sealed_issue_ids = {
+                    str(prefix.get("issue_id") or "").strip().casefold()
+                    for prefix in checkpoint.get("issue_prefixes", [])
+                    if isinstance(prefix, dict)
+                    and isinstance(prefix.get("history_count"), int)
+                    and not isinstance(prefix.get("history_count"), bool)
+                    and int(prefix["history_count"]) > 0
+                    and prefix.get("issue_id")
+                }
+        pattern_keys: set[str] = set()
+        for record in ledger.get("issues", []):
+            if not isinstance(record, dict):
+                continue
+            existed_before_event = any(
+                isinstance(history, dict)
+                and str(history.get("event_id") or "").strip().casefold()
+                in prefix_event_ids
+                for history in record.get("history", [])
+            )
+            existed_before_event = existed_before_event or (
+                str(record.get("issue_id") or "").strip().casefold()
+                in sealed_issue_ids
+            )
+            if not existed_before_event:
+                continue
+            pattern_key = str(
+                record.get("pattern_key")
+                or storyboard_agent.issue_pattern_key(
+                    str(ledger.get("project_id") or ""), record
+                )
+            )
+            if pattern_key:
+                pattern_keys.add(pattern_key)
+        return pattern_keys
+
+    def _audit_event_content(
+        self,
+        *,
+        project_id: str,
+        artifact_record: dict[str, Any],
+        storyboard: dict[str, Any],
+        report: dict[str, Any],
+        ledger: dict[str, Any],
+        cycle_id: str,
+        audit_class: str,
+        audit_cache_key: str | None,
+        prior_events: list[dict[str, Any]],
+        audit_round: int,
+        known_pattern_keys: set[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build the deterministic, authoritative content of one audit event."""
+
+        prior_keys: set[tuple[str, str, tuple[str, ...]]] = set()
+        for prior_event in prior_events[-1:]:
+            for prior_issue in prior_event.get("issues", []):
+                code = str(prior_issue.get("error_code"))
+                shots = tuple(
+                    str(value) for value in prior_issue.get("shot_ids", [])
+                )
+                field_or_location = str(
+                    prior_issue.get("location") or prior_issue.get("field")
+                )
+                prior_keys.add((code, field_or_location, shots))
+                # Events written before the phase-1 upgrade only retained the
+                # terminal field. Keep them comparable without collapsing new
+                # events from different shots/locations into one signature.
+                prior_keys.add((code, str(prior_issue.get("field")), shots))
+        issues = []
+        for issue in report.get("issues", []):
+            location = str(issue.get("location") or "全表")
+            # `location` is evidence identity, not the semantic field identity.
+            # Independent auditors commonly use a per-report issue id in the
+            # terminal location segment; deriving `field` from that value would
+            # split one recurring problem into unrelated cross-batch patterns.
+            field = str(
+                issue.get("field") or location.rsplit(".", 1)[-1]
+            ).strip()
+            supplied_shot_ids = issue.get("shot_ids")
+            shot_ids = (
+                [str(value) for value in supplied_shot_ids if str(value)]
+                if isinstance(supplied_shot_ids, list)
+                else self._shot_ids_for_location(storyboard, location)
+            )
+            key = (
+                str(issue.get("error_code") or "E-UNKNOWN"),
+                location,
+                tuple(shot_ids),
+            )
+            legacy_key = (key[0], field, key[2])
+            status = (
+                "initial"
+                if audit_round == 1
+                else (
+                    "residual"
+                    if key in prior_keys or legacy_key in prior_keys
+                    else "introduced"
+                )
+            )
+            severity = str(issue.get("severity") or "fail")
+            if severity == "warning":
+                severity = "warn"
+            issues.append(
+                {
+                    "error_code": key[0],
+                    "category": str(
+                        issue.get("semantic_layer")
+                        or _issue_category(key[0])
+                    ),
+                    "severity": (
+                        severity
+                        if severity in storyboard_agent.SEVERITIES
+                        else "fail"
+                    ),
+                    "blocking": bool(
+                        issue.get("blocking", severity == "fail")
+                    ),
+                    "shot_ids": shot_ids,
+                    "field": field,
+                    "location": location,
+                    "issue_type": issue.get("issue_type")
+                    or issue.get("template_gate_id")
+                    or _issue_category(key[0]),
+                    "problem_key": str(
+                        issue.get("problem_key")
+                        or issue.get("template_gate_id")
+                        or ""
+                    ),
+                    "root_cause": str(issue.get("root_cause") or ""),
+                    "evidence": str(issue.get("evidence") or location),
+                    "source_sentence": str(
+                        issue.get("evidence") or "无额外原文证据"
+                    ),
+                    "repair_action": str(
+                        issue.get("repair_action")
+                        or "按R10规则修复后重跑。"
+                    ),
+                    "status": status,
+                }
+            )
+        if audit_round == 1:
+            initial_issue_count = len(issues)
+        else:
+            first_event = prior_events[0] if prior_events else {}
+            first_summary = first_event.get("audit_summary", {})
+            initial_issue_count = int(
+                first_summary.get(
+                    "initial_issue_count",
+                    len(first_event.get("issues", [])),
+                )
+            )
+        residual_issue_count = sum(
+            issue.get("status") == "residual" for issue in issues
+        )
+        introduced_issue_count = sum(
+            issue.get("status") == "introduced" for issue in issues
+        )
+        blocking_issue_count = sum(
+            bool(issue.get("blocking")) for issue in issues
+        )
+        audit_summary = {
+            "initial_issue_count": initial_issue_count,
+            "residual_issue_count": residual_issue_count,
+            "introduced_issue_count": introduced_issue_count,
+            "blocking_issue_count": blocking_issue_count,
+            "final_status": "pass" if not issues else "fail_current",
+        }
+        first_draft_quality: dict[str, Any] | None = None
+        if audit_class == AUDIT_CLASS_INDEPENDENT:
+            if audit_round == 1:
+                if known_pattern_keys is None:
+                    profile = storyboard_agent.active_prevention_profile(ledger)
+                    known_patterns = {
+                        str(row.get("pattern_key"))
+                        for row in profile.get("patterns", [])
+                        if row.get("pattern_key")
+                    }
+                else:
+                    known_patterns = set(known_pattern_keys)
+                first_draft_quality = _draft_quality_metrics(
+                    storyboard,
+                    issues,
+                    project_id=project_id,
+                    known_pattern_keys=known_patterns,
+                )
+                first_draft_quality["threshold_met"] = (
+                    first_draft_quality["grade"] == "A"
+                )
+                first_draft_quality["final_audit_pass"] = not issues
+            elif prior_events:
+                first_draft_quality = copy.deepcopy(
+                    prior_events[0].get("first_draft_quality")
+                    or prior_events[0].get("audit_summary", {}).get(
+                        "first_draft_quality"
+                    )
+                )
+            if first_draft_quality:
+                audit_summary["first_draft_quality"] = copy.deepcopy(
+                    first_draft_quality
+                )
+        source_lock = storyboard.get("source_lock") or {}
+        episode_id = str(
+            source_lock.get("episode_id")
+            or source_lock.get("episode_boundary")
+            or source_lock.get("target_boundary")
+            or "全项目"
+        )
+        content = {
+            "episode_id": episode_id,
+            "file_name": f"storyboard-{audit_class}-{cycle_id}",
+            "artifact_file_name": artifact_record.get("file_name")
+            or "storyboard",
+            "file_fingerprint": artifact_record.get("fingerprint")
+            or sha256_bytes(
+                json.dumps(storyboard, ensure_ascii=False).encode("utf-8")
+            ),
+            "source_version": artifact_record.get("version") or "current",
+            "audit_cycle_id": cycle_id,
+            "task_type": (
+                "audit"
+                if audit_class == AUDIT_CLASS_INDEPENDENT
+                else (
+                    "generation_audit"
+                    if audit_round == 1
+                    else "repair_regression"
+                )
+            ),
+            "audit_class": audit_class,
+            "audit_cache_key": audit_cache_key,
+            "audit_round": audit_round,
+            "result": "pass" if not issues else "fail_current",
+            "checked_shot_count": len(storyboard.get("shots", [])),
+            "issues": issues,
+            "audit_summary": audit_summary,
+        }
+        if first_draft_quality:
+            content["first_draft_quality"] = copy.deepcopy(
+                first_draft_quality
+            )
+        return content
+
     def _record_audit(
         self,
         *,
@@ -6337,158 +7622,22 @@ class StoryboardService:
                 "reason": "maximum three audit/repair rounds reached; rebuild the upstream structure",
                 "audit_cycle_id": cycle_id,
             }
-        prior_keys: set[tuple[str, str, tuple[str, ...]]] = set()
-        for event in prior_events[-1:]:
-            for prior_issue in event.get("issues", []):
-                code = str(prior_issue.get("error_code"))
-                shots = tuple(str(value) for value in prior_issue.get("shot_ids", []))
-                field_or_location = str(prior_issue.get("location") or prior_issue.get("field"))
-                prior_keys.add((code, field_or_location, shots))
-                # Events written before the phase-1 upgrade only retained the
-                # terminal field. Keep them comparable without collapsing new
-                # events from different shots/locations into one signature.
-                prior_keys.add((code, str(prior_issue.get("field")), shots))
-        issues = []
-        for issue in report.get("issues", []):
-            location = str(issue.get("location") or "全表")
-            # `location` is evidence identity, not the semantic field identity.
-            # Independent auditors commonly use a per-report issue id in the
-            # terminal location segment; deriving `field` from that value would
-            # split one recurring problem into unrelated cross-batch patterns.
-            field = str(
-                issue.get("field") or location.rsplit(".", 1)[-1]
-            ).strip()
-            supplied_shot_ids = issue.get("shot_ids")
-            shot_ids = (
-                [str(value) for value in supplied_shot_ids if str(value)]
-                if isinstance(supplied_shot_ids, list)
-                else self._shot_ids_for_location(storyboard, location)
-            )
-            key = (str(issue.get("error_code") or "E-UNKNOWN"), location, tuple(shot_ids))
-            legacy_key = (key[0], field, key[2])
-            status = (
-                "initial"
-                if audit_round == 1
-                else ("residual" if key in prior_keys or legacy_key in prior_keys else "introduced")
-            )
-            severity = str(issue.get("severity") or "fail")
-            if severity == "warning":
-                severity = "warn"
-            issues.append(
-                {
-                    "error_code": key[0],
-                    "category": str(
-                        issue.get("semantic_layer") or _issue_category(key[0])
-                    ),
-                    "severity": severity if severity in storyboard_agent.SEVERITIES else "fail",
-                    "blocking": bool(issue.get("blocking", severity == "fail")),
-                    "shot_ids": shot_ids,
-                    "field": field,
-                    "location": location,
-                    "issue_type": issue.get("issue_type")
-                    or issue.get("template_gate_id")
-                    or _issue_category(key[0]),
-                    "problem_key": str(
-                        issue.get("problem_key")
-                        or issue.get("template_gate_id")
-                        or ""
-                    ),
-                    "root_cause": str(issue.get("root_cause") or ""),
-                    "evidence": str(issue.get("evidence") or location),
-                    "source_sentence": str(issue.get("evidence") or "无额外原文证据"),
-                    "repair_action": str(issue.get("repair_action") or "按R10规则修复后重跑。"),
-                    "status": status,
-                }
-            )
-        if audit_round == 1:
-            initial_issue_count = len(issues)
-        else:
-            first_event = prior_events[0] if prior_events else {}
-            first_summary = first_event.get("audit_summary", {})
-            initial_issue_count = int(
-                first_summary.get(
-                    "initial_issue_count", len(first_event.get("issues", []))
-                )
-            )
-        residual_issue_count = sum(
-            issue.get("status") == "residual" for issue in issues
-        )
-        introduced_issue_count = sum(
-            issue.get("status") == "introduced" for issue in issues
-        )
-        blocking_issue_count = sum(bool(issue.get("blocking")) for issue in issues)
-        audit_summary = {
-            "initial_issue_count": initial_issue_count,
-            "residual_issue_count": residual_issue_count,
-            "introduced_issue_count": introduced_issue_count,
-            "blocking_issue_count": blocking_issue_count,
-            "final_status": "pass" if not issues else "fail_current",
-        }
-        first_draft_quality: dict[str, Any] | None = None
-        if audit_class == AUDIT_CLASS_INDEPENDENT:
-            if audit_round == 1:
-                profile = storyboard_agent.active_prevention_profile(ledger)
-                known_patterns = {
-                    str(row.get("pattern_key"))
-                    for row in profile.get("patterns", [])
-                    if row.get("pattern_key")
-                }
-                first_draft_quality = _draft_quality_metrics(
-                    storyboard,
-                    issues,
-                    project_id=project_id,
-                    known_pattern_keys=known_patterns,
-                )
-                first_draft_quality["threshold_met"] = (
-                    first_draft_quality["grade"] == "A"
-                )
-                first_draft_quality["final_audit_pass"] = not issues
-            elif prior_events:
-                first_draft_quality = copy.deepcopy(
-                    prior_events[0].get("first_draft_quality")
-                    or prior_events[0].get("audit_summary", {}).get(
-                        "first_draft_quality"
-                    )
-                )
-            if first_draft_quality:
-                audit_summary["first_draft_quality"] = copy.deepcopy(
-                    first_draft_quality
-                )
-        source_lock = storyboard.get("source_lock") or {}
-        episode_id = str(
-            source_lock.get("episode_id")
-            or source_lock.get("episode_boundary")
-            or source_lock.get("target_boundary")
-            or "全项目"
-        )
         event = {
             "event_id": event_id or _new_id("EVT"),
             "timestamp": utc_stamp(),
-            "episode_id": episode_id,
-            "file_name": f"storyboard-{audit_class}-{cycle_id}",
-            "artifact_file_name": artifact_record.get("file_name") or "storyboard",
-            "file_fingerprint": artifact_record.get("fingerprint") or sha256_bytes(json.dumps(storyboard, ensure_ascii=False).encode("utf-8")),
-            "source_version": artifact_record.get("version") or "current",
-            "audit_cycle_id": cycle_id,
-            "task_type": (
-                "audit"
-                if audit_class == AUDIT_CLASS_INDEPENDENT and audit_round == 1
-                else (
-                    "audit_repair"
-                    if audit_class == AUDIT_CLASS_INDEPENDENT
-                    else ("generation_audit" if audit_round == 1 else "repair_regression")
-                )
+            **self._audit_event_content(
+                project_id=project_id,
+                artifact_record=artifact_record,
+                storyboard=storyboard,
+                report=report,
+                ledger=ledger,
+                cycle_id=cycle_id,
+                audit_class=audit_class,
+                audit_cache_key=audit_cache_key,
+                prior_events=prior_events,
+                audit_round=audit_round,
             ),
-            "audit_class": audit_class,
-            "audit_cache_key": audit_cache_key,
-            "audit_round": audit_round,
-            "result": "pass" if not issues else "fail_current",
-            "checked_shot_count": len(storyboard.get("shots", [])),
-            "issues": issues,
-            "audit_summary": audit_summary,
         }
-        if first_draft_quality:
-            event["first_draft_quality"] = copy.deepcopy(first_draft_quality)
         if audit_class == AUDIT_CLASS_INDEPENDENT:
             if not handoff_id or not stage_trace_id or not fingerprints or not work_order_id:
                 raise ValueError("independent_audit_event_binding_incomplete")
@@ -6508,6 +7657,12 @@ class StoryboardService:
                     "runtime_test_certificate_id": runtime_test_certificate_id
                     or "RUNTIMECERT-MISSING",
                     "stage_trace_id": stage_trace_id,
+                    "semantic_audit_sha256": str(
+                        report.get("semantic_audit_sha256") or ""
+                    ),
+                    "semantic_report_input_sha256": (
+                        self._audit_event_report_input_sha256(report)
+                    ),
                     "cache_evidence": [
                         {
                             "cache_key": audit_cache_key,
@@ -6543,8 +7698,17 @@ class StoryboardService:
                     prior_scope_key,
                     str(event["event_id"]),
                     event["timestamp"],
+                    checkpoint_authorizer=self._ledger_checkpoint_authorizer(
+                        namespace, project_id
+                    ),
                 )
-        ingest = storyboard_agent.ingest_event(ledger, event)
+        ingest = storyboard_agent.ingest_event(
+            ledger,
+            event,
+            checkpoint_authorizer=self._ledger_checkpoint_authorizer(
+                namespace, project_id
+            ),
+        )
         return {"status": "recorded", "event": event, "ingest": ingest}
 
     def _persist_audit_certificate(
@@ -6561,6 +7725,7 @@ class StoryboardService:
         handoff_id: str | None = None,
         stage_trace_id: str | None = None,
         production_trace_id: str | None = None,
+        production_stage_trace_id: str | None = None,
         fingerprints: dict[str, str] | None = None,
         production_work_order_id: str | None = None,
         audit_actor_binding_id: str | None = None,
@@ -6636,6 +7801,20 @@ class StoryboardService:
                 raise ValueError(
                     "independent_audit_binding_incomplete: event, handoff, production/audit traces, and fingerprints are required"
                 )
+            ledger = self.store.load_ledger(namespace, project_id)
+            bound_events = [
+                row
+                for row in ledger.get("events", [])
+                if isinstance(row, dict)
+                and str(row.get("event_id") or "") == str(event_id)
+            ]
+            if len(bound_events) != 1:
+                raise ValueError(
+                    "independent_audit_binding_incomplete: certificate requires one exact durable event"
+                )
+            event_sha256 = sha256_bytes(
+                _stable_json_bytes(bound_events[0])
+            )
             evidence_matrix = report.get("independent_evidence_matrix")
             if not isinstance(evidence_matrix, dict):
                 raise ValueError(
@@ -6669,9 +7848,13 @@ class StoryboardService:
             certificate.update(
                 {
                     "event_id": event_id,
+                    "event_sha256": event_sha256,
                     "handoff_id": handoff_id,
                     "stage_trace_id": stage_trace_id,
                     "production_trace_id": production_trace_id,
+                    "production_stage_trace_id": (
+                        production_stage_trace_id or production_trace_id
+                    ),
                     "audit_trace_id": stage_trace_id,
                     "created_at": utc_stamp(),
                     "fingerprints": {
@@ -6972,8 +8155,2489 @@ class StoryboardService:
             "recovery_work_order_id",
             "recovery_trace_id",
             "recovery_plan_sha256",
+            "reaudit_kind",
+            "reaudit_root_handoff_id",
+            "reaudit_parent_handoff_id",
+            "reaudit_sequence",
+            "reaudit_route_trace_id",
+            "reaudit_event_trace_id",
+            "production_stage_trace_id",
+            "previous_audit_certificate_id",
+            "previous_audit_certificate_hmac",
+            "previous_audit_event_sha256",
+            "latest_audit_certificate_id",
+            "reaudit_lineage_sha256",
         }
         return {key: copy.deepcopy(value) for key, value in handoff.items() if key in keys}
+
+    @staticmethod
+    def _reaudit_immutable_identity(handoff: dict[str, Any]) -> dict[str, Any]:
+        """Return the production facts a re-audit route may never rewrite."""
+
+        keys = (
+            "work_order_id",
+            "audit_cycle_id",
+            "logical_artifact_id",
+            "handoff_type",
+            "from_window_role",
+            "to_window_role",
+            "scope",
+            "fingerprints",
+            "objective_evidence",
+            "producer_claims",
+            "cache_manifest",
+            "publication_state",
+            "storyboard_artifact_id",
+            "canonical_artifact_id",
+            "canonical_sha256",
+            "source_fingerprint",
+            "boundary_hash",
+            "ruleset_version",
+            "validator_version",
+            "audit_class",
+            "certificate_id",
+            "cache_key",
+            "cache_components",
+            "production_preflight_status",
+            "production_preflight_issue_count",
+            "checked_shot_count",
+            "facts_reusable",
+            "conclusion_reusable_for_independent_audit",
+            "from_window_binding_id",
+            "from_actor_binding_id",
+            "from_session_fingerprint",
+            "successor_transaction_id",
+            "successor_base_artifact_id",
+            "successor_kind",
+            "successor_scope_hash",
+            "immutable_repair_package_id",
+            "return_to_audit_work_order_id",
+            "return_to_audit_window_binding_id",
+            "return_to_audit_actor_binding_id",
+            "return_to_audit_session_fingerprint",
+        )
+        return {
+            key: copy.deepcopy(handoff.get(key))
+            for key in keys
+            if key in handoff
+        }
+
+    @classmethod
+    def _reaudit_lineage_payload(
+        cls,
+        *,
+        root: dict[str, Any],
+        parent: dict[str, Any],
+        successor: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "spec": "independent-reaudit-successor-v1",
+            "root_handoff_id": str(root.get("handoff_id") or ""),
+            "parent_handoff_id": str(parent.get("handoff_id") or ""),
+            "successor_handoff_id": str(successor.get("handoff_id") or ""),
+            "reaudit_sequence": int(successor.get("reaudit_sequence") or 0),
+            "audit_work_order_id": str(
+                successor.get("claim_authority_work_order_id") or ""
+            ),
+            "previous_audit_certificate_id": str(
+                successor.get("previous_audit_certificate_id") or ""
+            ),
+            "previous_audit_certificate_hmac": str(
+                successor.get("previous_audit_certificate_hmac") or ""
+            ),
+            "previous_audit_event_sha256": str(
+                successor.get("previous_audit_event_sha256") or ""
+            ),
+            "production_stage_trace_id": str(
+                successor.get("production_stage_trace_id") or ""
+            ),
+            "route_trace_id": str(
+                successor.get("reaudit_route_trace_id") or ""
+            ),
+            "audit_event_trace_id": str(
+                successor.get("reaudit_event_trace_id") or ""
+            ),
+            "audit_window_binding_id": str(
+                successor.get("reaudit_audit_window_binding_id") or ""
+            ),
+            "audit_actor_binding_id": str(
+                successor.get("reaudit_audit_actor_binding_id") or ""
+            ),
+            "audit_session_fingerprint": str(
+                successor.get("reaudit_audit_session_fingerprint") or ""
+            ),
+            "immutable_identity_sha256": sha256_bytes(
+                _stable_json_bytes(cls._reaudit_immutable_identity(root))
+            ),
+        }
+
+    def _resolve_reaudit_lineage(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        requested_handoff: dict[str, Any],
+        audit_work_order: dict[str, Any],
+        fingerprints: dict[str, str],
+        allow_pending: bool = False,
+        repair_projection: bool = True,
+        allow_legacy_tail_as_reaudit_parent: bool = False,
+        authority_manifest_out: list[dict[str, Any]] | None = None,
+        project_lock_held: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Verify the complete signed chain and return its root and latest node."""
+
+        requested_id = str(requested_handoff.get("handoff_id") or "")
+        root_id = str(
+            requested_handoff.get("reaudit_root_handoff_id") or requested_id
+        )
+        snapshot_reader = (
+            self.store.load_handoff_projection_snapshot_while_project_locked
+            if project_lock_held
+            else self.store.load_handoff_projection_snapshot
+        )
+        records, hub = snapshot_reader(namespace, project_id)
+        root_matches = [
+            row
+            for row in records
+            if str(row.get("handoff_id") or "") == root_id
+        ]
+        if len(root_matches) != 1:
+            raise ValueError(
+                "reaudit_lineage_invalid: root production handoff is missing or duplicated"
+            )
+        root = root_matches[0]
+        audit_work_order_id = str(audit_work_order.get("work_order_id") or "")
+        if (
+            not self.store.project_record_is_signed(root)
+            or root.get("reaudit_kind")
+            or root.get("status") != "consumed"
+            or root.get("consumed_by_work_order_id") != audit_work_order_id
+            or not root.get("audit_certificate_id")
+            or root.get("fingerprints") != fingerprints
+        ):
+            raise ValueError(
+                "reaudit_lineage_invalid: root production handoff is not a completed route for this audit authority"
+            )
+        root_certificate = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=str(root["audit_certificate_id"]),
+        )
+        if (
+            not self.store.project_record_is_signed(root_certificate)
+            or root_certificate.get("handoff_id") != root_id
+            or root_certificate.get("work_order_id") != audit_work_order_id
+        ):
+            raise ValueError(
+                "reaudit_lineage_invalid: root audit certificate is not bound to the root handoff"
+            )
+
+        successors = [
+            row
+            for row in records
+            if row.get("reaudit_root_handoff_id") == root_id
+        ]
+        children: dict[str, list[dict[str, Any]]] = {}
+        event_trace_ids: set[str] = set()
+        route_trace_ids: set[str] = set()
+        root_identity = self._reaudit_immutable_identity(root)
+        for successor in successors:
+            successor_id = str(successor.get("handoff_id") or "")
+            parent_id = str(successor.get("reaudit_parent_handoff_id") or "")
+            route_trace_id = str(
+                successor.get("reaudit_route_trace_id") or ""
+            )
+            event_trace_id = str(
+                successor.get("reaudit_event_trace_id") or ""
+            )
+            if (
+                successor.get("reaudit_kind")
+                != "independent_audit_successor"
+                or successor.get("server_minted_lineage") is not True
+                or successor.get("status")
+                not in {"prepared", "consuming", "consumed"}
+                or successor.get("claim_authority_work_order_id")
+                != audit_work_order_id
+                or successor.get("reaudit_audit_window_binding_id")
+                != audit_work_order.get("server_window_binding_id")
+                or successor.get("reaudit_audit_actor_binding_id")
+                != audit_work_order.get("server_actor_binding_id")
+                or successor.get("reaudit_audit_session_fingerprint")
+                != audit_work_order.get("transport_session_fingerprint")
+                or successor.get("fingerprints") != fingerprints
+                or self._reaudit_immutable_identity(successor) != root_identity
+                or successor.get("production_stage_trace_id")
+                != root.get("stage_trace_id")
+                or successor.get("stage_trace_id") != route_trace_id
+                or not route_trace_id
+                or not event_trace_id
+                or route_trace_id == event_trace_id
+                or route_trace_id in route_trace_ids
+                or event_trace_id in event_trace_ids
+            ):
+                raise ValueError(
+                    f"reaudit_lineage_invalid: successor {successor_id or 'unknown'} changed authority, identity, or trace binding"
+                )
+            finalization_error = (
+                self.store._reaudit_successor_lifecycle_error(successor)
+            )
+            if finalization_error:
+                raise ValueError(
+                    "reaudit_lineage_invalid: successor "
+                    f"{successor_id or 'unknown'} has an invalid lifecycle "
+                    f"finalization: {finalization_error}"
+                )
+            route_trace_ids.add(route_trace_id)
+            event_trace_ids.add(event_trace_id)
+            expected_lineage = sha256_bytes(
+                _stable_json_bytes(
+                    self._reaudit_lineage_payload(
+                        root=root,
+                        parent=(
+                            root
+                            if parent_id == root_id
+                            else next(
+                                (
+                                    item
+                                    for item in successors
+                                    if item.get("handoff_id") == parent_id
+                                ),
+                                {},
+                            )
+                        ),
+                        successor=successor,
+                    )
+                )
+            )
+            if successor.get("reaudit_lineage_sha256") != expected_lineage:
+                raise ValueError(
+                    f"reaudit_lineage_invalid: successor {successor_id or 'unknown'} has forged lineage"
+                )
+            children.setdefault(parent_id, []).append(successor)
+
+        current = root
+        ordered_routes = [root]
+        visited = {root_id}
+        expected_sequence = 1
+        while children.get(str(current.get("handoff_id") or "")):
+            candidates = children[str(current["handoff_id"])]
+            if len(candidates) != 1:
+                raise ValueError(
+                    "reaudit_lineage_invalid: a handoff has multiple successor routes"
+                )
+            child = candidates[0]
+            child_id = str(child.get("handoff_id") or "")
+            if (
+                child_id in visited
+                or int(child.get("reaudit_sequence") or 0)
+                != expected_sequence
+                or child.get("previous_audit_certificate_id")
+                != current.get("audit_certificate_id")
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: successor order or certificate ancestry is invalid"
+                )
+            if child.get("status") == "consumed":
+                certificate = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="certificates",
+                    record_id=str(child.get("audit_certificate_id") or ""),
+                )
+                if (
+                    not self.store.project_record_is_signed(certificate)
+                    or certificate.get("handoff_id") != child_id
+                    or certificate.get("work_order_id") != audit_work_order_id
+                    or certificate.get("stage_trace_id")
+                    != child.get("reaudit_event_trace_id")
+                    or certificate.get("production_trace_id")
+                    != child.get("reaudit_route_trace_id")
+                    or certificate.get("production_stage_trace_id")
+                    != root.get("stage_trace_id")
+                ):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: successor certificate binding is invalid"
+                    )
+            visited.add(child_id)
+            current = child
+            ordered_routes.append(child)
+            expected_sequence += 1
+
+        if len(visited) != len(successors) + 1 or (
+            requested_id != root_id and requested_id not in visited
+        ):
+            raise ValueError(
+                "reaudit_lineage_invalid: caller supplied an unlinked or forged handoff"
+            )
+        current_id = str(current.get("handoff_id") or "")
+        if any(
+            str(route.get("handoff_id") or "") != current_id
+            and (
+                route.get("status") != "consumed"
+                or not route.get("audit_certificate_id")
+                or route.get("consumed_by_work_order_id")
+                != audit_work_order_id
+            )
+            for route in successors
+        ):
+            raise ValueError(
+                "reaudit_lineage_invalid: every non-tail successor must be a completed audit authority"
+            )
+        current_is_complete = bool(
+            current.get("status") == "consumed"
+            and current.get("audit_certificate_id")
+            and current.get("consumed_by_work_order_id")
+            == audit_work_order_id
+        )
+        current_is_resumable = bool(
+            allow_pending
+            and current.get("status") in {"prepared", "consuming"}
+            and not current.get("audit_certificate_id")
+        )
+        if not current_is_complete and not current_is_resumable:
+            raise ValueError(
+                "reaudit_successor_pending: the latest route has not completed"
+            )
+        authority_manifest = (
+            self._validate_reaudit_lineage_certificate_authority(
+            namespace,
+            project_id,
+            root=root,
+            ordered_routes=ordered_routes,
+            audit_work_order=audit_work_order,
+            fingerprints=fingerprints,
+            allow_legacy_tail_as_reaudit_parent=(
+                allow_legacy_tail_as_reaudit_parent
+            ),
+        )
+        )
+        if authority_manifest_out is not None:
+            authority_manifest_out.clear()
+            authority_manifest_out.extend(copy.deepcopy(authority_manifest))
+        signed_successor_ids = {
+            str(route.get("handoff_id") or "") for route in successors
+        }
+        if any(
+            row.get("reaudit_root_handoff_id") == root_id
+            and str(row.get("handoff_id") or "")
+            not in signed_successor_ids
+            for row in hub.get("handoffs", [])
+            if isinstance(row, dict)
+        ):
+            # All legitimate transitions are signed-first.  Hub-only state is
+            # never implicit replay authority and requires an explicit,
+            # controlled repair; a read/audit request remains zero-mutation.
+            raise ValueError(
+                "reaudit_successor_projection_mismatch: Hub-only route has no signed authority"
+            )
+        for route in successors:
+            hub_matches = [
+                row
+                for row in hub.get("handoffs", [])
+                if row.get("handoff_id") == route.get("handoff_id")
+            ]
+            expected_projection = self._handoff_record_projection(route)
+            is_resumable_tail = bool(
+                route.get("handoff_id") == current.get("handoff_id")
+                and current_is_resumable
+            )
+            if (
+                is_resumable_tail
+                and route.get("status") == "prepared"
+                and not hub_matches
+            ):
+                # commit_reaudit_successor repairs this exact signed-first
+                # crash boundary after semantic validation succeeds again.
+                continue
+            if (
+                is_resumable_tail
+                and route.get("status") == "prepared"
+                and len(hub_matches) == 1
+                and str(
+                    route.get("reaudit_prerelease_projection_sha256") or ""
+                )
+                and self.store.project_state_sha256(hub_matches[0])
+                == route.get("reaudit_prerelease_projection_sha256")
+            ):
+                # release_reaudit_successor_claim signed the prepared state
+                # before Hub was updated.  Semantic validation must succeed
+                # again before commit_reaudit_successor repairs this exact,
+                # server-hashed consuming projection.
+                continue
+            if (
+                is_resumable_tail
+                and route.get("status") == "consuming"
+                and len(hub_matches) == 1
+                and str(route.get("reaudit_preclaim_projection_sha256") or "")
+                and self.store.project_state_sha256(hub_matches[0])
+                == route.get("reaudit_preclaim_projection_sha256")
+            ):
+                # claim_reaudit_successor repairs the signed-consuming /
+                # Hub-preclaim boundary, then enforces its persisted lease.
+                continue
+            if len(hub_matches) != 1 or hub_matches[0] != expected_projection:
+                if (
+                    route.get("status") == "consumed"
+                    and len(hub_matches) == 1
+                    and isinstance(route.get("consumption_claim"), dict)
+                ):
+                    half_written = copy.deepcopy(route)
+                    half_written["status"] = "consuming"
+                    half_written["claimed_by_work_order_id"] = (
+                        audit_work_order_id
+                    )
+                    for key, value in route["consumption_claim"].items():
+                        half_written[key] = copy.deepcopy(value)
+                    for key in (
+                        "consumed_by_work_order_id",
+                        "audit_certificate_id",
+                        "latest_audit_certificate_id",
+                        "consumed_at",
+                        "consumption_claim",
+                    ):
+                        half_written.pop(key, None)
+                    if hub_matches[0] != self._handoff_record_projection(
+                        half_written
+                    ):
+                        raise ValueError(
+                            "reaudit_successor_projection_mismatch: Hub and signed handoff differ"
+                        )
+                    if not repair_projection:
+                        continue
+                    # A consumed signed route plus the exact former consuming
+                    # projection is the only finalization half-write we heal.
+                    route = self.store.finish_reaudit_successor(
+                        namespace,
+                        project_id,
+                        str(route["handoff_id"]),
+                        consumer_work_order_id=audit_work_order_id,
+                        audit_certificate_id=str(
+                            route["audit_certificate_id"]
+                        ),
+                        claim_token=str(
+                            route["consumption_claim"].get("claim_token")
+                            or ""
+                        ),
+                    )
+                    hub = self.store.load_hub(namespace, project_id)
+                    repaired = [
+                        row
+                        for row in hub.get("handoffs", [])
+                        if row.get("handoff_id")
+                        == route.get("handoff_id")
+                    ]
+                    if (
+                        len(repaired) == 1
+                        and repaired[0]
+                        == self._handoff_record_projection(route)
+                    ):
+                        continue
+                raise ValueError(
+                    "reaudit_successor_projection_mismatch: Hub and signed handoff differ"
+                )
+        return root, current
+
+    def _validate_reaudit_recovery_event(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        event: dict[str, Any],
+        handoff: dict[str, Any],
+        audit_work_order: dict[str, Any],
+        fingerprints: dict[str, str],
+        cache_components: dict[str, str],
+        artifact_record: dict[str, Any],
+        certificate: dict[str, Any] | None = None,
+        require_latest_scope: bool = True,
+    ) -> None:
+        """Verify one durable event before any re-audit recovery write."""
+
+        expected = {
+            "handoff_id": handoff.get("handoff_id"),
+            "window_key": audit_work_order.get("work_order_id"),
+            "audit_cycle_id": handoff.get("audit_cycle_id"),
+            "audit_class": AUDIT_CLASS_INDEPENDENT,
+            "validation_role": "independent_audit",
+            "stage_trace_id": (
+                handoff.get("reaudit_event_trace_id")
+                if handoff.get("reaudit_kind")
+                == "independent_audit_successor"
+                else (certificate or {}).get("stage_trace_id")
+            ),
+            "audit_cache_key": self._cache_key_from_components(
+                cache_components
+            ),
+            "file_fingerprint": fingerprints["artifact_raw"],
+            "artifact_file_name": artifact_record.get("file_name"),
+            "source_version": artifact_record.get("version") or "current",
+            "artifact_semantic_fingerprint": fingerprints[
+                "artifact_semantic"
+            ],
+            "canonical_fingerprint": fingerprints["canonical"],
+            "source_fingerprint": fingerprints["source_bytes"],
+            "boundary_fingerprint": fingerprints["episode_boundary"],
+            "runtime_fingerprint": fingerprints["runtime"],
+            "rules_fingerprint": fingerprints["rules"],
+            "validator_fingerprint": fingerprints["validator"],
+            "runtime_test_certificate_id": cache_components[
+                "runtime_test_certificate_id"
+            ],
+            "independence_assertions": {
+                "artifact_read_only": True,
+                "production_verdict_not_reused": True,
+                "quality_conclusions_recomputed": True,
+                "eight_layers_completed": True,
+            },
+        }
+        cache_evidence = event.get("cache_evidence")
+        if (
+            any(event.get(key) != value for key, value in expected.items())
+            or cache_evidence
+            != [
+                {
+                    "cache_key": expected["audit_cache_key"],
+                    "artifact_raw": fingerprints["artifact_raw"],
+                }
+            ]
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: persisted event changed route, file, source, artifact, cache, or fingerprint identity"
+            )
+        self._validate_schema_record(
+            self._ledger_schema, "audit_event", event
+        )
+        ledger = self.store.load_ledger(namespace, project_id)
+        ledger_errors = storyboard_agent.validate_ledger(
+            ledger,
+            checkpoint_authorizer=self._ledger_checkpoint_authorizer(
+                namespace, project_id
+            ),
+        )
+        if ledger_errors:
+            raise ValueError(
+                "reaudit_recovery_invalid: persisted Ledger replay is invalid: "
+                + "; ".join(ledger_errors)
+            )
+        if require_latest_scope:
+            matching_scopes = [
+                scope
+                for scope in ledger.get("scope_states", [])
+                if isinstance(scope, dict)
+                and scope.get("scope_key") == event.get("scope_key")
+                and scope.get("last_event_id") == event.get("event_id")
+            ]
+            if len(matching_scopes) != 1:
+                raise ValueError(
+                    "reaudit_recovery_invalid: persisted event is not the unique latest Ledger scope authority"
+                )
+
+    def _validate_reaudit_recovery_event_content(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        event: dict[str, Any],
+        storyboard: dict[str, Any],
+        artifact_record: dict[str, Any],
+        report: dict[str, Any],
+        require_latest_scope: bool = True,
+    ) -> None:
+        """Rebuild every deterministic event field before a recovery write."""
+
+        ledger = self.store.load_ledger(namespace, project_id)
+        event_id = str(event.get("event_id") or "")
+        indexes = [
+            index
+            for index, row in enumerate(ledger.get("events", []))
+            if isinstance(row, dict)
+            and str(row.get("event_id") or "") == event_id
+        ]
+        if len(indexes) != 1:
+            raise ValueError(
+                "reaudit_recovery_invalid: durable event identity is not unique"
+            )
+        event_index = indexes[0]
+        cycle_id = str(event.get("audit_cycle_id") or "")
+        prior_events = [
+            row
+            for row in ledger.get("events", [])[:event_index]
+            if isinstance(row, dict)
+            and row.get("audit_cycle_id") == cycle_id
+            and row.get("audit_class", AUDIT_CLASS_PRODUCTION_PREFLIGHT)
+            == AUDIT_CLASS_INDEPENDENT
+        ]
+        expected_round = 1 + max(
+            (
+                int(row.get("audit_round", 0))
+                for row in prior_events
+            ),
+            default=0,
+        )
+        expected_content = self._audit_event_content(
+            project_id=project_id,
+            artifact_record=artifact_record,
+            storyboard=storyboard,
+            report=report,
+            ledger=ledger,
+            cycle_id=cycle_id,
+            audit_class=AUDIT_CLASS_INDEPENDENT,
+            audit_cache_key=str(event.get("audit_cache_key") or ""),
+            prior_events=prior_events,
+            audit_round=expected_round,
+            known_pattern_keys=self._known_prevention_pattern_keys_before_event(
+                ledger, event_index
+            ),
+        )
+        raw_expected_issues = copy.deepcopy(expected_content["issues"])
+        expected_content["issues"] = [
+            storyboard_agent._normalize_issue(issue)
+            for issue in expected_content["issues"]
+        ]
+        mismatched_fields = [
+            key
+            for key, value in expected_content.items()
+            if event.get(key) != value
+        ]
+        if mismatched_fields:
+            raise ValueError(
+                "reaudit_event_recovery_mismatch: durable event content differs from the deterministic semantic report: "
+                + ", ".join(mismatched_fields)
+            )
+        expected_counts = storyboard_agent._event_counts(
+            expected_content
+        )
+        if _stable_json_bytes(event.get("counts")) != _stable_json_bytes(
+            expected_counts
+        ):
+            raise ValueError(
+                "reaudit_event_recovery_mismatch: durable event counts differ from the deterministic semantic report"
+            )
+        expected_legacy_aliases = sorted(
+            {
+                str(issue.get("category"))
+                for issue in raw_expected_issues
+                if isinstance(issue, dict)
+                and issue.get("category")
+                in storyboard_agent.LEGACY_AUDIT_CATEGORY_ALIASES
+            }
+        )
+        expected_alias_projection = (
+            {
+                value: storyboard_agent.LEGACY_AUDIT_CATEGORY_ALIASES[
+                    value
+                ]
+                for value in expected_legacy_aliases
+            }
+            if expected_legacy_aliases
+            else None
+        )
+        if (
+            event.get("legacy_aliases_applied")
+            != expected_alias_projection
+            and (
+                expected_alias_projection is not None
+                or "legacy_aliases_applied" in event
+            )
+        ):
+            raise ValueError(
+                "reaudit_event_recovery_mismatch: durable event legacy aliases differ from deterministic ingestion"
+            )
+        producer_binding_fields = {
+            "window_key",
+            "validation_role",
+            "handoff_id",
+            "artifact_semantic_fingerprint",
+            "canonical_fingerprint",
+            "source_fingerprint",
+            "boundary_fingerprint",
+            "runtime_fingerprint",
+            "rules_fingerprint",
+            "validator_fingerprint",
+            "runtime_test_certificate_id",
+            "stage_trace_id",
+            "semantic_audit_sha256",
+            "semantic_report_input_sha256",
+            "cache_evidence",
+            "independence_assertions",
+        }
+        allowed_fields = (
+            set(expected_content)
+            | producer_binding_fields
+            | {"event_id", "timestamp", "scope_key", "sequence", "counts"}
+        )
+        if expected_alias_projection is not None:
+            allowed_fields.add("legacy_aliases_applied")
+        if (
+            event.get("semantic_audit_sha256") in (None, "")
+            and event.get("semantic_report_input_sha256") in (None, "")
+        ):
+            # A signed checkpointed legacy event may omit exactly this pair;
+            # the caller separately verifies that narrow compatibility case.
+            allowed_fields -= {
+                "semantic_audit_sha256",
+                "semantic_report_input_sha256",
+            }
+        unexpected_or_missing = sorted(
+            set(event).symmetric_difference(allowed_fields)
+        )
+        if unexpected_or_missing:
+            raise ValueError(
+                "reaudit_event_recovery_mismatch: durable event field set differs from the modern producer contract: "
+                + ", ".join(unexpected_or_missing)
+            )
+        if event.get("sequence") != event_index + 1:
+            raise ValueError(
+                "reaudit_event_recovery_mismatch: durable event sequence differs from deterministic ingestion"
+            )
+        expected_scope_key = storyboard_agent._scope_key(
+            ledger, expected_content
+        )
+        if event.get("scope_key") != expected_scope_key:
+            raise ValueError(
+                "reaudit_event_recovery_mismatch: durable event scope differs from deterministic identity"
+            )
+        if require_latest_scope:
+            matching_scopes = [
+                scope
+                for scope in ledger.get("scope_states", [])
+                if isinstance(scope, dict)
+                and scope.get("scope_key") == event.get("scope_key")
+                and scope.get("last_event_id") == event_id
+                and scope.get("episode_id") == expected_content["episode_id"]
+                and scope.get("file_name") == expected_content["file_name"]
+                and scope.get("audit_cycle_id") == cycle_id
+                and scope.get("last_audit_round") == expected_round
+                and scope.get("last_result") == expected_content["result"]
+            ]
+            if len(matching_scopes) != 1:
+                raise ValueError(
+                    "reaudit_event_recovery_mismatch: durable event is not the exact latest scope authority"
+                )
+
+    def _sealed_legacy_recovery_event(
+        self,
+        namespace: str,
+        project_id: str,
+        event_id: str,
+    ) -> bool:
+        """Return whether an old event is inside a verified checkpoint prefix."""
+
+        ledger = self.store.load_ledger(namespace, project_id)
+        checkpoint = ledger.get("replay_checkpoint")
+        if not isinstance(checkpoint, dict):
+            return False
+        event_count = checkpoint.get("event_count")
+        if not isinstance(event_count, int) or isinstance(event_count, bool):
+            return False
+        indexes = [
+            index
+            for index, row in enumerate(ledger.get("events", []))
+            if isinstance(row, dict)
+            and str(row.get("event_id") or "") == event_id
+        ]
+        return len(indexes) == 1 and indexes[0] < event_count
+
+    def _completed_reaudit_receipt(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        latest_handoff: dict[str, Any] | None,
+        audit_work_order: dict[str, Any],
+        semantic_audit: dict[str, Any] | None,
+        fingerprints: dict[str, str],
+    ) -> dict[str, Any] | None:
+        """Recognize an exact retry of one already-completed re-audit.
+
+        The signed certificate is the server-side completion receipt.  A
+        caller cannot create a new audit round by resubmitting byte-equivalent
+        semantic evidence after losing the first response; a genuinely new
+        round must carry a different normalized semantic submission.
+        """
+
+        if (
+            semantic_audit is None
+            or not isinstance(latest_handoff, dict)
+            or latest_handoff.get("reaudit_kind")
+            != "independent_audit_successor"
+            or latest_handoff.get("status") != "consumed"
+            or not latest_handoff.get("audit_certificate_id")
+        ):
+            return None
+        submission = self._normalized_semantic_audit_submission(
+            semantic_audit
+        )
+        submission_sha256 = sha256_bytes(_stable_json_bytes(submission))
+        certificate = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=str(latest_handoff["audit_certificate_id"]),
+        )
+        expected_fingerprints = {
+            "source": fingerprints["source_bytes"],
+            "boundary": fingerprints["episode_boundary"],
+            "artifact_raw": fingerprints["artifact_raw"],
+            "artifact_semantic": fingerprints["artifact_semantic"],
+            "canonical": fingerprints["canonical"],
+            "parser": fingerprints["parser"],
+            "schema": fingerprints["schema"],
+            "runtime": fingerprints["runtime"],
+            "rules": fingerprints["rules"],
+            "validator": fingerprints["validator"],
+            "project_anchors": fingerprints["project_anchors"],
+            "target_model_contract": fingerprints[
+                "target_model_contract"
+            ],
+        }
+        report = certificate.get("report")
+        if (
+            not self.store.project_record_is_signed(certificate)
+            or certificate.get("handoff_id")
+            != latest_handoff.get("handoff_id")
+            or certificate.get("work_order_id")
+            != audit_work_order.get("work_order_id")
+            or certificate.get("stage_trace_id")
+            != latest_handoff.get("reaudit_event_trace_id")
+            or certificate.get("production_trace_id")
+            != latest_handoff.get("reaudit_route_trace_id")
+            or certificate.get("production_stage_trace_id")
+            != latest_handoff.get("production_stage_trace_id")
+            or certificate.get("fingerprints") != expected_fingerprints
+            or certificate.get("audit_actor_binding_id")
+            != audit_work_order.get("server_actor_binding_id")
+            or certificate.get("audit_session_fingerprint")
+            != audit_work_order.get("transport_session_fingerprint")
+            or certificate.get("semantic_audit_sha256")
+            != submission_sha256
+            or not isinstance(report, dict)
+            or report.get("semantic_audit") != submission
+            or report.get("semantic_audit_sha256") != submission_sha256
+            or certificate.get("report_sha256")
+            != sha256_bytes(_stable_json_bytes(report))
+        ):
+            return None
+        return certificate
+
+    def _repair_package_downstream_evidence(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        repair_package_id: str,
+        base_artifact_id: str,
+    ) -> list[str]:
+        """Return durable facts proving that a repair authorization advanced."""
+
+        evidence: list[str] = []
+        for handoff in self.store.list_project_records_strict(
+            namespace, project_id, kind="handoffs"
+        ):
+            if (
+                handoff.get("immutable_repair_package_id")
+                == repair_package_id
+                and handoff.get("handoff_type") == "repair_to_audit"
+            ):
+                evidence.append(
+                    "repair_to_audit:"
+                    + str(handoff.get("handoff_id") or "")
+                )
+        for artifact in self.store.list_artifacts(
+            namespace, project_id, include_uncommitted=True
+        ):
+            metadata = artifact.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            if repair_package_id in {
+                str(metadata.get("repair_package_id") or ""),
+                str(metadata.get("patch_repair_package_id") or ""),
+            }:
+                evidence.append(
+                    "successor_artifact:"
+                    + str(artifact.get("artifact_id") or "")
+                )
+        try:
+            base_record, _base_path = self.store.get_artifact(
+                namespace, project_id, base_artifact_id
+            )
+        except ValueError:
+            return sorted(set(evidence))
+        metadata = base_record.get("metadata")
+        if isinstance(metadata, dict):
+            transaction = metadata.get("successor_transaction")
+            if (
+                isinstance(transaction, dict)
+                and transaction.get("successor_kind")
+                in {"patch", "repair"}
+                and transaction.get("state")
+                in {"prepared", "committed"}
+            ):
+                evidence.append(
+                    "base_successor_transaction:"
+                    + str(
+                        transaction.get("transaction_id")
+                        or transaction.get("claim_id")
+                        or "unknown"
+                    )
+                )
+        return sorted(set(evidence))
+
+    def _validate_consumed_repair_package_state(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        repair_package: dict[str, Any],
+        certificate: dict[str, Any],
+    ) -> None:
+        """Require the complete repair successor, CAS and return route."""
+
+        package_id = str(repair_package.get("repair_package_id") or "")
+        repair_work_order_id = str(
+            repair_package.get("consumed_by_work_order_id") or ""
+        )
+        successor_artifact_id = str(
+            repair_package.get("successor_artifact_id") or ""
+        )
+        successor_canonical = str(
+            repair_package.get("successor_canonical_sha256") or ""
+        )
+        return_handoff_id = str(
+            repair_package.get("repair_to_audit_handoff_id") or ""
+        )
+        hub = self.store.load_hub(namespace, project_id)
+        repair_orders = [
+            row
+            for row in hub.get("work_orders", [])
+            if isinstance(row, dict)
+            and row.get("work_order_id") == repair_work_order_id
+        ]
+        if len(repair_orders) != 1:
+            raise ValueError(
+                "reaudit_recovery_invalid: consumed repair package has no unique repair work order"
+            )
+        repair_work_order = repair_orders[0]
+        self._assert_storyboard_authority(repair_work_order, "repair")
+        successor_storyboard, successor_record = (
+            self._storyboard_from_artifact(
+                namespace, project_id, successor_artifact_id
+            )
+        )
+        if (
+            successor_record.get("project_id") != project_id
+            or successor_record.get("work_order_id")
+            != repair_work_order_id
+            or successor_record.get("source_artifact_id")
+            != repair_package.get("base_artifact_id")
+            or canonical_storyboard_sha256(successor_storyboard)
+            != successor_canonical
+            or self.store.artifact_publication_state(successor_record)
+            != "committed"
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: consumed repair successor artifact binding differs"
+            )
+        successor_metadata = successor_record.get("metadata")
+        if not isinstance(successor_metadata, dict):
+            raise ValueError(
+                "reaudit_recovery_invalid: consumed repair successor metadata is missing"
+            )
+        base_record, _base_path = self.store.get_artifact(
+            namespace,
+            project_id,
+            str(repair_package.get("base_artifact_id") or ""),
+        )
+        base_metadata = base_record.get("metadata")
+        transaction = (
+            base_metadata.get("successor_transaction")
+            if isinstance(base_metadata, dict)
+            else None
+        )
+        successor_kind = (
+            str(transaction.get("successor_kind") or "")
+            if isinstance(transaction, dict)
+            else ""
+        )
+        if (
+            not isinstance(transaction, dict)
+            or transaction.get("state") != "committed"
+            or successor_kind not in {"patch", "repair"}
+            or transaction.get("successor_artifact_id")
+            != successor_artifact_id
+            or transaction.get("successor_canonical_hash")
+            != successor_canonical
+            or base_metadata.get("successor_artifact_id")
+            != successor_artifact_id
+            or base_metadata.get("successor_canonical_hash")
+            != successor_canonical
+            or base_metadata.get("successor_kind") != successor_kind
+            or base_metadata.get("successor_scope_hash")
+            != transaction.get("scope_hash")
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: consumed repair base CAS is not committed"
+            )
+        if successor_kind == "patch":
+            expected_metadata = {
+                "patch_repair_package_id": package_id,
+                "patch_audit_certificate_id": certificate.get(
+                    "certificate_id"
+                ),
+                "patch_base_artifact_id": repair_package.get(
+                    "base_artifact_id"
+                ),
+                "patch_base_canonical_sha256": repair_package.get(
+                    "base_canonical_sha256"
+                ),
+                "patch_scope_hash": transaction.get("scope_hash"),
+                "successor_transaction_id": transaction.get(
+                    "transaction_id"
+                ),
+            }
+        else:
+            expected_metadata = {
+                "repair_package_id": package_id,
+                "repair_audit_certificate_id": certificate.get(
+                    "certificate_id"
+                ),
+                "repair_base_artifact_id": repair_package.get(
+                    "base_artifact_id"
+                ),
+                "repair_base_canonical_sha256": repair_package.get(
+                    "base_canonical_sha256"
+                ),
+                "repair_scope_hash": transaction.get("scope_hash"),
+                "repair_transaction_id": transaction.get(
+                    "transaction_id"
+                ),
+            }
+        if any(
+            successor_metadata.get(key) != value
+            for key, value in expected_metadata.items()
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: consumed repair successor metadata differs"
+            )
+        return_handoff = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="handoffs",
+            record_id=return_handoff_id,
+        )
+        self._validate_schema_record(
+            self._project_schema, "handoff_manifest", return_handoff
+        )
+        if not self.store.project_record_is_signed(return_handoff):
+            raise ValueError(
+                "reaudit_recovery_invalid: repair return handoff is unsigned"
+            )
+        expected_return_bindings = {
+            "handoff_type": "repair_to_audit",
+            "work_order_id": repair_work_order_id,
+            "immutable_repair_package_id": package_id,
+            "storyboard_artifact_id": successor_artifact_id,
+            "canonical_sha256": successor_canonical,
+            "return_to_audit_work_order_id": repair_package.get(
+                "audit_work_order_id"
+            ),
+            "return_to_audit_window_binding_id": repair_package.get(
+                "audit_window_binding_id"
+            ),
+            "return_to_audit_actor_binding_id": repair_package.get(
+                "audit_actor_binding_id"
+            ),
+            "return_to_audit_session_fingerprint": repair_package.get(
+                "audit_session_fingerprint"
+            ),
+        }
+        if (
+            any(
+                return_handoff.get(key) != value
+                for key, value in expected_return_bindings.items()
+            )
+            or not self.store.handoff_is_published(
+                namespace, project_id, return_handoff
+            )
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: repair return handoff binding differs"
+            )
+        hub_handoffs = [
+            row
+            for row in hub.get("handoffs", [])
+            if isinstance(row, dict)
+            and row.get("handoff_id") == return_handoff_id
+        ]
+        if len(hub_handoffs) != 1 or hub_handoffs[0] != return_handoff:
+            raise ValueError(
+                "reaudit_recovery_invalid: repair return handoff Hub projection differs"
+            )
+        claim_fields = {
+            "claimed_by_work_order_id",
+            "claim_token",
+            "claim_epoch_seconds",
+            "claim_lease_seconds",
+            "claim_lease_expires_at",
+            "claim_lease_expires_epoch_seconds",
+        }
+        consumption_fields = {
+            "consumed_by_work_order_id",
+            "audit_certificate_id",
+            "consumed_at",
+        }
+        return_status = return_handoff.get("status")
+        if return_status == "prepared":
+            if any(key in return_handoff for key in claim_fields | consumption_fields):
+                raise ValueError(
+                    "reaudit_recovery_invalid: prepared repair return handoff carries transition state"
+                )
+        elif return_status == "consuming":
+            if (
+                return_handoff.get("claimed_by_work_order_id")
+                != repair_package.get("audit_work_order_id")
+                or not return_handoff.get("claim_token")
+            ):
+                raise ValueError(
+                    "reaudit_recovery_invalid: consuming repair return handoff claim differs"
+                )
+        elif return_status == "consumed":
+            if (
+                return_handoff.get("consumed_by_work_order_id")
+                != repair_package.get("audit_work_order_id")
+                or not return_handoff.get("audit_certificate_id")
+            ):
+                raise ValueError(
+                    "reaudit_recovery_invalid: consumed repair return handoff authority differs"
+                )
+            return_certificate = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="certificates",
+                record_id=str(return_handoff["audit_certificate_id"]),
+            )
+            if (
+                not self.store.project_record_is_signed(return_certificate)
+                or return_certificate.get("handoff_id")
+                != return_handoff_id
+                or return_certificate.get("artifact_id")
+                != successor_artifact_id
+                or return_certificate.get("canonical_sha256")
+                != successor_canonical
+            ):
+                raise ValueError(
+                    "reaudit_recovery_invalid: repair return audit certificate differs"
+                )
+        else:
+            raise ValueError(
+                "reaudit_recovery_invalid: repair return handoff status is invalid"
+            )
+
+    def _completed_repair_projection_state(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        storyboard: dict[str, Any],
+        handoff: dict[str, Any],
+        certificate: dict[str, Any],
+        event: dict[str, Any],
+        audit_work_order: dict[str, Any],
+    ) -> tuple[bool, dict[str, Any] | None, dict[str, Any] | None]:
+        """Read one deterministic failed-audit repair projection.
+
+        Missing package/handoff/Hub rows are the only recoverable state here;
+        a present-but-different signed record remains corruption and fails
+        closed.  The caller may repair a missing projection only through the
+        storage-layer latest-lineage CAS.
+        """
+
+        if int(certificate.get("issue_count") or 0) == 0:
+            return True, None, None
+        expected_package, expected_handoff = (
+            self._deterministic_repair_package_and_handoff(
+                project_id,
+                storyboard=storyboard,
+                certificate=certificate,
+                production_handoff=handoff,
+                audit_work_order=audit_work_order,
+            )
+        )
+        if expected_package is None or expected_handoff is None:
+            raise ValueError(
+                "reaudit_recovery_invalid: failed audit cannot rebuild its deterministic repair route"
+            )
+        if expected_package.get("audit_event_id") != event.get("event_id"):
+            raise ValueError(
+                "reaudit_recovery_invalid: repair route and durable event differ"
+            )
+        certificate_id = str(certificate.get("certificate_id") or "")
+        expected_package_id = str(expected_package["repair_package_id"])
+        expected_handoff_id = str(expected_handoff["handoff_id"])
+        downstream_evidence = self._repair_package_downstream_evidence(
+            namespace,
+            project_id,
+            repair_package_id=expected_package_id,
+            base_artifact_id=str(expected_package["base_artifact_id"]),
+        )
+        all_packages = self.store.list_project_records_strict(
+            namespace, project_id, kind="repair_packages"
+        )
+        if any(
+            row.get("repair_package_id") == expected_package_id
+            and row.get("audit_certificate_id") != certificate_id
+            for row in all_packages
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: deterministic repair package identity belongs to another certificate"
+            )
+        packages = [
+            row
+            for row in all_packages
+            if row.get("audit_certificate_id") == certificate_id
+        ]
+        if not packages:
+            if downstream_evidence:
+                raise ValueError(
+                    "reaudit_recovery_invalid: consumed repair authorization cannot be resurrected from missing package state"
+                )
+            return False, None, None
+        if len(packages) != 1:
+            raise ValueError(
+                "reaudit_recovery_invalid: completed failed audit has no unique repair package"
+            )
+        repair_package = packages[0]
+        package_storage_fields = {"record_id", "project_id", "integrity_hmac"}
+        package_mutable_fields = {
+            "status",
+            "consumed_by_work_order_id",
+            "successor_artifact_id",
+            "successor_canonical_sha256",
+            "repair_to_audit_handoff_id",
+        }
+        package_allowed_fields = (
+            set(expected_package)
+            | package_storage_fields
+            | package_mutable_fields
+        )
+        package_status = repair_package.get("status")
+        package_transition_fields = package_mutable_fields - {"status"}
+        present_transition_fields = {
+            key for key in package_transition_fields if key in repair_package
+        }
+        valid_package_transition = (
+            package_status == "issued"
+            and not present_transition_fields
+            and not downstream_evidence
+        ) or (
+            package_status == "consumed"
+            and present_transition_fields == package_transition_fields
+            and all(
+                repair_package.get(key)
+                for key in package_transition_fields
+            )
+        )
+        if (
+            not self.store.project_record_is_signed(repair_package)
+            or repair_package.get("record_id") != expected_package_id
+            or repair_package.get("project_id") != project_id
+            or set(repair_package) - package_allowed_fields
+            or any(
+                repair_package.get(key) != value
+                for key, value in expected_package.items()
+                if key != "status"
+            )
+            or not valid_package_transition
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: completed repair package differs from its deterministic authority"
+            )
+        self._validate_schema_record(
+            self._project_schema, "immutable_repair_package", repair_package
+        )
+        try:
+            audit_to_repair_handoff = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="handoffs",
+                record_id=expected_handoff_id,
+            )
+        except ValueError as exc:
+            if str(exc).startswith("unknown handoffs record_id:"):
+                if package_status != "issued":
+                    raise ValueError(
+                        "reaudit_recovery_invalid: consumed repair route lost its audit-to-repair handoff"
+                    ) from exc
+                return False, repair_package, None
+            raise
+        expected_sealed_handoff = {
+            **copy.deepcopy(expected_handoff),
+            "record_id": expected_handoff_id,
+            "project_id": project_id,
+        }
+        actual_handoff_without_hmac = {
+            key: copy.deepcopy(value)
+            for key, value in audit_to_repair_handoff.items()
+            if key != "integrity_hmac"
+        }
+        if (
+            not self.store.project_record_is_signed(audit_to_repair_handoff)
+            or actual_handoff_without_hmac != expected_sealed_handoff
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: completed repair handoff differs from its deterministic authority"
+            )
+        self._validate_schema_record(
+            self._project_schema, "handoff_manifest", audit_to_repair_handoff
+        )
+        hub = self.store.load_hub(namespace, project_id)
+        package_rows = [
+            row
+            for row in hub.get("repair_packages", [])
+            if row.get("repair_package_id") == expected_package_id
+        ]
+        handoff_rows = [
+            row
+            for row in hub.get("handoffs", [])
+            if row.get("handoff_id") == expected_handoff_id
+        ]
+        if not package_rows or not handoff_rows:
+            if package_status != "issued":
+                raise ValueError(
+                    "reaudit_recovery_invalid: consumed repair route lost a Hub projection"
+                )
+            return False, repair_package, audit_to_repair_handoff
+        if (
+            len(package_rows) != 1
+            or len(handoff_rows) != 1
+            or package_rows[0] != repair_package
+            or handoff_rows[0] != audit_to_repair_handoff
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: completed repair Hub projection changed identity"
+            )
+        if package_status == "consumed":
+            self._validate_consumed_repair_package_state(
+                namespace,
+                project_id,
+                repair_package=repair_package,
+                certificate=certificate,
+            )
+        return True, repair_package, audit_to_repair_handoff
+
+    def _completed_audit_response(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        artifact_id: str,
+        canonical_hash: str,
+        storyboard: dict[str, Any],
+        handoff: dict[str, Any],
+        audit_work_order: dict[str, Any],
+        certificate: dict[str, Any],
+        event: dict[str, Any],
+        fingerprints: dict[str, str],
+    ) -> ToolResponse:
+        """Return a completed audit from immutable records without writes."""
+
+        authority_manifest: list[dict[str, Any]] = []
+        root, latest = self._resolve_reaudit_lineage(
+            namespace,
+            project_id,
+            requested_handoff=handoff,
+            audit_work_order=audit_work_order,
+            fingerprints=fingerprints,
+            allow_pending=False,
+            repair_projection=False,
+            authority_manifest_out=authority_manifest,
+        )
+        if (
+            latest.get("handoff_id") != handoff.get("handoff_id")
+            or latest.get("status") != "consumed"
+            or latest.get("audit_certificate_id")
+            != certificate.get("certificate_id")
+            or certificate.get("event_id") != event.get("event_id")
+        ):
+            raise ValueError(
+                "reaudit_replay_superseded: a newer completed audit is authoritative"
+            )
+        telemetry_id = str(
+            certificate.get("audit_trace_id")
+            or certificate.get("stage_trace_id")
+            or ""
+        )
+        telemetry = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="telemetry",
+            record_id=telemetry_id,
+        )
+        if (
+            not self.store.project_record_is_signed(telemetry)
+            or telemetry.get("operation") != "audit_storyboard"
+            or telemetry.get("artifact_id") != artifact_id
+            or telemetry.get("input_fingerprints") != fingerprints
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: completed audit telemetry changed identity"
+            )
+        overlays = [
+            row
+            for row in self.store.list_artifacts(namespace, project_id)
+            if row.get("artifact_type") == "storyboard_audit_overlay"
+            and row.get("metadata", {}).get(
+                "independent_audit_certificate_id"
+            )
+            == certificate.get("certificate_id")
+        ]
+        if len(overlays) != 1:
+            raise ValueError(
+                "reaudit_recovery_invalid: completed audit has no unique overlay"
+            )
+        audited_record = overlays[0]
+        source_record, _source_path = self.store.get_artifact(
+            namespace, project_id, artifact_id
+        )
+        self._verify_authoritative_audit_overlay(
+            namespace,
+            project_id,
+            overlay_record=audited_record,
+            source_record=source_record,
+            certificate=certificate,
+        )
+        (
+            repair_projection_complete,
+            repair_package,
+            audit_to_repair_handoff,
+        ) = self._completed_repair_projection_state(
+            namespace,
+            project_id,
+            storyboard=storyboard,
+            handoff=handoff,
+            certificate=certificate,
+            event=event,
+            audit_work_order=audit_work_order,
+        )
+        if not repair_projection_complete:
+            raise ValueError(
+                "reaudit_recovery_incomplete: completed failed audit repair projection is incomplete"
+            )
+        route_trace = None
+        if handoff.get("reaudit_kind") == "independent_audit_successor":
+            route_trace = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="telemetry",
+                record_id=str(handoff.get("reaudit_route_trace_id") or ""),
+            )
+            if (
+                not self.store.project_record_is_signed(route_trace)
+                or route_trace.get("operation")
+                != "audit_storyboard_reaudit_route"
+                or route_trace.get("artifact_id") != artifact_id
+                or route_trace.get("input_fingerprints") != fingerprints
+                or route_trace.get("window_role")
+                != "independent_audit"
+                or route_trace.get("task_type")
+                != "independent_audit"
+            ):
+                raise ValueError(
+                    "reaudit_recovery_invalid: completed route trace changed identity"
+                )
+        issue_count = len(event.get("issues", []))
+        status = (
+            "pass"
+            if certificate.get("result") == "pass"
+            else "blocked"
+            if certificate.get("result") == "blocked"
+            else "fail_current"
+        )
+        summary = f"审计结果未变｜问题{issue_count}项｜未新增轮次"
+        production_trace_id = str(handoff.get("stage_trace_id") or "")
+        original_production_trace_id = str(
+            handoff.get("production_stage_trace_id")
+            or handoff.get("stage_trace_id")
+            or ""
+        )
+        report = copy.deepcopy(certificate.get("report") or {})
+        fast_path_evidence = {
+            "cache_hit": True,
+            "cache_reason": "completed signed audit receipt reused read-only",
+            "semantic_submission_required": False,
+            "semantic_submission_used": False,
+            "machine_validator_executed": False,
+            "canonical_sha256": canonical_hash,
+            "reviewed_shot_count": certificate.get(
+                "reviewed_shot_count"
+            ),
+            "reviewed_batch_count": certificate.get(
+                "reviewed_batch_count"
+            ),
+            "semantic_audit_sha256": certificate.get(
+                "semantic_audit_sha256"
+            ),
+            "production_trace_id": production_trace_id,
+            "original_production_trace_id": original_production_trace_id,
+            "reaudit_route_trace_id": handoff.get(
+                "reaudit_route_trace_id"
+            ),
+            "audit_trace_id": telemetry_id,
+            "certificate_audit_trace_id": certificate.get(
+                "audit_trace_id"
+            ),
+            "measurement_scope": "server_only",
+        }
+        download_url = self.store.signed_download_url(
+            namespace,
+            project_id,
+            str(audited_record["artifact_id"]),
+            str(audited_record["file_name"]),
+        )
+        response = ToolResponse(
+            status=status,
+            summary=summary,
+            project_id=project_id,
+            artifact_id=artifact_id,
+            trace_id=telemetry_id,
+            data={
+                "report": report,
+                "audit": {
+                    "status": "duplicate",
+                    "event": copy.deepcopy(event),
+                    "ingest": None,
+                },
+                "audit_class": AUDIT_CLASS_INDEPENDENT,
+                "audit_work_order_id": audit_work_order["work_order_id"],
+                "cache_hit": True,
+                "canonical_sha256": canonical_hash,
+                "production_trace_id": production_trace_id,
+                "original_production_trace_id": (
+                    original_production_trace_id
+                ),
+                "reaudit_route_trace": route_trace,
+                "audit_trace_id": telemetry_id,
+                "fast_path_evidence": fast_path_evidence,
+                "handoff": self._handoff_summary(handoff),
+                "certificate": self._certificate_summary(certificate),
+                "repair_package": repair_package,
+                "audit_to_repair_handoff": self._handoff_summary(
+                    audit_to_repair_handoff
+                ),
+                "audited_workbook": {
+                    "artifact_id": audited_record["artifact_id"],
+                    "file_name": audited_record["file_name"],
+                    "fingerprint": audited_record["fingerprint"],
+                    "status": str(
+                        certificate.get("result") or "fail_current"
+                    ).upper(),
+                    "source_artifact_id": artifact_id,
+                },
+                "audited_workbook_download_url": download_url,
+                "telemetry_id": telemetry_id,
+                "telemetry": telemetry,
+            },
+        )
+        self.store.assert_latest_reaudit_receipt(
+            namespace,
+            project_id,
+            root_handoff_id=str(
+                handoff.get("reaudit_root_handoff_id")
+                or handoff.get("handoff_id")
+                or ""
+            ),
+            root_handoff_hmac=str(root.get("integrity_hmac") or ""),
+            latest_handoff_id=str(handoff.get("handoff_id") or ""),
+            latest_handoff_hmac=str(
+                handoff.get("integrity_hmac") or ""
+            ),
+            certificate_id=str(certificate.get("certificate_id") or ""),
+            certificate_hmac=str(
+                certificate.get("integrity_hmac") or ""
+            ),
+            lineage_authority_manifest=authority_manifest,
+        )
+        return response
+
+    def _validate_exact_reaudit_certificate_binding(
+        self,
+        *,
+        certificate: dict[str, Any],
+        event: dict[str, Any],
+        handoff: dict[str, Any],
+        audit_work_order: dict[str, Any],
+        fingerprints: dict[str, str],
+        cache_components: dict[str, str],
+        artifact_record: dict[str, Any],
+        allow_legacy_missing_event_sha: bool = False,
+    ) -> None:
+        """Bind a signed certificate to its exact report, event and route.
+
+        This validation runs before any recovery claim or projection write.
+        A record that is correctly HMAC-signed but internally inconsistent is
+        still invalid authority and must never be completed or replayed.
+        """
+
+        report = certificate.get("report")
+        semantic_submission = (
+            report.get("semantic_audit")
+            if isinstance(report, dict)
+            else None
+        )
+        evidence_matrix = (
+            report.get("independent_evidence_matrix")
+            if isinstance(report, dict)
+            else None
+        )
+        report_issues = (
+            report.get("issues") if isinstance(report, dict) else None
+        )
+        event_issues = event.get("issues")
+        if (
+            not self.store.project_record_is_signed(certificate)
+            or not isinstance(report, dict)
+            or not isinstance(report_issues, list)
+            or not isinstance(event_issues, list)
+            or not isinstance(semantic_submission, dict)
+            or not isinstance(evidence_matrix, dict)
+        ):
+            raise ValueError(
+                "reaudit_recovery_invalid: certificate authority is unsigned or incomplete"
+            )
+        semantic_sha256 = sha256_bytes(
+            _stable_json_bytes(semantic_submission)
+        )
+        expected_result = (
+            "pass"
+            if event.get("result") == "pass"
+            else "blocked"
+            if event.get("result") == "blocked"
+            else "fail_current"
+        )
+        event_trace_id = str(event.get("stage_trace_id") or "")
+        expected_production_trace_id = str(
+            handoff.get("reaudit_route_trace_id")
+            or handoff.get("stage_trace_id")
+            or ""
+        )
+        expected_production_stage_trace_id = str(
+            handoff.get("production_stage_trace_id")
+            or handoff.get("stage_trace_id")
+            or ""
+        )
+        expected_fingerprints = {
+            "source": fingerprints["source_bytes"],
+            "boundary": fingerprints["episode_boundary"],
+            "artifact_raw": fingerprints["artifact_raw"],
+            "artifact_semantic": fingerprints["artifact_semantic"],
+            "canonical": fingerprints["canonical"],
+            "parser": fingerprints["parser"],
+            "schema": fingerprints["schema"],
+            "runtime": fingerprints["runtime"],
+            "rules": fingerprints["rules"],
+            "validator": fingerprints["validator"],
+            "project_anchors": fingerprints["project_anchors"],
+            "target_model_contract": fingerprints[
+                "target_model_contract"
+            ],
+        }
+        report_summary = copy.deepcopy(report.get("audit_summary") or {})
+        expected_certificate_summary = {
+            **report_summary,
+            "audit_trace_id": event_trace_id,
+            "canonical_sha256": cache_components["canonical"],
+            "artifact_raw_sha256": fingerprints["artifact_raw"],
+        }
+        expected_values = {
+            "certificate_type": AUDIT_CLASS_INDEPENDENT,
+            "audit_class": AUDIT_CLASS_INDEPENDENT,
+            "work_order_id": audit_work_order.get("work_order_id"),
+            "production_work_order_id": handoff.get("work_order_id"),
+            "artifact_id": artifact_record.get("artifact_id"),
+            "canonical_artifact_id": artifact_record.get("metadata", {}).get(
+                "canonical_json_artifact_id"
+            ),
+            "canonical_sha256": cache_components["canonical"],
+            "source_fingerprint": cache_components["source"],
+            "boundary_hash": cache_components["boundary"],
+            "ruleset_version": cache_components["ruleset"],
+            "validator_version": cache_components["validator"],
+            "cache_key": self._cache_key_from_components(
+                cache_components
+            ),
+            "cache_components": cache_components,
+            "checked_shot_count": int(report.get("shot_count", -1)),
+            "report_sha256": sha256_bytes(_stable_json_bytes(report)),
+            "result": expected_result,
+            "issue_count": len(report_issues),
+            "event_id": event.get("event_id"),
+            "handoff_id": handoff.get("handoff_id"),
+            "stage_trace_id": event_trace_id,
+            "audit_trace_id": event_trace_id,
+            "production_trace_id": expected_production_trace_id,
+            "production_stage_trace_id": (
+                expected_production_stage_trace_id
+            ),
+            "fingerprints": expected_fingerprints,
+            "independent_of_production": True,
+            "preventive_gate_results": evidence_matrix.get(
+                "preventive_gate_results"
+            ),
+            "audit_layer_results": evidence_matrix.get(
+                "audit_layer_results"
+            ),
+            "quality_thresholds": evidence_matrix.get(
+                "quality_thresholds"
+            ),
+            "audit_actor_binding_id": audit_work_order.get(
+                "server_actor_binding_id"
+            ),
+            "audit_session_fingerprint": audit_work_order.get(
+                "transport_session_fingerprint"
+            ),
+            "semantic_audit_contract": (
+                SEMANTIC_AUDIT_CONTRACT_VERSION
+            ),
+            "semantic_audit_sha256": semantic_sha256,
+            "reviewed_shot_count": int(
+                semantic_submission.get("reviewed_shot_count", -1)
+            ),
+            "reviewed_batch_count": int(
+                semantic_submission.get("reviewed_batch_count", -1)
+            ),
+            "source_ingestion_mode": (
+                "chapter_to_storyboard"
+                if isinstance(report.get("chapter_coverage"), dict)
+                else "non_chapter"
+            ),
+            "semantic_conclusion": semantic_submission.get("conclusion"),
+            "audit_summary": expected_certificate_summary,
+        }
+        if not (
+            allow_legacy_missing_event_sha
+            and "event_sha256" not in certificate
+        ):
+            expected_values["event_sha256"] = sha256_bytes(
+                _stable_json_bytes(event)
+            )
+        mismatched = [
+            key
+            for key, value in expected_values.items()
+            if _stable_json_bytes(certificate.get(key))
+            != _stable_json_bytes(value)
+        ]
+        event_semantic_sha256 = event.get("semantic_audit_sha256")
+        if (
+            mismatched
+            or report.get("semantic_audit_sha256") != semantic_sha256
+            or evidence_matrix.get("semantic_audit_sha256")
+            != semantic_sha256
+            or len(event_issues) != len(report_issues)
+            or _stable_json_bytes(event.get("checked_shot_count"))
+            != _stable_json_bytes(certificate.get("checked_shot_count"))
+            or (
+                event_semantic_sha256 not in (None, "")
+                and event_semantic_sha256 != semantic_sha256
+            )
+        ):
+            details = ", ".join(mismatched) or "event/report counts"
+            raise ValueError(
+                "reaudit_recovery_invalid: certificate, report, event, handoff, work order, or fingerprints differ: "
+                + details
+            )
+
+    def _validate_reaudit_lineage_certificate_authority(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        root: dict[str, Any],
+        ordered_routes: list[dict[str, Any]],
+        audit_work_order: dict[str, Any],
+        fingerprints: dict[str, str],
+        allow_legacy_tail_as_reaudit_parent: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Revalidate every completed route's certificate and Ledger event."""
+
+        artifact_id = str(root.get("logical_artifact_id") or "")
+        storyboard, artifact_record = self._storyboard_from_artifact(
+            namespace, project_id, artifact_id
+        )
+        canonical_hash = canonical_storyboard_sha256(storyboard)
+        source_fingerprint = self._source_fingerprint(
+            namespace,
+            project_id,
+            storyboard,
+            artifact_record.get("source_artifact_id"),
+            artifact_record,
+        )
+        boundary_hash = self._boundary_hash(storyboard)
+        recomputed_fingerprints = self._fingerprint_bundle(
+            storyboard,
+            artifact_record,
+            canonical_hash=canonical_hash,
+            source_fingerprint=source_fingerprint,
+            boundary_hash=boundary_hash,
+        )
+        if recomputed_fingerprints != fingerprints:
+            raise ValueError(
+                "reaudit_lineage_invalid: current artifact fingerprints differ from the signed route"
+            )
+        runtime_certificate = self._require_runtime_test_certificate(
+            namespace, project_id
+        )
+        ledger = self.store.load_ledger(namespace, project_id)
+        manifest: list[dict[str, Any]] = []
+        completed_routes = [
+            route
+            for route in ordered_routes
+            if route.get("status") == "consumed"
+        ]
+        completed_tail_is_scope_authority = bool(
+            ordered_routes
+            and ordered_routes[-1].get("status") == "consumed"
+        )
+        route_positions = {
+            str(route.get("handoff_id") or ""): index
+            for index, route in enumerate(ordered_routes)
+        }
+        for route_index, route in enumerate(completed_routes):
+            route_id = str(route.get("handoff_id") or "")
+            certificate_id = str(
+                route.get("audit_certificate_id") or ""
+            )
+            certificate = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="certificates",
+                record_id=certificate_id,
+            )
+            self._validate_schema_record(
+                self._ledger_schema,
+                "independent_audit_certificate",
+                certificate,
+            )
+            event_id = str(certificate.get("event_id") or "")
+            matching_events = [
+                row
+                for row in ledger.get("events", [])
+                if isinstance(row, dict)
+                and str(row.get("event_id") or "") == event_id
+            ]
+            if len(matching_events) != 1:
+                raise ValueError(
+                    "reaudit_lineage_invalid: certificate has no unique Ledger event"
+                )
+            event = matching_events[0]
+            event_sha256 = sha256_bytes(_stable_json_bytes(event))
+            route_position = route_positions.get(route_id, -1)
+            child = (
+                ordered_routes[route_position + 1]
+                if 0 <= route_position < len(ordered_routes) - 1
+                else None
+            )
+            if child is not None and (
+                child.get("previous_audit_certificate_id")
+                != certificate_id
+                or child.get("previous_audit_certificate_hmac")
+                != certificate.get("integrity_hmac")
+                or child.get("previous_audit_event_sha256")
+                != event_sha256
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: successor does not seal its parent certificate and event"
+                )
+            certificate_has_event_sha = "event_sha256" in certificate
+            allow_legacy_missing_event_sha = bool(
+                not certificate_has_event_sha
+                and (
+                    child is not None
+                    or (
+                        route_position == len(ordered_routes) - 1
+                        and allow_legacy_tail_as_reaudit_parent
+                    )
+                )
+            )
+            if (
+                not certificate_has_event_sha
+                and not allow_legacy_missing_event_sha
+            ):
+                raise ValueError(
+                    "reaudit_recovery_invalid: legacy certificate needs a fresh successor audit before it can authorize replay"
+                )
+            current_cache_components = self._audit_cache_components(
+                canonical_hash=canonical_hash,
+                source_fingerprint=source_fingerprint,
+                boundary_hash=boundary_hash,
+                audit_class=AUDIT_CLASS_INDEPENDENT,
+                artifact_fingerprint=str(
+                    artifact_record.get("fingerprint") or ""
+                ),
+                storyboard=storyboard,
+                scope=self._independent_audit_cache_scope(
+                    route, artifact_id
+                ),
+                runtime_test_certificate_id=str(
+                    runtime_certificate.get("certificate_id") or ""
+                ),
+            )
+            route_is_historical_parent = bool(
+                child is not None
+                or (
+                    route_position == len(ordered_routes) - 1
+                    and allow_legacy_tail_as_reaudit_parent
+                )
+            )
+            cache_components = current_cache_components
+            if route_is_historical_parent:
+                persisted_cache_components = certificate.get(
+                    "cache_components"
+                )
+                if (
+                    not isinstance(persisted_cache_components, dict)
+                    or set(persisted_cache_components)
+                    != set(current_cache_components)
+                    or any(
+                        persisted_cache_components.get(key) != value
+                        for key, value in current_cache_components.items()
+                        if key != "semantic_audit_contract"
+                    )
+                ):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: historical certificate cache changed outside the semantic audit contract"
+                    )
+                cache_components = copy.deepcopy(
+                    persisted_cache_components
+                )
+            self._validate_reaudit_recovery_event(
+                namespace,
+                project_id,
+                event=event,
+                handoff=route,
+                audit_work_order=audit_work_order,
+                fingerprints=fingerprints,
+                cache_components=cache_components,
+                artifact_record=artifact_record,
+                certificate=certificate,
+                require_latest_scope=(
+                    completed_tail_is_scope_authority
+                    and route_index == len(completed_routes) - 1
+                ),
+            )
+            report = certificate.get("report")
+            if not isinstance(report, dict):
+                raise ValueError(
+                    "reaudit_lineage_invalid: certificate report is missing"
+                )
+            self._validate_reaudit_recovery_event_content(
+                namespace,
+                project_id,
+                event=event,
+                storyboard=storyboard,
+                artifact_record=artifact_record,
+                report=report,
+                require_latest_scope=(
+                    completed_tail_is_scope_authority
+                    and route_index == len(completed_routes) - 1
+                ),
+            )
+            self._validate_exact_reaudit_certificate_binding(
+                certificate=certificate,
+                event=event,
+                handoff=route,
+                audit_work_order=audit_work_order,
+                fingerprints=fingerprints,
+                cache_components=cache_components,
+                artifact_record=artifact_record,
+                allow_legacy_missing_event_sha=(
+                    allow_legacy_missing_event_sha
+                ),
+            )
+            manifest.append(
+                {
+                    "handoff_id": route_id,
+                    "handoff_hmac": str(
+                        route.get("integrity_hmac") or ""
+                    ),
+                    "certificate_id": certificate_id,
+                    "certificate_hmac": str(
+                        certificate.get("integrity_hmac") or ""
+                    ),
+                    "event_id": event_id,
+                    "event_sha256": event_sha256,
+                    "legacy_event_sha_missing": (
+                        not certificate_has_event_sha
+                    ),
+                }
+            )
+        return manifest
+
+    def _recoverable_reaudit_certificate(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        pending_handoff: dict[str, Any],
+        audit_work_order: dict[str, Any],
+        fingerprints: dict[str, str],
+        cache_components: dict[str, str],
+        artifact_record: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Return the unique cert+event pair from a pre-finish crash.
+
+        A complete pair resumes finalization.  An event-only hard-crash state
+        may later mint one deterministic certificate, but a certificate with
+        no immutable event always fails closed.
+        """
+
+        handoff_id = str(pending_handoff.get("handoff_id") or "")
+        event_trace_id = str(
+            pending_handoff.get("reaudit_event_trace_id") or ""
+        )
+        expected_cache_key = self._cache_key_from_components(
+            cache_components
+        )
+        certificates = [
+            row
+            for row in self.store.list_project_records_strict(
+                namespace, project_id, kind="certificates"
+            )
+            if row.get("handoff_id") == handoff_id
+            or row.get("stage_trace_id") == event_trace_id
+            or row.get("cache_key") == expected_cache_key
+        ]
+        ledger = self.store.load_ledger(namespace, project_id)
+        events = [
+            row
+            for row in ledger.get("events", [])
+            if isinstance(row, dict)
+            and (
+                row.get("handoff_id") == handoff_id
+                or row.get("stage_trace_id") == event_trace_id
+                or row.get("audit_cache_key") == expected_cache_key
+            )
+        ]
+        if not certificates and not events:
+            return None, None
+        if (
+            pending_handoff.get("status") not in {"prepared", "consuming"}
+            or len(events) != 1
+            or len(certificates) > 1
+        ):
+            raise ValueError(
+                "reaudit_recovery_incomplete: pending route must have exactly one ledger event and at most one signed certificate"
+            )
+        event = events[0]
+        self._validate_reaudit_recovery_event(
+            namespace,
+            project_id,
+            event=event,
+            handoff=pending_handoff,
+            audit_work_order=audit_work_order,
+            fingerprints=fingerprints,
+            cache_components=cache_components,
+            artifact_record=artifact_record,
+        )
+        if not certificates:
+            return None, event
+        certificate = certificates[0]
+        self._validate_exact_reaudit_certificate_binding(
+            certificate=certificate,
+            event=event,
+            handoff=pending_handoff,
+            audit_work_order=audit_work_order,
+            fingerprints=fingerprints,
+            cache_components=cache_components,
+            artifact_record=artifact_record,
+        )
+        return certificate, event
+
+    def _recoverable_root_audit_certificate(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        pending_handoff: dict[str, Any],
+        audit_work_order: dict[str, Any],
+        fingerprints: dict[str, str],
+        cache_components: dict[str, str],
+        artifact_record: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Verify the immutable event+certificate pair from a root-audit retry.
+
+        A caught failure after those two records are durable releases the
+        production handoff back to ``prepared``.  Only that exact, unique pair
+        may resume the remaining package/overlay/telemetry projections.
+        """
+
+        if (
+            pending_handoff.get("reaudit_kind")
+            or pending_handoff.get("status")
+            not in {"prepared", "consuming"}
+            or pending_handoff.get("audit_certificate_id")
+        ):
+            return None
+        handoff_id = str(pending_handoff.get("handoff_id") or "")
+        certificates = [
+            row
+            for row in self.store.list_project_records_strict(
+                namespace, project_id, kind="certificates"
+            )
+            if row.get("handoff_id") == handoff_id
+        ]
+        events = [
+            row
+            for row in self.store.load_ledger(namespace, project_id).get(
+                "events", []
+            )
+            if isinstance(row, dict) and row.get("handoff_id") == handoff_id
+        ]
+        if not certificates and not events:
+            return None
+        if len(certificates) != 1 or len(events) != 1:
+            raise ValueError(
+                "audit_recovery_incomplete: pending root route must have exactly one signed certificate and ledger event"
+            )
+        certificate = certificates[0]
+        event = events[0]
+        if certificate.get("certificate_id") != candidate.get(
+            "certificate_id"
+        ):
+            raise ValueError(
+                "audit_recovery_invalid: cached root certificate identity differs"
+            )
+        self._validate_reaudit_recovery_event(
+            namespace,
+            project_id,
+            event=event,
+            handoff=pending_handoff,
+            audit_work_order=audit_work_order,
+            fingerprints=fingerprints,
+            cache_components=cache_components,
+            artifact_record=artifact_record,
+            certificate=certificate,
+        )
+        self._validate_exact_reaudit_certificate_binding(
+            certificate=certificate,
+            event=event,
+            handoff=pending_handoff,
+            audit_work_order=audit_work_order,
+            fingerprints=fingerprints,
+            cache_components=cache_components,
+            artifact_record=artifact_record,
+        )
+        return certificate
+
+    def _persist_reaudit_successor(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        root: dict[str, Any],
+        parent: dict[str, Any],
+        audit_work_order: dict[str, Any],
+        audit_event_trace_id: str,
+        fingerprints: dict[str, str],
+        artifact_id: str,
+        shot_count: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Mint a fresh signed route only after semantic validation succeeds."""
+
+        route_started_ns = time.perf_counter_ns()
+        parent_authority_manifest: list[dict[str, Any]] = []
+        verified_root, verified_latest = self._resolve_reaudit_lineage(
+            namespace,
+            project_id,
+            requested_handoff=parent,
+            audit_work_order=audit_work_order,
+            fingerprints=fingerprints,
+            allow_pending=True,
+            repair_projection=False,
+            allow_legacy_tail_as_reaudit_parent=True,
+            authority_manifest_out=parent_authority_manifest,
+        )
+        if (
+            verified_root.get("handoff_id") != root.get("handoff_id")
+            or verified_latest.get("handoff_id")
+            != parent.get("handoff_id")
+        ):
+            raise ValueError(
+                "reaudit_lineage_invalid: successor parent changed before issue"
+            )
+
+        def parent_authority(handoff_id: str) -> dict[str, Any]:
+            matches = [
+                row
+                for row in parent_authority_manifest
+                if row.get("handoff_id") == handoff_id
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    "reaudit_lineage_invalid: successor parent authority is incomplete"
+                )
+            return matches[0]
+
+        def route_trace_for(route_trace_id: str) -> dict[str, Any]:
+            try:
+                existing_trace = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="telemetry",
+                    record_id=route_trace_id,
+                )
+            except ValueError as exc:
+                if not str(exc).startswith("unknown telemetry record_id:"):
+                    raise
+                existing_trace = None
+            if existing_trace is not None:
+                if (
+                    not self.store.project_record_is_signed(existing_trace)
+                    or existing_trace.get("operation")
+                    != "audit_storyboard_reaudit_route"
+                    or existing_trace.get("artifact_id") != artifact_id
+                    or existing_trace.get("input_fingerprints")
+                    != fingerprints
+                    or existing_trace.get("window_role")
+                    != "independent_audit"
+                    or existing_trace.get("task_type")
+                    != "independent_audit"
+                ):
+                    raise ValueError(
+                        "reaudit_trace_conflict: persisted route telemetry changed identity"
+                    )
+                return existing_trace
+            return self._save_telemetry(
+                namespace,
+                project_id,
+                operation="audit_storyboard_reaudit_route",
+                started_ns=route_started_ns,
+                stages_ms={
+                    "lineage_verification_and_route_issue": (
+                        time.perf_counter_ns() - route_started_ns
+                    )
+                    / 1_000_000,
+                },
+                cache_hit=False,
+                artifact_id=artifact_id,
+                telemetry_id=route_trace_id,
+                window_role="independent_audit",
+                task_type="independent_audit",
+                input_fingerprints=fingerprints,
+                shot_count=shot_count,
+                batch_count=0,
+            )
+
+        if parent.get("status") in {"prepared", "consuming"}:
+            pending = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="handoffs",
+                record_id=str(parent.get("handoff_id") or ""),
+            )
+            if (
+                pending.get("status") not in {"prepared", "consuming"}
+                or
+                pending.get("reaudit_kind")
+                != "independent_audit_successor"
+                or pending.get("reaudit_root_handoff_id")
+                != root.get("handoff_id")
+                or pending.get("claim_authority_work_order_id")
+                != audit_work_order.get("work_order_id")
+                or pending.get("fingerprints") != fingerprints
+                or pending.get("reaudit_event_trace_id")
+                != audit_event_trace_id
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: pending route changed retry identity"
+                )
+            actual_parent_id = str(
+                pending.get("reaudit_parent_handoff_id") or ""
+            )
+            actual_parent = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="handoffs",
+                record_id=actual_parent_id,
+            )
+            if (
+                actual_parent.get("status") != "consumed"
+                or actual_parent.get("audit_certificate_id")
+                != pending.get("previous_audit_certificate_id")
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: pending route parent is no longer complete"
+                )
+            actual_parent_authority = parent_authority(actual_parent_id)
+            if (
+                pending.get("previous_audit_certificate_hmac")
+                != actual_parent_authority.get("certificate_hmac")
+                or pending.get("previous_audit_event_sha256")
+                != actual_parent_authority.get("event_sha256")
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: pending route lost its parent authority bridge"
+                )
+            if pending.get("status") == "prepared":
+                try:
+                    pending = self.store.commit_reaudit_successor(
+                        namespace,
+                        project_id,
+                        root_handoff_id=str(root["handoff_id"]),
+                        parent_handoff_id=actual_parent_id,
+                        successor_handoff_id=str(pending["handoff_id"]),
+                        consumer_work_order_id=str(
+                            audit_work_order["work_order_id"]
+                        ),
+                        successor=self._handoff_record_projection(pending),
+                    )
+                except ValueError as exc:
+                    if str(exc) != "reaudit_successor_idempotency_conflict":
+                        raise
+                    refreshed = self.store.get_project_record(
+                        namespace,
+                        project_id,
+                        kind="handoffs",
+                        record_id=str(pending["handoff_id"]),
+                    )
+                    if (
+                        refreshed.get("status") != "consuming"
+                        or refreshed.get("reaudit_lineage_sha256")
+                        != pending.get("reaudit_lineage_sha256")
+                        or refreshed.get("fingerprints") != fingerprints
+                        or refreshed.get("reaudit_event_trace_id")
+                        != audit_event_trace_id
+                    ):
+                        raise
+                    pending = refreshed
+            return pending, route_trace_for(
+                str(pending["reaudit_route_trace_id"])
+            )
+
+        successor_id = _new_id("HND")
+        route_trace_id = _new_id("TRC")
+        used_trace_ids = {
+            str(row.get("telemetry_id") or row.get("trace_id") or "")
+            for row in self.store.list_project_records_strict(
+                namespace, project_id, kind="telemetry"
+            )
+            if isinstance(row, dict)
+        }
+        used_trace_ids.update(
+            str(row.get("stage_trace_id") or "")
+            for row in self.store.load_ledger(namespace, project_id).get(
+                "events", []
+            )
+            if isinstance(row, dict)
+        )
+        if (
+            not route_trace_id
+            or not audit_event_trace_id
+            or route_trace_id == audit_event_trace_id
+            or route_trace_id in used_trace_ids
+            or audit_event_trace_id in used_trace_ids
+        ):
+            raise ValueError(
+                "reaudit_trace_conflict: route and audit-event traces must be globally fresh"
+            )
+        successor = self._handoff_record_projection(root)
+        for key in (
+            "handoff_id",
+            "created_at",
+            "status",
+            "claimed_by_work_order_id",
+            "claim_token",
+            "claim_generation",
+            "claim_epoch_seconds",
+            "claim_lease_seconds",
+            "claim_lease_expires_at",
+            "claim_lease_expires_epoch_seconds",
+            "consumed_by_work_order_id",
+            "consumed_at",
+            "audit_certificate_id",
+            "audit_certificate_ids",
+            "reaudit_count",
+            "reaudited_at",
+            "latest_audit_certificate_id",
+        ):
+            successor.pop(key, None)
+        parent_authority_record = parent_authority(
+            str(parent.get("handoff_id") or "")
+        )
+        successor.update(
+            {
+                "handoff_id": successor_id,
+                "created_at": utc_stamp(),
+                "status": "prepared",
+                "independent_audit_status": "PENDING_AUDIT",
+                "stage_trace_id": route_trace_id,
+                "production_stage_trace_id": str(root["stage_trace_id"]),
+                "reaudit_kind": "independent_audit_successor",
+                "reaudit_root_handoff_id": str(root["handoff_id"]),
+                "reaudit_parent_handoff_id": str(parent["handoff_id"]),
+                "reaudit_sequence": int(parent.get("reaudit_sequence") or 0)
+                + 1,
+                "reaudit_route_trace_id": route_trace_id,
+                "reaudit_event_trace_id": audit_event_trace_id,
+                "previous_audit_certificate_id": str(
+                    parent["audit_certificate_id"]
+                ),
+                "previous_audit_certificate_hmac": str(
+                    parent_authority_record["certificate_hmac"]
+                ),
+                "previous_audit_event_sha256": str(
+                    parent_authority_record["event_sha256"]
+                ),
+                "claim_authority_work_order_id": str(
+                    audit_work_order["work_order_id"]
+                ),
+                "reaudit_audit_window_binding_id": audit_work_order.get(
+                    "server_window_binding_id"
+                ),
+                "reaudit_audit_actor_binding_id": audit_work_order.get(
+                    "server_actor_binding_id"
+                ),
+                "reaudit_audit_session_fingerprint": audit_work_order.get(
+                    "transport_session_fingerprint"
+                ),
+                "server_minted_lineage": True,
+            }
+        )
+        successor["reaudit_lineage_sha256"] = sha256_bytes(
+            _stable_json_bytes(
+                self._reaudit_lineage_payload(
+                    root=root, parent=parent, successor=successor
+                )
+            )
+        )
+        self._validate_schema_record(
+            self._project_schema, "handoff_manifest", successor
+        )
+        persisted = self.store.commit_reaudit_successor(
+            namespace,
+            project_id,
+            root_handoff_id=str(root["handoff_id"]),
+            parent_handoff_id=str(parent["handoff_id"]),
+            successor_handoff_id=successor_id,
+            consumer_work_order_id=str(audit_work_order["work_order_id"]),
+            successor=successor,
+        )
+        _ACTIVE_CONSUMPTION_CLAIMS.set(
+            (
+                *_ACTIVE_CONSUMPTION_CLAIMS.get(),
+                {
+                    "kind": "reaudit_successor",
+                    "namespace": namespace,
+                    "project_id": project_id,
+                    "record_id": successor_id,
+                    "route_trace_id": route_trace_id,
+                },
+            )
+        )
+        route_trace = route_trace_for(route_trace_id)
+        return persisted, route_trace
 
     def _persist_production_handoff(
         self,
@@ -7651,9 +11315,128 @@ class StoryboardService:
         }
         return sha256_bytes(_stable_json_bytes(payload))
 
-    def _persist_repair_package_and_handoff(
+    def _repair_issue_targets(
         self,
-        namespace: str,
+        storyboard: dict[str, Any],
+        issues: list[Any],
+    ) -> list[dict[str, str]]:
+        """Normalize every repairable issue to exact canonical shot targets."""
+
+        shot_reference_to_id: dict[str, str] = {}
+        for shot in storyboard.get("shots", []):
+            if not isinstance(shot, dict):
+                continue
+            canonical_shot_id = str(
+                shot.get("镜头编号") or shot.get("shot_uid") or ""
+            ).strip()
+            if not canonical_shot_id:
+                continue
+            for reference in (shot.get("镜头编号"), shot.get("shot_uid")):
+                clean_reference = str(reference or "").strip()
+                if clean_reference:
+                    shot_reference_to_id[clean_reference] = canonical_shot_id
+
+        issue_targets: list[dict[str, str]] = []
+        considered_issue_count = 0
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            considered_issue_count += 1
+            issue_id = str(
+                issue.get("semantic_issue_id")
+                or issue.get("issue_id")
+                or issue.get("error_code")
+                or "E-UNKNOWN"
+            )
+            location = str(
+                issue.get("location") or f"semantic_audit.{issue_id}"
+            )
+            field = str(
+                issue.get("field") or location.rsplit(".", 1)[-1]
+            ).strip()
+            explicit_references = issue.get("shot_ids") or []
+            if not isinstance(explicit_references, list):
+                raise ValueError(
+                    "repair_package_target_invalid: issue shot_ids must be a list"
+                )
+            unknown_references = sorted(
+                {
+                    str(reference).strip()
+                    for reference in explicit_references
+                    if str(reference).strip() not in shot_reference_to_id
+                }
+            )
+            if unknown_references:
+                raise ValueError(
+                    "repair_package_target_invalid: certificate references unknown shots "
+                    + ", ".join(unknown_references)
+                )
+            canonical_references = [
+                shot_reference_to_id[str(reference).strip()]
+                for reference in explicit_references
+                if str(reference).strip()
+            ]
+            if len(set(canonical_references)) != len(canonical_references):
+                raise ValueError(
+                    "repair_package_target_invalid: shot aliases repeat one canonical target"
+                )
+            explicit_shot_ids = set(canonical_references)
+            location_match = re.search(r"shots\[(\d+)\]", location)
+            location_shot_ids: set[str] = set()
+            for derived in self._shot_ids_for_location(storyboard, location):
+                if derived not in shot_reference_to_id:
+                    raise ValueError(
+                        "repair_package_target_invalid: location resolved outside the audited artifact"
+                    )
+                location_shot_ids.add(shot_reference_to_id[derived])
+            if location_match and not location_shot_ids:
+                raise ValueError(
+                    "repair_package_target_invalid: indexed location is outside the audited artifact"
+                )
+            if (
+                explicit_shot_ids
+                and location_shot_ids
+                and explicit_shot_ids != location_shot_ids
+            ):
+                raise ValueError(
+                    "repair_package_target_conflict: explicit shot_ids and location disagree"
+                )
+            shot_ids = explicit_shot_ids or location_shot_ids
+            if bool(issue.get("blocking", True)) and not shot_ids:
+                raise ValueError(
+                    "repair_package_target_required: every blocking audit issue must authorize a concrete shot"
+                )
+            for shot_id in sorted(shot_ids):
+                issue_targets.append(
+                    {
+                        "issue_id": issue_id,
+                        "issue_code": str(
+                            issue.get("error_code") or "E-UNKNOWN"
+                        ),
+                        "shot_id": shot_id,
+                        "field": field,
+                        "location": location,
+                    }
+                )
+        unique = {
+            (
+                row["issue_id"],
+                row["issue_code"],
+                row["shot_id"],
+                row["field"],
+                row["location"],
+            ): row
+            for row in issue_targets
+        }
+        normalized = list(unique.values())
+        if considered_issue_count and not normalized:
+            raise ValueError(
+                "repair_package_target_required: audit issues cannot produce an empty repair route"
+            )
+        return normalized
+
+    def _deterministic_repair_package_and_handoff(
+        self,
         project_id: str,
         *,
         storyboard: dict[str, Any],
@@ -7661,30 +11444,34 @@ class StoryboardService:
         production_handoff: dict[str, Any],
         audit_work_order: dict[str, Any],
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        issue_targets: list[dict[str, str]] = []
-        for issue in certificate.get("report", {}).get("issues", []):
-            if not isinstance(issue, dict):
-                continue
-            location = str(issue.get("location") or "")
-            field = str(issue.get("field") or location.rsplit(".", 1)[-1]).strip()
-            for shot_id in self._shot_ids_for_location(storyboard, location):
-                issue_targets.append(
-                    {
-                        "issue_code": str(issue.get("error_code") or "E-UNKNOWN"),
-                        "shot_id": shot_id,
-                        "field": field,
-                        "location": location,
-                    }
-                )
-        unique = {
-            (row["issue_code"], row["shot_id"], row["field"], row["location"]): row
-            for row in issue_targets
-        }
-        issue_targets = list(unique.values())
+        """Build the exact immutable portion of a failed-audit repair route."""
+
+        issue_targets = self._repair_issue_targets(
+            storyboard,
+            list(certificate.get("report", {}).get("issues", [])),
+        )
         if not issue_targets:
             return None, None
-        repair_package_id = _new_id("RPK")
-        repair_handoff_id = _new_id("HND")
+        certificate_id = str(certificate["certificate_id"])
+        repair_identity = sha256_bytes(
+            f"immutable-repair-route:{certificate_id}".encode("utf-8")
+        )
+        repair_package_id = f"RPK-{repair_identity[:24]}"
+        repair_handoff_id = f"HND-{repair_identity[24:48]}"
+        issued_at = str(certificate.get("created_at") or "")
+        try:
+            issued_datetime = datetime.fromisoformat(
+                issued_at.replace("Z", "+00:00")
+            )
+            if issued_datetime.tzinfo is None:
+                issued_datetime = issued_datetime.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "repair_package_binding_mismatch: certificate creation time is invalid"
+            ) from exc
+        expires_at = (issued_datetime + timedelta(days=7)).replace(
+            microsecond=0
+        ).isoformat().replace("+00:00", "Z")
         fingerprints = copy.deepcopy(production_handoff["fingerprints"])
         protected = production_handoff.get("scope", {}).get("protected_scope", [])
         production_session = production_handoff.get("from_session_fingerprint") or sha256_bytes(
@@ -7713,10 +11500,8 @@ class StoryboardService:
             "audit_window_binding_id": audit_work_order.get("server_window_binding_id"),
             "audit_actor_binding_id": audit_work_order.get("server_actor_binding_id"),
             "audit_session_fingerprint": audit_session,
-            "created_at": utc_stamp(),
-            "expires_at": (
-                datetime.now(timezone.utc) + timedelta(days=7)
-            ).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "created_at": issued_at,
+            "expires_at": expires_at,
             "status": "issued",
             "base_artifact_id": certificate["artifact_id"],
             "base_canonical_sha256": certificate["canonical_sha256"],
@@ -7729,18 +11514,61 @@ class StoryboardService:
             "protected_scope_hash": sha256_bytes(_stable_json_bytes(protected)),
             "issue_targets": issue_targets,
             "topology_fingerprint": self._topology_fingerprint(storyboard),
+            "source_audit_handoff_id": production_handoff["handoff_id"],
+            "source_audit_event_trace_id": certificate["stage_trace_id"],
+            "source_audit_route_trace_id": certificate[
+                "production_trace_id"
+            ],
+            "source_production_stage_trace_id": certificate[
+                "production_stage_trace_id"
+            ],
         }
         self._validate_schema_record(
             self._project_schema, "immutable_repair_package", package
         )
         repair_handoff = copy.deepcopy(production_handoff)
+        for key in (
+            "record_id",
+            "project_id",
+            "integrity_hmac",
+            "claimed_by_work_order_id",
+            "claim_token",
+            "claim_generation",
+            "claim_epoch_seconds",
+            "claim_lease_seconds",
+            "claim_lease_expires_at",
+            "claim_lease_expires_epoch_seconds",
+            "claim_history",
+            "idempotent_replay",
+            "consumed_by_work_order_id",
+            "consumed_at",
+            "consumption_claim",
+            "latest_audit_certificate_id",
+            "reaudit_kind",
+            "reaudit_root_handoff_id",
+            "reaudit_parent_handoff_id",
+            "reaudit_sequence",
+            "reaudit_route_trace_id",
+            "reaudit_event_trace_id",
+            "reaudit_lineage_sha256",
+            "reaudit_audit_window_binding_id",
+            "reaudit_audit_actor_binding_id",
+            "reaudit_audit_session_fingerprint",
+            "previous_audit_certificate_id",
+            "previous_audit_certificate_hmac",
+            "previous_audit_event_sha256",
+            "server_minted_lineage",
+            "reaudit_preclaim_projection_sha256",
+            "reaudit_prerelease_projection_sha256",
+        ):
+            repair_handoff.pop(key, None)
         repair_handoff.update(
             {
                 "handoff_id": repair_handoff_id,
                 "work_order_id": str(audit_work_order["work_order_id"]),
                 "audit_cycle_id": str(production_handoff["audit_cycle_id"]),
                 "handoff_type": "audit_to_repair",
-                "created_at": utc_stamp(),
+                "created_at": issued_at,
                 "from_window_role": "independent_audit",
                 "to_window_role": "repair",
                 "audit_certificate_id": certificate["certificate_id"],
@@ -7756,29 +11584,349 @@ class StoryboardService:
                 "from_window_binding_id": audit_work_order.get("server_window_binding_id"),
                 "from_actor_binding_id": audit_work_order.get("server_actor_binding_id"),
                 "from_session_fingerprint": audit_work_order.get("transport_session_fingerprint"),
+                "source_audit_handoff_id": production_handoff["handoff_id"],
+                "source_audit_event_trace_id": certificate[
+                    "stage_trace_id"
+                ],
+                "source_audit_route_trace_id": certificate[
+                    "production_trace_id"
+                ],
             }
         )
         self._validate_schema_record(
             self._project_schema, "handoff_manifest", repair_handoff
         )
-        persisted_package = self.store.save_project_record(
-            namespace,
-            project_id,
-            kind="repair_packages",
-            record_id=repair_package_id,
-            value=package,
+        return package, repair_handoff
+
+    def _persist_repair_package_and_handoff(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        storyboard: dict[str, Any],
+        certificate: dict[str, Any],
+        production_handoff: dict[str, Any],
+        audit_work_order: dict[str, Any],
+        root_handoff: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        package, repair_handoff = (
+            self._deterministic_repair_package_and_handoff(
+                project_id,
+                storyboard=storyboard,
+                certificate=certificate,
+                production_handoff=production_handoff,
+                audit_work_order=audit_work_order,
+            )
         )
-        persisted_handoff = self.store.save_project_record(
-            namespace,
-            project_id,
-            kind="handoffs",
-            record_id=repair_handoff_id,
-            value=repair_handoff,
+        if package is None or repair_handoff is None:
+            return None, None
+        certificate_id = str(certificate["certificate_id"])
+        repair_package_id = str(package["repair_package_id"])
+        repair_handoff_id = str(repair_handoff["handoff_id"])
+        repair_root_handoff = root_handoff or production_handoff
+        expected_root_handoff_id = str(
+            production_handoff.get("reaudit_root_handoff_id")
+            or production_handoff["handoff_id"]
         )
-        with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
-            hub.setdefault("repair_packages", []).append(copy.deepcopy(persisted_package))
-            hub.setdefault("handoffs", []).append(copy.deepcopy(persisted_handoff))
+        if (
+            repair_root_handoff.get("handoff_id")
+            != expected_root_handoff_id
+        ):
+            raise ValueError(
+                "repair_route_freshness_invalid: verified root handoff differs"
+            )
+        authority_manifest: list[dict[str, Any]] = []
+        if repair_root_handoff.get("status") == "consumed":
+            route_fingerprints = production_handoff.get("fingerprints")
+            if not isinstance(route_fingerprints, dict):
+                raise ValueError(
+                    "repair_route_freshness_invalid: route fingerprints are missing"
+                )
+            verified_root, verified_latest = self._resolve_reaudit_lineage(
+                namespace,
+                project_id,
+                requested_handoff=production_handoff,
+                audit_work_order=audit_work_order,
+                fingerprints=route_fingerprints,
+                allow_pending=True,
+                repair_projection=False,
+                authority_manifest_out=authority_manifest,
+            )
+            if (
+                verified_root.get("handoff_id")
+                != repair_root_handoff.get("handoff_id")
+                or verified_latest.get("handoff_id")
+                != production_handoff.get("handoff_id")
+                or verified_latest.get("integrity_hmac")
+                != production_handoff.get("integrity_hmac")
+            ):
+                raise ValueError(
+                    "repair_route_freshness_invalid: verified audit route changed before repair publication"
+                )
+        persisted_package, persisted_handoff = (
+            self.store.commit_repair_package_route(
+                namespace,
+                project_id,
+                repair_package_id=repair_package_id,
+                package=package,
+                handoff_id=repair_handoff_id,
+                handoff=repair_handoff,
+                expected_root_handoff_id=expected_root_handoff_id,
+                expected_root_handoff_hmac=str(
+                    repair_root_handoff.get("integrity_hmac") or ""
+                ),
+                expected_latest_handoff_id=str(
+                    production_handoff["handoff_id"]
+                ),
+                expected_latest_handoff_hmac=str(
+                    production_handoff.get("integrity_hmac") or ""
+                ),
+                expected_latest_certificate_id=certificate_id,
+                expected_latest_certificate_hmac=str(
+                    certificate.get("integrity_hmac") or ""
+                ),
+                lineage_authority_manifest=authority_manifest,
+                expected_claim_token=(
+                    str(production_handoff.get("claim_token"))
+                    if production_handoff.get("claim_token")
+                    else None
+                ),
+                expected_claim_generation=(
+                    int(production_handoff["claim_generation"])
+                    if production_handoff.get("claim_generation")
+                    is not None
+                    else None
+                ),
+            )
+        )
         return persisted_package, persisted_handoff
+
+    def _assert_latest_repair_package_authority(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        package: dict[str, Any],
+        certificate: dict[str, Any],
+        base_artifact_id: str,
+        current_fingerprints: dict[str, str],
+    ) -> None:
+        """Reject a repair route superseded by a later completed re-audit."""
+
+        source_handoff_id = str(package.get("production_handoff_id") or "")
+        try:
+            source_handoff = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="handoffs",
+                record_id=source_handoff_id,
+            )
+        except ValueError as exc:
+            if not self._is_unknown_project_record_error(
+                exc,
+                kind="handoffs",
+                record_id=source_handoff_id,
+            ):
+                raise
+            raise ValueError(
+                "repair_package_binding_mismatch: original production handoff is missing"
+            ) from exc
+        if not self.store.project_record_is_signed(source_handoff):
+            raise ValueError(
+                "repair_package_binding_mismatch: source audit handoff is unsigned or tampered"
+            )
+        hub = self.store.load_hub(namespace, project_id)
+        audit_work_order = next(
+            (
+                row
+                for row in hub.get("work_orders", [])
+                if row.get("work_order_id")
+                == package.get("audit_work_order_id")
+            ),
+            None,
+        )
+        if not isinstance(audit_work_order, dict):
+            raise ValueError(
+                "repair_package_binding_mismatch: source audit work order is missing"
+            )
+        root_handoff, latest_handoff = self._resolve_reaudit_lineage(
+            namespace,
+            project_id,
+            requested_handoff=source_handoff,
+            audit_work_order=audit_work_order,
+            fingerprints=current_fingerprints,
+            allow_pending=False,
+        )
+        latest_certificate = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=str(latest_handoff.get("audit_certificate_id") or ""),
+        )
+        expected_event_trace_id = str(
+            latest_certificate.get("stage_trace_id") or ""
+        )
+        expected_route_trace_id = str(
+            latest_certificate.get("production_trace_id") or ""
+        )
+        expected_production_trace_id = str(
+            latest_certificate.get("production_stage_trace_id") or ""
+        )
+        expected_authority = {
+            "production_handoff_id": latest_handoff.get("handoff_id"),
+            "source_audit_handoff_id": latest_handoff.get("handoff_id"),
+            "audit_certificate_id": latest_certificate.get("certificate_id"),
+            "audit_event_id": latest_certificate.get("event_id"),
+            "source_audit_event_trace_id": expected_event_trace_id,
+            "source_audit_route_trace_id": expected_route_trace_id,
+            "source_production_stage_trace_id": expected_production_trace_id,
+        }
+        if (
+            not self.store.project_record_is_signed(latest_certificate)
+            or certificate.get("certificate_id")
+            != latest_certificate.get("certificate_id")
+            or any(
+                package.get(key) != value
+                for key, value in expected_authority.items()
+            )
+        ):
+            raise ValueError(
+                "repair_package_superseded: a later completed independent audit is the only repair authority"
+            )
+
+        ledger = self.store.load_ledger(namespace, project_id)
+        matching_events = [
+            row
+            for row in ledger.get("events", [])
+            if isinstance(row, dict)
+            and row.get("event_id") == latest_certificate.get("event_id")
+        ]
+        if len(matching_events) != 1:
+            raise ValueError(
+                "repair_package_binding_mismatch: latest audit event is missing or duplicated"
+            )
+        event = matching_events[0]
+        expected_event_bindings = {
+            "handoff_id": latest_handoff.get("handoff_id"),
+            "window_key": audit_work_order.get("work_order_id"),
+            "stage_trace_id": expected_event_trace_id,
+            "audit_cache_key": latest_certificate.get("cache_key"),
+            "file_fingerprint": current_fingerprints["artifact_raw"],
+            "artifact_semantic_fingerprint": current_fingerprints[
+                "artifact_semantic"
+            ],
+            "canonical_fingerprint": current_fingerprints["canonical"],
+            "source_fingerprint": current_fingerprints["source_bytes"],
+            "boundary_fingerprint": current_fingerprints[
+                "episode_boundary"
+            ],
+        }
+        if any(
+            event.get(key) != value
+            for key, value in expected_event_bindings.items()
+        ) or not any(
+            isinstance(scope, dict)
+            and scope.get("last_event_id") == event.get("event_id")
+            for scope in ledger.get("scope_states", [])
+        ):
+            raise ValueError(
+                "repair_package_superseded: package event is not the latest Ledger scope authority"
+            )
+
+        production_trace = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="telemetry",
+            record_id=expected_production_trace_id,
+        )
+        audit_trace = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="telemetry",
+            record_id=expected_event_trace_id,
+        )
+        root_handoff_type = str(root_handoff.get("handoff_type") or "")
+        intake_source_trace = root_handoff_type == "audit_intake"
+        expected_source_trace_role = (
+            "independent_audit"
+            if intake_source_trace
+            else root_handoff.get("from_window_role")
+        )
+        if (
+            root_handoff.get("stage_trace_id")
+            != expected_production_trace_id
+            # An external intake has no producer telemetry.  Its root trace is
+            # the exact audit event that created the signed intake handoff, so
+            # that trace correctly belongs to independent_audit rather than
+            # impersonating external_input.  Every produced source keeps a
+            # distinct producer trace and the signed source-window role.
+            or (
+                expected_production_trace_id == expected_event_trace_id
+                and not intake_source_trace
+            )
+            or (
+                intake_source_trace
+                and (
+                    root_handoff.get("from_window_role") != "external_input"
+                    or root_handoff.get("to_window_role")
+                    != "independent_audit"
+                    or production_trace.get("operation") != "audit_storyboard"
+                )
+            )
+            or not self.store.project_record_is_signed(production_trace)
+            or production_trace.get("trace_id")
+            != expected_production_trace_id
+            or production_trace.get("window_role")
+            != expected_source_trace_role
+            or production_trace.get("artifact_id") != base_artifact_id
+            or production_trace.get("input_fingerprints")
+            != current_fingerprints
+            or not self.store.project_record_is_signed(audit_trace)
+            or audit_trace.get("trace_id") != expected_event_trace_id
+            or audit_trace.get("operation") != "audit_storyboard"
+            or audit_trace.get("window_role") != "independent_audit"
+            or audit_trace.get("artifact_id") != base_artifact_id
+            or audit_trace.get("input_fingerprints")
+            != current_fingerprints
+        ):
+            raise ValueError(
+                "repair_package_binding_mismatch: production or audit trace changed identity"
+            )
+        if latest_handoff.get("reaudit_kind"):
+            route_trace = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="telemetry",
+                record_id=expected_route_trace_id,
+            )
+            if (
+                not self.store.project_record_is_signed(route_trace)
+                or route_trace.get("trace_id") != expected_route_trace_id
+                or route_trace.get("operation")
+                != "audit_storyboard_reaudit_route"
+                or route_trace.get("window_role") != "independent_audit"
+                or route_trace.get("artifact_id") != base_artifact_id
+                or route_trace.get("input_fingerprints")
+                != current_fingerprints
+            ):
+                raise ValueError(
+                    "repair_package_binding_mismatch: re-audit route trace changed identity"
+                )
+        elif expected_route_trace_id != expected_production_trace_id:
+            raise ValueError(
+                "repair_package_binding_mismatch: root audit route trace changed identity"
+            )
+
+    @staticmethod
+    def _is_unknown_project_record_error(
+        exc: ValueError,
+        *,
+        kind: str,
+        record_id: str,
+    ) -> bool:
+        """Distinguish an absent record from a damaged record with the same ID."""
+
+        return str(exc) == f"unknown {kind} record_id: {record_id}"
 
     def _repair_package_for_patch(
         self,
@@ -7843,6 +11991,12 @@ class StoryboardService:
                 record_id=handoff_id,
             )
         except ValueError as exc:
+            if not self._is_unknown_project_record_error(
+                exc,
+                kind="handoffs",
+                record_id=handoff_id,
+            ):
+                raise
             raise ValueError(
                 "repair_package_binding_mismatch: audit_to_repair handoff is missing"
             ) from exc
@@ -7867,6 +12021,14 @@ class StoryboardService:
             raise ValueError(
                 "repair_package_binding_mismatch: audit handoff does not bind the exact package and artifact"
             )
+        self._assert_latest_repair_package_authority(
+            namespace,
+            project_id,
+            package=package,
+            certificate=certificate,
+            base_artifact_id=base_artifact_id,
+            current_fingerprints=current_fingerprints,
+        )
         return package, handoff
 
     def _sync_repair_package_in_hub(
@@ -7946,6 +12108,12 @@ class StoryboardService:
                 record_id=repair_package_id,
             )
         except ValueError as exc:
+            if not self._is_unknown_project_record_error(
+                exc,
+                kind="repair_packages",
+                record_id=repair_package_id,
+            ):
+                raise
             raise ValueError(
                 "repair_package_required: signed immutable package does not exist in this project"
             ) from exc
@@ -7966,6 +12134,12 @@ class StoryboardService:
                 record_id=certificate_id,
             )
         except ValueError as exc:
+            if not self._is_unknown_project_record_error(
+                exc,
+                kind="certificates",
+                record_id=certificate_id,
+            ):
+                raise
             raise ValueError(
                 "invalid_audit_certificate: package-bound certificate is missing"
             ) from exc
@@ -8115,6 +12289,12 @@ class StoryboardService:
                 record_id=production_handoff_id,
             )
         except ValueError as exc:
+            if not self._is_unknown_project_record_error(
+                exc,
+                kind="handoffs",
+                record_id=production_handoff_id,
+            ):
+                raise
             raise ValueError(
                 "repair_package_binding_mismatch: original production handoff is missing"
             ) from exc
@@ -8126,7 +12306,13 @@ class StoryboardService:
             self._project_schema, "handoff_manifest", production_handoff
         )
         if (
-            production_handoff.get("handoff_type") != "production_to_audit"
+            # A repair result and an external audit intake are both legitimate
+            # audited sources.  Keep this list identical to the handoff types
+            # the independent-audit boundary can claim; the remaining checks
+            # still bind the exact signed handoff, package, certificate,
+            # artifact, canonical, fingerprints, producer and transport.
+            production_handoff.get("handoff_type")
+            not in AUDIT_SOURCE_HANDOFF_TYPES
             or production_handoff.get("handoff_id") != production_handoff_id
             or certificate.get("handoff_id") != production_handoff_id
             or production_handoff.get("work_order_id")
@@ -8942,6 +13128,9 @@ class StoryboardService:
                         "quality": quality,
                         "commit_ready": False,
                     },
+                    checkpoint_authorizer=self._ledger_checkpoint_authorizer(
+                        namespace, project_id
+                    ),
                 )
             telemetry = self._save_telemetry(
                 namespace,
@@ -9356,6 +13545,9 @@ class StoryboardService:
                             "issues": [],
                             "commit_ready": True,
                         },
+                        checkpoint_authorizer=self._ledger_checkpoint_authorizer(
+                            namespace, project_id
+                        ),
                     )
             if not any(
                 row.get("deliverable_id") == xlsx_record["artifact_id"]
@@ -10698,6 +14890,83 @@ class StoryboardService:
             for key, value in fingerprints.items()
         ):
             raise ValueError("handoff_fingerprint_mismatch: source/artifact/canonical/runtime binding changed")
+        resolved_reaudit_root: dict[str, Any] | None = None
+        resolved_reaudit_latest: dict[str, Any] | None = None
+        completed_reaudit_replay = False
+        completed_reaudit_receipt: dict[str, Any] | None = None
+        allow_legacy_tail_as_reaudit_parent = bool(
+            force_machine_recheck and semantic_audit is not None
+        )
+        if (
+            handoff.get("status") == "consumed"
+            and not handoff.get("reaudit_kind")
+            and handoff.get("consumed_by_work_order_id")
+            != audit_work_order.get("work_order_id")
+        ):
+            raise ValueError(
+                "handoff_state_conflict: consumed production handoff belongs to a different audit work order"
+            )
+        if (
+            handoff.get("status") == "consumed"
+            or handoff.get("reaudit_kind")
+            == "independent_audit_successor"
+        ):
+            resolved_reaudit_root, resolved_reaudit_latest = (
+                self._resolve_reaudit_lineage(
+                    namespace,
+                    project_id,
+                    requested_handoff=handoff,
+                    audit_work_order=audit_work_order,
+                    fingerprints=fingerprints,
+                    allow_pending=force_machine_recheck,
+                    repair_projection=False,
+                    allow_legacy_tail_as_reaudit_parent=(
+                        allow_legacy_tail_as_reaudit_parent
+                    ),
+                )
+            )
+            if (
+                force_machine_recheck
+                and resolved_reaudit_latest.get("status")
+                in {"prepared", "consuming"}
+            ):
+                # A restart resumes the server-minted event identity rather
+                # than creating a second route for the same parent.
+                stage_trace_id = str(
+                    resolved_reaudit_latest["reaudit_event_trace_id"]
+                )
+                handoff = resolved_reaudit_latest
+            elif not force_machine_recheck:
+                # An ordinary retry of the original production HND must replay
+                # the newest completed successor verdict, never resurrect the
+                # root certificate that an independent re-audit superseded.
+                handoff = resolved_reaudit_latest
+            elif resolved_reaudit_latest.get("status") == "consumed":
+                completed_reaudit_receipt = (
+                    self._completed_reaudit_receipt(
+                        namespace,
+                        project_id,
+                        latest_handoff=resolved_reaudit_latest,
+                        audit_work_order=audit_work_order,
+                        semantic_audit=semantic_audit,
+                        fingerprints=fingerprints,
+                    )
+                )
+                if completed_reaudit_receipt is not None:
+                    # The signed certificate is a durable completion receipt
+                    # for this normalized semantic submission.  Replaying the
+                    # same force request must not burn another audit round.
+                    completed_reaudit_replay = True
+                    handoff = resolved_reaudit_latest
+        pending_reaudit_handoff = (
+            resolved_reaudit_latest
+            if force_machine_recheck
+            and isinstance(resolved_reaudit_latest, dict)
+            and resolved_reaudit_latest.get("status")
+            in {"prepared", "consuming"}
+            else None
+        )
+        cache_scope_handoff = pending_reaudit_handoff or handoff
         cache_components = self._audit_cache_components(
             canonical_hash=canonical_hash,
             source_fingerprint=source_fingerprint,
@@ -10705,12 +14974,35 @@ class StoryboardService:
             audit_class=AUDIT_CLASS_INDEPENDENT,
             artifact_fingerprint=str(record.get("fingerprint") or ""),
             storyboard=storyboard,
-            scope=self._independent_audit_cache_scope(handoff, artifact_id),
+            scope=self._independent_audit_cache_scope(
+                cache_scope_handoff, artifact_id
+            ),
             runtime_test_certificate_id=str(runtime_test_certificate["certificate_id"]),
         )
         audit_cache_key = self._cache_key_from_components(cache_components)
-        cached_certificate = None
-        if not force_machine_recheck:
+        cached_certificate = completed_reaudit_receipt
+        reused_audit_event: dict[str, Any] | None = None
+        if (
+            cached_certificate is None
+            and pending_reaudit_handoff is not None
+        ):
+            cached_certificate, reused_audit_event = (
+                self._recoverable_reaudit_certificate(
+                    namespace,
+                    project_id,
+                    pending_handoff=pending_reaudit_handoff,
+                    audit_work_order=audit_work_order,
+                    fingerprints=fingerprints,
+                    cache_components=cache_components,
+                    artifact_record=record,
+                )
+            )
+        recovering_reaudit_completion = bool(
+            pending_reaudit_handoff is not None
+            and cached_certificate is not None
+        )
+        recovering_root_completion = False
+        if cached_certificate is None and not force_machine_recheck:
             cache_candidates = [
                 candidate
                 for candidate in self.store.list_project_records(
@@ -10744,6 +15036,55 @@ class StoryboardService:
                         str(candidate.get("certificate_id") or ""),
                     ),
                 )
+        if (
+            cached_certificate is not None
+            and not force_machine_recheck
+            and handoff.get("status") in {"prepared", "consuming"}
+            and not handoff.get("reaudit_kind")
+        ):
+            recovered_root_certificate = (
+                self._recoverable_root_audit_certificate(
+                    namespace,
+                    project_id,
+                    pending_handoff=handoff,
+                    audit_work_order=audit_work_order,
+                    fingerprints=fingerprints,
+                    cache_components=cache_components,
+                    artifact_record=record,
+                    candidate=cached_certificate,
+                )
+            )
+            recovering_root_completion = (
+                recovered_root_certificate is not None
+            )
+            if recovered_root_certificate is not None:
+                cached_certificate = recovered_root_certificate
+        if completed_reaudit_replay and cached_certificate is not None:
+            completed_events = [
+                row
+                for row in self.store.load_ledger(
+                    namespace, project_id
+                ).get("events", [])
+                if isinstance(row, dict)
+                and row.get("event_id")
+                == cached_certificate.get("event_id")
+            ]
+            if len(completed_events) != 1:
+                raise ValueError(
+                    "reaudit_recovery_incomplete: completed receipt has no unique Ledger event"
+                )
+            reused_audit_event = completed_events[0]
+            self._validate_reaudit_recovery_event(
+                namespace,
+                project_id,
+                event=reused_audit_event,
+                handoff=handoff,
+                audit_work_order=audit_work_order,
+                fingerprints=fingerprints,
+                cache_components=cache_components,
+                artifact_record=record,
+                certificate=cached_certificate,
+            )
         cache_hit = cached_certificate is not None
         if cached_certificate is not None:
             if (
@@ -10770,6 +15111,14 @@ class StoryboardService:
                     "cached independent audit certificate has no bound semantic review"
                 )
             certificate = cached_certificate
+            # A cache/recovery response is bound to the original signed audit
+            # trace.  Reusing it avoids manufacturing request telemetry that
+            # would mutate authority during an otherwise read-only replay.
+            stage_trace_id = str(certificate.get("stage_trace_id") or "")
+            if not stage_trace_id:
+                raise ValueError(
+                    "cached independent audit certificate has no audit trace"
+                )
         else:
             if semantic_audit is None:
                 raise ValueError(
@@ -10781,22 +15130,372 @@ class StoryboardService:
                 storyboard,
                 semantic_audit,
             )
-        validated_ns = time.perf_counter_ns()
-        claimed_handoff = self.store.claim_handoff(
-            namespace,
-            project_id,
-            str(handoff["handoff_id"]),
-            consumer_work_order_id=str(audit_work_order["work_order_id"]),
-            expected_to_role="independent_audit",
-            expected_types={"production_to_audit", "repair_to_audit", "audit_intake"},
+        completed_consumed_replay = bool(
+            cached_certificate is not None
+            and
+            pending_reaudit_handoff is None
+            and handoff.get("status") == "consumed"
+            and handoff.get("audit_certificate_id")
+            == cached_certificate.get("certificate_id")
         )
+        if completed_consumed_replay and reused_audit_event is None:
+            completed_events = [
+                row
+                for row in self.store.load_ledger(
+                    namespace, project_id
+                ).get("events", [])
+                if isinstance(row, dict)
+                and row.get("event_id") == certificate.get("event_id")
+            ]
+            if len(completed_events) != 1:
+                raise ValueError(
+                    "reaudit_recovery_incomplete: completed audit has no unique Ledger event"
+                )
+            reused_audit_event = completed_events[0]
+            self._validate_reaudit_recovery_event(
+                namespace,
+                project_id,
+                event=reused_audit_event,
+                handoff=handoff,
+                audit_work_order=audit_work_order,
+                fingerprints=fingerprints,
+                cache_components=cache_components,
+                artifact_record=record,
+                certificate=certificate,
+            )
+        if report.get("issues"):
+            # Repair authorization is part of the audit contract.  Validate
+            # every target before the handoff claim, ledger event, certificate,
+            # or successor route is allowed to become durable.
+            self._repair_issue_targets(
+                storyboard, list(report.get("issues", []))
+            )
+        recovering_event_only = bool(
+            reused_audit_event is not None
+            and cached_certificate is None
+        )
+        if reused_audit_event is not None:
+            expected_result = (
+                "fail_current" if report.get("issues") else "pass"
+            )
+            event_semantic_sha = reused_audit_event.get(
+                "semantic_audit_sha256"
+            )
+            event_report_sha = reused_audit_event.get(
+                "semantic_report_input_sha256"
+            )
+            legacy_semantic_pair = (
+                event_semantic_sha in (None, "")
+                and event_report_sha in (None, "")
+            )
+            partial_semantic_pair = (
+                (event_semantic_sha in (None, ""))
+                != (event_report_sha in (None, ""))
+            )
+            if partial_semantic_pair or (
+                legacy_semantic_pair
+                and (
+                    cached_certificate is None
+                    or not self._sealed_legacy_recovery_event(
+                        namespace,
+                        project_id,
+                        str(reused_audit_event.get("event_id") or ""),
+                    )
+                )
+            ):
+                raise ValueError(
+                    "reaudit_event_recovery_mismatch: semantic event identity is incomplete"
+                )
+            if (
+                (
+                    event_semantic_sha
+                    not in (None, "")
+                    and event_semantic_sha
+                    != report.get("semantic_audit_sha256")
+                )
+                or (
+                    event_report_sha not in (None, "")
+                    and event_report_sha
+                    != self._audit_event_report_input_sha256(report)
+                )
+                or reused_audit_event.get("result") != expected_result
+                or int(
+                    reused_audit_event.get("checked_shot_count") or -1
+                )
+                != len(storyboard.get("shots", []))
+            ):
+                raise ValueError(
+                    "reaudit_event_recovery_mismatch: resubmitted semantic report does not exactly match the durable event"
+                )
+            if recovering_event_only and (
+                event_semantic_sha
+                != report.get("semantic_audit_sha256")
+                or event_report_sha
+                != self._audit_event_report_input_sha256(report)
+            ):
+                raise ValueError(
+                    "reaudit_event_recovery_mismatch: resubmitted semantic report does not exactly match the durable event"
+                )
+            if cached_certificate is not None and (
+                cached_certificate.get("event_id")
+                != reused_audit_event.get("event_id")
+                or cached_certificate.get("result") != expected_result
+                or int(
+                    cached_certificate.get("checked_shot_count") or -1
+                )
+                != len(storyboard.get("shots", []))
+                or (
+                    event_semantic_sha
+                    not in (None, "")
+                    and cached_certificate.get("semantic_audit_sha256")
+                    != event_semantic_sha
+                )
+            ):
+                raise ValueError(
+                    "reaudit_event_recovery_mismatch: certificate and durable event disagree"
+                )
+            self._validate_reaudit_recovery_event_content(
+                namespace,
+                project_id,
+                event=reused_audit_event,
+                storyboard=storyboard,
+                artifact_record=record,
+                report=report,
+            )
+            if (
+                resolved_reaudit_root is not None
+                and resolved_reaudit_latest is not None
+            ):
+                resolved_reaudit_root, resolved_reaudit_latest = (
+                    self._resolve_reaudit_lineage(
+                        namespace,
+                        project_id,
+                        requested_handoff=handoff,
+                        audit_work_order=audit_work_order,
+                        fingerprints=fingerprints,
+                        allow_pending=force_machine_recheck,
+                        repair_projection=not completed_consumed_replay,
+                        allow_legacy_tail_as_reaudit_parent=(
+                            allow_legacy_tail_as_reaudit_parent
+                        ),
+                    )
+                )
+                if pending_reaudit_handoff is not None:
+                    pending_reaudit_handoff = resolved_reaudit_latest
+                    handoff = resolved_reaudit_latest
+                elif completed_reaudit_replay:
+                    handoff = resolved_reaudit_latest
+            if completed_consumed_replay:
+                repair_projection_complete, _package, _repair_handoff = (
+                    self._completed_repair_projection_state(
+                        namespace,
+                        project_id,
+                        storyboard=storyboard,
+                        handoff=handoff,
+                        certificate=certificate,
+                        event=reused_audit_event,
+                        audit_work_order=audit_work_order,
+                    )
+                )
+                if not repair_projection_complete:
+                    self._persist_repair_package_and_handoff(
+                        namespace,
+                        project_id,
+                        storyboard=storyboard,
+                        certificate=certificate,
+                        production_handoff=handoff,
+                        audit_work_order=audit_work_order,
+                        root_handoff=(
+                            resolved_reaudit_root or handoff
+                        ),
+                    )
+                return self._completed_audit_response(
+                    namespace,
+                    project_id,
+                    artifact_id=artifact_id,
+                    canonical_hash=canonical_hash,
+                    storyboard=storyboard,
+                    handoff=handoff,
+                    audit_work_order=audit_work_order,
+                    certificate=certificate,
+                    event=reused_audit_event,
+                    fingerprints=fingerprints,
+                )
+        validated_ns = time.perf_counter_ns()
+        event_id = (
+            str(certificate.get("event_id"))
+            if cached_certificate
+            else str(reused_audit_event.get("event_id"))
+            if reused_audit_event is not None
+            else _new_id("EVT")
+        )
+        reaudited_root_handoff: dict[str, Any] | None = None
+        reaudited_route_trace: dict[str, Any] | None = None
+        is_reaudit_successor = False
+        if pending_reaudit_handoff is not None:
+            if resolved_reaudit_root is None:
+                raise ValueError(
+                    "reaudit_lineage_invalid: pending successor has no verified root"
+                )
+            reaudited_root_handoff = resolved_reaudit_root
+            handoff, reaudited_route_trace = (
+                self._persist_reaudit_successor(
+                    namespace,
+                    project_id,
+                    root=reaudited_root_handoff,
+                    parent=pending_reaudit_handoff,
+                    audit_work_order=audit_work_order,
+                    audit_event_trace_id=stage_trace_id,
+                    fingerprints=fingerprints,
+                    artifact_id=artifact_id,
+                    shot_count=len(storyboard.get("shots", [])),
+                )
+            )
+            is_reaudit_successor = True
+        elif (
+            handoff.get("status") == "consumed"
+            and force_machine_recheck
+            and not completed_reaudit_replay
+        ):
+            reaudited_root_handoff = resolved_reaudit_root
+            latest_handoff = resolved_reaudit_latest
+            if reaudited_root_handoff is None or latest_handoff is None:
+                reaudited_root_handoff, latest_handoff = (
+                    self._resolve_reaudit_lineage(
+                        namespace,
+                        project_id,
+                        requested_handoff=handoff,
+                        audit_work_order=audit_work_order,
+                        fingerprints=fingerprints,
+                        allow_pending=True,
+                        allow_legacy_tail_as_reaudit_parent=(
+                            allow_legacy_tail_as_reaudit_parent
+                        ),
+                    )
+                )
+            # Preview the exact ledger transition on an isolated copy before
+            # publishing a route.  Round-limit, schema, reopen, and authority
+            # rejection therefore leave no successor or ledger mutation.
+            preview_result = self._record_audit(
+                namespace=namespace,
+                project_id=project_id,
+                artifact_record=record,
+                storyboard=storyboard,
+                report=copy.deepcopy(report),
+                ledger=copy.deepcopy(
+                    self.store.load_ledger(namespace, project_id)
+                ),
+                audit_cycle_id=audit_cycle_id,
+                audit_class=AUDIT_CLASS_INDEPENDENT,
+                audit_cache_key=audit_cache_key,
+                event_id=event_id,
+                handoff_id=f"HND-PREVIEW-{event_id}",
+                stage_trace_id=stage_trace_id,
+                fingerprints=fingerprints,
+                runtime_test_certificate_id=str(
+                    runtime_test_certificate["certificate_id"]
+                ),
+                work_order_id=str(audit_work_order["work_order_id"]),
+                validation_role="independent_audit",
+                allow_reopen=True,
+            )
+            if preview_result.get("status") == "blocked":
+                return ToolResponse(
+                    status="blocked",
+                    summary="审计阻塞｜已达3轮｜需要上游重建",
+                    project_id=project_id,
+                    artifact_id=artifact_id,
+                    data={
+                        "audit": preview_result,
+                        "audit_class": AUDIT_CLASS_INDEPENDENT,
+                        "audit_work_order_id": audit_work_order[
+                            "work_order_id"
+                        ],
+                        "handoff": self._handoff_summary(handoff),
+                        "side_effects": "none",
+                    },
+                )
+            reaudited_root_handoff, latest_handoff = (
+                self._resolve_reaudit_lineage(
+                    namespace,
+                    project_id,
+                    requested_handoff=handoff,
+                    audit_work_order=audit_work_order,
+                    fingerprints=fingerprints,
+                    allow_pending=True,
+                    repair_projection=True,
+                    allow_legacy_tail_as_reaudit_parent=(
+                        allow_legacy_tail_as_reaudit_parent
+                    ),
+                )
+            )
+            handoff, reaudited_route_trace = self._persist_reaudit_successor(
+                namespace,
+                project_id,
+                root=reaudited_root_handoff,
+                parent=latest_handoff,
+                audit_work_order=audit_work_order,
+                audit_event_trace_id=stage_trace_id,
+                fingerprints=fingerprints,
+                artifact_id=artifact_id,
+                shot_count=len(storyboard.get("shots", [])),
+            )
+            cache_components = self._audit_cache_components(
+                canonical_hash=canonical_hash,
+                source_fingerprint=source_fingerprint,
+                boundary_hash=boundary_hash,
+                audit_class=AUDIT_CLASS_INDEPENDENT,
+                artifact_fingerprint=str(record.get("fingerprint") or ""),
+                storyboard=storyboard,
+                scope=self._independent_audit_cache_scope(
+                    handoff, artifact_id
+                ),
+                runtime_test_certificate_id=str(
+                    runtime_test_certificate["certificate_id"]
+                ),
+            )
+            audit_cache_key = self._cache_key_from_components(cache_components)
+            is_reaudit_successor = True
+        elif handoff.get("status") == "consumed" and not cache_hit:
+            raise ValueError(
+                "reaudit_force_required: consumed handoff cannot authorize a new audit round"
+            )
+
+        if is_reaudit_successor:
+            # Every recovery request obtains a fresh fenced claim.  A durable
+            # event+certificate pair does not authorize a second process to
+            # bypass a live lease and race the remaining projections.
+            claimed_handoff = self.store.claim_reaudit_successor(
+                namespace,
+                project_id,
+                str(handoff["handoff_id"]),
+                consumer_work_order_id=str(
+                    audit_work_order["work_order_id"]
+                ),
+            )
+        else:
+            claimed_handoff = self.store.claim_handoff(
+                namespace,
+                project_id,
+                str(handoff["handoff_id"]),
+                consumer_work_order_id=str(audit_work_order["work_order_id"]),
+                expected_to_role="independent_audit",
+                expected_types=set(AUDIT_SOURCE_HANDOFF_TYPES),
+            )
         handoff = claimed_handoff
-        if handoff.get("status") == "consuming" and handoff.get("claim_token"):
+        if (
+            handoff.get("status") == "consuming"
+            and handoff.get("claim_token")
+        ):
             _ACTIVE_CONSUMPTION_CLAIMS.set(
                 (
                     *_ACTIVE_CONSUMPTION_CLAIMS.get(),
                     {
-                        "kind": "handoff",
+                        "kind": (
+                            "reaudit_handoff"
+                            if is_reaudit_successor
+                            else "handoff"
+                        ),
                         "namespace": namespace,
                         "project_id": project_id,
                         "record_id": str(handoff["handoff_id"]),
@@ -10807,32 +15506,44 @@ class StoryboardService:
                     },
                 )
             )
-        event_id = str(certificate.get("event_id")) if cached_certificate else _new_id("EVT")
         with self.store.mutate_project(namespace, project_id) as (hub, ledger):
             audit_work_order_live = _find_work_order(hub, str(audit_work_order["work_order_id"]))
-            if audit_work_order_live["status"] in {"scope_locked", "failed_current"}:
+            if (
+                not cache_hit
+                and audit_work_order_live["status"]
+                in {"scope_locked", "failed_current"}
+            ):
                 project_agent.transition_work_order(
                     hub, audit_work_order_live["work_order_id"], "executing"
                 )
-            audit_result = self._record_audit(
-                namespace=namespace,
-                project_id=project_id,
-                artifact_record=record,
-                storyboard=storyboard,
-                report=report,
-                ledger=ledger,
-                audit_cycle_id=audit_cycle_id,
-                audit_class=AUDIT_CLASS_INDEPENDENT,
-                audit_cache_key=audit_cache_key,
-                event_id=event_id,
-                handoff_id=str(handoff["handoff_id"]),
-                stage_trace_id=stage_trace_id,
-                fingerprints=fingerprints,
-                runtime_test_certificate_id=str(runtime_test_certificate["certificate_id"]),
-                work_order_id=str(audit_work_order["work_order_id"]),
-                validation_role="independent_audit",
-                allow_reopen=force_machine_recheck,
-            )
+            if reused_audit_event is not None:
+                audit_result = {
+                    "status": "duplicate",
+                    "event": copy.deepcopy(reused_audit_event),
+                    "ingest": None,
+                }
+            else:
+                audit_result = self._record_audit(
+                    namespace=namespace,
+                    project_id=project_id,
+                    artifact_record=record,
+                    storyboard=storyboard,
+                    report=report,
+                    ledger=ledger,
+                    audit_cycle_id=audit_cycle_id,
+                    audit_class=AUDIT_CLASS_INDEPENDENT,
+                    audit_cache_key=audit_cache_key,
+                    event_id=event_id,
+                    handoff_id=str(handoff["handoff_id"]),
+                    stage_trace_id=stage_trace_id,
+                    fingerprints=fingerprints,
+                    runtime_test_certificate_id=str(
+                        runtime_test_certificate["certificate_id"]
+                    ),
+                    work_order_id=str(audit_work_order["work_order_id"]),
+                    validation_role="independent_audit",
+                    allow_reopen=force_machine_recheck,
+                )
             if audit_result.get("status") == "duplicate":
                 # Crash/exception recovery must bind the certificate to the
                 # already-ingested immutable event, not to this retry's fresh
@@ -10917,12 +15628,34 @@ class StoryboardService:
                 event_id=event_id,
                 handoff_id=str(handoff["handoff_id"]),
                 stage_trace_id=stage_trace_id,
-                production_trace_id=str(handoff.get("stage_trace_id") or ""),
+                production_trace_id=str(
+                    handoff.get("reaudit_route_trace_id")
+                    or handoff.get("stage_trace_id")
+                    or ""
+                ),
+                production_stage_trace_id=str(
+                    handoff.get("production_stage_trace_id")
+                    or handoff.get("stage_trace_id")
+                    or ""
+                ),
                 fingerprints=fingerprints,
                 production_work_order_id=str(handoff["work_order_id"]),
                 audit_actor_binding_id=str(audit_work_order.get("server_actor_binding_id") or ""),
                 audit_session_fingerprint=audit_work_order.get("transport_session_fingerprint"),
                 result_override="blocked" if audit_blocked else None,
+                certificate_id=(
+                    "CERT-"
+                    + sha256_bytes(
+                        (
+                            "reaudit-event-recovery:"
+                            + project_id
+                            + ":"
+                            + event_id
+                        ).encode("utf-8")
+                    )[:16]
+                    if recovering_event_only
+                    else None
+                ),
             )
         certificate = self._load_verified_independent_audit_certificate(
             namespace,
@@ -10978,29 +15711,24 @@ class StoryboardService:
         repair_package = None
         audit_to_repair_handoff = None
         if certificate.get("issue_count", 0):
-            repair_package = self.store.find_project_record(
-                namespace,
-                project_id,
-                kind="repair_packages",
-                field="audit_certificate_id",
-                value=certificate["certificate_id"],
-            )
-            if repair_package is None:
-                repair_package, audit_to_repair_handoff = self._persist_repair_package_and_handoff(
+            # Deterministic ids plus the recoverable two-record commit make
+            # every retry reconcile the exact signed package, handoff and Hub
+            # projections.  Never fall back to an older certificate's route.
+            repair_package, audit_to_repair_handoff = (
+                self._persist_repair_package_and_handoff(
                     namespace,
                     project_id,
                     storyboard=storyboard,
                     certificate=certificate,
                     production_handoff=handoff,
                     audit_work_order=audit_work_order,
+                    root_handoff=(
+                        reaudited_root_handoff
+                        or resolved_reaudit_root
+                        or handoff
+                    ),
                 )
-            elif repair_package.get("audit_to_repair_handoff_id"):
-                audit_to_repair_handoff = self.store.get_project_record(
-                    namespace,
-                    project_id,
-                    kind="handoffs",
-                    record_id=str(repair_package["audit_to_repair_handoff_id"]),
-                )
+            )
         recorded_ns = time.perf_counter_ns()
         if audit_result["status"] == "duplicate":
             prior = audit_result["event"]
@@ -11126,72 +15854,119 @@ class StoryboardService:
                     "signed_audit_overlay": True,
                 },
             )
-        telemetry = self._save_telemetry(
-            namespace,
-            project_id,
-            operation="audit_storyboard",
-            started_ns=started_ns,
-            stages_ms={
-                "canonical_load": (loaded_ns - started_ns) / 1_000_000,
-                "machine_validation": (validated_ns - loaded_ns) / 1_000_000,
-                "ledger": (recorded_ns - validated_ns) / 1_000_000,
-            },
-            cache_hit=cache_hit,
-            artifact_id=artifact_id,
-            telemetry_id=stage_trace_id,
-            window_role="independent_audit",
-            task_type="independent_audit",
-            input_fingerprints=fingerprints,
-            shot_count=len(storyboard.get("shots", [])),
-            # This metric counts batches generated by the v0.5 stage, not
-            # legacy read-only rows present in an old artifact.
-            batch_count=0,
-        )
+        telemetry = None
+        if cache_hit:
+            try:
+                telemetry = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="telemetry",
+                    record_id=stage_trace_id,
+                )
+            except ValueError as exc:
+                if not str(exc).startswith("unknown telemetry record_id:"):
+                    raise
+                if not (
+                    recovering_reaudit_completion
+                    or recovering_root_completion
+                ):
+                    raise ValueError(
+                        "cached independent audit telemetry is missing"
+                    ) from exc
+            if telemetry is not None and (
+                not self.store.project_record_is_signed(telemetry)
+                or telemetry.get("operation") != "audit_storyboard"
+                or telemetry.get("artifact_id") != artifact_id
+                or telemetry.get("input_fingerprints") != fingerprints
+            ):
+                raise ValueError(
+                    "reaudit_recovery_invalid: audit telemetry changed identity"
+                )
+        if telemetry is None:
+            telemetry = self._save_telemetry(
+                namespace,
+                project_id,
+                operation="audit_storyboard",
+                started_ns=started_ns,
+                stages_ms={
+                    "canonical_load": (loaded_ns - started_ns) / 1_000_000,
+                    "machine_validation": (validated_ns - loaded_ns)
+                    / 1_000_000,
+                    "ledger": (recorded_ns - validated_ns) / 1_000_000,
+                },
+                cache_hit=cache_hit,
+                artifact_id=artifact_id,
+                telemetry_id=stage_trace_id,
+                window_role="independent_audit",
+                task_type="independent_audit",
+                input_fingerprints=fingerprints,
+                shot_count=len(storyboard.get("shots", [])),
+                # This metric counts batches generated by the v0.5 stage, not
+                # legacy read-only rows present in an old artifact.
+                batch_count=0,
+            )
         with self.store.mutate_project(namespace, project_id) as (hub, ledger):
-            ledger.setdefault("performance_traces", []).append(copy.deepcopy(telemetry))
+            if not any(
+                row.get("telemetry_id") == telemetry.get("telemetry_id")
+                for row in ledger.setdefault("performance_traces", [])
+            ):
+                ledger["performance_traces"].append(
+                    copy.deepcopy(telemetry)
+                )
+            if reaudited_route_trace is not None and not any(
+                row.get("telemetry_id")
+                == reaudited_route_trace.get("telemetry_id")
+                for row in ledger["performance_traces"]
+            ):
+                ledger["performance_traces"].append(
+                    copy.deepcopy(reaudited_route_trace)
+                )
             if not any(
                 row.get("certificate_id") == certificate.get("certificate_id")
                 for row in ledger.setdefault("audit_certificates", [])
             ):
                 ledger["audit_certificates"].append(copy.deepcopy(certificate))
             audit_order = _find_work_order(hub, str(audit_work_order["work_order_id"]))
+            # Every certificate and overlay is a work-order deliverable even
+            # when a successor FAIL revokes an already-passed audit order.
+            # Registration is by immutable id so retries are exact no-ops.
+            if not any(
+                row.get("deliverable_id") == certificate["certificate_id"]
+                for row in hub.get("deliverables", [])
+            ):
+                project_agent.record_deliverable(
+                    hub,
+                    {
+                        "deliverable_id": certificate["certificate_id"],
+                        "work_order_id": audit_order["work_order_id"],
+                        "timestamp": utc_stamp(),
+                        "artifact_type": "audit_report",
+                        "file_name": f"{certificate['certificate_id']}.json",
+                        "version": str(record.get("version") or "current"),
+                        "fingerprint": certificate["report_sha256"],
+                        "status": "validated" if status == "pass" else "draft",
+                        "source_versions": [artifact_id],
+                    },
+                )
+            if not any(
+                row.get("deliverable_id") == audited_record["artifact_id"]
+                for row in hub.get("deliverables", [])
+            ):
+                project_agent.record_deliverable(
+                    hub,
+                    {
+                        "deliverable_id": audited_record["artifact_id"],
+                        "work_order_id": audit_order["work_order_id"],
+                        "timestamp": utc_stamp(),
+                        "artifact_type": "storyboard_audit_overlay",
+                        "file_name": audited_record["file_name"],
+                        "version": str(audited_record.get("version") or "current"),
+                        "fingerprint": audited_record["fingerprint"],
+                        "status": "validated" if status == "pass" else "draft",
+                        "source_versions": [artifact_id],
+                    },
+                )
             if audit_order["status"] == "executing":
-                if not any(
-                    row.get("deliverable_id") == certificate["certificate_id"]
-                    for row in hub.get("deliverables", [])
-                ):
-                    project_agent.record_deliverable(
-                        hub,
-                        {
-                            "deliverable_id": certificate["certificate_id"],
-                            "work_order_id": audit_order["work_order_id"],
-                            "timestamp": utc_stamp(),
-                            "artifact_type": "audit_report",
-                            "file_name": f"{certificate['certificate_id']}.json",
-                            "version": str(record.get("version") or "current"),
-                            "fingerprint": certificate["report_sha256"],
-                            "status": "validated" if status == "pass" else "draft",
-                            "source_versions": [artifact_id],
-                        },
-                    )
-                if not any(
-                    row.get("deliverable_id") == audited_record["artifact_id"]
-                    for row in hub.get("deliverables", [])
-                ):
-                    project_agent.record_deliverable(
-                        hub,
-                        {
-                            "deliverable_id": audited_record["artifact_id"],
-                            "work_order_id": audit_order["work_order_id"],
-                            "timestamp": utc_stamp(),
-                            "artifact_type": "storyboard_audit_overlay",
-                            "file_name": audited_record["file_name"],
-                            "version": str(audited_record.get("version") or "current"),
-                            "fingerprint": audited_record["fingerprint"],
-                            "status": "validated" if status == "pass" else "draft",
-                            "source_versions": [artifact_id],
-                        },
-                    )
                 project_agent.transition_work_order(hub, audit_order["work_order_id"], "validating")
             clean = status == "pass"
             if audit_order["status"] == "validating":
@@ -11331,33 +16106,17 @@ class StoryboardService:
                 ),
                 None,
             )
-            if matching_handoff is not None:
+            if matching_handoff is not None and not is_reaudit_successor:
                 matching_handoff["status"] = "consumed"
-                if force_machine_recheck:
-                    certificate_history = [
-                        str(value)
-                        for value in matching_handoff.get(
-                            "audit_certificate_ids", []
-                        )
-                        if str(value)
-                    ]
-                    previous_certificate_id = str(
-                        matching_handoff.get("audit_certificate_id") or ""
-                    )
-                    if previous_certificate_id:
-                        certificate_history.append(previous_certificate_id)
-                    certificate_history.append(str(certificate["certificate_id"]))
-                    matching_handoff["audit_certificate_ids"] = list(
-                        dict.fromkeys(certificate_history)
-                    )
-                    matching_handoff["reaudit_count"] = max(
-                        0,
-                        len(matching_handoff["audit_certificate_ids"]) - 1,
-                    )
                 matching_handoff["audit_certificate_id"] = certificate["certificate_id"]
         certified_summary = copy.deepcopy(certificate.get("audit_summary") or {})
         independent_status = str(certificate.get("result") or "fail_current").upper()
         metadata_update = {
+            # External audit intake has no production commit to seed this CAS
+            # coordinate.  Persist the canonical that this exact signed audit
+            # just verified so a later package-bound repair can atomically
+            # compare both canonical semantics and the unchanged raw bytes.
+            "canonical_sha256": canonical_hash,
             "independent_audit_status": independent_status,
             "audit_status": independent_status,
             "issue_count": int(certificate.get("issue_count", 0)),
@@ -11387,27 +16146,46 @@ class StoryboardService:
                 str(canonical_artifact_id),
                 metadata_update,
             )
-        handoff = self.store.finish_handoff(
-            namespace,
-            project_id,
-            str(handoff["handoff_id"]),
-            consumer_work_order_id=str(audit_work_order["work_order_id"]),
-            audit_certificate_id=str(certificate["certificate_id"]),
-            claim_token=(
-                str(claimed_handoff.get("claim_token"))
-                if claimed_handoff.get("claim_token")
-                else None
-            ),
-            allow_reaudit=force_machine_recheck,
-        )
-        production_trace_id = str(handoff.get("stage_trace_id") or "")
-        audit_trace_id = str(telemetry["telemetry_id"])
+        # Assemble the only response component that can still raise before
+        # consuming a one-time successor.  Once finish succeeds, constructing
+        # the in-memory response below performs no storage or signing work.
         audited_download_url = self.store.signed_download_url(
             namespace,
             project_id,
             audited_record["artifact_id"],
             audited_record["file_name"],
         )
+        if is_reaudit_successor:
+            handoff = self.store.finish_reaudit_successor(
+                namespace,
+                project_id,
+                str(handoff["handoff_id"]),
+                consumer_work_order_id=str(
+                    audit_work_order["work_order_id"]
+                ),
+                audit_certificate_id=str(certificate["certificate_id"]),
+                claim_token=str(claimed_handoff.get("claim_token") or ""),
+            )
+        else:
+            handoff = self.store.finish_handoff(
+                namespace,
+                project_id,
+                str(handoff["handoff_id"]),
+                consumer_work_order_id=str(audit_work_order["work_order_id"]),
+                audit_certificate_id=str(certificate["certificate_id"]),
+                claim_token=(
+                    str(claimed_handoff.get("claim_token"))
+                    if claimed_handoff.get("claim_token")
+                    else None
+                ),
+            )
+        production_trace_id = str(handoff.get("stage_trace_id") or "")
+        original_production_trace_id = str(
+            handoff.get("production_stage_trace_id")
+            or handoff.get("stage_trace_id")
+            or ""
+        )
+        audit_trace_id = str(telemetry["telemetry_id"])
         fast_path_evidence = {
             "cache_hit": cache_hit,
             "cache_reason": (
@@ -11423,6 +16201,12 @@ class StoryboardService:
             "reviewed_batch_count": certificate.get("reviewed_batch_count"),
             "semantic_audit_sha256": certificate.get("semantic_audit_sha256"),
             "production_trace_id": production_trace_id,
+            "original_production_trace_id": original_production_trace_id,
+            "reaudit_route_trace_id": (
+                handoff.get("reaudit_route_trace_id")
+                if is_reaudit_successor
+                else None
+            ),
             "audit_trace_id": audit_trace_id,
             "certificate_audit_trace_id": certificate.get("audit_trace_id"),
             "measurement_scope": "server_only",
@@ -11441,6 +16225,8 @@ class StoryboardService:
                 "cache_hit": cache_hit,
                 "canonical_sha256": canonical_hash,
                 "production_trace_id": production_trace_id,
+                "original_production_trace_id": original_production_trace_id,
+                "reaudit_route_trace": reaudited_route_trace,
                 "audit_trace_id": audit_trace_id,
                 "fast_path_evidence": fast_path_evidence,
                 "handoff": self._handoff_summary(handoff),
@@ -11613,25 +16399,69 @@ class StoryboardService:
             source_fingerprint=source_fingerprint,
             boundary_hash=boundary_hash,
         )
-        certificate = next(
+        root_candidates = [
+            row
+            for row in self.store.list_project_records_strict(
+                namespace, project_id, kind="handoffs"
+            )
+            if not row.get("reaudit_kind")
+            and row.get("work_order_id") == work_order_id
+            and row.get("logical_artifact_id") == artifact_id
+            and row.get("fingerprints") == current_fingerprints
+            and row.get("status") == "consumed"
+            and row.get("audit_certificate_id")
+        ]
+        if len(root_candidates) != 1:
+            raise ValueError(
+                "independent_audit_required: exact storyboard has no unique completed production handoff"
+            )
+        root_handoff = root_candidates[0]
+        audit_work_order_id = str(
+            root_handoff.get("consumed_by_work_order_id") or ""
+        )
+        audit_work_order = next(
             (
                 row
-                for row in self.store.list_project_records(
-                    namespace, project_id, kind="certificates"
-                )
-                if row.get("audit_class") == AUDIT_CLASS_INDEPENDENT
-                and row.get("production_work_order_id") == work_order_id
-                and artifact_id
-                in {row.get("artifact_id"), row.get("canonical_artifact_id")}
-                and row.get("canonical_sha256") == canonical_hash
+                for row in hub.get("work_orders", [])
+                if row.get("work_order_id") == audit_work_order_id
             ),
             None,
         )
+        if not isinstance(audit_work_order, dict):
+            raise ValueError(
+                "independent_audit_required: bound audit work order is missing"
+            )
+        try:
+            _verified_root, handoff = self._resolve_reaudit_lineage(
+                namespace,
+                project_id,
+                requested_handoff=root_handoff,
+                audit_work_order=audit_work_order,
+                fingerprints=current_fingerprints,
+                allow_pending=False,
+                project_lock_held=True,
+            )
+            certificate = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="certificates",
+                record_id=str(handoff.get("audit_certificate_id") or ""),
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "independent_audit_required: signed audit lineage is missing, stale, or tampered"
+            ) from exc
         if (
-            certificate is None
-            or certificate.get("result") != "pass"
+            certificate.get("result") != "pass"
             or int(certificate.get("issue_count", -1)) != 0
             or not self._valid_cache_identity(certificate, AUDIT_CLASS_INDEPENDENT)
+            or certificate.get("production_work_order_id") != work_order_id
+            or artifact_id
+            not in {
+                certificate.get("artifact_id"),
+                certificate.get("canonical_artifact_id"),
+            }
+            or certificate.get("canonical_sha256") != canonical_hash
         ):
             raise ValueError(
                 "independent_audit_required: exact storyboard version needs a clean independent audit before sign-off"
@@ -11663,26 +16493,33 @@ class StoryboardService:
         }
         if cert_fingerprints != expected_subset:
             raise ValueError("independent_audit_required: certificate fingerprints are stale")
-        handoff = self.store.get_project_record(
-            namespace,
-            project_id,
-            kind="handoffs",
-            record_id=str(certificate.get("handoff_id") or ""),
-        )
         if not self.store.project_record_is_signed(handoff):
             raise ValueError("independent_audit_required: handoff is unsigned or tampered")
         self._validate_schema_record(self._project_schema, "handoff_manifest", handoff)
         if (
+            certificate.get("handoff_id") != handoff.get("handoff_id")
+            or
             handoff.get("work_order_id") != work_order_id
             or handoff.get("logical_artifact_id") != artifact_id
             or handoff.get("fingerprints") != current_fingerprints
         ):
             raise ValueError("independent_audit_required: handoff binding mismatch")
-        production_trace_id = str(certificate.get("production_trace_id") or "")
+        production_trace_id = str(
+            certificate.get("production_stage_trace_id") or ""
+        )
+        route_trace_id = str(certificate.get("production_trace_id") or "")
         audit_trace_id = str(certificate.get("audit_trace_id") or "")
         if (
             not production_trace_id
-            or production_trace_id != str(handoff.get("stage_trace_id") or "")
+            or production_trace_id
+            != str(root_handoff.get("stage_trace_id") or "")
+            or not route_trace_id
+            or route_trace_id
+            != str(
+                handoff.get("reaudit_route_trace_id")
+                or handoff.get("stage_trace_id")
+                or ""
+            )
             or not audit_trace_id
             or audit_trace_id != str(certificate.get("stage_trace_id") or "")
         ):
@@ -11704,12 +16541,40 @@ class StoryboardService:
         )
         if (
             production_trace.get("trace_id") != production_trace_id
-            or production_trace.get("window_role") != handoff.get("from_window_role")
+            or production_trace.get("window_role")
+            != root_handoff.get("from_window_role")
             or production_trace.get("artifact_id") != artifact_id
             or production_trace.get("input_fingerprints") != current_fingerprints
         ):
             raise ValueError(
                 "independent_audit_required: production trace binding mismatch"
+            )
+        if handoff.get("reaudit_kind") == "independent_audit_successor":
+            route_trace = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="telemetry",
+                record_id=route_trace_id,
+            )
+            if (
+                not self.store.project_record_is_signed(route_trace)
+                or route_trace.get("trace_id") != route_trace_id
+                or route_trace.get("operation")
+                != "audit_storyboard_reaudit_route"
+                or route_trace.get("window_role") != "independent_audit"
+                or route_trace.get("artifact_id") != artifact_id
+                or route_trace.get("input_fingerprints")
+                != current_fingerprints
+            ):
+                raise ValueError(
+                    "independent_audit_required: re-audit route trace binding mismatch"
+                )
+            self._validate_schema_record(
+                self._project_schema, "stage_timing_trace", route_trace
+            )
+        elif route_trace_id != production_trace_id:
+            raise ValueError(
+                "independent_audit_required: root certificate production trace changed"
             )
         ledger = self.store.load_ledger(namespace, project_id)
         event = next(
@@ -11729,6 +16594,14 @@ class StoryboardService:
         ):
             raise ValueError("independent_audit_required: audit event binding mismatch")
         self._validate_schema_record(self._ledger_schema, "audit_event", event)
+        if not any(
+            isinstance(scope, dict)
+            and scope.get("last_event_id") == event.get("event_id")
+            for scope in ledger.get("scope_states", [])
+        ):
+            raise ValueError(
+                "independent_audit_required: latest lineage certificate is not the Ledger scope authority"
+            )
         audit_trace = self.store.get_project_record(
             namespace,
             project_id,
@@ -11813,6 +16686,9 @@ class StoryboardService:
                     ledger,
                     str(audit_scope["scope_key"]),
                     "approve" if decision == "approve" else "reopen",
+                    checkpoint_authorizer=self._ledger_checkpoint_authorizer(
+                        namespace, project_id
+                    ),
                 )
             if decision == "approve":
                 for deliverable in hub.get("deliverables", []):

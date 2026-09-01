@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from jsonschema import Draft202012Validator
 from starlette.testclient import TestClient
 
 import shortdrama_mcp.service as service_module
@@ -153,6 +154,94 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         service.store.save_hub(namespace, project_id, hub)
         service.store.save_ledger(namespace, project_id, ledger)
 
+    def _project_tree_bytes(self, project_id: str) -> dict[str, bytes]:
+        project_dir = self.service.store.project_dir(
+            self.namespace, project_id
+        )
+        return {
+            str(path.relative_to(project_dir)): path.read_bytes()
+            for path in sorted(project_dir.rglob("*"))
+            if path.is_file()
+        }
+
+    def _save_prepared_migration(
+        self,
+        *,
+        project_id: str,
+        work_order_id: str,
+        migration_id: str,
+        timestamp: str = "2026-08-31T12:00:00Z",
+    ) -> dict[str, Any]:
+        hub_before = self.service.store.load_hub(
+            self.namespace, project_id
+        )
+        ledger_before = self.service.store.load_ledger(
+            self.namespace, project_id
+        )
+        hub_after, hub_changes = (
+            service_module.project_agent.migrate_hub_to_current(
+                hub_before,
+                timestamp=timestamp,
+                migration_id=migration_id,
+            )
+        )
+        ledger_after, ledger_changes = (
+            service_module.storyboard_agent.migrate_ledger_to_current(
+                ledger_before,
+                timestamp=timestamp,
+                migration_id=migration_id,
+            )
+        )
+        migration_key = self.service._project_migration_key(
+            project_id=project_id,
+            work_order_id=work_order_id,
+            from_version="0.5.4",
+            target_version="0.5.5",
+        )
+        runtime_certificate = self.service._require_runtime_test_certificate(
+            self.namespace, project_id
+        )
+        return self.service.store.save_project_record(
+            self.namespace,
+            project_id,
+            kind="migrations",
+            record_id=migration_id,
+            value={
+                "record_id": migration_id,
+                "migration_id": migration_id,
+                "migration_key": migration_key,
+                "project_id": project_id,
+                "work_order_id": work_order_id,
+                "status": "prepared",
+                "created_at": timestamp,
+                "from_version": "0.5.4",
+                "target_version": "0.5.5",
+                "hub_before_sha256": (
+                    self.service.store.project_state_sha256(hub_before)
+                ),
+                "ledger_before_sha256": (
+                    self.service.store.project_state_sha256(ledger_before)
+                ),
+                "hub_after_sha256": (
+                    self.service.store.project_state_sha256(hub_after)
+                ),
+                "ledger_after_sha256": (
+                    self.service.store.project_state_sha256(ledger_after)
+                ),
+                "hub_before": hub_before,
+                "ledger_before": ledger_before,
+                "hub_after": hub_after,
+                "ledger_after": ledger_after,
+                "runtime_test_certificate_id": runtime_certificate[
+                    "certificate_id"
+                ],
+                "ruleset_version": self.service._ruleset_version,
+                "validator_version": self.service._validator_version(),
+                "changed_paths": hub_changes + ledger_changes,
+                "preserves_artifacts": True,
+            },
+        )
+
     def _assert_no_storyboard_publication(self, project_id: str) -> None:
         self.assertEqual(
             self.service.store.list_artifacts(self.namespace, project_id), []
@@ -166,6 +255,34 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         hub = self.service.store.load_hub(self.namespace, project_id)
         self.assertEqual(hub.get("deliverables", []), [])
         self.assertNotIn("storyboard", hub["project_state"]["latest_artifacts"])
+
+    def _rewrite_signed_migration_fixture(
+        self,
+        project_id: str,
+        migration_id: str,
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Test-only raw rewrite for an already fenced migration journal."""
+
+        rewritten = copy.deepcopy(value)
+        rewritten["record_id"] = migration_id
+        rewritten["migration_id"] = migration_id
+        rewritten["project_id"] = project_id
+        rewritten["integrity_hmac"] = (
+            self.service.store._record_integrity_hmac(rewritten)
+        )
+        path = (
+            self.service.store.project_dir(self.namespace, project_id)
+            / "migrations"
+            / f"{migration_id}.json"
+        )
+        self.service.store.atomic_write_json(path, rewritten)
+        return self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="migrations",
+            record_id=migration_id,
+        )
 
     def _preflight_full_with_scene_coverage(
         self,
@@ -244,6 +361,122 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             self.service._require_runtime_test_certificate(
                 self.namespace, project_id
             )
+
+    def test_runtime_certificate_sequence_orders_same_second_pass_and_fail(
+        self,
+    ) -> None:
+        project_id = self._project("runtime-certificate-total-order")
+        current = self.service._require_runtime_test_certificate(
+            self.namespace, project_id
+        )
+        current_sequence = int(current["certificate_sequence"])
+        report_base = {
+            "version": "0.5.6",
+            "workflow_revision": "R10-PG1",
+        }
+        with patch(
+            "shortdrama_mcp.storage.utc_stamp",
+            return_value="2026-08-31T15:00:00Z",
+        ):
+            newer_pass = self.service._persist_runtime_certificate(
+                self.namespace,
+                project_id,
+                {**report_base, "status": "pass"},
+            )
+            newest_fail = self.service._persist_runtime_certificate(
+                self.namespace,
+                project_id,
+                {**report_base, "status": "fail_current"},
+            )
+        self.assertEqual(
+            newer_pass["certificate_sequence"], current_sequence + 1
+        )
+        self.assertEqual(
+            newest_fail["certificate_sequence"], current_sequence + 2
+        )
+        self.assertEqual(newer_pass["created_at"], newest_fail["created_at"])
+        self.assertEqual(
+            self.service.store.latest_runtime_certificate(
+                self.namespace,
+                project_id,
+                certificate_key=self.service._runtime_certificate_key(),
+            )["certificate_id"],
+            newest_fail["certificate_id"],
+        )
+        self.assertIsNone(
+            self.service._matching_runtime_certificate(
+                self.namespace, project_id
+            )
+        )
+
+        with patch(
+            "shortdrama_mcp.storage.utc_stamp",
+            return_value="2026-08-31T15:00:00Z",
+        ):
+            recovered_pass = self.service._persist_runtime_certificate(
+                self.namespace,
+                project_id,
+                {**report_base, "status": "pass"},
+            )
+        self.assertEqual(
+            recovered_pass["certificate_sequence"], current_sequence + 3
+        )
+        self.assertEqual(
+            self.service._require_runtime_test_certificate(
+                self.namespace, project_id
+            )["certificate_id"],
+            recovered_pass["certificate_id"],
+        )
+
+    def test_ambiguous_legacy_runtime_head_is_superseded_by_signed_sequence(
+        self,
+    ) -> None:
+        project_id = self._project("runtime-certificate-legacy-order")
+        current = self.service._require_runtime_test_certificate(
+            self.namespace, project_id
+        )
+        certificate_dir = (
+            self.service.store.project_dir(self.namespace, project_id)
+            / "certificates"
+        )
+        legacy_a = copy.deepcopy(current)
+        legacy_a.pop("certificate_sequence", None)
+        legacy_a["created_at"] = "2026-08-31T15:30:00Z"
+        legacy_a["integrity_hmac"] = (
+            self.service.store._record_integrity_hmac(legacy_a)
+        )
+        self.service.store.atomic_write_json(
+            certificate_dir / f"{legacy_a['certificate_id']}.json",
+            legacy_a,
+        )
+        legacy_b = copy.deepcopy(legacy_a)
+        legacy_b_id = "CERT-legacy-same-second-b"
+        legacy_b["record_id"] = legacy_b_id
+        legacy_b["certificate_id"] = legacy_b_id
+        legacy_b["integrity_hmac"] = (
+            self.service.store._record_integrity_hmac(legacy_b)
+        )
+        self.service.store.atomic_write_json(
+            certificate_dir / f"{legacy_b_id}.json",
+            legacy_b,
+        )
+        with self.assertRaisesRegex(
+            ValueError, "runtime_test_certificate_required"
+        ):
+            self.service._require_runtime_test_certificate(
+                self.namespace, project_id
+            )
+
+        recovered = self.service.agent_status(
+            self.namespace, project_id, full_self_test=True
+        )
+        self.assertTrue(recovered.data["runtime_test_certificate_valid"])
+        latest = recovered.data["runtime_test_certificate"]
+        self.assertEqual(latest["certificate_sequence"], 1)
+        self.assertNotIn(
+            latest["certificate_id"],
+            {legacy_a["certificate_id"], legacy_b_id},
+        )
 
     def test_ruleset_digest_covers_markdown_and_jsonl_and_invalidates_old_authority(self) -> None:
         original_skill_root = service_module.SKILL_ROOT
@@ -1151,6 +1384,9 @@ class V055QualityAndMigrationTests(unittest.TestCase):
                 storyboard=draft,
                 report={
                     "status": "fail_current",
+                    "semantic_audit_sha256": hashlib.sha256(
+                        b"independent-profile-change-semantic-audit"
+                    ).hexdigest(),
                     "issues": [
                         {
                             "issue_id": "SEM-PROFILE-CHANGE",
@@ -1981,14 +2217,53 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             "timestamp": "2026-08-31T00:02:00Z",
             "episode_id": "EP01",
             "file_name": "storyboard-EP01.xlsx",
-            "file_fingerprint": "sha256:storyboard-r1",
+            "file_fingerprint": hashlib.sha256(b"storyboard-r1").hexdigest(),
             "source_version": "v1",
             "audit_cycle_id": "AUD-INDEPENDENT-EP01",
             "task_type": "audit",
             "audit_class": "independent_audit",
+            "validation_role": "independent_audit",
+            "handoff_id": "HND-STATUS-MATRIX-R1",
+            "artifact_semantic_fingerprint": hashlib.sha256(
+                b"status-matrix-artifact-r1"
+            ).hexdigest(),
+            "canonical_fingerprint": hashlib.sha256(
+                b"status-matrix-canonical-r1"
+            ).hexdigest(),
+            "source_fingerprint": hashlib.sha256(
+                b"status-matrix-source"
+            ).hexdigest(),
+            "boundary_fingerprint": hashlib.sha256(
+                b"status-matrix-boundary"
+            ).hexdigest(),
+            "runtime_fingerprint": hashlib.sha256(
+                b"status-matrix-runtime"
+            ).hexdigest(),
+            "rules_fingerprint": hashlib.sha256(
+                b"status-matrix-rules"
+            ).hexdigest(),
+            "validator_fingerprint": hashlib.sha256(
+                b"status-matrix-validator"
+            ).hexdigest(),
+            "runtime_test_certificate_id": "RTC-STATUS-MATRIX",
+            "stage_trace_id": "TRC-STATUS-MATRIX-R1",
+            "semantic_audit_sha256": hashlib.sha256(
+                b"status-matrix-semantic-audit-r1"
+            ).hexdigest(),
+            "semantic_report_input_sha256": hashlib.sha256(
+                b"status-matrix-semantic-report-r1"
+            ).hexdigest(),
+            "cache_evidence": [],
+            "independence_assertions": {
+                "artifact_read_only": True,
+                "production_verdict_not_reused": True,
+                "quality_conclusions_recomputed": True,
+                "eight_layers_completed": True,
+            },
             "audit_round": 1,
             "result": "fail_current",
             "checked_shot_count": 100,
+            "blockers": [],
             "issues": issues,
         }
         first_result = agent.ingest_event(ledger, first_audit)
@@ -2007,11 +2282,26 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             **first_audit,
             "event_id": "EVT-INDEPENDENT-R2",
             "timestamp": "2026-08-31T00:03:00Z",
-            "file_fingerprint": "sha256:storyboard-r2",
+            "file_fingerprint": hashlib.sha256(b"storyboard-r2").hexdigest(),
             "source_version": "v2",
-            "task_type": "audit_repair",
+            "task_type": "audit",
+            "handoff_id": "HND-STATUS-MATRIX-R2",
+            "artifact_semantic_fingerprint": hashlib.sha256(
+                b"status-matrix-artifact-r2"
+            ).hexdigest(),
+            "canonical_fingerprint": hashlib.sha256(
+                b"status-matrix-canonical-r2"
+            ).hexdigest(),
+            "stage_trace_id": "TRC-STATUS-MATRIX-R2",
+            "semantic_audit_sha256": hashlib.sha256(
+                b"status-matrix-semantic-audit-r2"
+            ).hexdigest(),
+            "semantic_report_input_sha256": hashlib.sha256(
+                b"status-matrix-semantic-report-r2"
+            ).hexdigest(),
             "audit_round": 2,
             "result": "pass",
+            "blockers": [],
             "issues": [],
         }
         repaired_result = agent.ingest_event(ledger, repaired_pass)
@@ -2253,6 +2543,198 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             plan("different-cloud-session")
         self.assertEqual(plan(session_id).status, "already_current")
 
+    def test_current_hub_duplicate_runtime_certificate_projection_is_migrated_out(
+        self,
+    ) -> None:
+        project_id = self._project("retired-runtime-certificate-projection")
+        work_order_id, session_id = self._begin(
+            project_id,
+            operation="rule_improvement",
+            label="retired-runtime-certificate-projection",
+        )
+        recovery_work_order_id, recovery_session_id = self._begin(
+            project_id,
+            operation="rule_improvement",
+            label="retired-runtime-certificate-projection-recovery",
+        )
+        certified = self.service.agent_status(self.namespace, project_id)
+        runtime_certificate = certified.data["runtime_test_certificate"]
+        certificates_before = (
+            self.service.store.list_project_records_strict(
+                self.namespace, project_id, kind="certificates"
+            )
+        )
+        hub = self.service.store.load_hub(self.namespace, project_id)
+        hub["runtime_test_certificates"] = [
+            copy.deepcopy(runtime_certificate)
+        ]
+        self.service.store.save_hub(self.namespace, project_id, hub)
+
+        invalid = self.service.agent_status(self.namespace, project_id)
+        self.assertEqual(invalid.status, "migration_required")
+        self.assertFalse(invalid.data["state_valid"])
+        self.assertTrue(
+            any(
+                "runtime_test_certificates" in error
+                for error in invalid.data["state_errors"]
+            )
+        )
+
+        plan = self.service.migrate_project_state(
+            self.namespace,
+            project_id=project_id,
+            work_order_id=work_order_id,
+            action="plan",
+            target_version="0.5.5",
+            expected_current_version="0.5.5",
+            migration_id=None,
+            request_session_id=session_id,
+        )
+        self.assertEqual(plan.status, "migration_plan_ready")
+        self.assertTrue(plan.data["migration_plan"]["candidate_valid"])
+        self.assertIn(
+            "runtime_test_certificates",
+            plan.data["migration_plan"]["hub_changed_paths"],
+        )
+
+        migrated = self.service.migrate_project_state(
+            self.namespace,
+            project_id=project_id,
+            work_order_id=work_order_id,
+            action="execute",
+            target_version="0.5.5",
+            expected_current_version="0.5.5",
+            migration_id=None,
+            request_session_id=session_id,
+        )
+        self.assertEqual(migrated.status, "migrated")
+        self.assertIn(
+            "runtime_test_certificates",
+            migrated.data["migration"]["changed_paths"],
+        )
+        self.assertNotIn(
+            "runtime_test_certificates",
+            self.service.store.load_hub(self.namespace, project_id),
+        )
+        self.assertEqual(
+            self.service.store.list_project_records_strict(
+                self.namespace, project_id, kind="certificates"
+            ),
+            certificates_before,
+        )
+        current = self.service.agent_status(self.namespace, project_id)
+        self.assertTrue(current.data["state_valid"], current.data["state_errors"])
+        self.assertEqual(
+            current.data["runtime_test_certificate"]["certificate_id"],
+            runtime_certificate["certificate_id"],
+        )
+
+        migration_id = str(migrated.data["migration"]["migration_id"])
+        rolled_back = self.service.migrate_project_state(
+            self.namespace,
+            project_id=project_id,
+            work_order_id=work_order_id,
+            action="rollback",
+            target_version="0.5.5",
+            expected_current_version="0.5.5",
+            migration_id=migration_id,
+            request_session_id=session_id,
+        )
+        self.assertEqual(rolled_back.status, "rolled_back")
+        self.assertIn(
+            "runtime_test_certificates",
+            self.service.store.load_hub(self.namespace, project_id),
+        )
+
+        # Model a legitimately signed legacy journal whose after-image still
+        # carries the retired Hub projection. A fresh current candidate must
+        # never be overwritten by this stale after-image.
+        stale_journal = copy.deepcopy(rolled_back.data["migration"])
+        stale_journal["hub_after"] = copy.deepcopy(
+            stale_journal["hub_before"]
+        )
+        stale_journal["hub_after_sha256"] = (
+            self.service.store.project_state_sha256(
+                stale_journal["hub_after"]
+            )
+        )
+        stale_journal = self.service.store.save_project_record(
+            self.namespace,
+            project_id,
+            kind="migrations",
+            record_id=migration_id,
+            value=stale_journal,
+        )
+        self.assertTrue(
+            self.service.store.project_record_is_signed(stale_journal)
+        )
+        project_dir = self.service.store.project_dir(
+            self.namespace, project_id
+        )
+        before_stale_retry = {
+            str(path.relative_to(project_dir)): path.read_bytes()
+            for path in sorted(project_dir.rglob("*"))
+            if path.is_file()
+        }
+        with self.assertRaisesRegex(
+            ValueError, "migration_record_authority_conflict"
+        ):
+            self.service.migrate_project_state(
+                self.namespace,
+                project_id=project_id,
+                work_order_id=work_order_id,
+                action="execute",
+                target_version="0.5.5",
+                expected_current_version="0.5.5",
+                migration_id=migration_id,
+                request_session_id=session_id,
+            )
+        self.assertEqual(
+            {
+                str(path.relative_to(project_dir)): path.read_bytes()
+                for path in sorted(project_dir.rglob("*"))
+                if path.is_file()
+            },
+            before_stale_retry,
+        )
+        still_invalid = self.service.agent_status(
+            self.namespace, project_id
+        )
+        self.assertEqual(still_invalid.status, "migration_required")
+        self.assertFalse(still_invalid.data["state_valid"])
+
+        recovered = self.service.migrate_project_state(
+            self.namespace,
+            project_id=project_id,
+            work_order_id=recovery_work_order_id,
+            action="execute",
+            target_version="0.5.5",
+            expected_current_version="0.5.5",
+            migration_id=None,
+            request_session_id=recovery_session_id,
+        )
+        self.assertEqual(recovered.status, "migrated")
+        self.assertNotEqual(
+            recovered.data["migration"]["migration_id"], migration_id
+        )
+        self.assertNotIn(
+            "runtime_test_certificates",
+            self.service.store.load_hub(self.namespace, project_id),
+        )
+        recovered_status = self.service.agent_status(
+            self.namespace, project_id
+        )
+        self.assertTrue(
+            recovered_status.data["state_valid"],
+            recovered_status.data["state_errors"],
+        )
+        self.assertEqual(
+            self.service.store.list_project_records_strict(
+                self.namespace, project_id, kind="certificates"
+            ),
+            certificates_before,
+        )
+
     def test_migration_plan_execute_and_replay_are_non_destructive_and_idempotent(self) -> None:
         project_id = self._project("legacy-state-migration")
         work_order_id, session_id = self._begin(
@@ -2413,6 +2895,213 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         )
         self.assertEqual(replay.status, "already_migrated")
 
+    def test_replay_checkpoint_requires_signed_journal_and_event_derived_suffix(self) -> None:
+        project_id = self._project("checkpoint-signed-journal-authority")
+        work_order_id, session_id = self._begin(
+            project_id, operation="rule_improvement", label="checkpoint-authority"
+        )
+        ledger = self.service.store.load_ledger(self.namespace, project_id)
+        service_module.storyboard_agent.ingest_event(
+            ledger,
+            {
+                "event_id": "LEGACY-SERVICE-E1",
+                "timestamp": "2026-08-30T00:00:00Z",
+                "episode_id": "EP01",
+                "file_name": "legacy-service.json",
+                "file_fingerprint": "legacy-service-file-v1",
+                "source_version": "legacy-service-source-v1",
+                "audit_cycle_id": "LEGACY-SERVICE-CYCLE",
+                "task_type": "audit_repair",
+                "audit_round": 1,
+                "result": "fail_current",
+                "checked_shot_count": 1,
+                "blockers": [],
+                "issues": [{
+                    "error_code": "E-LEGACY-SERVICE",
+                    "category": "表演链",
+                    "severity": "fail",
+                    "blocking": True,
+                    "shot_ids": ["S01"],
+                    "field": "人物表演链",
+                    "issue_type": "服务迁移检查点负例",
+                    "evidence": "迁移前保留的一条完整历史问题。",
+                    "source_sentence": "角色听见真相。",
+                    "repair_action": "补齐听话反应。",
+                    "impact_scope": ["S01"],
+                    "status": "initial",
+                }],
+            },
+        )
+        self.service.store.save_ledger(self.namespace, project_id, ledger)
+        self._make_legacy_state(self.service, self.namespace, project_id)
+
+        migrated = self.service.migrate_project_state(
+            self.namespace,
+            project_id=project_id,
+            work_order_id=work_order_id,
+            action="execute",
+            target_version="0.5.5",
+            expected_current_version="0.5.4",
+            migration_id=None,
+            request_session_id=session_id,
+        )
+        self.assertEqual(migrated.status, "migrated")
+        migration = copy.deepcopy(migrated.data["migration"])
+        migration_id = str(migration["migration_id"])
+        migrated_ledger = self.service.store.load_ledger(
+            self.namespace, project_id
+        )
+        checkpoint = copy.deepcopy(migrated_ledger["replay_checkpoint"])
+        self.assertTrue(
+            self.service.store.ledger_replay_checkpoint_is_authorized(
+                self.namespace, project_id, checkpoint
+            )
+        )
+
+        wrong_checkpoint = copy.deepcopy(checkpoint)
+        wrong_checkpoint["migration_id"] = "MIG-NOT-SIGNED-FOR-THIS-PROJECT"
+        self.assertFalse(
+            self.service.store.ledger_replay_checkpoint_is_authorized(
+                self.namespace, project_id, wrong_checkpoint
+            )
+        )
+
+        record_path = (
+            self.service.store.project_dir(self.namespace, project_id)
+            / "migrations"
+            / f"{migration_id}.json"
+        )
+        unsigned_tamper = copy.deepcopy(migration)
+        unsigned_tamper["status"] = "prepared"
+        self.service.store.atomic_write_json(record_path, unsigned_tamper)
+        self.assertFalse(
+            self.service.store.ledger_replay_checkpoint_is_authorized(
+                self.namespace, project_id, checkpoint
+            )
+        )
+        self.service.store.atomic_write_json(record_path, migration)
+        restored = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="migrations",
+            record_id=migration_id,
+        )
+        self.assertTrue(self.service.store.project_record_is_signed(restored))
+
+        forged_ledger = copy.deepcopy(migrated_ledger)
+        forged_row = copy.deepcopy(forged_ledger["issues"][0]["history"][0])
+        forged_row["event_id"] = "legacy-forged-after-checkpoint"
+        forged_ledger["issues"][0]["history"].append(forged_row)
+        self.assertEqual(
+            list(
+                Draft202012Validator(
+                    self.service._ledger_schema
+                ).iter_errors(forged_ledger)
+            ),
+            [],
+        )
+        self.service.store.save_ledger(
+            self.namespace, project_id, forged_ledger
+        )
+        persisted_before = (
+            self.service.store.project_dir(self.namespace, project_id)
+            / "ledger.json"
+        ).read_bytes()
+        status = self.service.agent_status(self.namespace, project_id)
+        self.assertEqual(status.status, "migration_required")
+        self.assertEqual(
+            (
+                self.service.store.project_dir(self.namespace, project_id)
+                / "ledger.json"
+            ).read_bytes(),
+            persisted_before,
+        )
+
+    def test_replay_quality_profile_uses_only_pre_event_checkpoint_authority(self) -> None:
+        agent = service_module.storyboard_agent
+        ledger = agent.new_ledger(
+            "检查点质量前缀", "SBP-CHECKPOINT-QUALITY", "2026-08-30T00:00:00Z"
+        )
+        agent.ingest_event(
+            ledger,
+            {
+                "event_id": "LEGACY-QUALITY-E1",
+                "timestamp": "2026-08-30T00:01:00Z",
+                "episode_id": "EP01",
+                "file_name": "legacy-quality.json",
+                "file_fingerprint": "legacy-quality-file-v1",
+                "source_version": "legacy-quality-source-v1",
+                "audit_cycle_id": "LEGACY-QUALITY-CYCLE",
+                "task_type": "audit_repair",
+                "audit_round": 1,
+                "result": "fail_current",
+                "checked_shot_count": 1,
+                "blockers": [],
+                "issues": [
+                    {
+                        "error_code": "E-LEGACY-QUALITY",
+                        "category": "表演链",
+                        "severity": "fail",
+                        "blocking": True,
+                        "shot_ids": ["S01"],
+                        "field": "人物表演链",
+                        "issue_type": "检查点前已知模式",
+                        "evidence": "迁移前已有的完整历史问题。",
+                        "source_sentence": "角色听见真相。",
+                        "repair_action": "补齐听话反应。",
+                        "impact_scope": ["S01"],
+                        "status": "initial",
+                    }
+                ],
+            },
+        )
+        issue = ledger["issues"][0]
+        pattern_key = str(issue["pattern_key"])
+        for row in issue["history"]:
+            row["event_id"] = "legacy-baseline-history"
+        for row in issue["occurrence_locations"]:
+            row["event_id"] = "legacy-baseline-history"
+
+        migrated, _changes = agent.migrate_ledger_to_current(
+            ledger,
+            timestamp="2026-08-31T00:00:00Z",
+            migration_id="MIG-LEGACY-QUALITY-PREFIX",
+        )
+        self.assertEqual(
+            agent.validate_ledger(
+                migrated, checkpoint_authorizer=lambda _checkpoint: True
+            ),
+            [],
+        )
+        checkpoint_count = int(migrated["replay_checkpoint"]["event_count"])
+        self.assertEqual(
+            self.service._known_prevention_pattern_keys_before_event(
+                migrated, checkpoint_count
+            ),
+            {pattern_key},
+        )
+        # The sealed baseline is authority only after its checkpoint boundary;
+        # it must not be projected backwards into an event inside that prefix.
+        self.assertEqual(
+            self.service._known_prevention_pattern_keys_before_event(migrated, 0),
+            set(),
+        )
+
+        forged = copy.deepcopy(migrated)
+        forged["issues"][0]["history"].append(
+            copy.deepcopy(forged["issues"][0]["history"][0])
+        )
+        suffix_errors = agent.validate_ledger(
+            forged, checkpoint_authorizer=lambda _checkpoint: True
+        )
+        self.assertTrue(
+            any(
+                "appends a legacy-only row after the sealed checkpoint" in error
+                for error in suffix_errors
+            ),
+            suffix_errors,
+        )
+
     def test_execute_recovers_a_signed_prepared_half_written_migration(self) -> None:
         project_id = self._project("migration-half-write-recovery")
         work_order_id, session_id = self._begin(
@@ -2493,7 +3182,11 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         self.assertTrue(self.service.store.project_record_is_signed(prepared))
 
         # Simulate a crash after hub.json replacement and before ledger.json.
-        self.service.store.save_hub(self.namespace, project_id, hub_after)
+        self.service.store.atomic_write_json(
+            self.service.store.project_dir(self.namespace, project_id)
+            / "hub.json",
+            hub_after,
+        )
         self.assertEqual(
             self.service.store.project_state_sha256(
                 self.service.store.load_hub(self.namespace, project_id)
@@ -2514,7 +3207,7 @@ class V055QualityAndMigrationTests(unittest.TestCase):
                 work_order_id=wrong_work_order_id,
                 action="execute",
                 target_version="0.5.5",
-                expected_current_version=None,
+                expected_current_version="0.5.4",
                 migration_id=migration_id,
                 request_session_id=wrong_session_id,
             )
@@ -2531,13 +3224,27 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             prepared["ledger_before_sha256"],
         )
 
+        before_missing_cas = self._project_tree_bytes(project_id)
+        with self.assertRaisesRegex(ValueError, "expected_current_version is required"):
+            self.service.migrate_project_state(
+                self.namespace,
+                project_id=project_id,
+                work_order_id=work_order_id,
+                action="execute",
+                target_version="0.5.5",
+                expected_current_version=None,
+                migration_id=migration_id,
+                request_session_id=session_id,
+            )
+        self.assertEqual(self._project_tree_bytes(project_id), before_missing_cas)
+
         recovered = self.service.migrate_project_state(
             self.namespace,
             project_id=project_id,
             work_order_id=work_order_id,
             action="execute",
             target_version="0.5.5",
-            expected_current_version=None,
+            expected_current_version="0.5.4",
             migration_id=migration_id,
             request_session_id=session_id,
         )
@@ -2560,6 +3267,800 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         self.assertTrue(
             self.service.agent_status(self.namespace, project_id).data["state_valid"]
         )
+
+    def test_prepared_migration_selection_is_exact_and_cas_bound(self) -> None:
+        for explicit_id in (True, False):
+            with self.subTest(explicit_id=explicit_id):
+                label = f"prepared-selector-{explicit_id}"
+                project_id = self._project(label)
+                work_order_id, session_id = self._begin(
+                    project_id,
+                    operation="rule_improvement",
+                    label=label,
+                )
+                self._make_legacy_state(
+                    self.service, self.namespace, project_id
+                )
+                migration_id = f"MIG-{label}"
+                prepared = self._save_prepared_migration(
+                    project_id=project_id,
+                    work_order_id=work_order_id,
+                    migration_id=migration_id,
+                )
+                recovered = self.service.migrate_project_state(
+                    self.namespace,
+                    project_id=project_id,
+                    work_order_id=work_order_id,
+                    action="execute",
+                    target_version="0.5.5",
+                    expected_current_version="0.5.4",
+                    migration_id=migration_id if explicit_id else None,
+                    request_session_id=session_id,
+                )
+                self.assertEqual(recovered.status, "migration_recovered")
+                self.assertEqual(
+                    recovered.data["migration"]["migration_id"],
+                    prepared["migration_id"],
+                )
+
+        fresh_project_id = self._project("explicit-new-migration-id")
+        fresh_work_order_id, fresh_session_id = self._begin(
+            fresh_project_id,
+            operation="rule_improvement",
+            label="explicit-new-migration-id",
+        )
+        self._make_legacy_state(
+            self.service, self.namespace, fresh_project_id
+        )
+        fresh_migration_id = "MIG-explicit-new-authority"
+        fresh = self.service.migrate_project_state(
+            self.namespace,
+            project_id=fresh_project_id,
+            work_order_id=fresh_work_order_id,
+            action="execute",
+            target_version="0.5.5",
+            expected_current_version="0.5.4",
+            migration_id=fresh_migration_id,
+            request_session_id=fresh_session_id,
+        )
+        self.assertEqual(fresh.status, "migrated")
+        self.assertEqual(
+            fresh.data["migration"]["migration_id"], fresh_migration_id
+        )
+
+        project_id = self._project("prepared-selector-rejections")
+        work_order_id, session_id = self._begin(
+            project_id,
+            operation="rule_improvement",
+            label="prepared-selector-rejections",
+        )
+        self._make_legacy_state(self.service, self.namespace, project_id)
+        migration_id = "MIG-prepared-selector-authority"
+        prepared = self._save_prepared_migration(
+            project_id=project_id,
+            work_order_id=work_order_id,
+            migration_id=migration_id,
+        )
+        rejection_cases = (
+            ("unknown_explicit_id", "MIG-unrelated-explicit", "0.5.4"),
+            ("cas_mismatch", migration_id, "0.5.3"),
+            ("invalid_explicit_id", "../invalid", "0.5.4"),
+        )
+        for label, requested_id, expected_version in rejection_cases:
+            with self.subTest(rejection=label):
+                before = self._project_tree_bytes(project_id)
+                with self.assertRaises(ValueError):
+                    self.service.migrate_project_state(
+                        self.namespace,
+                        project_id=project_id,
+                        work_order_id=work_order_id,
+                        action="execute",
+                        target_version="0.5.5",
+                        expected_current_version=expected_version,
+                        migration_id=requested_id,
+                        request_session_id=session_id,
+                    )
+                self.assertEqual(
+                    self._project_tree_bytes(project_id), before
+                )
+
+        damaged = copy.deepcopy(prepared)
+        damaged["target_version"] = "damaged-without-resigning"
+        record_path = (
+            self.service.store.project_dir(self.namespace, project_id)
+            / "migrations"
+            / f"{migration_id}.json"
+        )
+        self.service.store.atomic_write_json(record_path, damaged)
+        before_damaged_retry = self._project_tree_bytes(project_id)
+        with self.assertRaisesRegex(
+            ValueError, "project_record_integrity_mismatch"
+        ):
+            self.service.migrate_project_state(
+                self.namespace,
+                project_id=project_id,
+                work_order_id=work_order_id,
+                action="execute",
+                target_version="0.5.5",
+                expected_current_version="0.5.4",
+                migration_id=migration_id,
+                request_session_id=session_id,
+            )
+        self.assertEqual(
+            self._project_tree_bytes(project_id), before_damaged_retry
+        )
+
+    def test_prepared_candidate_is_validated_before_any_state_write(self) -> None:
+        project_id = self._project("prepared-candidate-prevalidation")
+        work_order_id, session_id = self._begin(
+            project_id,
+            operation="rule_improvement",
+            label="prepared-candidate-prevalidation",
+        )
+        ledger = self.service.store.load_ledger(self.namespace, project_id)
+        service_module.storyboard_agent.ingest_event(
+            ledger,
+            {
+                "event_id": "LEGACY-PREPARED-PREVALIDATION",
+                "timestamp": "2026-08-30T00:00:00Z",
+                "episode_id": "EP01",
+                "file_name": "legacy-prepared.json",
+                "file_fingerprint": "legacy-prepared-file-v1",
+                "source_version": "legacy-prepared-source-v1",
+                "audit_cycle_id": "LEGACY-PREPARED-CYCLE",
+                "task_type": "audit_repair",
+                "audit_round": 1,
+                "result": "fail_current",
+                "checked_shot_count": 1,
+                "blockers": [],
+                "issues": [
+                    {
+                        "error_code": "E-PREPARED-PREVALIDATION",
+                        "category": "表演链",
+                        "severity": "fail",
+                        "blocking": True,
+                        "shot_ids": ["S01"],
+                        "field": "人物表演链",
+                        "issue_type": "prepared候选预校验",
+                        "evidence": "迁移前保留的完整问题证据。",
+                        "source_sentence": "角色听见真相。",
+                        "repair_action": "补齐听话反应。",
+                        "impact_scope": ["S01"],
+                        "status": "initial",
+                    }
+                ],
+            },
+        )
+        self.service.store.save_ledger(self.namespace, project_id, ledger)
+        self._make_legacy_state(self.service, self.namespace, project_id)
+        migration_id = "MIG-prepared-candidate-prevalidation"
+        prepared = self._save_prepared_migration(
+            project_id=project_id,
+            work_order_id=work_order_id,
+            migration_id=migration_id,
+        )
+        self.assertIn(
+            "replay_checkpoint", prepared["ledger_after"]
+        )
+
+        invalid_schema = copy.deepcopy(prepared)
+        invalid_schema["hub_after"].pop("policy")
+        invalid_schema["hub_after_sha256"] = (
+            self.service.store.project_state_sha256(
+                invalid_schema["hub_after"]
+            )
+        )
+        invalid_checkpoint = copy.deepcopy(prepared)
+        invalid_checkpoint["ledger_after"]["replay_checkpoint"][
+            "migration_id"
+        ] = "MIG-forged-checkpoint"
+        invalid_checkpoint["ledger_after_sha256"] = (
+            self.service.store.project_state_sha256(
+                invalid_checkpoint["ledger_after"]
+            )
+        )
+        for label, invalid_record in (
+            ("schema", invalid_schema),
+            ("checkpoint_authority", invalid_checkpoint),
+        ):
+            with self.subTest(validation=label):
+                resigned = self._rewrite_signed_migration_fixture(
+                    project_id,
+                    migration_id,
+                    invalid_record,
+                )
+                self.assertTrue(
+                    self.service.store.project_record_is_signed(resigned)
+                )
+                before = self._project_tree_bytes(project_id)
+                with self.assertRaisesRegex(
+                    ValueError, "migration_candidate_invalid"
+                ):
+                    self.service.migrate_project_state(
+                        self.namespace,
+                        project_id=project_id,
+                        work_order_id=work_order_id,
+                        action="execute",
+                        target_version="0.5.5",
+                        expected_current_version="0.5.4",
+                        migration_id=migration_id,
+                        request_session_id=session_id,
+                    )
+                self.assertEqual(self._project_tree_bytes(project_id), before)
+
+        restored = self._rewrite_signed_migration_fixture(
+            project_id,
+            migration_id,
+            prepared,
+        )
+        self.assertTrue(self.service.store.project_record_is_signed(restored))
+        with patch.object(
+            service_module.project_agent,
+            "validate_hub",
+            return_value=["forced-current-validator-rejection"],
+        ):
+            before_validator_rejection = self._project_tree_bytes(project_id)
+            with self.assertRaisesRegex(
+                ValueError, "forced-current-validator-rejection"
+            ):
+                self.service.migrate_project_state(
+                    self.namespace,
+                    project_id=project_id,
+                    work_order_id=work_order_id,
+                    action="execute",
+                    target_version="0.5.5",
+                    expected_current_version="0.5.4",
+                    migration_id=migration_id,
+                    request_session_id=session_id,
+                )
+            self.assertEqual(
+                self._project_tree_bytes(project_id),
+                before_validator_rejection,
+            )
+
+    def test_storage_requires_signed_wal_before_accepting_after_images(self) -> None:
+        project_id = self._project("migration-signed-wal-required")
+        work_order_id, _session_id = self._begin(
+            project_id,
+            operation="rule_improvement",
+            label="signed-wal-required",
+        )
+        self._make_legacy_state(self.service, self.namespace, project_id)
+        migration_id = "MIG-signed-wal-required"
+        prepared = self._save_prepared_migration(
+            project_id=project_id,
+            work_order_id=work_order_id,
+            migration_id=migration_id,
+        )
+        project_dir = self.service.store.project_dir(
+            self.namespace, project_id
+        )
+        self.service.store.atomic_write_json(
+            project_dir / "hub.json", prepared["hub_after"]
+        )
+        self.service.store.atomic_write_json(
+            project_dir / "ledger.json", prepared["ledger_after"]
+        )
+        (project_dir / "migrations" / f"{migration_id}.json").unlink()
+
+        before = self._project_tree_bytes(project_id)
+        with self.assertRaisesRegex(
+            ValueError, "signed migration journal required"
+        ):
+            self.service.store.commit_project_state_migration(
+                self.namespace,
+                project_id,
+                migration_id=migration_id,
+                migration_key=str(prepared["migration_key"]),
+                work_order_id=work_order_id,
+                from_version="0.5.4",
+                target_version="0.5.5",
+                hub_before=prepared["hub_before"],
+                ledger_before=prepared["ledger_before"],
+                hub_after=prepared["hub_after"],
+                ledger_after=prepared["ledger_after"],
+                runtime_test_certificate_id=str(
+                    prepared["runtime_test_certificate_id"]
+                ),
+                runtime_test_certificate_key=(
+                    self.service._runtime_certificate_key()
+                ),
+                ruleset_version=self.service._ruleset_version,
+                validator_version=self.service._validator_version(),
+                changed_paths=list(prepared["changed_paths"]),
+            )
+        self.assertEqual(self._project_tree_bytes(project_id), before)
+
+    def test_storage_rechecks_runtime_certificate_inside_migration_lock(self) -> None:
+        project_id = self._project("migration-runtime-cert-atomic")
+        work_order_id, _session_id = self._begin(
+            project_id,
+            operation="rule_improvement",
+            label="runtime-cert-atomic",
+        )
+        self._make_legacy_state(self.service, self.namespace, project_id)
+        hub_before = self.service.store.load_hub(self.namespace, project_id)
+        ledger_before = self.service.store.load_ledger(
+            self.namespace, project_id
+        )
+        migration_id = "MIG-runtime-cert-atomic"
+        timestamp = "2026-08-31T14:00:00Z"
+        hub_after, hub_changes = (
+            service_module.project_agent.migrate_hub_to_current(
+                hub_before,
+                timestamp=timestamp,
+                migration_id=migration_id,
+            )
+        )
+        ledger_after, ledger_changes = (
+            service_module.storyboard_agent.migrate_ledger_to_current(
+                ledger_before,
+                timestamp=timestamp,
+                migration_id=migration_id,
+            )
+        )
+        stale_pass = self.service._require_runtime_test_certificate(
+            self.namespace, project_id
+        )
+        fail_id = "CERT-runtime-fail-after-pass"
+        fail_current = {
+            key: copy.deepcopy(value)
+            for key, value in stale_pass.items()
+            if key
+            not in {
+                "record_id",
+                "project_id",
+                "created_at",
+                "integrity_hmac",
+            }
+        }
+        fail_current.update(
+            {
+                "certificate_id": fail_id,
+                "result": "fail_current",
+                "created_at": "9999-12-31T23:59:59Z",
+            }
+        )
+        self.service.store.save_project_record(
+            self.namespace,
+            project_id,
+            kind="certificates",
+            record_id=fail_id,
+            value=fail_current,
+        )
+        self.assertIsNone(
+            self.service._matching_runtime_certificate(
+                self.namespace, project_id
+            )
+        )
+
+        before = self._project_tree_bytes(project_id)
+        with self.assertRaisesRegex(
+            ValueError, "migration_runtime_certificate_conflict"
+        ):
+            self.service.store.commit_project_state_migration(
+                self.namespace,
+                project_id,
+                migration_id=migration_id,
+                migration_key=self.service._project_migration_key(
+                    project_id=project_id,
+                    work_order_id=work_order_id,
+                    from_version="0.5.4",
+                    target_version="0.5.5",
+                ),
+                work_order_id=work_order_id,
+                from_version="0.5.4",
+                target_version="0.5.5",
+                hub_before=hub_before,
+                ledger_before=ledger_before,
+                hub_after=hub_after,
+                ledger_after=ledger_after,
+                runtime_test_certificate_id=str(
+                    stale_pass["certificate_id"]
+                ),
+                runtime_test_certificate_key=(
+                    self.service._runtime_certificate_key()
+                ),
+                ruleset_version=self.service._ruleset_version,
+                validator_version=self.service._validator_version(),
+                changed_paths=hub_changes + ledger_changes,
+            )
+        self.assertEqual(self._project_tree_bytes(project_id), before)
+
+    def test_prepared_migration_can_be_cancelled_without_manual_file_repair(
+        self,
+    ) -> None:
+        project_id = self._project("prepared-migration-cancel")
+        work_order_id, session_id = self._begin(
+            project_id,
+            operation="rule_improvement",
+            label="prepared-migration-cancel",
+        )
+        self._make_legacy_state(self.service, self.namespace, project_id)
+        migration_id = "MIG-prepared-migration-cancel"
+        prepared = self._save_prepared_migration(
+            project_id=project_id,
+            work_order_id=work_order_id,
+            migration_id=migration_id,
+        )
+        with self.assertRaisesRegex(ValueError, "migration_commit_in_progress"):
+            self.service.store.save_hub(
+                self.namespace,
+                project_id,
+                self.service.store.load_hub(self.namespace, project_id),
+            )
+
+        cancelled = self.service.migrate_project_state(
+            self.namespace,
+            project_id=project_id,
+            work_order_id=work_order_id,
+            action="rollback",
+            target_version="0.5.5",
+            expected_current_version="0.5.5",
+            migration_id=migration_id,
+            request_session_id=session_id,
+        )
+        self.assertEqual(cancelled.status, "rolled_back")
+        self.assertEqual(cancelled.data["migration"]["status"], "rolled_back")
+        self.assertEqual(
+            self.service.store.load_hub(self.namespace, project_id),
+            prepared["hub_before"],
+        )
+        self.assertEqual(
+            self.service.store.load_ledger(self.namespace, project_id),
+            prepared["ledger_before"],
+        )
+        current_hub = self.service.store.load_hub(
+            self.namespace, project_id
+        )
+        self.service.store.save_hub(
+            self.namespace, project_id, current_hub
+        )
+
+    def test_any_project_rolling_back_journal_blocks_execute(self) -> None:
+        project_id = self._project("project-global-rolling-back")
+        first_work_order_id, first_session_id = self._begin(
+            project_id,
+            operation="rule_improvement",
+            label="project-global-rolling-back-first",
+        )
+        other_work_order_id, other_session_id = self._begin(
+            project_id,
+            operation="rule_improvement",
+            label="project-global-rolling-back-other",
+        )
+        self._make_legacy_state(self.service, self.namespace, project_id)
+        migrated = self.service.migrate_project_state(
+            self.namespace,
+            project_id=project_id,
+            work_order_id=first_work_order_id,
+            action="execute",
+            target_version="0.5.5",
+            expected_current_version="0.5.4",
+            migration_id=None,
+            request_session_id=first_session_id,
+        )
+        other_migration_id = "MIG-other-committed-history"
+        other_migration = copy.deepcopy(migrated.data["migration"])
+        other_migration.update(
+            {
+                "record_id": other_migration_id,
+                "migration_id": other_migration_id,
+                "migration_key": self.service._project_migration_key(
+                    project_id=project_id,
+                    work_order_id=other_work_order_id,
+                    from_version="0.5.4",
+                    target_version="0.5.5",
+                ),
+                "work_order_id": other_work_order_id,
+            }
+        )
+        self.service.store.save_project_record(
+            self.namespace,
+            project_id,
+            kind="migrations",
+            record_id=other_migration_id,
+            value=other_migration,
+        )
+        rolling_back = copy.deepcopy(migrated.data["migration"])
+        rolling_back["status"] = "rolling_back"
+        rolling_back["rollback_started_at"] = "2026-08-31T13:00:00Z"
+        rolling_back = self.service.store.save_project_record(
+            self.namespace,
+            project_id,
+            kind="migrations",
+            record_id=rolling_back["migration_id"],
+            value=rolling_back,
+        )
+        project_dir = self.service.store.project_dir(
+            self.namespace, project_id
+        )
+        # Model a hard-crash image directly: ordinary storage writers are now
+        # fenced once the signed rolling_back intent exists.
+        self.service.store.atomic_write_json(
+            project_dir / "hub.json", rolling_back["hub_before"]
+        )
+        self.service.store.atomic_write_json(
+            project_dir / "ledger.json", rolling_back["ledger_before"]
+        )
+
+        for label, write_attempt in (
+            (
+                "hub_ledger_mutation",
+                lambda: self.service.store.mutate_project(
+                    self.namespace, project_id
+                ),
+            ),
+            (
+                "artifact_write",
+                lambda: self.service.store.save_artifact_bytes(
+                    self.namespace,
+                    project_id,
+                    b"must-not-persist",
+                    file_name="rollback-fenced.txt",
+                    artifact_type="diagnostic",
+                    version="v0",
+                    artifact_id="ART-rollback-fenced",
+                ),
+            ),
+        ):
+            with self.subTest(project_write_fence=label):
+                before_fenced_write = self._project_tree_bytes(project_id)
+                with self.assertRaisesRegex(
+                    ValueError, "migration_rollback_in_progress"
+                ):
+                    attempted = write_attempt()
+                    if label == "hub_ledger_mutation":
+                        with attempted as (hub, _ledger):
+                            hub["forbidden_while_rolling_back"] = True
+                self.assertEqual(
+                    self._project_tree_bytes(project_id),
+                    before_fenced_write,
+                )
+
+        before_cross_rollback = self._project_tree_bytes(project_id)
+        with self.assertRaisesRegex(
+            ValueError, "migration_rollback_in_progress"
+        ):
+            self.service.store.rollback_project_state_migration(
+                self.namespace,
+                project_id,
+                other_migration_id,
+            )
+        self.assertEqual(
+            self._project_tree_bytes(project_id), before_cross_rollback
+        )
+
+        for requested_id in (None, "MIG-unrelated-new-id"):
+            with self.subTest(requested_id=requested_id):
+                before = self._project_tree_bytes(project_id)
+                with self.assertRaisesRegex(
+                    ValueError, "migration_rollback_in_progress"
+                ):
+                    self.service.migrate_project_state(
+                        self.namespace,
+                        project_id=project_id,
+                        work_order_id=other_work_order_id,
+                        action="execute",
+                        target_version="0.5.5",
+                        expected_current_version="0.5.4",
+                        migration_id=requested_id,
+                        request_session_id=other_session_id,
+                    )
+                self.assertEqual(self._project_tree_bytes(project_id), before)
+
+        direct_before = self._project_tree_bytes(project_id)
+        direct_hub = self.service.store.load_hub(
+            self.namespace, project_id
+        )
+        direct_ledger = self.service.store.load_ledger(
+            self.namespace, project_id
+        )
+        direct_migration_id = "MIG-direct-storage-fenced"
+        direct_key = self.service._project_migration_key(
+            project_id=project_id,
+            work_order_id=other_work_order_id,
+            from_version="0.5.4",
+            target_version="0.5.5",
+        )
+        with self.assertRaisesRegex(
+            ValueError, "migration_rollback_in_progress"
+        ):
+            self.service.store.commit_project_state_migration(
+                self.namespace,
+                project_id,
+                migration_id=direct_migration_id,
+                migration_key=direct_key,
+                work_order_id=other_work_order_id,
+                from_version="0.5.4",
+                target_version="0.5.5",
+                hub_before=direct_hub,
+                ledger_before=direct_ledger,
+                hub_after=copy.deepcopy(direct_hub),
+                ledger_after=copy.deepcopy(direct_ledger),
+                runtime_test_certificate_id="RTC-direct-storage-fenced",
+                runtime_test_certificate_key=self.service._runtime_certificate_key(),
+                ruleset_version=self.service._ruleset_version,
+                validator_version=self.service._validator_version(),
+                changed_paths=[],
+            )
+        self.assertEqual(
+            self._project_tree_bytes(project_id), direct_before
+        )
+
+    def test_rolled_back_exact_reexecute_is_time_stable_and_key_unique(
+        self,
+    ) -> None:
+        project_id = self._project("rolled-back-exact-reexecute")
+        work_order_id, session_id = self._begin(
+            project_id,
+            operation="rule_improvement",
+            label="rolled-back-exact-reexecute",
+        )
+        self._make_legacy_state(self.service, self.namespace, project_id)
+        migrated = self.service.migrate_project_state(
+            self.namespace,
+            project_id=project_id,
+            work_order_id=work_order_id,
+            action="execute",
+            target_version="0.5.5",
+            expected_current_version="0.5.4",
+            migration_id=None,
+            request_session_id=session_id,
+        )
+        migration = copy.deepcopy(migrated.data["migration"])
+        migration_id = str(migration["migration_id"])
+        migration_key = str(migration["migration_key"])
+        rolled_back = self.service.migrate_project_state(
+            self.namespace,
+            project_id=project_id,
+            work_order_id=work_order_id,
+            action="rollback",
+            target_version="0.5.5",
+            expected_current_version="0.5.5",
+            migration_id=migration_id,
+            request_session_id=session_id,
+        )
+        self.assertEqual(rolled_back.status, "rolled_back")
+
+        before_alternate = self._project_tree_bytes(project_id)
+        with self.assertRaisesRegex(
+            ValueError, "migration_record_authority_conflict"
+        ):
+            self.service.migrate_project_state(
+                self.namespace,
+                project_id=project_id,
+                work_order_id=work_order_id,
+                action="execute",
+                target_version="0.5.5",
+                expected_current_version="0.5.4",
+                migration_id="MIG-ALTERNATE-SAME-KEY",
+                request_session_id=session_id,
+            )
+        self.assertEqual(
+            self._project_tree_bytes(project_id), before_alternate
+        )
+        self.assertEqual(
+            len(
+                self.service.store.list_project_records_strict(
+                    self.namespace, project_id, kind="migrations"
+                )
+            ),
+            1,
+        )
+
+        original_atomic_write = self.service.store.atomic_write_json
+        ledger_crashed = False
+
+        def crash_between_reexecution_files(path, value):
+            nonlocal ledger_crashed
+            if path.name == "ledger.json" and not ledger_crashed:
+                ledger_crashed = True
+                raise RuntimeError("simulated rolled-back reexecute crash")
+            return original_atomic_write(path, value)
+
+        with patch.object(
+            self.service.store,
+            "atomic_write_json",
+            side_effect=crash_between_reexecution_files,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "rolled-back reexecute crash"
+            ):
+                self.service.migrate_project_state(
+                    self.namespace,
+                    project_id=project_id,
+                    work_order_id=work_order_id,
+                    action="execute",
+                    target_version="0.5.5",
+                    expected_current_version="0.5.4",
+                    migration_id=migration_id,
+                    request_session_id=session_id,
+                )
+        self.assertTrue(ledger_crashed)
+        interrupted_record = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="migrations",
+            record_id=migration_id,
+        )
+        self.assertEqual(interrupted_record["status"], "replaying")
+        self.assertEqual(
+            self.service.store.project_state_sha256(
+                self.service.store.load_hub(self.namespace, project_id)
+            ),
+            migration["hub_after_sha256"],
+        )
+        self.assertEqual(
+            self.service.store.project_state_sha256(
+                self.service.store.load_ledger(self.namespace, project_id)
+            ),
+            migration["ledger_before_sha256"],
+        )
+
+        fenced_replay = self._project_tree_bytes(project_id)
+        with self.assertRaisesRegex(ValueError, "migration_commit_in_progress"):
+            self.service.store.save_hub(
+                self.namespace,
+                project_id,
+                self.service.store.load_hub(self.namespace, project_id),
+            )
+        with self.assertRaisesRegex(ValueError, "migration_record_authority_conflict"):
+            self.service.migrate_project_state(
+                self.namespace,
+                project_id=project_id,
+                work_order_id=work_order_id,
+                action="execute",
+                target_version="0.5.5",
+                expected_current_version="0.5.4",
+                migration_id="MIG-REPLAY-UNRELATED",
+                request_session_id=session_id,
+            )
+        self.assertEqual(self._project_tree_bytes(project_id), fenced_replay)
+
+        with patch.object(
+            service_module,
+            "utc_stamp",
+            return_value="2099-12-31T23:59:59Z",
+        ):
+            replayed = self.service.migrate_project_state(
+                self.namespace,
+                project_id=project_id,
+                work_order_id=work_order_id,
+                action="execute",
+                target_version="0.5.5",
+                expected_current_version="0.5.4",
+                migration_id=migration_id,
+                request_session_id=session_id,
+            )
+        self.assertEqual(replayed.status, "migration_recovered")
+        self.assertEqual(
+            replayed.data["migration"]["migration_id"], migration_id
+        )
+        self.assertEqual(
+            replayed.data["migration"]["migration_key"], migration_key
+        )
+        self.assertEqual(
+            replayed.data["migration"]["status"], "committed"
+        )
+        self.assertEqual(
+            self.service.store.project_state_sha256(
+                self.service.store.load_hub(self.namespace, project_id)
+            ),
+            migration["hub_after_sha256"],
+        )
+        self.assertEqual(
+            self.service.store.project_state_sha256(
+                self.service.store.load_ledger(self.namespace, project_id)
+            ),
+            migration["ledger_after_sha256"],
+        )
+        records = self.service.store.list_project_records_strict(
+            self.namespace, project_id, kind="migrations"
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["migration_id"], migration_id)
+        self.assertEqual(records[0]["migration_key"], migration_key)
 
     def test_migration_rollback_replay_is_idempotent(self) -> None:
         project_id = self._project("migration-rollback-replay")
@@ -2625,7 +4126,7 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             work_order_id=work_order_id,
             action="rollback",
             target_version="0.5.5",
-            expected_current_version=None,
+            expected_current_version="0.5.5",
             migration_id=migration_id,
             request_session_id=session_id,
         )
@@ -2723,13 +4224,51 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             migration["ledger_after_sha256"],
         )
 
+        rolling_back_snapshot = {
+            "hub": self.service.store.load_hub(self.namespace, project_id),
+            "ledger": self.service.store.load_ledger(
+                self.namespace, project_id
+            ),
+            "journal": interrupted,
+        }
+        with self.assertRaisesRegex(
+            ValueError, "migration_rollback_in_progress"
+        ):
+            self.service.migrate_project_state(
+                self.namespace,
+                project_id=project_id,
+                work_order_id=work_order_id,
+                action="execute",
+                target_version="0.5.5",
+                expected_current_version="0.5.4",
+                migration_id=migration_id,
+                request_session_id=session_id,
+            )
+        self.assertEqual(
+            {
+                "hub": self.service.store.load_hub(
+                    self.namespace, project_id
+                ),
+                "ledger": self.service.store.load_ledger(
+                    self.namespace, project_id
+                ),
+                "journal": self.service.store.get_project_record(
+                    self.namespace,
+                    project_id,
+                    kind="migrations",
+                    record_id=migration_id,
+                ),
+            },
+            rolling_back_snapshot,
+        )
+
         recovered = self.service.migrate_project_state(
             self.namespace,
             project_id=project_id,
             work_order_id=work_order_id,
             action="rollback",
             target_version="0.5.5",
-            expected_current_version=None,
+            expected_current_version="0.5.5",
             migration_id=migration_id,
             request_session_id=session_id,
         )
@@ -3248,10 +4787,12 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             project_id, operation="storyboard_create", label="older-clean-source"
         )
         draft = valid_storyboard()
+        blocked_draft = copy.deepcopy(draft)
+        blocked_draft["shots"][0]["光源来源"] = "右侧木格窗透入的日光"
         blocked_preflight = self._preflight_full_with_scene_coverage(
             project_id=project_id,
             work_order_id=blocked_order_id,
-            storyboard=draft,
+            storyboard=blocked_draft,
             scope_id="EP01",
             request_session_id=blocked_session,
         )
@@ -3266,7 +4807,7 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             self.namespace,
             project_id=project_id,
             work_order_id=blocked_order_id,
-            storyboard=draft,
+            storyboard=blocked_draft,
             file_name="将触发C级质量阻断.xlsx",
             source_artifact_id=None,
             request_session_id=blocked_session,
@@ -3323,8 +4864,11 @@ class V055QualityAndMigrationTests(unittest.TestCase):
                 project_id,
                 blocked_artifact_id,
                 shot_id=str(draft["shots"][0]["镜头编号"]),
-                field="原文支撑句",
-                error_code="E-SOURCE-SELECT-001",
+                field="光源来源",
+                error_code="E-TEMPLATE-008",
+                issue_id="shots[1].light_source_semantic_mismatch",
+                evidence="独立审计确认当前右侧窗光与锁定的左侧自然光事实冲突。",
+                repair_action="仅修正该镜光源来源并执行完整生产回归后返回原审计窗口。",
             ),
             request_session_id=blocked_audit_session,
         )
@@ -3363,29 +4907,74 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         self.assertNotIn("cleared_at", after)
         status = self.service.agent_status(self.namespace, project_id)
         self.assertTrue(status.data["state_valid"], status.data["state_errors"])
+        # A completed replay is now a pure receipt read.  It must not move the
+        # project's latest quality authority back to an older clean artifact.
         self.assertEqual(
             self.service.store.load_hub(self.namespace, project_id)[
                 "project_state"
             ]["latest_first_draft_quality"]["grade"],
-            "A",
+            block["grade"],
         )
         self.assertIn(after["grade"], {"B", "C"})
         self.assertEqual(status.status, "action_required")
         self.assertEqual(status.data["execution_mode"], "root_cause_repair_only")
 
+        repair_session = "v055-quality-block-repair"
+        repair_task = self.service.begin_task(
+            self.namespace,
+            project_id=project_id,
+            operation="storyboard_repair",
+            mode="audit_and_repair",
+            authorization="explicit_execute",
+            request_text="消费最新独立审计修复包并生成新证据绑定",
+            targets=[str(draft["shots"][0]["镜头编号"])],
+            authoritative_source="最新独立审计证书与不可变修复包",
+            latest_version="current",
+            target_boundary="第一集",
+            must_keep=["未授权镜头与字段不变"],
+            must_remove=[],
+            protected_scope=[],
+            expected_outputs=["补丁修复版", "repair_to_audit"],
+            window_key=repair_session,
+            request_session_id=repair_session,
+        )
+        repaired = self.service.commit_storyboard_patch(
+            self.namespace,
+            project_id=project_id,
+            work_order_id=str(repair_task.work_order_id),
+            base_artifact_id=blocked_artifact_id,
+            expected_canonical_hash=str(blocked_artifact.data["canonical_sha256"]),
+            expected_raw_artifact_fingerprint=None,
+            audit_certificate_id=str(failed.data["certificate"]["certificate_id"]),
+            operations=[
+                {
+                    "op": "replace_field",
+                    "shot_id": str(draft["shots"][0]["镜头编号"]),
+                    "field": "光源来源",
+                    "value": draft["shots"][0]["光源来源"],
+                    "issue_ids": ["E-TEMPLATE-008"],
+                    "reason": "按最新独立审计证据恢复锁定的左侧自然光来源",
+                }
+            ],
+            impact_scope=[str(draft["shots"][0]["镜头编号"])],
+            file_name="质量阻断_真实修复版.xlsx",
+            request_session_id=repair_session,
+        )
+        repaired_artifact_id = str(repaired.artifact_id)
+        repair_handoff_id = str(repaired.data["handoff_artifact_id"])
         same_cycle_clean = self.service.audit_storyboard(
             self.namespace,
             project_id=project_id,
-            artifact_id=blocked_artifact_id,
+            artifact_id=repaired_artifact_id,
             audit_cycle_id=None,
             work_order_id=blocked_audit_id,
-            handoff_artifact_id=str(blocked_artifact.data["handoff_artifact_id"]),
-            force_machine_recheck=True,
+            handoff_artifact_id=repair_handoff_id,
+            force_machine_recheck=False,
             semantic_audit=semantic_audit_for_artifact(
                 self.service,
                 self.settings,
                 project_id,
-                blocked_artifact_id,
+                repaired_artifact_id,
             ),
             request_session_id=blocked_audit_session,
         )
@@ -3399,7 +4988,7 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             cleared["cleared_by_audit_cycle_id"], block["audit_cycle_id"]
         )
         self.assertEqual(
-            cleared["cleared_by_artifact_id"], blocked_artifact_id
+            cleared["cleared_by_artifact_id"], repaired_artifact_id
         )
         self.assertEqual(
             cleared["cleared_by_certificate_id"],
@@ -3409,6 +4998,77 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             self.service.agent_status(self.namespace, project_id).data[
                 "state_valid"
             ]
+        )
+
+        repair_reaudit_semantic = semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            project_id,
+            repaired_artifact_id,
+        )
+        repair_reaudit_semantic["layers"][0]["summary"] += (
+            "｜修复产物使用新证据完成显式复审。"
+        )
+        repair_reaudit = self.service.audit_storyboard(
+            self.namespace,
+            project_id=project_id,
+            artifact_id=repaired_artifact_id,
+            audit_cycle_id=None,
+            work_order_id=blocked_audit_id,
+            handoff_artifact_id=repair_handoff_id,
+            force_machine_recheck=True,
+            semantic_audit=repair_reaudit_semantic,
+            request_session_id=blocked_audit_session,
+        )
+        self.assertEqual(repair_reaudit.status, "pass")
+        repair_successor_id = str(
+            repair_reaudit.data["handoff"]["handoff_id"]
+        )
+        repair_successor = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="handoffs",
+            record_id=repair_successor_id,
+        )
+        self.assertTrue(
+            self.service.store.project_record_is_signed(repair_successor)
+        )
+        self.service._validate_schema_record(
+            self.service._project_schema,
+            "handoff_manifest",
+            repair_successor,
+        )
+        self.assertEqual(
+            repair_successor["reaudit_kind"],
+            "independent_audit_successor",
+        )
+        self.assertEqual(repair_successor["status"], "consumed")
+        self.assertEqual(
+            repair_successor["reaudit_root_handoff_id"], repair_handoff_id
+        )
+        self.assertEqual(
+            repair_successor["reaudit_parent_handoff_id"], repair_handoff_id
+        )
+        self.assertEqual(repair_successor["reaudit_sequence"], 1)
+        self.assertEqual(
+            repair_successor["previous_audit_certificate_id"],
+            same_cycle_clean.data["certificate"]["certificate_id"],
+        )
+        self.assertEqual(
+            repair_successor["audit_certificate_id"],
+            repair_reaudit.data["certificate"]["certificate_id"],
+        )
+        self.assertEqual(
+            repair_reaudit.data["certificate"]["handoff_id"],
+            repair_successor_id,
+        )
+        self.assertEqual(repair_successor["handoff_type"], "repair_to_audit")
+        self.assertEqual(repair_successor["from_window_role"], "repair")
+        self.assertEqual(
+            repair_successor["to_window_role"], "independent_audit"
+        )
+        Draft202012Validator(self.service._project_schema).validate(
+            self.service.store.load_hub(self.namespace, project_id)
         )
 
     def test_status_requires_valid_overlay_and_resolvable_authoritative_pointer(self) -> None:
@@ -3636,6 +5296,80 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         self.assertEqual(
             latest["authoritative_artifact_id"],
             audited.data["audited_workbook"]["artifact_id"],
+        )
+
+        intake_handoff_id = str(audited.data["handoff"]["handoff_id"])
+        intake_reaudit_semantic = semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            project_id,
+            artifact_id,
+        )
+        intake_reaudit_semantic["layers"][0]["summary"] += (
+            "｜外部 intake 使用新证据完成显式复审。"
+        )
+        intake_reaudit = self.service.audit_storyboard(
+            self.namespace,
+            project_id=project_id,
+            artifact_id=artifact_id,
+            audit_cycle_id=None,
+            work_order_id=audit_work_order_id,
+            handoff_artifact_id=intake_handoff_id,
+            force_machine_recheck=True,
+            semantic_audit=intake_reaudit_semantic,
+            request_session_id=audit_session,
+        )
+        self.assertEqual(intake_reaudit.status, "pass")
+        intake_successor_id = str(
+            intake_reaudit.data["handoff"]["handoff_id"]
+        )
+        intake_successor = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="handoffs",
+            record_id=intake_successor_id,
+        )
+        self.assertTrue(
+            self.service.store.project_record_is_signed(intake_successor)
+        )
+        self.service._validate_schema_record(
+            self.service._project_schema,
+            "handoff_manifest",
+            intake_successor,
+        )
+        self.assertEqual(
+            intake_successor["reaudit_kind"],
+            "independent_audit_successor",
+        )
+        self.assertEqual(intake_successor["status"], "consumed")
+        self.assertEqual(
+            intake_successor["reaudit_root_handoff_id"], intake_handoff_id
+        )
+        self.assertEqual(
+            intake_successor["reaudit_parent_handoff_id"], intake_handoff_id
+        )
+        self.assertEqual(intake_successor["reaudit_sequence"], 1)
+        self.assertEqual(
+            intake_successor["previous_audit_certificate_id"],
+            audited.data["certificate"]["certificate_id"],
+        )
+        self.assertEqual(
+            intake_successor["audit_certificate_id"],
+            intake_reaudit.data["certificate"]["certificate_id"],
+        )
+        self.assertEqual(
+            intake_reaudit.data["certificate"]["handoff_id"],
+            intake_successor_id,
+        )
+        self.assertEqual(intake_successor["handoff_type"], "audit_intake")
+        self.assertEqual(
+            intake_successor["from_window_role"], "external_input"
+        )
+        self.assertEqual(
+            intake_successor["to_window_role"], "independent_audit"
+        )
+        Draft202012Validator(self.service._project_schema).validate(
+            self.service.store.load_hub(self.namespace, project_id)
         )
 
 

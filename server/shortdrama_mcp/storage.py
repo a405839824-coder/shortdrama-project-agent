@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import base64
 import calendar
+import copy
 import contextlib
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import secrets
@@ -17,6 +19,8 @@ from pathlib import Path
 from typing import Any, BinaryIO, Iterator
 
 from filelock import FileLock
+
+from .canonical import canonical_json_bytes
 
 
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -30,10 +34,19 @@ PROJECT_RECORD_KINDS = {
     "draft_preflights",
     "migrations",
 }
-SIGNED_ONLY_PROJECT_RECORD_KINDS = {
-    "draft_preflights",
-    "handoff_recoveries",
-    "migrations",
+SIGNED_ONLY_PROJECT_RECORD_KINDS = PROJECT_RECORD_KINDS - {
+    "handoffs",
+    "certificates",
+}
+PROJECT_RECORD_PRIMARY_ID_KEYS = {
+    "handoffs": "handoff_id",
+    "handoff_recoveries": "recovery_id",
+    "certificates": "certificate_id",
+    "telemetry": "trace_id",
+    "diagnostics": "diagnostic_run_id",
+    "repair_packages": "repair_package_id",
+    "draft_preflights": "draft_preflight_id",
+    "migrations": "migration_id",
 }
 DEFAULT_SUCCESSOR_LEASE_SECONDS = 300
 MAX_SUCCESSOR_LEASE_SECONDS = 86_400
@@ -48,6 +61,48 @@ DOWNLOAD_COPY_CHUNK_BYTES = 1024 * 1024
 LEGACY_DOWNLOAD_TOKEN_WINDOW_SECONDS = 86_400
 SUCCESSOR_KINDS = frozenset({"patch", "delta", "repair"})
 UNPUBLISHED_ARTIFACT_STATES = frozenset({"pending", "aborted", "rejected"})
+REAUDIT_IMMUTABLE_IDENTITY_KEYS = (
+    "work_order_id",
+    "audit_cycle_id",
+    "logical_artifact_id",
+    "handoff_type",
+    "from_window_role",
+    "to_window_role",
+    "scope",
+    "fingerprints",
+    "objective_evidence",
+    "producer_claims",
+    "cache_manifest",
+    "publication_state",
+    "storyboard_artifact_id",
+    "canonical_artifact_id",
+    "canonical_sha256",
+    "source_fingerprint",
+    "boundary_hash",
+    "ruleset_version",
+    "validator_version",
+    "audit_class",
+    "certificate_id",
+    "cache_key",
+    "cache_components",
+    "production_preflight_status",
+    "production_preflight_issue_count",
+    "checked_shot_count",
+    "facts_reusable",
+    "conclusion_reusable_for_independent_audit",
+    "from_window_binding_id",
+    "from_actor_binding_id",
+    "from_session_fingerprint",
+    "successor_transaction_id",
+    "successor_base_artifact_id",
+    "successor_kind",
+    "successor_scope_hash",
+    "immutable_repair_package_id",
+    "return_to_audit_work_order_id",
+    "return_to_audit_window_binding_id",
+    "return_to_audit_actor_binding_id",
+    "return_to_audit_session_fingerprint",
+)
 
 
 def utc_stamp() -> str:
@@ -523,6 +578,65 @@ class ProjectStore:
         with FileLock(str(lock_path)):
             yield
 
+    def _assert_no_project_rollback_fence_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        permitted_migration_id: str | None = None,
+    ) -> None:
+        """Reject ordinary writes while any signed migration is nonterminal."""
+
+        for migration_path in sorted(
+            (directory / "migrations").glob("*.json")
+        ):
+            record = self.read_json(migration_path)
+            record_id = migration_path.stem
+            if not isinstance(record, dict):
+                raise ValueError("migration_record_authority_conflict")
+            self._verify_record_integrity(record, record_id=record_id)
+            self._verify_project_record_primary_id(
+                "migrations",
+                record,
+                record_id=record_id,
+            )
+            if (
+                record.get("project_id") != project_id
+                or not self.project_record_is_signed(record)
+            ):
+                raise ValueError("migration_record_authority_conflict")
+            status = str(record.get("status") or "")
+            if (
+                status in {"prepared", "replaying", "rolling_back"}
+                and record_id != permitted_migration_id
+            ):
+                if status == "rolling_back":
+                    raise ValueError(
+                        "migration_rollback_in_progress: finish rollback before project writes"
+                    )
+                raise ValueError(
+                    "migration_commit_in_progress: finish migration before project writes"
+                )
+
+    @contextlib.contextmanager
+    def project_write_lock(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        permit_migration_id: str | None = None,
+    ) -> Iterator[None]:
+        """Serialize a project write and enforce its migration WAL fence."""
+
+        directory = self.project_dir(namespace, project_id)
+        with self.lock(f"{namespace}-{project_id}"):
+            self._assert_no_project_rollback_fence_unlocked(
+                directory,
+                project_id=project_id,
+                permitted_migration_id=permit_migration_id,
+            )
+            yield
+
     @staticmethod
     def atomic_write_bytes(path: Path, data: bytes) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -569,7 +683,7 @@ class ProjectStore:
     def create_project(self, namespace: str, hub: dict[str, Any], ledger: dict[str, Any]) -> None:
         project_id = safe_id(str(hub["project_id"]), "project_id")
         directory = self.project_dir(namespace, project_id)
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if (directory / "hub.json").exists():
                 raise ValueError("project already exists")
             directory.mkdir(parents=True, exist_ok=True)
@@ -606,7 +720,7 @@ class ProjectStore:
 
     def save_hub(self, namespace: str, project_id: str, hub: dict[str, Any]) -> None:
         path = self.project_dir(namespace, project_id) / "hub.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             self.atomic_write_json(path, hub)
 
     def load_ledger(self, namespace: str, project_id: str) -> dict[str, Any]:
@@ -617,7 +731,7 @@ class ProjectStore:
 
     def save_ledger(self, namespace: str, project_id: str, ledger: dict[str, Any]) -> None:
         path = self.project_dir(namespace, project_id) / "ledger.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             self.atomic_write_json(path, ledger)
 
     @staticmethod
@@ -629,6 +743,57 @@ class ProjectStore:
             separators=(",", ":"),
         ).encode("utf-8")
         return sha256_bytes(payload)
+
+    def ledger_replay_checkpoint_is_authorized(
+        self,
+        namespace: str,
+        project_id: str,
+        checkpoint: dict[str, Any],
+    ) -> bool:
+        """Verify a legacy-ledger replay checkpoint against its signed CAS journal.
+
+        The checkpoint stored in ``ledger.json`` is only an immutable-prefix
+        descriptor.  Authority comes from the separately signed migration
+        journal that committed the exact before/after ledger pair.  Keeping
+        this verification in storage prevents a caller-provided boolean (or
+        the checkpoint's own marker field) from authorizing legacy history.
+        """
+
+        if not isinstance(checkpoint, dict):
+            return False
+        migration_id = checkpoint.get("migration_id")
+        if not isinstance(migration_id, str):
+            return False
+        try:
+            clean_id = safe_id(migration_id, "migration_id")
+            record = self.get_project_record(
+                namespace,
+                project_id,
+                kind="migrations",
+                record_id=clean_id,
+            )
+        except (OSError, TypeError, ValueError, KeyError):
+            return False
+
+        ledger_before = record.get("ledger_before")
+        ledger_after = record.get("ledger_after")
+        old_ledger_sha = checkpoint.get("old_ledger_canonical_sha256")
+        if not isinstance(ledger_before, dict) or not isinstance(ledger_after, dict):
+            return False
+        return bool(
+            record.get("status") == "committed"
+            and record.get("migration_id") == clean_id
+            and record.get("record_id") == clean_id
+            and record.get("project_id") == project_id
+            and record.get("preserves_artifacts") is True
+            and isinstance(old_ledger_sha, str)
+            and record.get("ledger_before_sha256") == old_ledger_sha
+            and self.project_state_sha256(ledger_before) == old_ledger_sha
+            and record.get("ledger_after_sha256")
+            == self.project_state_sha256(ledger_after)
+            and ledger_after.get("project_id") == project_id
+            and ledger_after.get("replay_checkpoint") == checkpoint
+        )
 
     def commit_project_state_migration(
         self,
@@ -645,6 +810,7 @@ class ProjectStore:
         hub_after: dict[str, Any],
         ledger_after: dict[str, Any],
         runtime_test_certificate_id: str,
+        runtime_test_certificate_key: str,
         ruleset_version: str,
         validator_version: str,
         changed_paths: list[str],
@@ -666,7 +832,32 @@ class ProjectStore:
         after_hub_sha = self.project_state_sha256(hub_after)
         after_ledger_sha = self.project_state_sha256(ledger_after)
 
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(
+            namespace,
+            project_id,
+            permit_migration_id=clean_id,
+        ):
+            current_runtime_certificate = self.latest_runtime_certificate(
+                namespace,
+                project_id,
+                certificate_key=runtime_test_certificate_key,
+            )
+            if (
+                not isinstance(current_runtime_certificate, dict)
+                or not self.project_record_is_signed(current_runtime_certificate)
+                or current_runtime_certificate.get("certificate_id")
+                != runtime_test_certificate_id
+                or current_runtime_certificate.get("certificate_type")
+                != "runtime_full_regression"
+                or current_runtime_certificate.get("result") != "pass"
+                or current_runtime_certificate.get("certificate_key")
+                != runtime_test_certificate_key
+                or current_runtime_certificate.get("ruleset_version")
+                != ruleset_version
+                or current_runtime_certificate.get("validator_version")
+                != validator_version
+            ):
+                raise ValueError("migration_runtime_certificate_conflict")
             current_hub = self.read_json(hub_path)
             current_ledger = self.read_json(ledger_path)
             current_hub_sha = self.project_state_sha256(current_hub)
@@ -677,8 +868,54 @@ class ProjectStore:
                 self._verify_record_integrity(record, record_id=clean_id)
                 if not self.project_record_is_signed(record):
                     raise ValueError("migration_record_signature_required")
-                if record.get("migration_key") != migration_key:
-                    raise ValueError("migration_id_conflict")
+                if record.get("status") == "rolling_back":
+                    raise ValueError(
+                        "migration_rollback_in_progress: finish rollback before execute"
+                    )
+                record_hub_before = record.get("hub_before")
+                record_ledger_before = record.get("ledger_before")
+                record_hub_after = record.get("hub_after")
+                record_ledger_after = record.get("ledger_after")
+                if (
+                    record.get("migration_id") != clean_id
+                    or record.get("record_id") != clean_id
+                    or record.get("project_id") != project_id
+                    or record.get("work_order_id") != work_order_id
+                    or record.get("migration_key") != migration_key
+                    or record.get("from_version") != from_version
+                    or record.get("target_version") != target_version
+                    or record.get("runtime_test_certificate_id")
+                    != runtime_test_certificate_id
+                    or record.get("ruleset_version") != ruleset_version
+                    or record.get("validator_version") != validator_version
+                    or record.get("changed_paths") != list(changed_paths)
+                    or record.get("preserves_artifacts") is not True
+                    or record.get("status")
+                    not in {
+                        "prepared",
+                        "replaying",
+                        "committed",
+                        "rolled_back",
+                    }
+                    or not isinstance(record_hub_before, dict)
+                    or not isinstance(record_ledger_before, dict)
+                    or not isinstance(record_hub_after, dict)
+                    or not isinstance(record_ledger_after, dict)
+                    or record.get("hub_before_sha256") != before_hub_sha
+                    or record.get("ledger_before_sha256")
+                    != before_ledger_sha
+                    or record.get("hub_after_sha256") != after_hub_sha
+                    or record.get("ledger_after_sha256") != after_ledger_sha
+                    or self.project_state_sha256(record_hub_before)
+                    != before_hub_sha
+                    or self.project_state_sha256(record_ledger_before)
+                    != before_ledger_sha
+                    or self.project_state_sha256(record_hub_after)
+                    != after_hub_sha
+                    or self.project_state_sha256(record_ledger_after)
+                    != after_ledger_sha
+                ):
+                    raise ValueError("migration_record_authority_conflict")
                 before_hub_sha = str(record["hub_before_sha256"])
                 before_ledger_sha = str(record["ledger_before_sha256"])
                 after_hub_sha = str(record["hub_after_sha256"])
@@ -686,18 +923,25 @@ class ProjectStore:
                 hub_after = record["hub_after"]
                 ledger_after = record["ledger_after"]
 
-            if (current_hub_sha, current_ledger_sha) == (after_hub_sha, after_ledger_sha):
+            if (current_hub_sha, current_ledger_sha) == (
+                after_hub_sha,
+                after_ledger_sha,
+            ):
+                if record is None and (
+                    current_hub_sha,
+                    current_ledger_sha,
+                ) != (before_hub_sha, before_ledger_sha):
+                    raise ValueError(
+                        "migration_recovery_required: signed migration journal required"
+                    )
                 if record is not None and record.get("status") != "committed":
                     record["status"] = "committed"
                     record["committed_at"] = utc_stamp()
                     record["integrity_hmac"] = self._record_integrity_hmac(record)
                     self.atomic_write_json(record_path, record)
-                return record or {
-                    "migration_id": clean_id,
-                    "migration_key": migration_key,
-                    "status": "committed",
-                    "idempotent_replay": True,
-                }
+                    return record
+                if record is not None:
+                    return record
 
             valid_hub = current_hub_sha in {before_hub_sha, after_hub_sha}
             valid_ledger = current_ledger_sha in {before_ledger_sha, after_ledger_sha}
@@ -734,6 +978,15 @@ class ProjectStore:
                     "changed_paths": list(changed_paths),
                     "preserves_artifacts": True,
                 }
+                record["integrity_hmac"] = self._record_integrity_hmac(record)
+                self.atomic_write_json(record_path, record)
+
+            if record.get("status") == "rolled_back":
+                # Sign replay intent before either after-image is restored. If
+                # the process dies between the two replaces, the project-wide
+                # fence prevents unrelated writes from stranding recovery.
+                record["status"] = "replaying"
+                record["replay_started_at"] = utc_stamp()
                 record["integrity_hmac"] = self._record_integrity_hmac(record)
                 self.atomic_write_json(record_path, record)
 
@@ -804,7 +1057,7 @@ class ProjectStore:
         hub_before_sha = self.project_state_sha256(hub_before)
         hub_after_sha = self.project_state_sha256(hub_after)
 
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not old_path.is_file():
                 raise ValueError("handoff_recovery_required: old handoff is missing")
             current_old = self.read_json(old_path)
@@ -956,13 +1209,35 @@ class ProjectStore:
         clean_id = safe_id(migration_id, "migration_id")
         directory = self.project_dir(namespace, project_id)
         record_path = directory / "migrations" / f"{clean_id}.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(
+            namespace,
+            project_id,
+            permit_migration_id=clean_id,
+        ):
             if not record_path.is_file():
                 raise ValueError("unknown migration_id")
             record = self.read_json(record_path)
             self._verify_record_integrity(record, record_id=clean_id)
             if not self.project_record_is_signed(record):
                 raise ValueError("migration_record_signature_required")
+            self._verify_project_record_primary_id(
+                "migrations", record, record_id=clean_id
+            )
+            if record.get("project_id") != project_id:
+                raise ValueError("migration_record_authority_conflict")
+            for body_field, sha_field in (
+                ("hub_before", "hub_before_sha256"),
+                ("hub_after", "hub_after_sha256"),
+                ("ledger_before", "ledger_before_sha256"),
+                ("ledger_after", "ledger_after_sha256"),
+            ):
+                body = record.get(body_field)
+                if (
+                    not isinstance(body, dict)
+                    or self.project_state_sha256(body)
+                    != record.get(sha_field)
+                ):
+                    raise ValueError("migration_record_authority_conflict")
             hub_path = directory / "hub.json"
             ledger_path = directory / "ledger.json"
             current_hub_sha = self.project_state_sha256(self.read_json(hub_path))
@@ -981,7 +1256,12 @@ class ProjectStore:
                     "migration_rollback_cas_mismatch: project changed after rollback"
                 )
             status = str(record.get("status") or "")
-            if status not in {"committed", "rolling_back"}:
+            if status not in {
+                "prepared",
+                "replaying",
+                "committed",
+                "rolling_back",
+            }:
                 raise ValueError(
                     f"migration_rollback_state_conflict: migration status is {status!r}"
                 )
@@ -996,17 +1276,17 @@ class ProjectStore:
                 raise ValueError(
                     "migration_rollback_cas_mismatch: project changed after migration"
                 )
-            if status == "rolling_back" and (
+            if status in {"prepared", "replaying", "rolling_back"} and (
                 current_hub_sha not in {before_hub_sha, after_hub_sha}
                 or current_ledger_sha not in {before_ledger_sha, after_ledger_sha}
             ):
                 raise ValueError(
                     "migration_rollback_cas_mismatch: project changed during rollback"
                 )
-            if status == "committed":
+            if status != "rolling_back":
                 # Sign intent before either project-state file changes. A retry
-                # can then distinguish a legitimate half rollback from an
-                # unrelated write and complete only the missing side.
+                # can then distinguish a legitimate cancellation/half rollback
+                # from an unrelated write and complete only the missing side.
                 record["status"] = "rolling_back"
                 record["rollback_started_at"] = utc_stamp()
                 record["integrity_hmac"] = self._record_integrity_hmac(record)
@@ -1086,7 +1366,7 @@ class ProjectStore:
             / "draft_preflights"
             / f"{clean_id}.json"
         )
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not path.is_file():
                 raise ValueError(f"unknown draft_preflight_id: {clean_id}")
             record = self.read_json(path)
@@ -1175,7 +1455,7 @@ class ProjectStore:
             / "draft_preflights"
             / f"{clean_id}.json"
         )
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             record = self.read_json(path)
             self._verify_record_integrity(record, record_id=clean_id)
             if not self.project_record_is_signed(record):
@@ -1220,7 +1500,7 @@ class ProjectStore:
         )
         if not isinstance(stage, str) or not stage or len(stage) > 64:
             raise ValueError("invalid draft_preflight commit progress stage")
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             record = self.read_json(path)
             self._verify_record_integrity(record, record_id=clean_id)
             if not self.project_record_is_signed(record):
@@ -1264,7 +1544,7 @@ class ProjectStore:
             / "draft_preflights"
             / f"{clean_id}.json"
         )
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             record = self.read_json(path)
             self._verify_record_integrity(record, record_id=clean_id)
             if not self.project_record_is_signed(record):
@@ -1298,7 +1578,7 @@ class ProjectStore:
         directory = self.project_dir(namespace, project_id)
         hub_path = directory / "hub.json"
         ledger_path = directory / "ledger.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not hub_path.is_file() or not ledger_path.is_file():
                 raise ValueError(f"unknown project_id: {project_id}")
             hub = self.read_json(hub_path)
@@ -1345,7 +1625,7 @@ class ProjectStore:
             "relative_path": str(payload_path.relative_to(self.project_dir(namespace, project_id))),
             "metadata": metadata or {},
         }
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if meta_path.is_file():
                 existing = self.read_json(meta_path)
                 existing_path = self.project_dir(namespace, project_id) / str(
@@ -1551,13 +1831,33 @@ class ProjectStore:
         still detected before repair or sign-off.
         """
 
-        signature = value.get("integrity_hmac")
-        if signature is None:
+        if "record_id" in value and value.get("record_id") != record_id:
+            raise ValueError(f"project_record_identity_mismatch: {record_id}")
+        if "integrity_hmac" not in value:
             return
+        signature = value.get("integrity_hmac")
+        if value.get("record_id") != record_id:
+            raise ValueError(f"project_record_identity_mismatch: {record_id}")
         if not isinstance(signature, str) or not self._record_integrity_signature_matches(
             value, signature
         ):
             raise ValueError(f"project_record_integrity_mismatch: {record_id}")
+
+    @staticmethod
+    def _verify_project_record_primary_id(
+        kind: str, value: dict[str, Any], *, record_id: str
+    ) -> None:
+        """Bind signed and narrowly compatible legacy records to one ID."""
+
+        primary_key = PROJECT_RECORD_PRIMARY_ID_KEYS[kind]
+        if value.get(primary_key) != record_id:
+            raise ValueError(f"project_record_identity_mismatch: {record_id}")
+        if (
+            kind == "telemetry"
+            and "telemetry_id" in value
+            and value.get("telemetry_id") != record_id
+        ):
+            raise ValueError(f"project_record_identity_mismatch: {record_id}")
 
     def list_artifacts(
         self,
@@ -1627,12 +1927,33 @@ class ProjectStore:
         if not (directory / "hub.json").is_file():
             raise ValueError(f"unknown project_id: {project_id}")
         record = dict(value)
-        record.setdefault("record_id", clean_id)
-        record.setdefault("project_id", project_id)
+        if record.get("record_id", clean_id) != clean_id:
+            raise ValueError(f"project_record_identity_mismatch: {clean_id}")
+        if record.get("project_id", project_id) != project_id:
+            raise ValueError(f"invalid {clean_kind} record: {clean_id}")
+        primary_key = PROJECT_RECORD_PRIMARY_ID_KEYS[clean_kind]
+        if record.get(primary_key) != clean_id:
+            raise ValueError(f"project_record_identity_mismatch: {clean_id}")
+        record["record_id"] = clean_id
+        record["project_id"] = project_id
         record.setdefault("created_at", utc_stamp())
-        record["integrity_hmac"] = self._record_integrity_hmac(record)
         path = directory / clean_kind / f"{clean_id}.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
+            if (
+                clean_kind == "certificates"
+                and record.get("certificate_type")
+                == "runtime_full_regression"
+            ):
+                record["certificate_sequence"] = (
+                    self._next_runtime_certificate_sequence_unlocked(
+                        namespace,
+                        project_id,
+                        certificate_key=str(
+                            record.get("certificate_key") or ""
+                        ),
+                    )
+                )
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
             self.atomic_write_json(path, record)
         return record
 
@@ -1653,6 +1974,9 @@ class ProjectStore:
         if not isinstance(value, dict) or value.get("project_id") != project_id:
             raise ValueError(f"invalid {clean_kind} record: {clean_id}")
         self._verify_record_integrity(value, record_id=clean_id)
+        self._verify_project_record_primary_id(
+            clean_kind, value, record_id=clean_id
+        )
         if (
             clean_kind in SIGNED_ONLY_PROJECT_RECORD_KINDS
             and not self.project_record_is_signed(value)
@@ -1680,19 +2004,34 @@ class ProjectStore:
         clean_kind = self._project_record_kind(kind)
         clean_id = safe_id(record_id, "record_id")
         path = self.project_dir(namespace, project_id) / clean_kind / f"{clean_id}.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not path.is_file():
                 raise ValueError(f"unknown {clean_kind} record_id: {clean_id}")
             value = self.read_json(path)
             if not isinstance(value, dict) or value.get("project_id") != project_id:
                 raise ValueError(f"invalid {clean_kind} record: {clean_id}")
             self._verify_record_integrity(value, record_id=clean_id)
+            self._verify_project_record_primary_id(
+                clean_kind, value, record_id=clean_id
+            )
             if (
                 clean_kind in SIGNED_ONLY_PROJECT_RECORD_KINDS
                 and not self.project_record_is_signed(value)
             ):
                 raise ValueError(f"project_record_signature_required: {clean_id}")
             yield value
+            if (
+                value.get("record_id") != clean_id
+                or value.get("project_id") != project_id
+            ):
+                raise ValueError(
+                    f"project_record_identity_mismatch: {clean_id}"
+                )
+            primary_key = PROJECT_RECORD_PRIMARY_ID_KEYS[clean_kind]
+            if value.get(primary_key) != clean_id:
+                raise ValueError(
+                    f"project_record_identity_mismatch: {clean_id}"
+                )
             value["integrity_hmac"] = self._record_integrity_hmac(value)
             self.atomic_write_json(path, value)
 
@@ -1707,22 +2046,122 @@ class ProjectStore:
         directory = self.project_dir(namespace, project_id) / clean_kind
         result: list[dict[str, Any]] = []
         for path in sorted(directory.glob("*.json")):
-            with contextlib.suppress(Exception):
+            try:
                 value = self.read_json(path)
-                if isinstance(value, dict) and value.get("project_id") == project_id:
-                    self._verify_record_integrity(
-                        value, record_id=str(value.get("record_id") or path.stem)
-                    )
-                    if (
-                        clean_kind in SIGNED_ONLY_PROJECT_RECORD_KINDS
-                        and not self.project_record_is_signed(value)
-                    ):
-                        raise ValueError(
-                            f"project_record_signature_required: {path.stem}"
-                        )
-                    result.append(value)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(value, dict) or value.get("project_id") != project_id:
+                raise ValueError(f"invalid {clean_kind} record: {path.stem}")
+            self._verify_record_integrity(value, record_id=path.stem)
+            self._verify_project_record_primary_id(
+                clean_kind, value, record_id=path.stem
+            )
+            if (
+                clean_kind in SIGNED_ONLY_PROJECT_RECORD_KINDS
+                and not self.project_record_is_signed(value)
+            ):
+                raise ValueError(
+                    f"project_record_signature_required: {path.stem}"
+                )
+            result.append(value)
         result.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
         return result
+
+    def list_project_records_strict(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        kind: str,
+    ) -> list[dict[str, Any]]:
+        """Enumerate authority records without hiding malformed entries."""
+
+        clean_kind = self._project_record_kind(kind)
+        directory = self.project_dir(namespace, project_id) / clean_kind
+        result: list[dict[str, Any]] = []
+        for path in sorted(directory.glob("*.json")):
+            value = self.read_json(path)
+            if not isinstance(value, dict) or value.get("project_id") != project_id:
+                raise ValueError(f"invalid {clean_kind} record: {path.stem}")
+            record_id = path.stem
+            self._verify_record_integrity(value, record_id=record_id)
+            self._verify_project_record_primary_id(
+                clean_kind, value, record_id=record_id
+            )
+            if (
+                clean_kind in SIGNED_ONLY_PROJECT_RECORD_KINDS
+                and not self.project_record_is_signed(value)
+            ):
+                raise ValueError(
+                    f"project_record_signature_required: {path.stem}"
+                )
+            result.append(value)
+        result.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        return result
+
+    def _load_handoff_projection_snapshot_unlocked(
+        self,
+        namespace: str,
+        project_id: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        handoffs = self.list_project_records_strict(
+            namespace,
+            project_id,
+            kind="handoffs",
+        )
+        hub = self.load_hub(namespace, project_id)
+        return handoffs, hub
+
+    def load_handoff_projection_snapshot(
+        self,
+        namespace: str,
+        project_id: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Read signed handoffs and their Hub projections at one lock epoch.
+
+        Successor lifecycle transitions intentionally write the signed authority
+        before its unsigned Hub projection.  A reader that enumerates those two
+        stores without the project lock can otherwise combine the signed state
+        from before a transition with the Hub state from after it (or vice
+        versa), producing a projection mismatch that never existed as a durable
+        state.  Later claim/finalization methods still perform their own locked
+        compare-and-swap checks; this snapshot only makes lineage validation
+        linearizable.
+        """
+
+        with self.lock(f"{namespace}-{project_id}"):
+            return self._load_handoff_projection_snapshot_unlocked(
+                namespace,
+                project_id,
+            )
+
+    def load_handoff_projection_snapshot_while_project_locked(
+        self,
+        namespace: str,
+        project_id: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Read a snapshot when the caller already owns the project lock.
+
+        This narrowly scoped entrypoint avoids attempting to reacquire the
+        non-reentrant cross-process ``FileLock`` from sign-off validation.  It
+        must only be called by code whose enclosing storage mutation already
+        owns ``lock(f"{namespace}-{project_id}")``.
+        """
+
+        return self._load_handoff_projection_snapshot_unlocked(
+            namespace,
+            project_id,
+        )
+
+    @staticmethod
+    def _hub_record_projection(value: dict[str, Any]) -> dict[str, Any]:
+        """Remove signed-record envelope fields from a Hub projection."""
+
+        return {
+            key: copy.deepcopy(item)
+            for key, item in value.items()
+            if key not in {"record_id", "project_id", "integrity_hmac"}
+        }
 
     def find_project_record(
         self,
@@ -1733,10 +2172,132 @@ class ProjectStore:
         field: str,
         value: Any,
     ) -> dict[str, Any] | None:
-        for record in self.list_project_records(namespace, project_id, kind=kind):
+        for record in self.list_project_records_strict(
+            namespace, project_id, kind=kind
+        ):
             if record.get(field) == value:
                 return record
         return None
+
+    def _runtime_certificates_for_key_unlocked(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        certificate_key: str,
+    ) -> list[dict[str, Any]]:
+        if not certificate_key:
+            raise ValueError(
+                "runtime_certificate_storage_invalid: certificate key is empty"
+            )
+        matches = [
+            record
+            for record in self.list_project_records_strict(
+                namespace, project_id, kind="certificates"
+            )
+            if record.get("certificate_key") == certificate_key
+        ]
+        for record in matches:
+            if (
+                record.get("certificate_type")
+                != "runtime_full_regression"
+                or not self.project_record_is_signed(record)
+            ):
+                raise ValueError(
+                    "runtime_certificate_storage_invalid: matching runtime authority is malformed"
+                )
+            sequence = record.get("certificate_sequence")
+            if sequence is not None and (
+                not isinstance(sequence, int)
+                or isinstance(sequence, bool)
+                or sequence < 1
+            ):
+                raise ValueError(
+                    "runtime_certificate_storage_invalid: certificate sequence is invalid"
+                )
+        return matches
+
+    def _next_runtime_certificate_sequence_unlocked(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        certificate_key: str,
+    ) -> int:
+        matches = self._runtime_certificates_for_key_unlocked(
+            namespace,
+            project_id,
+            certificate_key=certificate_key,
+        )
+        sequences = [
+            int(record["certificate_sequence"])
+            for record in matches
+            if record.get("certificate_sequence") is not None
+        ]
+        if len(sequences) != len(set(sequences)):
+            raise ValueError(
+                "runtime_certificate_storage_invalid: duplicate certificate sequence"
+            )
+        return max(sequences, default=0) + 1
+
+    def latest_runtime_certificate(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        certificate_key: str,
+    ) -> dict[str, Any] | None:
+        """Resolve one runtime authority by its signed project-local total order."""
+
+        matches = self._runtime_certificates_for_key_unlocked(
+            namespace,
+            project_id,
+            certificate_key=certificate_key,
+        )
+        if not matches:
+            return None
+        sequenced = [
+            record
+            for record in matches
+            if record.get("certificate_sequence") is not None
+        ]
+        if sequenced:
+            latest_sequence = max(
+                int(record["certificate_sequence"])
+                for record in sequenced
+            )
+            latest = [
+                record
+                for record in sequenced
+                if record.get("certificate_sequence") == latest_sequence
+            ]
+            if len(latest) != 1:
+                raise ValueError(
+                    "runtime_certificate_storage_invalid: latest certificate sequence is ambiguous"
+                )
+            return latest[0]
+
+        created_at_values = [
+            record.get("created_at") for record in matches
+        ]
+        if any(
+            not isinstance(value, str) or not value
+            for value in created_at_values
+        ):
+            raise ValueError(
+                "runtime_certificate_storage_invalid: legacy certificate timestamp is invalid"
+            )
+        latest_created_at = max(str(value) for value in created_at_values)
+        latest_legacy = [
+            record
+            for record in matches
+            if record.get("created_at") == latest_created_at
+        ]
+        if len(latest_legacy) != 1:
+            raise ValueError(
+                "runtime_certificate_storage_invalid: legacy certificate order is ambiguous"
+            )
+        return latest_legacy[0]
 
     def handoff_is_published(
         self,
@@ -1786,7 +2347,7 @@ class ProjectStore:
                 f"handoff lease_seconds must be between 1 and {MAX_CONSUMPTION_LEASE_SECONDS}"
             )
         path = self.project_dir(namespace, project_id) / "handoffs" / f"{clean_id}.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not path.is_file():
                 raise ValueError("handoff_required: signed handoff does not exist")
             record = self.read_json(path)
@@ -1897,7 +2458,7 @@ class ProjectStore:
 
         clean_id = safe_id(handoff_id, "handoff_id")
         path = self.project_dir(namespace, project_id) / "handoffs" / f"{clean_id}.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             record = self.read_json(path)
             self._verify_record_integrity(record, record_id=clean_id)
             if record.get("status") == "consumed":
@@ -1940,6 +2501,2670 @@ class ProjectStore:
             self.atomic_write_json(path, record)
             return record
 
+    def _reaudit_consumed_finalization_error(
+        self,
+        value: dict[str, Any],
+    ) -> str | None:
+        """Return the exact semantic defect in a consumed successor."""
+
+        if value.get("status") != "consumed":
+            return None
+        consumed_by = value.get("consumed_by_work_order_id")
+        consumed_at = value.get("consumed_at")
+        live_claim_fields = {
+            "claimed_by_work_order_id",
+            "claim_token",
+            "claim_epoch_seconds",
+            "claim_lease_seconds",
+            "claim_lease_expires_at",
+            "claim_lease_expires_epoch_seconds",
+        }
+        if (
+            not isinstance(consumed_by, str)
+            or not consumed_by
+            or consumed_by != value.get("claim_authority_work_order_id")
+            or not isinstance(consumed_at, str)
+            or not consumed_at
+            or live_claim_fields & set(value)
+        ):
+            return (
+                "reaudit_claim_binding_invalid: consumed successor has an "
+                "invalid finalization shape"
+            )
+        audit_certificate_id = str(
+            value.get("audit_certificate_id") or ""
+        )
+        latest_certificate_id = str(
+            value.get("latest_audit_certificate_id") or ""
+        )
+        if (
+            not audit_certificate_id
+            or latest_certificate_id != audit_certificate_id
+        ):
+            return (
+                "reaudit_certificate_binding_invalid: consumed successor "
+                "certificate pointers differ"
+            )
+
+        claim = value.get("consumption_claim")
+        claim_fields = {
+            "claim_token",
+            "claim_generation",
+            "claim_epoch_seconds",
+            "claim_lease_seconds",
+            "claim_lease_expires_at",
+            "claim_lease_expires_epoch_seconds",
+        }
+        if not isinstance(claim, dict) or set(claim) != claim_fields:
+            return (
+                "reaudit_claim_binding_invalid: consumed successor claim "
+                "snapshot is incomplete"
+            )
+        top_generation = value.get("claim_generation")
+        claim_generation = claim.get("claim_generation")
+        claim_token = claim.get("claim_token")
+        claim_epoch = claim.get("claim_epoch_seconds")
+        lease_seconds = claim.get("claim_lease_seconds")
+        lease_expires_at = claim.get("claim_lease_expires_at")
+        lease_expires_epoch = claim.get(
+            "claim_lease_expires_epoch_seconds"
+        )
+        if (
+            not isinstance(top_generation, int)
+            or isinstance(top_generation, bool)
+            or top_generation < 1
+            or not isinstance(claim_generation, int)
+            or isinstance(claim_generation, bool)
+            or claim_generation != top_generation
+            or not isinstance(claim_token, str)
+            or not claim_token
+            or not self._valid_reaudit_claim_epoch(claim_epoch)
+            or not isinstance(lease_seconds, int)
+            or isinstance(lease_seconds, bool)
+            or not 1 <= lease_seconds <= MAX_CONSUMPTION_LEASE_SECONDS
+            or not self._valid_reaudit_claim_epoch(lease_expires_epoch)
+            or abs(
+                float(lease_expires_epoch)
+                - (float(claim_epoch) + lease_seconds)
+            )
+            > 1e-6
+            or not isinstance(lease_expires_at, str)
+            or lease_expires_at
+            != time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ",
+                time.gmtime(float(lease_expires_epoch)),
+            )
+        ):
+            return (
+                "reaudit_claim_binding_invalid: consumed successor claim "
+                "snapshot differs from its finalized lease"
+            )
+        preclaim_sha256 = value.get(
+            "reaudit_preclaim_projection_sha256"
+        )
+        if (
+            not isinstance(preclaim_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", preclaim_sha256) is None
+        ):
+            return (
+                "reaudit_claim_binding_invalid: consumed successor preclaim "
+                "projection binding is invalid"
+            )
+        preclaim_projection = self._hub_record_projection(value)
+        preclaim_projection["status"] = "prepared"
+        for key in (
+            "consumed_by_work_order_id",
+            "audit_certificate_id",
+            "latest_audit_certificate_id",
+            "consumed_at",
+            "consumption_claim",
+        ):
+            preclaim_projection.pop(key, None)
+        if claim_generation == 1:
+            preclaim_projection.pop("claim_generation", None)
+            preclaim_projection.pop(
+                "reaudit_preclaim_projection_sha256", None
+            )
+        else:
+            history = preclaim_projection.get("claim_history")
+            prior_index = next(
+                (
+                    index
+                    for index in range(len(history or []) - 1, -1, -1)
+                    if isinstance((history or [])[index], dict)
+                    and (history or [])[index].get("claim_generation")
+                    == claim_generation - 1
+                ),
+                None,
+            )
+            prior_claim = (
+                history[prior_index]
+                if isinstance(history, list)
+                and isinstance(prior_index, int)
+                else None
+            )
+            prior_preclaim_sha256 = (
+                prior_claim.get("reaudit_preclaim_projection_sha256")
+                if isinstance(prior_claim, dict)
+                else None
+            )
+            if (
+                not isinstance(prior_preclaim_sha256, str)
+                or re.fullmatch(
+                    r"[0-9a-f]{64}", prior_preclaim_sha256
+                )
+                is None
+            ):
+                return (
+                    "reaudit_claim_binding_invalid: consumed successor "
+                    "cannot prove its prior preclaim projection"
+                )
+            prior_state = prior_claim.get("state")
+            if prior_state == "released":
+                preclaim_projection["claim_generation"] = (
+                    claim_generation - 1
+                )
+                preclaim_projection[
+                    "reaudit_preclaim_projection_sha256"
+                ] = prior_preclaim_sha256
+            elif prior_state == "lease_expired":
+                prior_live_fields = {
+                    "claimed_by_work_order_id": prior_claim.get(
+                        "claimed_by_work_order_id"
+                    ),
+                    "claim_token": prior_claim.get("claim_token"),
+                    "claim_generation": prior_claim.get(
+                        "claim_generation"
+                    ),
+                    "claim_epoch_seconds": prior_claim.get(
+                        "claim_epoch_seconds"
+                    ),
+                    "claim_lease_seconds": prior_claim.get(
+                        "claim_lease_seconds"
+                    ),
+                    "claim_lease_expires_at": prior_claim.get(
+                        "claim_lease_expires_at"
+                    ),
+                    "claim_lease_expires_epoch_seconds": prior_claim.get(
+                        "claim_lease_expires_epoch_seconds"
+                    ),
+                    "reaudit_preclaim_projection_sha256": (
+                        prior_preclaim_sha256
+                    ),
+                }
+                if any(
+                    value in {None, ""}
+                    for value in prior_live_fields.values()
+                ):
+                    return (
+                        "reaudit_claim_binding_invalid: consumed successor "
+                        "expired claim history is incomplete"
+                    )
+                preclaim_projection["status"] = "consuming"
+                preclaim_projection.update(prior_live_fields)
+                prior_history = copy.deepcopy(history)
+                prior_history.pop(prior_index)
+                if prior_history:
+                    preclaim_projection["claim_history"] = prior_history
+                else:
+                    preclaim_projection.pop("claim_history", None)
+            else:
+                return (
+                    "reaudit_claim_binding_invalid: consumed successor prior "
+                    "claim history state is invalid"
+                )
+        if self.project_state_sha256(preclaim_projection) != preclaim_sha256:
+            return (
+                "reaudit_claim_binding_invalid: consumed successor preclaim "
+                "projection differs from its finalized claim"
+            )
+        return None
+
+    @staticmethod
+    def _valid_reaudit_claim_epoch(value: Any) -> bool:
+        """Accept only finite UTC epochs that ``gmtime`` can represent."""
+
+        return bool(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value > 0
+            and value <= 253402300799
+            and math.isfinite(value)
+        )
+
+    def _reaudit_successor_lifecycle_error(
+        self,
+        value: dict[str, Any],
+    ) -> str | None:
+        """Validate the exact prepared/consuming/consumed claim shape."""
+
+        if value.get("reaudit_kind") != "independent_audit_successor":
+            return "reaudit_lineage_invalid: handoff is not a successor"
+        authority = value.get("claim_authority_work_order_id")
+        if not isinstance(authority, str) or not authority:
+            return (
+                "reaudit_claim_binding_invalid: successor claim authority "
+                "is missing"
+            )
+        status = value.get("status")
+        live_claim_fields = {
+            "claimed_by_work_order_id",
+            "claim_token",
+            "claim_epoch_seconds",
+            "claim_lease_seconds",
+            "claim_lease_expires_at",
+            "claim_lease_expires_epoch_seconds",
+        }
+        consumed_fields = {
+            "consumed_by_work_order_id",
+            "audit_certificate_id",
+            "latest_audit_certificate_id",
+            "consumed_at",
+            "consumption_claim",
+        }
+        present = set(value)
+        if status == "prepared":
+            if live_claim_fields & present or consumed_fields & present:
+                return (
+                    "reaudit_claim_binding_invalid: prepared successor has "
+                    "live or consumed claim fields"
+                )
+            generation = value.get("claim_generation")
+            if generation is not None and (
+                not isinstance(generation, int)
+                or isinstance(generation, bool)
+                or generation < 1
+            ):
+                return (
+                    "reaudit_claim_binding_invalid: prepared successor claim "
+                    "generation is invalid"
+                )
+            for field in (
+                "reaudit_preclaim_projection_sha256",
+                "reaudit_prerelease_projection_sha256",
+            ):
+                binding = value.get(field)
+                if binding is not None and (
+                    not isinstance(binding, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", binding) is None
+                ):
+                    return (
+                        "reaudit_claim_binding_invalid: prepared successor "
+                        f"{field} is invalid"
+                    )
+            return None
+        if status == "consuming":
+            required_live_fields = live_claim_fields | {"claim_generation"}
+            if (
+                not required_live_fields <= present
+                or consumed_fields & present
+                or value.get("claimed_by_work_order_id") != authority
+            ):
+                return (
+                    "reaudit_claim_binding_invalid: consuming successor has "
+                    "an invalid claim shape"
+                )
+            generation = value.get("claim_generation")
+            token = value.get("claim_token")
+            claim_epoch = value.get("claim_epoch_seconds")
+            lease_seconds = value.get("claim_lease_seconds")
+            lease_expires_at = value.get("claim_lease_expires_at")
+            lease_expires_epoch = value.get(
+                "claim_lease_expires_epoch_seconds"
+            )
+            preclaim_sha256 = value.get(
+                "reaudit_preclaim_projection_sha256"
+            )
+            if (
+                not isinstance(generation, int)
+                or isinstance(generation, bool)
+                or generation < 1
+                or not isinstance(token, str)
+                or not token
+                or not self._valid_reaudit_claim_epoch(claim_epoch)
+                or not isinstance(lease_seconds, int)
+                or isinstance(lease_seconds, bool)
+                or not 1 <= lease_seconds <= MAX_CONSUMPTION_LEASE_SECONDS
+                or not self._valid_reaudit_claim_epoch(lease_expires_epoch)
+                or abs(
+                    float(lease_expires_epoch)
+                    - (float(claim_epoch) + lease_seconds)
+                )
+                > 1e-6
+                or not isinstance(lease_expires_at, str)
+                or lease_expires_at
+                != time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ",
+                    time.gmtime(float(lease_expires_epoch)),
+                )
+                or not isinstance(preclaim_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", preclaim_sha256) is None
+            ):
+                return (
+                    "reaudit_claim_binding_invalid: consuming successor claim "
+                    "lease or preclaim binding is invalid"
+                )
+            return None
+        if status == "consumed":
+            return self._reaudit_consumed_finalization_error(value)
+        return (
+            "reaudit_claim_binding_invalid: successor lifecycle status is "
+            f"{status!r}"
+        )
+
+    @staticmethod
+    def _reaudit_successor_immutable_identity(
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            key: copy.deepcopy(value.get(key))
+            for key in REAUDIT_IMMUTABLE_IDENTITY_KEYS
+            if key in value
+        }
+
+    @classmethod
+    def _reaudit_successor_lineage_payload(
+        cls,
+        *,
+        root: dict[str, Any],
+        parent: dict[str, Any],
+        successor: dict[str, Any],
+    ) -> dict[str, Any]:
+        root_identity = cls._reaudit_successor_immutable_identity(root)
+        return {
+            "spec": "independent-reaudit-successor-v1",
+            "root_handoff_id": str(root.get("handoff_id") or ""),
+            "parent_handoff_id": str(parent.get("handoff_id") or ""),
+            "successor_handoff_id": str(
+                successor.get("handoff_id") or ""
+            ),
+            "reaudit_sequence": int(
+                successor.get("reaudit_sequence") or 0
+            ),
+            "audit_work_order_id": str(
+                successor.get("claim_authority_work_order_id") or ""
+            ),
+            "previous_audit_certificate_id": str(
+                successor.get("previous_audit_certificate_id") or ""
+            ),
+            "previous_audit_certificate_hmac": str(
+                successor.get("previous_audit_certificate_hmac") or ""
+            ),
+            "previous_audit_event_sha256": str(
+                successor.get("previous_audit_event_sha256") or ""
+            ),
+            "production_stage_trace_id": str(
+                successor.get("production_stage_trace_id") or ""
+            ),
+            "route_trace_id": str(
+                successor.get("reaudit_route_trace_id") or ""
+            ),
+            "audit_event_trace_id": str(
+                successor.get("reaudit_event_trace_id") or ""
+            ),
+            "audit_window_binding_id": str(
+                successor.get("reaudit_audit_window_binding_id") or ""
+            ),
+            "audit_actor_binding_id": str(
+                successor.get("reaudit_audit_actor_binding_id") or ""
+            ),
+            "audit_session_fingerprint": str(
+                successor.get("reaudit_audit_session_fingerprint") or ""
+            ),
+            "immutable_identity_sha256": sha256_bytes(
+                canonical_json_bytes(root_identity)
+            ),
+        }
+
+    def commit_reaudit_successor(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        root_handoff_id: str,
+        parent_handoff_id: str,
+        successor_handoff_id: str,
+        consumer_work_order_id: str,
+        successor: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically publish one server-derived independent re-audit route.
+
+        A consumed production handoff is immutable audit history.  A forced
+        re-audit therefore receives a fresh, single-use handoff instead of
+        reopening the consumed record.  The signed record and its Hub
+        projection are written under one project lock and compensated on an
+        ordinary write failure so callers never observe a one-sided route.
+        """
+
+        clean_root_id = safe_id(root_handoff_id, "root_handoff_id")
+        clean_parent_id = safe_id(parent_handoff_id, "parent_handoff_id")
+        clean_successor_id = safe_id(
+            successor_handoff_id, "successor_handoff_id"
+        )
+        clean_consumer_id = safe_id(
+            consumer_work_order_id, "consumer_work_order_id"
+        )
+        directory = self.project_dir(namespace, project_id)
+        root_path = directory / "handoffs" / f"{clean_root_id}.json"
+        parent_path = directory / "handoffs" / f"{clean_parent_id}.json"
+        successor_path = directory / "handoffs" / f"{clean_successor_id}.json"
+        hub_path = directory / "hub.json"
+
+        with self.project_write_lock(namespace, project_id):
+            if not root_path.is_file() or not parent_path.is_file():
+                raise ValueError(
+                    "reaudit_lineage_invalid: root or parent handoff is missing"
+                )
+            root = self.read_json(root_path)
+            parent = self.read_json(parent_path)
+            self._verify_record_integrity(root, record_id=clean_root_id)
+            self._verify_record_integrity(parent, record_id=clean_parent_id)
+            self._verify_project_record_primary_id(
+                "handoffs", root, record_id=clean_root_id
+            )
+            self._verify_project_record_primary_id(
+                "handoffs", parent, record_id=clean_parent_id
+            )
+            if not self.project_record_is_signed(
+                root
+            ) or not self.project_record_is_signed(parent):
+                raise ValueError(
+                    "reaudit_lineage_invalid: root or parent handoff is unsigned"
+                )
+            if (
+                root.get("project_id") != project_id
+                or parent.get("project_id") != project_id
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: root or parent crosses project authority"
+                )
+            hub_before = self.read_json(hub_path)
+            audit_orders = [
+                row
+                for row in hub_before.get("work_orders", [])
+                if isinstance(row, dict)
+                and row.get("work_order_id") == clean_consumer_id
+            ]
+            if len(audit_orders) != 1:
+                raise ValueError(
+                    "reaudit_lineage_invalid: audit work-order authority is missing"
+                )
+            audit_order = audit_orders[0]
+            if (
+                root.get("reaudit_kind")
+                or root.get("status") != "consumed"
+                or root.get("consumed_by_work_order_id")
+                != clean_consumer_id
+                or parent.get("status") != "consumed"
+                or parent.get("consumed_by_work_order_id")
+                != clean_consumer_id
+                or not parent.get("audit_certificate_id")
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: parent is not a completed audit route"
+                )
+            if clean_parent_id == clean_root_id:
+                expected_sequence = 1
+            else:
+                parent_lifecycle_error = (
+                    self._reaudit_successor_lifecycle_error(parent)
+                )
+                if (
+                    parent_lifecycle_error
+                    or parent.get("reaudit_root_handoff_id")
+                    != clean_root_id
+                    or parent.get("reaudit_kind")
+                    != "independent_audit_successor"
+                ):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: parent successor authority is invalid"
+                    )
+                expected_sequence = int(
+                    parent.get("reaudit_sequence") or 0
+                ) + 1
+            parent_certificate_id = safe_id(
+                str(parent["audit_certificate_id"]),
+                "parent_audit_certificate_id",
+            )
+            parent_certificate_path = (
+                directory
+                / "certificates"
+                / f"{parent_certificate_id}.json"
+            )
+            if not parent_certificate_path.is_file():
+                raise ValueError(
+                    "reaudit_lineage_invalid: parent certificate is missing"
+                )
+            parent_certificate = self.read_json(parent_certificate_path)
+            if not isinstance(parent_certificate, dict):
+                raise ValueError(
+                    "reaudit_lineage_invalid: parent certificate is malformed"
+                )
+            self._verify_record_integrity(
+                parent_certificate, record_id=parent_certificate_id
+            )
+            self._verify_project_record_primary_id(
+                "certificates",
+                parent_certificate,
+                record_id=parent_certificate_id,
+            )
+            ledger = self.read_json(directory / "ledger.json")
+            events = ledger.get("events") if isinstance(ledger, dict) else None
+            parent_event_id = str(
+                parent_certificate.get("event_id") or ""
+            )
+            matching_parent_events = [
+                event
+                for event in events or []
+                if isinstance(event, dict)
+                and str(event.get("event_id") or "") == parent_event_id
+            ]
+            if (
+                not self.project_record_is_signed(parent_certificate)
+                or parent_certificate.get("handoff_id") != clean_parent_id
+                or parent_certificate.get("work_order_id")
+                != clean_consumer_id
+                or len(matching_parent_events) != 1
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: parent certificate authority is incomplete"
+                )
+            parent_event_sha256 = sha256_bytes(
+                canonical_json_bytes(matching_parent_events[0])
+            )
+            if (
+                "event_sha256" in parent_certificate
+                and parent_certificate.get("event_sha256")
+                != parent_event_sha256
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: parent certificate event binding differs"
+                )
+            if (
+                successor.get("previous_audit_certificate_id")
+                != parent_certificate_id
+                or successor.get("previous_audit_certificate_hmac")
+                != parent_certificate.get("integrity_hmac")
+                or successor.get("previous_audit_event_sha256")
+                != parent_event_sha256
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: successor parent authority bridge differs"
+                )
+
+            expected_lineage_sha256 = sha256_bytes(
+                canonical_json_bytes(
+                    self._reaudit_successor_lineage_payload(
+                        root=root,
+                        parent=parent,
+                        successor=successor,
+                    )
+                )
+            )
+            if (
+                successor.get("handoff_id") != clean_successor_id
+                or successor.get("reaudit_kind")
+                != "independent_audit_successor"
+                or successor.get("reaudit_root_handoff_id")
+                != clean_root_id
+                or successor.get("reaudit_parent_handoff_id")
+                != clean_parent_id
+                or successor.get("reaudit_sequence") != expected_sequence
+                or successor.get("claim_authority_work_order_id")
+                != clean_consumer_id
+                or successor.get("reaudit_audit_window_binding_id")
+                != audit_order.get("server_window_binding_id")
+                or successor.get("reaudit_audit_actor_binding_id")
+                != audit_order.get("server_actor_binding_id")
+                or successor.get("reaudit_audit_session_fingerprint")
+                != audit_order.get("transport_session_fingerprint")
+                or successor.get("server_minted_lineage") is not True
+                or successor.get("production_stage_trace_id")
+                != root.get("stage_trace_id")
+                or successor.get("stage_trace_id")
+                != successor.get("reaudit_route_trace_id")
+                or self._reaudit_successor_immutable_identity(successor)
+                != self._reaudit_successor_immutable_identity(root)
+                or successor.get("reaudit_lineage_sha256")
+                != expected_lineage_sha256
+                or (
+                    "record_id" in successor
+                    and successor.get("record_id") != clean_successor_id
+                )
+                or (
+                    "project_id" in successor
+                    and successor.get("project_id") != project_id
+                )
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: successor changed root, parent, "
+                    "sequence, audit authority, immutable identity, or lineage"
+                )
+
+            route_trace_id = str(
+                successor.get("reaudit_route_trace_id") or ""
+            )
+            event_trace_id = str(
+                successor.get("reaudit_event_trace_id") or ""
+            )
+            if (
+                not route_trace_id
+                or not event_trace_id
+                or route_trace_id == event_trace_id
+            ):
+                raise ValueError(
+                    "reaudit_trace_conflict: route and audit-event traces "
+                    "must be distinct and globally fresh"
+                )
+            safe_id(route_trace_id, "reaudit_route_trace_id")
+            safe_id(event_trace_id, "reaudit_event_trace_id")
+            finalization_error = self._reaudit_successor_lifecycle_error(
+                successor
+            )
+            if finalization_error:
+                raise ValueError(finalization_error)
+
+            sealed = copy.deepcopy(successor)
+            sealed["record_id"] = clean_successor_id
+            sealed["project_id"] = project_id
+            sealed["integrity_hmac"] = self._record_integrity_hmac(sealed)
+            expected_projection = self._hub_record_projection(sealed)
+            existing: dict[str, Any] | None = None
+            if successor_path.is_file():
+                existing = self.read_json(successor_path)
+                self._verify_record_integrity(
+                    existing, record_id=clean_successor_id
+                )
+                self._verify_project_record_primary_id(
+                    "handoffs", existing, record_id=clean_successor_id
+                )
+                if (
+                    not self.project_record_is_signed(existing)
+                    or existing.get("record_id") != clean_successor_id
+                    or existing.get("project_id") != project_id
+                    or self._hub_record_projection(existing)
+                    != expected_projection
+                ):
+                    raise ValueError("reaudit_successor_idempotency_conflict")
+
+            existing_is_exact = existing is not None
+            candidate_trace_ids = {route_trace_id, event_trace_id}
+
+            def record_trace_ids(value: Any) -> set[str]:
+                if not isinstance(value, dict):
+                    return set()
+                return {
+                    str(item)
+                    for key, item in value.items()
+                    if isinstance(item, str)
+                    and item
+                    and (
+                        key in {"trace_id", "telemetry_id"}
+                        or key.endswith("_trace_id")
+                    )
+                }
+
+            def reject_reused_trace(trace_ids: set[str]) -> None:
+                if candidate_trace_ids & trace_ids:
+                    raise ValueError(
+                        "reaudit_trace_conflict: route and audit-event traces "
+                        "must be distinct and globally fresh"
+                    )
+
+            def is_exact_downstream_trace_reference(
+                value: Any,
+            ) -> bool:
+                return bool(
+                    existing_is_exact
+                    and isinstance(value, dict)
+                    and value.get("handoff_type") == "audit_to_repair"
+                    and value.get("from_window_role")
+                    == "independent_audit"
+                    and value.get("to_window_role") == "repair"
+                    and value.get("source_audit_handoff_id")
+                    == clean_successor_id
+                    and value.get("source_audit_route_trace_id")
+                    == route_trace_id
+                    and value.get("source_audit_event_trace_id")
+                    == event_trace_id
+                    and value.get("audit_cycle_id")
+                    == successor.get("audit_cycle_id")
+                    and value.get("logical_artifact_id")
+                    == successor.get("logical_artifact_id")
+                    and value.get("canonical_sha256")
+                    == successor.get("canonical_sha256")
+                    and value.get("fingerprints")
+                    == successor.get("fingerprints")
+                )
+
+            def is_exact_owned_telemetry(value: Any) -> bool:
+                if not existing_is_exact or not isinstance(value, dict):
+                    return False
+                trace_id = str(value.get("trace_id") or "")
+                if (
+                    value.get("telemetry_id") != trace_id
+                    or value.get("artifact_id")
+                    != successor.get("storyboard_artifact_id")
+                    or value.get("input_fingerprints")
+                    != successor.get("fingerprints")
+                    or value.get("window_role") != "independent_audit"
+                    or value.get("task_type") != "independent_audit"
+                ):
+                    return False
+                return bool(
+                    (
+                        trace_id == route_trace_id
+                        and value.get("operation")
+                        == "audit_storyboard_reaudit_route"
+                    )
+                    or (
+                        trace_id == event_trace_id
+                        and value.get("operation") == "audit_storyboard"
+                    )
+                )
+
+            for path in sorted((directory / "handoffs").glob("*.json")):
+                if path == successor_path:
+                    continue
+                candidate = self.read_json(path)
+                if not isinstance(candidate, dict):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: malformed handoff record"
+                    )
+                candidate_id = path.stem
+                self._verify_record_integrity(
+                    candidate, record_id=candidate_id
+                )
+                self._verify_project_record_primary_id(
+                    "handoffs", candidate, record_id=candidate_id
+                )
+                if (
+                    candidate.get("project_id") != project_id
+                    or not self.project_record_is_signed(candidate)
+                ):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: unsigned or cross-project handoff record"
+                    )
+                if (
+                    candidate.get("reaudit_parent_handoff_id")
+                    == clean_parent_id
+                ):
+                    raise ValueError(
+                        "reaudit_successor_conflict: parent already has a successor"
+                    )
+                candidate_record_trace_ids = record_trace_ids(candidate)
+                if (
+                    candidate_trace_ids & candidate_record_trace_ids
+                    and not is_exact_downstream_trace_reference(candidate)
+                ):
+                    reject_reused_trace(candidate_record_trace_ids)
+
+            for row in hub_before.get("handoffs", []):
+                if (
+                    isinstance(row, dict)
+                    and row.get("handoff_id") != clean_successor_id
+                ):
+                    hub_record_trace_ids = record_trace_ids(row)
+                    if (
+                        candidate_trace_ids & hub_record_trace_ids
+                        and not is_exact_downstream_trace_reference(row)
+                    ):
+                        reject_reused_trace(hub_record_trace_ids)
+
+            for path in sorted((directory / "telemetry").glob("*.json")):
+                trace = self.read_json(path)
+                if not isinstance(trace, dict):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: malformed performance trace"
+                    )
+                trace_id = path.stem
+                self._verify_record_integrity(trace, record_id=trace_id)
+                self._verify_project_record_primary_id(
+                    "telemetry", trace, record_id=trace_id
+                )
+                if (
+                    trace.get("project_id") != project_id
+                    or not self.project_record_is_signed(trace)
+                ):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: unsigned or cross-project "
+                        "performance trace"
+                    )
+                trace_ids = record_trace_ids(trace)
+                reused = candidate_trace_ids & trace_ids
+                if reused and not is_exact_owned_telemetry(trace):
+                    reject_reused_trace(trace_ids)
+
+            for trace in (
+                *hub_before.get("performance_traces", []),
+                *ledger.get("performance_traces", []),
+            ):
+                trace_ids = record_trace_ids(trace)
+                reused = candidate_trace_ids & trace_ids
+                if reused and not is_exact_owned_telemetry(trace):
+                    reject_reused_trace(trace_ids)
+
+            for event in events or []:
+                event_trace_ids = record_trace_ids(event)
+                reused = candidate_trace_ids & event_trace_ids
+                if not reused:
+                    continue
+                exact_existing_event = bool(
+                    existing_is_exact
+                    and reused == {event_trace_id}
+                    and event.get("handoff_id") == clean_successor_id
+                )
+                if not exact_existing_event:
+                    reject_reused_trace(event_trace_ids)
+
+            if existing is not None:
+                hub_matches = [
+                    index
+                    for index, row in enumerate(
+                        hub_before.get("handoffs", [])
+                    )
+                    if row.get("handoff_id") == clean_successor_id
+                ]
+                if not hub_matches:
+                    # Recover a crash after the signed prepared route was
+                    # durably written but before its Hub projection.  The
+                    # exact signed body is the only authority used to repair.
+                    hub_after = copy.deepcopy(hub_before)
+                    hub_after.setdefault("handoffs", []).append(
+                        self._hub_record_projection(existing)
+                    )
+                    self.atomic_write_json(hub_path, hub_after)
+                    return existing
+                prerelease_sha256 = str(
+                    existing.get("reaudit_prerelease_projection_sha256")
+                    or ""
+                )
+                if (
+                    len(hub_matches) == 1
+                    and existing.get("status") == "prepared"
+                    and prerelease_sha256
+                    and self.project_state_sha256(
+                        hub_before["handoffs"][hub_matches[0]]
+                    )
+                    == prerelease_sha256
+                ):
+                    # Recover the exact release half-write: signed storage
+                    # durably removed the claim while Hub still contains the
+                    # server-hashed consuming projection that preceded it.
+                    # No caller-supplied Hub field is trusted as authority.
+                    hub_after = copy.deepcopy(hub_before)
+                    hub_after["handoffs"][hub_matches[0]] = (
+                        self._hub_record_projection(existing)
+                    )
+                    self.atomic_write_json(hub_path, hub_after)
+                    return existing
+                if (
+                    len(hub_matches) != 1
+                    or hub_before["handoffs"][hub_matches[0]]
+                    != self._hub_record_projection(existing)
+                ):
+                    raise ValueError("reaudit_successor_projection_mismatch")
+                return existing
+
+            if any(
+                row.get("handoff_id") == clean_successor_id
+                for row in hub_before.get("handoffs", [])
+            ):
+                raise ValueError("reaudit_successor_projection_conflict")
+            hub_after = copy.deepcopy(hub_before)
+            hub_after.setdefault("handoffs", []).append(expected_projection)
+            try:
+                self.atomic_write_json(successor_path, sealed)
+                self.atomic_write_json(hub_path, hub_after)
+            except BaseException:
+                # The successor did not exist before this transaction.  An
+                # ordinary two-file failure is compensated to exact zero
+                # publication side effects.  A hard crash remains fail-closed
+                # because the successor-only claim path verifies the Hub
+                # projection before making the route consumable.
+                with contextlib.suppress(OSError):
+                    self.atomic_write_json(hub_path, hub_before)
+                with contextlib.suppress(FileNotFoundError, OSError):
+                    successor_path.unlink()
+                raise
+            return sealed
+
+    def _assert_reaudit_lineage_authority_manifest(
+        self,
+        directory: Path,
+        *,
+        ordered_routes: list[dict[str, Any]],
+        lineage_authority_manifest: list[dict[str, Any]],
+        error_message: str,
+    ) -> None:
+        """Fence every completed HND/CERT/event authority under one lock."""
+
+        if not isinstance(lineage_authority_manifest, list):
+            raise ValueError(error_message)
+        ledger = self.read_json(directory / "ledger.json")
+        if not isinstance(ledger, dict):
+            raise ValueError(error_message)
+        events = ledger.get("events")
+        if not isinstance(events, list):
+            raise ValueError(error_message)
+        expected_manifest: list[dict[str, Any]] = []
+        for route_index, route in enumerate(ordered_routes):
+            if route.get("status") != "consumed":
+                continue
+            handoff_id = str(route.get("handoff_id") or "")
+            certificate_id = str(
+                route.get("audit_certificate_id") or ""
+            )
+            certificate_path = (
+                directory / "certificates" / f"{certificate_id}.json"
+            )
+            if not certificate_path.is_file():
+                raise ValueError(error_message)
+            certificate = self.read_json(certificate_path)
+            if not isinstance(certificate, dict):
+                raise ValueError(error_message)
+            self._verify_record_integrity(
+                certificate, record_id=certificate_id
+            )
+            self._verify_project_record_primary_id(
+                "certificates", certificate, record_id=certificate_id
+            )
+            if (
+                not self.project_record_is_signed(certificate)
+                or certificate.get("handoff_id") != handoff_id
+            ):
+                raise ValueError(error_message)
+            event_id = str(certificate.get("event_id") or "")
+            matching_events = [
+                event
+                for event in events
+                if isinstance(event, dict)
+                and str(event.get("event_id") or "") == event_id
+            ]
+            if len(matching_events) != 1:
+                raise ValueError(error_message)
+            event = matching_events[0]
+            event_sha256 = sha256_bytes(canonical_json_bytes(event))
+            child = (
+                ordered_routes[route_index + 1]
+                if route_index < len(ordered_routes) - 1
+                else None
+            )
+            if child is not None and (
+                child.get("previous_audit_certificate_id")
+                != certificate_id
+                or child.get("previous_audit_certificate_hmac")
+                != certificate.get("integrity_hmac")
+                or child.get("previous_audit_event_sha256")
+                != event_sha256
+            ):
+                raise ValueError(error_message)
+            certificate_has_event_sha = "event_sha256" in certificate
+            if (
+                certificate_has_event_sha
+                and certificate.get("event_sha256") != event_sha256
+            ) or (not certificate_has_event_sha and child is None):
+                raise ValueError(error_message)
+            expected_manifest.append(
+                {
+                    "handoff_id": handoff_id,
+                    "handoff_hmac": str(
+                        route.get("integrity_hmac") or ""
+                    ),
+                    "certificate_id": certificate_id,
+                    "certificate_hmac": str(
+                        certificate.get("integrity_hmac") or ""
+                    ),
+                    "event_id": event_id,
+                    "event_sha256": event_sha256,
+                    "legacy_event_sha_missing": (
+                        not certificate_has_event_sha
+                    ),
+                }
+            )
+        if canonical_json_bytes(expected_manifest) != canonical_json_bytes(
+            lineage_authority_manifest
+        ):
+            raise ValueError(error_message)
+
+    def assert_latest_reaudit_receipt(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        root_handoff_id: str,
+        root_handoff_hmac: str,
+        latest_handoff_id: str,
+        latest_handoff_hmac: str,
+        certificate_id: str,
+        certificate_hmac: str,
+        lineage_authority_manifest: list[dict[str, Any]],
+    ) -> None:
+        """Linearize a completed receipt against the signed route tail."""
+
+        clean_root_id = safe_id(root_handoff_id, "root_handoff_id")
+        clean_latest_id = safe_id(latest_handoff_id, "latest_handoff_id")
+        clean_certificate_id = safe_id(certificate_id, "certificate_id")
+        if any(
+            not isinstance(value, str)
+            or re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in (
+                root_handoff_hmac,
+                latest_handoff_hmac,
+                certificate_hmac,
+            )
+        ):
+            raise ValueError(
+                "reaudit_replay_superseded: completed receipt signature is invalid"
+            )
+        directory = self.project_dir(namespace, project_id)
+        hub_path = directory / "hub.json"
+        with self.lock(f"{namespace}-{project_id}"):
+            signed_handoffs: dict[str, dict[str, Any]] = {}
+            for path in sorted((directory / "handoffs").glob("*.json")):
+                row = self.read_json(path)
+                if not isinstance(row, dict):
+                    raise ValueError(
+                        "reaudit_replay_superseded: malformed signed handoff"
+                    )
+                row_id = str(row.get("record_id") or "")
+                if row_id != path.stem or row.get("handoff_id") != row_id:
+                    raise ValueError(
+                        "reaudit_replay_superseded: handoff identity changed"
+                    )
+                self._verify_record_integrity(row, record_id=row_id)
+                if (
+                    row.get("project_id") != project_id
+                    or not self.project_record_is_signed(row)
+                    or row_id in signed_handoffs
+                ):
+                    raise ValueError(
+                        "reaudit_replay_superseded: handoff authority changed"
+                    )
+                signed_handoffs[row_id] = row
+            root = signed_handoffs.get(clean_root_id)
+            expected_latest = signed_handoffs.get(clean_latest_id)
+            if (
+                not isinstance(root, dict)
+                or root.get("reaudit_kind")
+                or not isinstance(expected_latest, dict)
+                or not hmac.compare_digest(
+                    str(root.get("integrity_hmac") or ""),
+                    root_handoff_hmac,
+                )
+            ):
+                raise ValueError(
+                    "reaudit_replay_superseded: completed route is missing"
+                )
+            successors = {
+                row_id: row
+                for row_id, row in signed_handoffs.items()
+                if row.get("reaudit_kind")
+                == "independent_audit_successor"
+                and row.get("reaudit_root_handoff_id") == clean_root_id
+            }
+            lineage_ids = {clean_root_id, *successors}
+            for row in signed_handoffs.values():
+                if (
+                    (
+                        row.get("reaudit_root_handoff_id") == clean_root_id
+                        or row.get("reaudit_parent_handoff_id")
+                        in lineage_ids
+                    )
+                    and row.get("reaudit_kind")
+                    != "independent_audit_successor"
+                ):
+                    raise ValueError(
+                        "reaudit_replay_superseded: malformed signed lineage record"
+                    )
+                if (
+                    row.get("reaudit_kind")
+                    == "independent_audit_successor"
+                    and row.get("reaudit_parent_handoff_id")
+                    in lineage_ids
+                    and row.get("reaudit_root_handoff_id")
+                    != clean_root_id
+                ):
+                    raise ValueError(
+                        "reaudit_replay_superseded: successor crosses root lineages"
+                    )
+            root_immutable_identity = {
+                key: copy.deepcopy(root.get(key))
+                for key in REAUDIT_IMMUTABLE_IDENTITY_KEYS
+                if key in root
+            }
+            children: dict[str, list[dict[str, Any]]] = {}
+            for row in successors.values():
+                parent_id = str(
+                    row.get("reaudit_parent_handoff_id") or ""
+                )
+                parent = signed_handoffs.get(parent_id)
+                candidate_immutable_identity = {
+                    key: copy.deepcopy(row.get(key))
+                    for key in REAUDIT_IMMUTABLE_IDENTITY_KEYS
+                    if key in row
+                }
+                lineage_payload = {
+                    "spec": "independent-reaudit-successor-v1",
+                    "root_handoff_id": clean_root_id,
+                    "parent_handoff_id": parent_id,
+                    "successor_handoff_id": str(
+                        row.get("handoff_id") or ""
+                    ),
+                    "reaudit_sequence": int(
+                        row.get("reaudit_sequence") or 0
+                    ),
+                    "audit_work_order_id": str(
+                        row.get("claim_authority_work_order_id") or ""
+                    ),
+                    "previous_audit_certificate_id": str(
+                        row.get("previous_audit_certificate_id") or ""
+                    ),
+                    "previous_audit_certificate_hmac": str(
+                        row.get("previous_audit_certificate_hmac") or ""
+                    ),
+                    "previous_audit_event_sha256": str(
+                        row.get("previous_audit_event_sha256") or ""
+                    ),
+                    "production_stage_trace_id": str(
+                        row.get("production_stage_trace_id") or ""
+                    ),
+                    "route_trace_id": str(
+                        row.get("reaudit_route_trace_id") or ""
+                    ),
+                    "audit_event_trace_id": str(
+                        row.get("reaudit_event_trace_id") or ""
+                    ),
+                    "audit_window_binding_id": str(
+                        row.get("reaudit_audit_window_binding_id") or ""
+                    ),
+                    "audit_actor_binding_id": str(
+                        row.get("reaudit_audit_actor_binding_id") or ""
+                    ),
+                    "audit_session_fingerprint": str(
+                        row.get("reaudit_audit_session_fingerprint") or ""
+                    ),
+                    "immutable_identity_sha256": sha256_bytes(
+                        canonical_json_bytes(root_immutable_identity)
+                    ),
+                }
+                if (
+                    row.get("server_minted_lineage") is not True
+                    or parent_id not in lineage_ids
+                    or not isinstance(parent, dict)
+                    or row.get("status") != "consumed"
+                    or not row.get("audit_certificate_id")
+                    or row.get("consumed_by_work_order_id")
+                    != row.get("claim_authority_work_order_id")
+                    or candidate_immutable_identity
+                    != root_immutable_identity
+                    or row.get("previous_audit_certificate_id")
+                    != parent.get("audit_certificate_id")
+                    or row.get("audit_cycle_id")
+                    != root.get("audit_cycle_id")
+                    or row.get("work_order_id")
+                    != root.get("work_order_id")
+                    or row.get("production_stage_trace_id")
+                    != root.get("stage_trace_id")
+                    or row.get("reaudit_lineage_sha256")
+                    != sha256_bytes(canonical_json_bytes(lineage_payload))
+                ):
+                    raise ValueError(
+                        "reaudit_replay_superseded: successor lineage binding changed"
+                    )
+                children.setdefault(parent_id, []).append(row)
+            if any(len(rows) != 1 for rows in children.values()):
+                raise ValueError(
+                    "reaudit_replay_superseded: completed route is forked"
+                )
+            cursor = root
+            cursor_id = clean_root_id
+            ordered_routes = [root]
+            visited: set[str] = set()
+            expected_sequence = 1
+            while children.get(cursor_id):
+                cursor = children[cursor_id][0]
+                cursor_id = str(cursor.get("handoff_id") or "")
+                if (
+                    cursor_id in visited
+                    or cursor_id not in successors
+                    or cursor.get("reaudit_sequence") != expected_sequence
+                ):
+                    raise ValueError(
+                        "reaudit_replay_superseded: completed route is broken"
+                    )
+                visited.add(cursor_id)
+                ordered_routes.append(cursor)
+                expected_sequence += 1
+            if (
+                len(visited) != len(successors)
+                or cursor_id != clean_latest_id
+                or cursor.get("status") != "consumed"
+                or cursor.get("audit_certificate_id")
+                != clean_certificate_id
+                or not hmac.compare_digest(
+                    str(cursor.get("integrity_hmac") or ""),
+                    latest_handoff_hmac,
+                )
+            ):
+                raise ValueError(
+                    "reaudit_replay_superseded: a newer completed audit is authoritative"
+                )
+            self._assert_reaudit_lineage_authority_manifest(
+                directory,
+                ordered_routes=ordered_routes,
+                lineage_authority_manifest=lineage_authority_manifest,
+                error_message=(
+                    "reaudit_replay_superseded: completed lineage authority changed"
+                ),
+            )
+            certificate_path = (
+                directory
+                / "certificates"
+                / f"{clean_certificate_id}.json"
+            )
+            if not certificate_path.is_file():
+                raise ValueError(
+                    "reaudit_replay_superseded: completed certificate is missing"
+                )
+            certificate = self.read_json(certificate_path)
+            self._verify_record_integrity(
+                certificate, record_id=clean_certificate_id
+            )
+            if (
+                not self.project_record_is_signed(certificate)
+                or certificate.get("record_id") != clean_certificate_id
+                or certificate.get("certificate_id")
+                != clean_certificate_id
+                or certificate.get("handoff_id") != clean_latest_id
+                or not hmac.compare_digest(
+                    str(certificate.get("integrity_hmac") or ""),
+                    certificate_hmac,
+                )
+            ):
+                raise ValueError(
+                    "reaudit_replay_superseded: completed certificate changed"
+                )
+            if successors:
+                hub = self.read_json(hub_path)
+                hub_successors = [
+                    row
+                    for row in hub.get("handoffs", [])
+                    if isinstance(row, dict)
+                    and row.get("reaudit_kind")
+                    == "independent_audit_successor"
+                    and row.get("reaudit_root_handoff_id") == clean_root_id
+                ]
+                if (
+                    any(
+                        isinstance(row, dict)
+                        and (
+                            row.get("reaudit_root_handoff_id")
+                            == clean_root_id
+                            or row.get("reaudit_parent_handoff_id")
+                            in lineage_ids
+                        )
+                        and row.get("reaudit_kind")
+                        != "independent_audit_successor"
+                        for row in hub.get("handoffs", [])
+                    )
+                    or len(
+                        {
+                            str(row.get("handoff_id") or "")
+                            for row in hub_successors
+                        }
+                    )
+                    != len(hub_successors)
+                    or {
+                        str(row.get("handoff_id") or "")
+                        for row in hub_successors
+                    }
+                    != set(successors)
+                    or any(
+                        row
+                        != self._hub_record_projection(
+                            successors[str(row.get("handoff_id") or "")]
+                        )
+                        for row in hub_successors
+                    )
+                ):
+                    raise ValueError(
+                        "reaudit_replay_superseded: Hub lineage projection changed"
+                    )
+
+    def commit_repair_package_route(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        repair_package_id: str,
+        package: dict[str, Any],
+        handoff_id: str,
+        handoff: dict[str, Any],
+        expected_root_handoff_id: str,
+        expected_root_handoff_hmac: str,
+        expected_latest_handoff_id: str,
+        expected_latest_handoff_hmac: str,
+        expected_latest_certificate_id: str,
+        expected_latest_certificate_hmac: str,
+        lineage_authority_manifest: list[dict[str, Any]],
+        expected_claim_token: str | None,
+        expected_claim_generation: int | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Publish an immutable repair package and route as one recoverable unit."""
+
+        clean_package_id = safe_id(
+            repair_package_id, "repair_package_id"
+        )
+        clean_handoff_id = safe_id(handoff_id, "handoff_id")
+        directory = self.project_dir(namespace, project_id)
+        package_path = (
+            directory / "repair_packages" / f"{clean_package_id}.json"
+        )
+        handoff_path = directory / "handoffs" / f"{clean_handoff_id}.json"
+        hub_path = directory / "hub.json"
+        sealed_package = copy.deepcopy(package)
+        sealed_package.update(
+            {"record_id": clean_package_id, "project_id": project_id}
+        )
+        sealed_package["integrity_hmac"] = self._record_integrity_hmac(
+            sealed_package
+        )
+        sealed_handoff = copy.deepcopy(handoff)
+        sealed_handoff.update(
+            {"record_id": clean_handoff_id, "project_id": project_id}
+        )
+        sealed_handoff["integrity_hmac"] = self._record_integrity_hmac(
+            sealed_handoff
+        )
+
+        with self.project_write_lock(namespace, project_id):
+            hub_before = self.read_json(hub_path)
+
+            clean_root_id = safe_id(
+                str(expected_root_handoff_id),
+                "expected_root_handoff_id",
+            )
+            clean_latest_id = safe_id(
+                str(expected_latest_handoff_id),
+                "expected_latest_handoff_id",
+            )
+            clean_certificate_id = safe_id(
+                str(expected_latest_certificate_id),
+                "expected_latest_certificate_id",
+            )
+            expected_hmacs = (
+                expected_root_handoff_hmac,
+                expected_latest_handoff_hmac,
+                expected_latest_certificate_hmac,
+            )
+            if any(
+                not isinstance(value, str)
+                or re.fullmatch(r"[0-9a-f]{64}", value) is None
+                for value in expected_hmacs
+            ):
+                raise ValueError(
+                    "repair_route_freshness_invalid: expected authority signature is invalid"
+                )
+
+            # Read and authenticate the complete signed handoff set before
+            # resolving the root/successor chain.  Performing lineage checks
+            # inside this scan would make the result depend on file ordering.
+            signed_handoffs: dict[str, dict[str, Any]] = {}
+            for candidate_path in sorted(
+                (directory / "handoffs").glob("*.json")
+            ):
+                candidate = self.read_json(candidate_path)
+                if not isinstance(candidate, dict):
+                    raise ValueError(
+                        "repair_route_freshness_invalid: malformed signed handoff"
+                    )
+                candidate_id = str(candidate.get("record_id") or "")
+                if (
+                    candidate_id != candidate_path.stem
+                    or candidate.get("handoff_id") != candidate_id
+                    or candidate_id in signed_handoffs
+                ):
+                    raise ValueError(
+                        "repair_route_freshness_invalid: handoff path, record id, or handoff id differs"
+                    )
+                self._verify_record_integrity(
+                    candidate, record_id=candidate_id
+                )
+                if (
+                    candidate.get("project_id") != project_id
+                    or not self.project_record_is_signed(candidate)
+                ):
+                    raise ValueError(
+                        "repair_route_freshness_invalid: unsigned or cross-project handoff"
+                    )
+                signed_handoffs[candidate_id] = candidate
+
+            root_authority = signed_handoffs.get(clean_root_id)
+            latest_authority = signed_handoffs.get(clean_latest_id)
+            if (
+                not isinstance(root_authority, dict)
+                or not isinstance(latest_authority, dict)
+                or root_authority.get("reaudit_kind")
+                or not hmac.compare_digest(
+                    str(root_authority.get("integrity_hmac") or ""),
+                    expected_root_handoff_hmac,
+                )
+                or not hmac.compare_digest(
+                    str(latest_authority.get("integrity_hmac") or ""),
+                    expected_latest_handoff_hmac,
+                )
+            ):
+                raise ValueError(
+                    "repair_route_freshness_invalid: signed root or latest authority is missing"
+                )
+            successors = {
+                candidate_id: candidate
+                for candidate_id, candidate in signed_handoffs.items()
+                if candidate.get("reaudit_kind")
+                == "independent_audit_successor"
+                and candidate.get("reaudit_root_handoff_id")
+                == clean_root_id
+            }
+            lineage_ids = {clean_root_id, *successors}
+            for candidate in signed_handoffs.values():
+                if (
+                    (
+                        candidate.get("reaudit_root_handoff_id")
+                        == clean_root_id
+                        or candidate.get("reaudit_parent_handoff_id")
+                        in lineage_ids
+                    )
+                    and candidate.get("reaudit_kind")
+                    != "independent_audit_successor"
+                ):
+                    raise ValueError(
+                        "repair_route_freshness_invalid: malformed signed lineage record"
+                    )
+                if (
+                    candidate.get("reaudit_kind")
+                    == "independent_audit_successor"
+                    and candidate.get("reaudit_parent_handoff_id")
+                    in lineage_ids
+                    and candidate.get("reaudit_root_handoff_id")
+                    != clean_root_id
+                ):
+                    raise ValueError(
+                        "repair_route_freshness_invalid: successor crosses root lineages"
+                    )
+            root_immutable_identity = {
+                key: copy.deepcopy(root_authority.get(key))
+                for key in REAUDIT_IMMUTABLE_IDENTITY_KEYS
+                if key in root_authority
+            }
+            children: dict[str, list[dict[str, Any]]] = {}
+            for candidate in successors.values():
+                parent_id = str(
+                    candidate.get("reaudit_parent_handoff_id") or ""
+                )
+                parent = signed_handoffs.get(parent_id)
+                candidate_immutable_identity = {
+                    key: copy.deepcopy(candidate.get(key))
+                    for key in REAUDIT_IMMUTABLE_IDENTITY_KEYS
+                    if key in candidate
+                }
+                lineage_payload = {
+                    "spec": "independent-reaudit-successor-v1",
+                    "root_handoff_id": clean_root_id,
+                    "parent_handoff_id": parent_id,
+                    "successor_handoff_id": str(
+                        candidate.get("handoff_id") or ""
+                    ),
+                    "reaudit_sequence": int(
+                        candidate.get("reaudit_sequence") or 0
+                    ),
+                    "audit_work_order_id": str(
+                        candidate.get("claim_authority_work_order_id")
+                        or ""
+                    ),
+                    "previous_audit_certificate_id": str(
+                        candidate.get("previous_audit_certificate_id")
+                        or ""
+                    ),
+                    "previous_audit_certificate_hmac": str(
+                        candidate.get(
+                            "previous_audit_certificate_hmac"
+                        )
+                        or ""
+                    ),
+                    "previous_audit_event_sha256": str(
+                        candidate.get("previous_audit_event_sha256")
+                        or ""
+                    ),
+                    "production_stage_trace_id": str(
+                        candidate.get("production_stage_trace_id") or ""
+                    ),
+                    "route_trace_id": str(
+                        candidate.get("reaudit_route_trace_id") or ""
+                    ),
+                    "audit_event_trace_id": str(
+                        candidate.get("reaudit_event_trace_id") or ""
+                    ),
+                    "audit_window_binding_id": str(
+                        candidate.get("reaudit_audit_window_binding_id")
+                        or ""
+                    ),
+                    "audit_actor_binding_id": str(
+                        candidate.get("reaudit_audit_actor_binding_id")
+                        or ""
+                    ),
+                    "audit_session_fingerprint": str(
+                        candidate.get(
+                            "reaudit_audit_session_fingerprint"
+                        )
+                        or ""
+                    ),
+                    "immutable_identity_sha256": sha256_bytes(
+                        canonical_json_bytes(root_immutable_identity)
+                    ),
+                }
+                if (
+                    candidate.get("server_minted_lineage") is not True
+                    or parent_id not in lineage_ids
+                    or not isinstance(parent, dict)
+                    or candidate_immutable_identity
+                    != root_immutable_identity
+                    or candidate.get("previous_audit_certificate_id")
+                    != parent.get("audit_certificate_id")
+                    or candidate.get("audit_cycle_id")
+                    != root_authority.get("audit_cycle_id")
+                    or candidate.get("work_order_id")
+                    != root_authority.get("work_order_id")
+                    or candidate.get("production_stage_trace_id")
+                    != root_authority.get("stage_trace_id")
+                    or candidate.get("reaudit_lineage_sha256")
+                    != sha256_bytes(canonical_json_bytes(lineage_payload))
+                ):
+                    raise ValueError(
+                        "repair_route_freshness_invalid: successor lineage binding differs"
+                    )
+                children.setdefault(parent_id, []).append(candidate)
+            if any(len(rows) != 1 for rows in children.values()):
+                raise ValueError(
+                    "repair_route_freshness_invalid: re-audit lineage is forked"
+                )
+            cursor = root_authority
+            cursor_id = clean_root_id
+            ordered_routes = [root_authority]
+            expected_sequence = 1
+            visited: set[str] = set()
+            while children.get(cursor_id):
+                child = children[cursor_id][0]
+                child_id = str(child.get("handoff_id") or "")
+                if (
+                    child_id not in successors
+                    or child_id in visited
+                    or child.get("reaudit_sequence") != expected_sequence
+                ):
+                    raise ValueError(
+                        "repair_route_freshness_invalid: re-audit lineage is broken"
+                    )
+                visited.add(child_id)
+                cursor = child
+                cursor_id = child_id
+                ordered_routes.append(child)
+                expected_sequence += 1
+            if len(visited) != len(successors):
+                raise ValueError(
+                    "repair_route_freshness_invalid: re-audit lineage has an unreachable successor"
+                )
+            for settled_id in visited - {cursor_id}:
+                settled = signed_handoffs[settled_id]
+                if (
+                    settled.get("status") != "consumed"
+                    or not settled.get("audit_certificate_id")
+                    or settled.get("consumed_by_work_order_id")
+                    != settled.get("claim_authority_work_order_id")
+                ):
+                    raise ValueError(
+                        "repair_route_freshness_invalid: every non-tail successor must be a completed audit authority"
+                    )
+            if cursor_id != clean_latest_id:
+                raise ValueError(
+                    "repair_route_superseded: a newer audit route is authoritative"
+                )
+
+            if cursor.get("status") == "consuming":
+                if (
+                    not expected_claim_token
+                    or cursor.get("claim_token") != expected_claim_token
+                    or cursor.get("claim_generation")
+                    != expected_claim_generation
+                ):
+                    raise ValueError(
+                        "repair_route_freshness_invalid: consuming audit claim changed"
+                    )
+                authority_work_order_id = cursor.get(
+                    "claimed_by_work_order_id"
+                )
+            elif (
+                cursor.get("status") != "consumed"
+                or cursor.get("audit_certificate_id")
+                != clean_certificate_id
+            ):
+                raise ValueError(
+                    "repair_route_freshness_invalid: latest audit is not completed by the expected certificate"
+                )
+            else:
+                authority_work_order_id = cursor.get(
+                    "consumed_by_work_order_id"
+                )
+
+            certificate_path = (
+                directory
+                / "certificates"
+                / f"{clean_certificate_id}.json"
+            )
+            if not certificate_path.is_file():
+                raise ValueError(
+                    "repair_route_freshness_invalid: latest certificate is missing"
+                )
+            latest_certificate = self.read_json(certificate_path)
+            self._verify_record_integrity(
+                latest_certificate, record_id=clean_certificate_id
+            )
+            actual_certificate_hmac = str(
+                latest_certificate.get("integrity_hmac") or ""
+            )
+            report = latest_certificate.get("report")
+            report_issues = (
+                report.get("issues") if isinstance(report, dict) else None
+            )
+            expected_production_trace_id = str(
+                cursor.get("reaudit_route_trace_id")
+                or cursor.get("stage_trace_id")
+                or ""
+            )
+            expected_production_stage_trace_id = str(
+                cursor.get("production_stage_trace_id")
+                or cursor.get("stage_trace_id")
+                or ""
+            )
+            if (
+                not self.project_record_is_signed(latest_certificate)
+                or not hmac.compare_digest(
+                    actual_certificate_hmac,
+                    expected_latest_certificate_hmac,
+                )
+                or latest_certificate.get("record_id")
+                != clean_certificate_id
+                or latest_certificate.get("certificate_id")
+                != clean_certificate_id
+                or latest_certificate.get("handoff_id") != clean_latest_id
+                or latest_certificate.get("work_order_id")
+                != authority_work_order_id
+                or latest_certificate.get("production_work_order_id")
+                != cursor.get("work_order_id")
+                or latest_certificate.get("production_trace_id")
+                != expected_production_trace_id
+                or latest_certificate.get("production_stage_trace_id")
+                != expected_production_stage_trace_id
+                or latest_certificate.get("result")
+                not in {"fail_current", "blocked"}
+                or not isinstance(report_issues, list)
+                or not report_issues
+                or latest_certificate.get("issue_count")
+                != len(report_issues)
+            ):
+                raise ValueError(
+                    "repair_route_freshness_invalid: latest certificate and handoff differ"
+                )
+            self._assert_reaudit_lineage_authority_manifest(
+                directory,
+                ordered_routes=ordered_routes,
+                lineage_authority_manifest=lineage_authority_manifest,
+                error_message=(
+                    "repair_route_freshness_invalid: completed lineage authority changed"
+                ),
+            )
+
+            # Every successor has a single exact Hub projection.  Root audit
+            # claims predate synchronized successor projections and therefore
+            # remain authoritative in signed storage alone.
+            hub_successors = [
+                row
+                for row in hub_before.get("handoffs", [])
+                if isinstance(row, dict)
+                and row.get("reaudit_kind")
+                == "independent_audit_successor"
+                and row.get("reaudit_root_handoff_id") == clean_root_id
+            ]
+            if any(
+                isinstance(row, dict)
+                and (
+                    row.get("reaudit_root_handoff_id") == clean_root_id
+                    or row.get("reaudit_parent_handoff_id") in lineage_ids
+                )
+                and row.get("reaudit_kind")
+                != "independent_audit_successor"
+                for row in hub_before.get("handoffs", [])
+            ):
+                raise ValueError(
+                    "repair_route_freshness_invalid: malformed Hub lineage projection"
+                )
+            if len(
+                {str(row.get("handoff_id") or "") for row in hub_successors}
+            ) != len(hub_successors):
+                raise ValueError(
+                    "repair_route_freshness_invalid: duplicate successor Hub projection"
+                )
+            if {
+                str(row.get("handoff_id") or "") for row in hub_successors
+            } != set(successors):
+                raise ValueError(
+                    "repair_route_freshness_invalid: signed and Hub successor sets differ"
+                )
+            for row in hub_successors:
+                signed = successors[str(row["handoff_id"])]
+                if row != self._hub_record_projection(signed):
+                    raise ValueError(
+                        "repair_route_freshness_invalid: successor Hub projection differs"
+                    )
+
+            package_bindings = {
+                "repair_package_id": clean_package_id,
+                "audit_certificate_id": clean_certificate_id,
+                "audit_event_id": latest_certificate.get("event_id"),
+                "audit_to_repair_handoff_id": clean_handoff_id,
+                "production_handoff_id": clean_latest_id,
+                "source_audit_handoff_id": clean_latest_id,
+                "production_work_order_id": cursor.get("work_order_id"),
+                "audit_work_order_id": authority_work_order_id,
+                "source_audit_event_trace_id": latest_certificate.get(
+                    "stage_trace_id"
+                ),
+                "source_audit_route_trace_id": latest_certificate.get(
+                    "production_trace_id"
+                ),
+                "source_production_stage_trace_id": latest_certificate.get(
+                    "production_stage_trace_id"
+                ),
+                "fingerprints": cursor.get("fingerprints"),
+            }
+            repair_handoff_bindings = {
+                "handoff_id": clean_handoff_id,
+                "work_order_id": authority_work_order_id,
+                "audit_cycle_id": cursor.get("audit_cycle_id"),
+                "audit_certificate_id": clean_certificate_id,
+                "certificate_id": clean_certificate_id,
+                "immutable_repair_package_id": clean_package_id,
+                "stage_trace_id": latest_certificate.get("stage_trace_id"),
+                "source_audit_handoff_id": clean_latest_id,
+                "source_audit_event_trace_id": latest_certificate.get(
+                    "stage_trace_id"
+                ),
+                "source_audit_route_trace_id": latest_certificate.get(
+                    "production_trace_id"
+                ),
+                "fingerprints": cursor.get("fingerprints"),
+                "scope": cursor.get("scope"),
+            }
+            if any(
+                sealed_package.get(key) != value
+                for key, value in package_bindings.items()
+            ) or any(
+                sealed_handoff.get(key) != value
+                for key, value in repair_handoff_bindings.items()
+            ):
+                raise ValueError(
+                    "repair_route_freshness_invalid: package or repair handoff differs from latest authority"
+                )
+
+            # A missing initial projection is recoverable only before the
+            # authorization advanced.  Recheck this under the project lock so
+            # a concurrent repair cannot consume the package between the
+            # service preflight and this publication CAS.
+            if not package_path.is_file():
+                downstream_evidence: list[str] = []
+                if any(
+                    isinstance(row, dict)
+                    and row.get("repair_package_id") == clean_package_id
+                    for row in hub_before.get("repair_packages", [])
+                ):
+                    downstream_evidence.append("hub_repair_package")
+                for candidate in signed_handoffs.values():
+                    if (
+                        candidate.get("handoff_type")
+                        == "repair_to_audit"
+                        and candidate.get("immutable_repair_package_id")
+                        == clean_package_id
+                    ):
+                        downstream_evidence.append(
+                            "repair_to_audit:"
+                            + str(candidate.get("handoff_id") or "")
+                        )
+                artifact_directory = directory / "artifacts"
+                for metadata_path in sorted(
+                    artifact_directory.glob("ART-*.meta.json")
+                ):
+                    artifact_record = self.read_json(metadata_path)
+                    if not isinstance(artifact_record, dict):
+                        raise ValueError(
+                            "repair_route_freshness_invalid: malformed artifact metadata"
+                        )
+                    metadata = artifact_record.get("metadata")
+                    if not isinstance(metadata, dict):
+                        continue
+                    if clean_package_id in {
+                        str(metadata.get("repair_package_id") or ""),
+                        str(
+                            metadata.get("patch_repair_package_id") or ""
+                        ),
+                    }:
+                        downstream_evidence.append(
+                            "successor_artifact:"
+                            + str(
+                                artifact_record.get("artifact_id") or ""
+                            )
+                        )
+                base_artifact_id = safe_id(
+                    str(sealed_package.get("base_artifact_id") or ""),
+                    "base_artifact_id",
+                )
+                base_metadata_path = (
+                    artifact_directory
+                    / f"{base_artifact_id}.meta.json"
+                )
+                if base_metadata_path.is_file():
+                    base_record = self.read_json(base_metadata_path)
+                    base_metadata = (
+                        base_record.get("metadata")
+                        if isinstance(base_record, dict)
+                        else None
+                    )
+                    transaction = (
+                        base_metadata.get("successor_transaction")
+                        if isinstance(base_metadata, dict)
+                        else None
+                    )
+                    if (
+                        isinstance(transaction, dict)
+                        and transaction.get("successor_kind")
+                        in {"patch", "repair"}
+                        and transaction.get("state")
+                        in {"prepared", "committed"}
+                    ):
+                        downstream_evidence.append(
+                            "base_successor_transaction:"
+                            + str(
+                                transaction.get("transaction_id")
+                                or transaction.get("claim_id")
+                                or "unknown"
+                            )
+                        )
+                if downstream_evidence:
+                    raise ValueError(
+                        "repair_route_freshness_invalid: consumed repair authorization cannot be resurrected"
+                    )
+
+            def exact_existing(
+                path: Path,
+                record_id: str,
+                expected: dict[str, Any],
+            ) -> dict[str, Any] | None:
+                if not path.is_file():
+                    return None
+                existing = self.read_json(path)
+                self._verify_record_integrity(
+                    existing, record_id=record_id
+                )
+                if (
+                    not self.project_record_is_signed(existing)
+                    or existing != expected
+                ):
+                    raise ValueError(
+                        "repair_route_idempotency_conflict: signed record differs"
+                    )
+                return existing
+
+            existing_package = exact_existing(
+                package_path, clean_package_id, sealed_package
+            )
+            existing_handoff = exact_existing(
+                handoff_path, clean_handoff_id, sealed_handoff
+            )
+            package_matches = [
+                row
+                for row in hub_before.get("repair_packages", [])
+                if row.get("repair_package_id") == clean_package_id
+            ]
+            handoff_matches = [
+                row
+                for row in hub_before.get("handoffs", [])
+                if row.get("handoff_id") == clean_handoff_id
+            ]
+            if (
+                len(package_matches) > 1
+                or len(handoff_matches) > 1
+                or (
+                    package_matches
+                    and package_matches[0] != sealed_package
+                )
+                or (
+                    handoff_matches
+                    and handoff_matches[0] != sealed_handoff
+                )
+            ):
+                raise ValueError(
+                    "repair_route_projection_mismatch: Hub differs from signed route"
+                )
+
+            hub_after = copy.deepcopy(hub_before)
+            if not package_matches:
+                hub_after.setdefault("repair_packages", []).append(
+                    copy.deepcopy(sealed_package)
+                )
+            if not handoff_matches:
+                hub_after.setdefault("handoffs", []).append(
+                    copy.deepcopy(sealed_handoff)
+                )
+            package_created = existing_package is None
+            handoff_created = existing_handoff is None
+            try:
+                if package_created:
+                    self.atomic_write_json(package_path, sealed_package)
+                if handoff_created:
+                    self.atomic_write_json(handoff_path, sealed_handoff)
+                if hub_after != hub_before:
+                    self.atomic_write_json(hub_path, hub_after)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    self.atomic_write_json(hub_path, hub_before)
+                if handoff_created:
+                    with contextlib.suppress(FileNotFoundError, OSError):
+                        handoff_path.unlink()
+                if package_created:
+                    with contextlib.suppress(FileNotFoundError, OSError):
+                        package_path.unlink()
+                raise
+            return sealed_package, sealed_handoff
+
+    def _reaudit_route_is_referenced(
+        self,
+        directory: Path,
+        handoff_id: str,
+    ) -> bool:
+        """Return whether immutable audit authority already names a route."""
+
+        ledger = self.read_json(directory / "ledger.json")
+        if any(
+            event.get("handoff_id") == handoff_id
+            for event in ledger.get("events", [])
+            if isinstance(event, dict)
+        ):
+            return True
+        for certificate_path in sorted(
+            (directory / "certificates").glob("*.json")
+        ):
+            certificate = self.read_json(certificate_path)
+            if not isinstance(certificate, dict):
+                raise ValueError(
+                    "reaudit_lineage_invalid: malformed certificate record"
+                )
+            certificate_id = str(
+                certificate.get("record_id") or certificate_path.stem
+            )
+            self._verify_record_integrity(
+                certificate, record_id=certificate_id
+            )
+            if not self.project_record_is_signed(certificate):
+                raise ValueError(
+                    "reaudit_lineage_invalid: unsigned certificate record"
+                )
+            if certificate.get("handoff_id") == handoff_id:
+                return True
+        return False
+
+    def cleanup_reaudit_hub_orphans(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        root_handoff_id: str,
+    ) -> list[str]:
+        """Remove non-authoritative Hub-only successor projections.
+
+        Every normal transition writes the signed record before Hub.  A Hub
+        row without that record can therefore never authorize consumption.
+        It is safe to remove only when neither ledger nor certificate history
+        references it; otherwise the missing signed record is corruption and
+        must fail closed.
+        """
+
+        clean_root_id = safe_id(root_handoff_id, "root_handoff_id")
+        directory = self.project_dir(namespace, project_id)
+        hub_path = directory / "hub.json"
+        with self.project_write_lock(namespace, project_id):
+            signed_ids: set[str] = set()
+            for path in sorted((directory / "handoffs").glob("*.json")):
+                record = self.read_json(path)
+                if not isinstance(record, dict):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: malformed handoff record"
+                    )
+                record_id = path.stem
+                self._verify_record_integrity(record, record_id=record_id)
+                self._verify_project_record_primary_id(
+                    "handoffs", record, record_id=record_id
+                )
+                if (
+                    record.get("project_id") != project_id
+                    or not self.project_record_is_signed(record)
+                ):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: unsigned or cross-project handoff record"
+                    )
+                signed_ids.add(str(record.get("handoff_id") or record_id))
+
+            hub = self.read_json(hub_path)
+            removed: list[str] = []
+            kept: list[dict[str, Any]] = []
+            for row in hub.get("handoffs", []):
+                if not isinstance(row, dict):
+                    raise ValueError(
+                        "reaudit_successor_projection_mismatch: malformed Hub handoff"
+                    )
+                row_id = str(row.get("handoff_id") or "")
+                is_root_successor = (
+                    row.get("reaudit_root_handoff_id") == clean_root_id
+                )
+                if not is_root_successor or row_id in signed_ids:
+                    kept.append(row)
+                    continue
+                clean_row_id = safe_id(row_id, "handoff_id")
+                if (
+                    row.get("reaudit_kind")
+                    != "independent_audit_successor"
+                    or row.get("server_minted_lineage") is not True
+                    or not row.get("reaudit_route_trace_id")
+                    or not row.get("reaudit_event_trace_id")
+                ):
+                    raise ValueError(
+                        "reaudit_successor_projection_mismatch: Hub-only route is not a valid server projection"
+                    )
+                if self._reaudit_route_is_referenced(
+                    directory, clean_row_id
+                ):
+                    raise ValueError(
+                        "reaudit_successor_projection_mismatch: referenced route lost its signed record"
+                    )
+                removed.append(clean_row_id)
+                # Hub is an unsigned projection.  Never use its trace id to
+                # delete signed telemetry: a corrupt row could point at an
+                # unrelated production or audit trace.  Preserve it for
+                # forensic inspection unless a signed route proves ownership.
+            if removed:
+                hub["handoffs"] = kept
+                self.atomic_write_json(hub_path, hub)
+            return removed
+
+    def claim_reaudit_successor(
+        self,
+        namespace: str,
+        project_id: str,
+        handoff_id: str,
+        *,
+        consumer_work_order_id: str,
+        lease_seconds: int = DEFAULT_HANDOFF_CLAIM_LEASE_SECONDS,
+    ) -> dict[str, Any]:
+        """Claim one successor while keeping signed storage and Hub identical."""
+
+        clean_id = safe_id(handoff_id, "handoff_id")
+        clean_consumer_id = safe_id(
+            consumer_work_order_id, "consumer_work_order_id"
+        )
+        try:
+            lease_seconds = int(lease_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid handoff lease_seconds") from exc
+        if not 1 <= lease_seconds <= MAX_CONSUMPTION_LEASE_SECONDS:
+            raise ValueError(
+                f"handoff lease_seconds must be between 1 and {MAX_CONSUMPTION_LEASE_SECONDS}"
+            )
+        directory = self.project_dir(namespace, project_id)
+        path = directory / "handoffs" / f"{clean_id}.json"
+        hub_path = directory / "hub.json"
+
+        with self.project_write_lock(namespace, project_id):
+            before = self.read_json(path)
+            self._verify_record_integrity(before, record_id=clean_id)
+            lifecycle_error = self._reaudit_successor_lifecycle_error(before)
+            if lifecycle_error:
+                raise ValueError(lifecycle_error)
+            hub_before = self.read_json(hub_path)
+            matches = [
+                index
+                for index, row in enumerate(hub_before.get("handoffs", []))
+                if row.get("handoff_id") == clean_id
+            ]
+            if (
+                before.get("reaudit_kind")
+                != "independent_audit_successor"
+                or before.get("claim_authority_work_order_id")
+                != clean_consumer_id
+                or len(matches) != 1
+            ):
+                raise ValueError(
+                    "reaudit_successor_projection_mismatch: route is not server-bound in both stores"
+                )
+            hub_projection = hub_before["handoffs"][matches[0]]
+            status = before.get("status")
+            if status == "consuming":
+                preclaim_sha256 = str(
+                    before.get("reaudit_preclaim_projection_sha256") or ""
+                )
+                if (
+                    hub_projection != self._hub_record_projection(before)
+                    and preclaim_sha256
+                    and self.project_state_sha256(hub_projection)
+                    == preclaim_sha256
+                ):
+                    # Recover the only safe half-write: signed storage moved
+                    # to consuming while Hub still contains the exact,
+                    # server-hashed pre-claim projection.
+                    hub_before["handoffs"][matches[0]] = (
+                        self._hub_record_projection(before)
+                    )
+                    self.atomic_write_json(hub_path, hub_before)
+                    hub_projection = self._hub_record_projection(before)
+                if hub_projection != self._hub_record_projection(before):
+                    raise ValueError(
+                        "reaudit_successor_projection_mismatch: consuming route projections differ"
+                    )
+                if before.get("claimed_by_work_order_id") != clean_consumer_id:
+                    raise ValueError(
+                        "handoff_state_conflict: successor is bound to another audit authority"
+                    )
+                try:
+                    lease_expires = float(
+                        before.get("claim_lease_expires_epoch_seconds") or 0
+                    )
+                except (TypeError, ValueError):
+                    lease_expires = 0
+                if lease_expires > time.time():
+                    raise ValueError(
+                        "handoff_state_conflict: successor is being consumed"
+                    )
+                history = before.setdefault("claim_history", [])
+                if not isinstance(history, list):
+                    history = []
+                    before["claim_history"] = history
+                history.append(
+                    {
+                        "claim_token": before.get("claim_token"),
+                        "claimed_by_work_order_id": clean_consumer_id,
+                        "claim_generation": before.get("claim_generation"),
+                        "claim_epoch_seconds": before.get(
+                            "claim_epoch_seconds"
+                        ),
+                        "claim_lease_seconds": before.get(
+                            "claim_lease_seconds"
+                        ),
+                        "claim_lease_expires_at": before.get(
+                            "claim_lease_expires_at"
+                        ),
+                        "claim_lease_expires_epoch_seconds": before.get(
+                            "claim_lease_expires_epoch_seconds"
+                        ),
+                        "reaudit_preclaim_projection_sha256": before.get(
+                            "reaudit_preclaim_projection_sha256"
+                        ),
+                        "state": "lease_expired",
+                        "expired_at": utc_stamp(),
+                    }
+                )
+                del history[:-MAX_CONSUMPTION_CLAIM_HISTORY]
+                before["status"] = "prepared"
+                for key in (
+                    "claimed_by_work_order_id",
+                    "claim_token",
+                    "claim_epoch_seconds",
+                    "claim_lease_seconds",
+                    "claim_lease_expires_at",
+                    "claim_lease_expires_epoch_seconds",
+                ):
+                    before.pop(key, None)
+                status = "prepared"
+            elif hub_projection != self._hub_record_projection(before):
+                raise ValueError(
+                    "reaudit_successor_projection_mismatch: route projections differ"
+                )
+            if status != "prepared":
+                raise ValueError(
+                    f"handoff_state_conflict: successor status is {status!r}"
+                )
+            now = time.time()
+            after = copy.deepcopy(before)
+            after.update(
+                {
+                    "status": "consuming",
+                    "claimed_by_work_order_id": clean_consumer_id,
+                    "claim_token": f"HCL-{uuid.uuid4().hex}",
+                    "claim_generation": int(before.get("claim_generation") or 0)
+                    + 1,
+                    "claim_epoch_seconds": now,
+                    "claim_lease_seconds": lease_seconds,
+                    "claim_lease_expires_at": time.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ",
+                        time.gmtime(now + lease_seconds),
+                    ),
+                    "claim_lease_expires_epoch_seconds": now + lease_seconds,
+                    "reaudit_preclaim_projection_sha256": (
+                        self.project_state_sha256(hub_projection)
+                    ),
+                }
+            )
+            after["integrity_hmac"] = self._record_integrity_hmac(after)
+            hub_after = copy.deepcopy(hub_before)
+            hub_after["handoffs"][matches[0]] = self._hub_record_projection(
+                after
+            )
+            try:
+                self.atomic_write_json(path, after)
+                self.atomic_write_json(hub_path, hub_after)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    self.atomic_write_json(path, before)
+                with contextlib.suppress(OSError):
+                    self.atomic_write_json(hub_path, hub_before)
+                raise
+            return after
+
+    def release_reaudit_successor_claim(
+        self,
+        namespace: str,
+        project_id: str,
+        handoff_id: str,
+        *,
+        consumer_work_order_id: str,
+        claim_token: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Release one successor claim and synchronize both projections."""
+
+        clean_id = safe_id(handoff_id, "handoff_id")
+        directory = self.project_dir(namespace, project_id)
+        path = directory / "handoffs" / f"{clean_id}.json"
+        hub_path = directory / "hub.json"
+
+        with self.project_write_lock(namespace, project_id):
+            before = self.read_json(path)
+            self._verify_record_integrity(before, record_id=clean_id)
+            lifecycle_error = self._reaudit_successor_lifecycle_error(before)
+            if lifecycle_error:
+                raise ValueError(lifecycle_error)
+            if before.get("status") == "consumed":
+                return before
+            if (
+                before.get("reaudit_kind")
+                != "independent_audit_successor"
+                or before.get("status") != "consuming"
+                or before.get("claimed_by_work_order_id")
+                != consumer_work_order_id
+                or before.get("claim_token") != claim_token
+            ):
+                raise ValueError(
+                    "handoff_state_conflict: successor claim is not current"
+                )
+            hub_before = self.read_json(hub_path)
+            matches = [
+                index
+                for index, row in enumerate(hub_before.get("handoffs", []))
+                if row.get("handoff_id") == clean_id
+            ]
+            if (
+                len(matches) != 1
+                or hub_before["handoffs"][matches[0]]
+                != self._hub_record_projection(before)
+            ):
+                raise ValueError("reaudit_successor_projection_mismatch")
+            after = copy.deepcopy(before)
+            history = after.setdefault("claim_history", [])
+            if not isinstance(history, list):
+                history = []
+                after["claim_history"] = history
+            history.append(
+                {
+                    "claim_token": claim_token,
+                    "claimed_by_work_order_id": consumer_work_order_id,
+                    "claim_generation": before.get("claim_generation"),
+                    "reaudit_preclaim_projection_sha256": before.get(
+                        "reaudit_preclaim_projection_sha256"
+                    ),
+                    "state": "released",
+                    "released_at": utc_stamp(),
+                    "release_reason": str(reason or "audit_failed")[:256],
+                }
+            )
+            del history[:-MAX_CONSUMPTION_CLAIM_HISTORY]
+            after["status"] = "prepared"
+            for key in (
+                "claimed_by_work_order_id",
+                "claim_token",
+                "claim_epoch_seconds",
+                "claim_lease_seconds",
+                "claim_lease_expires_at",
+                "claim_lease_expires_epoch_seconds",
+            ):
+                after.pop(key, None)
+            after["reaudit_prerelease_projection_sha256"] = (
+                self.project_state_sha256(
+                    self._hub_record_projection(before)
+                )
+            )
+            after["integrity_hmac"] = self._record_integrity_hmac(after)
+            hub_after = copy.deepcopy(hub_before)
+            hub_after["handoffs"][matches[0]] = self._hub_record_projection(
+                after
+            )
+            try:
+                self.atomic_write_json(path, after)
+                self.atomic_write_json(hub_path, hub_after)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    self.atomic_write_json(path, before)
+                with contextlib.suppress(OSError):
+                    self.atomic_write_json(hub_path, hub_before)
+                raise
+            return after
+
+    def finish_reaudit_successor(
+        self,
+        namespace: str,
+        project_id: str,
+        handoff_id: str,
+        *,
+        consumer_work_order_id: str,
+        audit_certificate_id: str,
+        claim_token: str,
+    ) -> dict[str, Any]:
+        """Consume a re-audit successor and synchronize its Hub projection."""
+
+        clean_id = safe_id(handoff_id, "handoff_id")
+        clean_consumer_id = safe_id(
+            consumer_work_order_id, "consumer_work_order_id"
+        )
+        clean_certificate_id = safe_id(
+            audit_certificate_id, "audit_certificate_id"
+        )
+        directory = self.project_dir(namespace, project_id)
+        path = directory / "handoffs" / f"{clean_id}.json"
+        certificate_path = (
+            directory / "certificates" / f"{clean_certificate_id}.json"
+        )
+        hub_path = directory / "hub.json"
+
+        with self.project_write_lock(namespace, project_id):
+            if not path.is_file():
+                raise ValueError("handoff_required: signed successor does not exist")
+            before = self.read_json(path)
+            self._verify_record_integrity(before, record_id=clean_id)
+            if before.get("reaudit_kind") != "independent_audit_successor":
+                raise ValueError("reaudit_lineage_invalid: handoff is not a successor")
+            finalization_error = self._reaudit_successor_lifecycle_error(before)
+            if finalization_error:
+                raise ValueError(finalization_error)
+            if not certificate_path.is_file():
+                raise ValueError(
+                    "reaudit_certificate_binding_invalid: certificate is missing"
+                )
+            certificate = self.read_json(certificate_path)
+            self._verify_record_integrity(
+                certificate, record_id=clean_certificate_id
+            )
+            if (
+                not self.project_record_is_signed(certificate)
+                or certificate.get("handoff_id") != clean_id
+                or certificate.get("work_order_id") != clean_consumer_id
+                or certificate.get("stage_trace_id")
+                != before.get("reaudit_event_trace_id")
+                or certificate.get("production_trace_id")
+                != before.get("reaudit_route_trace_id")
+            ):
+                raise ValueError(
+                    "reaudit_certificate_binding_invalid: certificate does not belong to this route"
+                )
+            hub_before = self.read_json(hub_path)
+            hub_matches = [
+                index
+                for index, row in enumerate(hub_before.get("handoffs", []))
+                if row.get("handoff_id") == clean_id
+            ]
+            if len(hub_matches) != 1:
+                raise ValueError("reaudit_successor_projection_mismatch")
+            hub_projection = hub_before["handoffs"][hub_matches[0]]
+            if (
+                before.get("status") == "consuming"
+                and hub_projection != self._hub_record_projection(before)
+                and str(
+                    before.get("reaudit_preclaim_projection_sha256") or ""
+                )
+                and self.project_state_sha256(hub_projection)
+                == before.get("reaudit_preclaim_projection_sha256")
+            ):
+                # Finalization can directly bridge the signed-consuming /
+                # exact pre-claim Hub boundary after a crash.
+                hub_before["handoffs"][hub_matches[0]] = (
+                    self._hub_record_projection(before)
+                )
+            if before.get("status") == "consumed":
+                if (
+                    before.get("consumed_by_work_order_id") == clean_consumer_id
+                    and before.get("audit_certificate_id")
+                    == clean_certificate_id
+                ):
+                    hub_projection = hub_before["handoffs"][hub_matches[0]]
+                    if hub_projection != self._hub_record_projection(before):
+                        claim = before.get("consumption_claim")
+                        if not isinstance(claim, dict):
+                            raise ValueError(
+                                "reaudit_successor_projection_mismatch"
+                            )
+                        half_written = copy.deepcopy(before)
+                        half_written["status"] = "consuming"
+                        half_written["claimed_by_work_order_id"] = (
+                            clean_consumer_id
+                        )
+                        for key, value in claim.items():
+                            half_written[key] = copy.deepcopy(value)
+                        for key in (
+                            "consumed_by_work_order_id",
+                            "audit_certificate_id",
+                            "latest_audit_certificate_id",
+                            "consumed_at",
+                            "consumption_claim",
+                        ):
+                            half_written.pop(key, None)
+                        if hub_projection != self._hub_record_projection(
+                            half_written
+                        ):
+                            raise ValueError(
+                                "reaudit_successor_projection_mismatch"
+                            )
+                        hub_after = copy.deepcopy(hub_before)
+                        hub_after["handoffs"][hub_matches[0]] = (
+                            self._hub_record_projection(before)
+                        )
+                        self.atomic_write_json(hub_path, hub_after)
+                    return before
+                raise ValueError(
+                    "handoff_state_conflict: successor finalization differs"
+                )
+            if (
+                before.get("status") != "consuming"
+                or before.get("claimed_by_work_order_id") != clean_consumer_id
+                or before.get("claim_token") != claim_token
+            ):
+                raise ValueError(
+                    "handoff_state_conflict: successor claim is not current"
+                )
+            if (
+                hub_before["handoffs"][hub_matches[0]]
+                != self._hub_record_projection(before)
+            ):
+                raise ValueError("reaudit_successor_projection_mismatch")
+            after = copy.deepcopy(before)
+            after["consumption_claim"] = {
+                key: copy.deepcopy(before.get(key))
+                for key in (
+                    "claim_token",
+                    "claim_generation",
+                    "claim_epoch_seconds",
+                    "claim_lease_seconds",
+                    "claim_lease_expires_at",
+                    "claim_lease_expires_epoch_seconds",
+                )
+                if key in before
+            }
+            after["status"] = "consumed"
+            after["consumed_by_work_order_id"] = clean_consumer_id
+            after["audit_certificate_id"] = clean_certificate_id
+            after["latest_audit_certificate_id"] = clean_certificate_id
+            after["consumed_at"] = utc_stamp()
+            for key in (
+                "claimed_by_work_order_id",
+                "claim_token",
+                "claim_epoch_seconds",
+                "claim_lease_seconds",
+                "claim_lease_expires_at",
+                "claim_lease_expires_epoch_seconds",
+            ):
+                after.pop(key, None)
+            finalization_error = self._reaudit_successor_lifecycle_error(after)
+            if finalization_error:
+                raise ValueError(finalization_error)
+            after["integrity_hmac"] = self._record_integrity_hmac(after)
+            hub_after = copy.deepcopy(hub_before)
+            hub_after["handoffs"][hub_matches[0]] = (
+                self._hub_record_projection(after)
+            )
+            try:
+                self.atomic_write_json(path, after)
+                self.atomic_write_json(hub_path, hub_after)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    self.atomic_write_json(path, before)
+                with contextlib.suppress(OSError):
+                    self.atomic_write_json(hub_path, hub_before)
+                raise
+            return after
+
+    def rollback_reaudit_successor(
+        self,
+        namespace: str,
+        project_id: str,
+        handoff_id: str,
+        *,
+        route_trace_id: str,
+    ) -> None:
+        """Compensate an unconsumed successor after a handled audit failure."""
+
+        clean_id = safe_id(handoff_id, "handoff_id")
+        clean_trace_id = safe_id(route_trace_id, "route_trace_id")
+        directory = self.project_dir(namespace, project_id)
+        path = directory / "handoffs" / f"{clean_id}.json"
+        telemetry_path = directory / "telemetry" / f"{clean_trace_id}.json"
+        hub_path = directory / "hub.json"
+        with self.project_write_lock(namespace, project_id):
+            hub = self.read_json(hub_path)
+            hub_matches = [
+                row
+                for row in hub.get("handoffs", [])
+                if row.get("handoff_id") == clean_id
+            ]
+            if len(hub_matches) > 1:
+                raise ValueError("reaudit_successor_projection_mismatch")
+            if not path.is_file():
+                if hub_matches:
+                    hub_only = hub_matches[0]
+                    if (
+                        hub_only.get("reaudit_kind")
+                        != "independent_audit_successor"
+                        or hub_only.get("server_minted_lineage") is not True
+                        or hub_only.get("reaudit_route_trace_id")
+                        != clean_trace_id
+                    ):
+                        raise ValueError(
+                            "reaudit_successor_projection_mismatch"
+                        )
+                    if self._reaudit_route_is_referenced(
+                        directory, clean_id
+                    ):
+                        raise ValueError(
+                            "reaudit_successor_projection_mismatch: referenced route lost its signed record"
+                        )
+                    hub["handoffs"] = [
+                        row
+                        for row in hub.get("handoffs", [])
+                        if row.get("handoff_id") != clean_id
+                    ]
+                    self.atomic_write_json(hub_path, hub)
+                # Without the signed route, the supplied/Hub trace id cannot
+                # prove telemetry ownership.  Retain any trace for forensics.
+                return
+            record = self.read_json(path)
+            self._verify_record_integrity(record, record_id=clean_id)
+            if (
+                record.get("reaudit_kind")
+                != "independent_audit_successor"
+                or record.get("reaudit_route_trace_id") != clean_trace_id
+                or record.get("status") not in {"prepared", "consuming"}
+                or record.get("audit_certificate_id")
+            ):
+                return
+            if self._reaudit_route_is_referenced(directory, clean_id):
+                # Once an immutable event refers to the route, deleting it
+                # would make the ledger less recoverable.  Leave the prepared
+                # successor in place for an exact retry instead.
+                return
+            if hub_matches:
+                hub_projection = hub_matches[0]
+                exact_projection = self._hub_record_projection(record)
+                preclaim_sha256 = str(
+                    record.get("reaudit_preclaim_projection_sha256") or ""
+                )
+                provable_preclaim = bool(
+                    record.get("status") == "consuming"
+                    and preclaim_sha256
+                    and self.project_state_sha256(hub_projection)
+                    == preclaim_sha256
+                )
+                prerelease_sha256 = str(
+                    record.get("reaudit_prerelease_projection_sha256") or ""
+                )
+                provable_prerelease = bool(
+                    record.get("status") == "prepared"
+                    and prerelease_sha256
+                    and self.project_state_sha256(hub_projection)
+                    == prerelease_sha256
+                )
+                if (
+                    hub_projection != exact_projection
+                    and not provable_preclaim
+                    and not provable_prerelease
+                ):
+                    raise ValueError(
+                        "reaudit_successor_projection_mismatch"
+                    )
+            hub["handoffs"] = [
+                row
+                for row in hub.get("handoffs", [])
+                if row.get("handoff_id") != clean_id
+            ]
+            # The signed route proves exclusive ownership of this telemetry
+            # id.  Delete it before removing the authority needed to resume
+            # cleanup; a failure here leaves Hub and signed storage untouched,
+            # so an identical rollback can safely retry.
+            with contextlib.suppress(FileNotFoundError):
+                telemetry_path.unlink()
+            self.atomic_write_json(hub_path, hub)
+            path.unlink()
+
     def finish_handoff(
         self,
         namespace: str,
@@ -1949,11 +5174,10 @@ class ProjectStore:
         consumer_work_order_id: str,
         audit_certificate_id: str,
         claim_token: str | None = None,
-        allow_reaudit: bool = False,
     ) -> dict[str, Any]:
         clean_id = safe_id(handoff_id, "handoff_id")
         path = self.project_dir(namespace, project_id) / "handoffs" / f"{clean_id}.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not path.is_file():
                 raise ValueError("handoff_required: signed handoff does not exist")
             record = self.read_json(path)
@@ -1963,35 +5187,6 @@ class ProjectStore:
                     record.get("consumed_by_work_order_id") == consumer_work_order_id
                     and record.get("audit_certificate_id") == audit_certificate_id
                 ):
-                    return record
-                if (
-                    allow_reaudit
-                    and record.get("consumed_by_work_order_id")
-                    == consumer_work_order_id
-                ):
-                    certificate_history = [
-                        str(value)
-                        for value in record.get("audit_certificate_ids", [])
-                        if str(value)
-                    ]
-                    previous_certificate_id = str(
-                        record.get("audit_certificate_id") or ""
-                    )
-                    if previous_certificate_id:
-                        certificate_history.append(previous_certificate_id)
-                    certificate_history.append(audit_certificate_id)
-                    record["audit_certificate_ids"] = list(
-                        dict.fromkeys(certificate_history)
-                    )
-                    record["audit_certificate_id"] = audit_certificate_id
-                    record["reaudit_count"] = max(
-                        0, len(record["audit_certificate_ids"]) - 1
-                    )
-                    record["reaudited_at"] = utc_stamp()
-                    record["integrity_hmac"] = self._record_integrity_hmac(
-                        record
-                    )
-                    self.atomic_write_json(path, record)
                     return record
                 raise ValueError("handoff_state_conflict: handoff finalization differs")
             if (
@@ -2025,7 +5220,7 @@ class ProjectStore:
     ) -> dict[str, Any]:
         clean_id = safe_id(repair_package_id, "repair_package_id")
         path = self.project_dir(namespace, project_id) / "repair_packages" / f"{clean_id}.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not path.is_file():
                 raise ValueError("repair_package_required: immutable package does not exist")
             record = self.read_json(path)
@@ -2051,7 +5246,7 @@ class ProjectStore:
     ) -> dict[str, Any]:
         clean_id = safe_id(repair_package_id, "repair_package_id")
         path = self.project_dir(namespace, project_id) / "repair_packages" / f"{clean_id}.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not path.is_file():
                 raise ValueError("repair_package_required: immutable package does not exist")
             record = self.read_json(path)
@@ -2090,7 +5285,7 @@ class ProjectStore:
         safe_id(artifact_id, "artifact_id")
         directory = self.project_dir(namespace, project_id)
         meta_path = directory / "artifacts" / f"{artifact_id}.meta.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not meta_path.is_file():
                 raise ValueError(f"unknown artifact_id: {artifact_id}")
             record = self.read_json(meta_path)
@@ -2149,7 +5344,7 @@ class ProjectStore:
         if successor_artifact_id is not None:
             directory = self.project_dir(namespace, project_id)
             meta_path = directory / "artifacts" / f"{artifact_id}.meta.json"
-            with self.lock(f"{namespace}-{project_id}"):
+            with self.project_write_lock(namespace, project_id):
                 record = self.read_json(meta_path)
                 metadata = record.setdefault("metadata", {})
                 existing = metadata.get("patch_successor_artifact_id")
@@ -2351,7 +5546,7 @@ class ProjectStore:
             )
         directory = self.project_dir(namespace, project_id)
         meta_path = directory / "artifacts" / f"{artifact_id}.meta.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not meta_path.is_file():
                 raise ValueError(f"unknown artifact_id: {artifact_id}")
             record = self.read_json(meta_path)
@@ -2498,7 +5693,7 @@ class ProjectStore:
         successor_meta_path = (
             directory / "artifacts" / f"{successor_artifact_id}.meta.json"
         )
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not meta_path.is_file():
                 raise ValueError(f"unknown artifact_id: {artifact_id}")
             record = self.read_json(meta_path)
@@ -2632,7 +5827,7 @@ class ProjectStore:
         safe_id(transaction_id, "transaction_id")
         directory = self.project_dir(namespace, project_id)
         meta_path = directory / "artifacts" / f"{artifact_id}.meta.json"
-        with self.lock(f"{namespace}-{project_id}"):
+        with self.project_write_lock(namespace, project_id):
             if not meta_path.is_file():
                 raise ValueError(f"unknown artifact_id: {artifact_id}")
             record = self.read_json(meta_path)

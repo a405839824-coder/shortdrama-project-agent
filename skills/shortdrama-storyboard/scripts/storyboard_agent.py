@@ -12,7 +12,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 SCHEMA_VERSION = "R10-AGENT-SAFE-1"
@@ -31,6 +31,10 @@ AUDIT_CATEGORIES = [
 LEGACY_AUDIT_CATEGORY_ALIASES = {
     "Seedance独立执行": "正式母版单镜执行完整性",
 }
+CURRENT_SEMANTIC_AUDIT_SHA256_FIELDS = (
+    "semantic_audit_sha256",
+    "semantic_report_input_sha256",
+)
 TASK_TYPES = {
     "production_draft_preflight",
     "generation_audit",
@@ -50,6 +54,45 @@ ISSUE_STATUS_ALIASES = {
     "修正新增": "introduced",
 }
 
+INDEPENDENT_AUDIT_REQUIRED_FIELDS = (
+    "validation_role",
+    "handoff_id",
+    "artifact_semantic_fingerprint",
+    "canonical_fingerprint",
+    "source_fingerprint",
+    "boundary_fingerprint",
+    "runtime_fingerprint",
+    "rules_fingerprint",
+    "validator_fingerprint",
+    "runtime_test_certificate_id",
+    "stage_trace_id",
+    *CURRENT_SEMANTIC_AUDIT_SHA256_FIELDS,
+    "cache_evidence",
+    "independence_assertions",
+)
+INDEPENDENT_ASSERTIONS = (
+    "artifact_read_only",
+    "production_verdict_not_reused",
+    "quality_conclusions_recomputed",
+    "eight_layers_completed",
+)
+FAILED_BINDING_FIELDS = (
+    "file_fingerprint",
+    "source_version",
+    "artifact_semantic_fingerprint",
+    "canonical_fingerprint",
+)
+SHA256_FIELDS = (
+    "artifact_semantic_fingerprint",
+    "canonical_fingerprint",
+    "source_fingerprint",
+    "boundary_fingerprint",
+    "runtime_fingerprint",
+    "rules_fingerprint",
+    "validator_fingerprint",
+    *CURRENT_SEMANTIC_AUDIT_SHA256_FIELDS,
+)
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -66,6 +109,341 @@ def _stable_hash(value: str, length: int = 16) -> str:
 def _normalize(value: Any) -> str:
     text = str(value or "").strip().casefold()
     return re.sub(r"[^0-9a-z\u3400-\u4dbf\u4e00-\u9fff]+", "", text)
+
+
+def _identity(value: Any) -> str:
+    """Compare persisted identifiers without whitespace/case bypasses."""
+
+    return str(value or "").strip().casefold()
+
+
+def _canonical_json_sha256(value: Any) -> str:
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _checkpoint_scope_boundaries(
+    ledger: dict[str, Any], events: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    boundaries: dict[str, dict[str, Any]] = {}
+    last_rounds: dict[str, int] = {}
+    legacy_to_canonical: dict[str, str] = {}
+    for position, event in enumerate(events, 1):
+        expected_scope = _scope_key(ledger, event)
+        legacy_scope = str(event.get("scope_key") or "")
+        if not _is_canonical_identifier(legacy_scope):
+            raise ValueError(
+                f"checkpoint event {event.get('event_id')} has no canonical persisted scope_key"
+            )
+        mapped_scope = legacy_to_canonical.setdefault(legacy_scope, expected_scope)
+        if mapped_scope != expected_scope:
+            raise ValueError(
+                f"checkpoint legacy scope {legacy_scope} maps to multiple canonical scopes"
+            )
+        audit_round = event.get("audit_round")
+        if isinstance(audit_round, bool) or not isinstance(audit_round, int):
+            raise ValueError(
+                f"checkpoint event {event.get('event_id')} has a non-integer audit_round"
+            )
+        previous_round = last_rounds.get(expected_scope)
+        if previous_round is not None and audit_round != previous_round + 1:
+            raise ValueError(
+                f"checkpoint scope {expected_scope} has a non-contiguous audit_round"
+            )
+        last_rounds[expected_scope] = audit_round
+        boundary = boundaries.get(expected_scope)
+        if boundary is None:
+            boundary = {
+                "scope_key": expected_scope,
+                "legacy_scope_key": legacy_scope,
+                "first_position": position,
+                "last_position": position,
+                "event_count": 1,
+                "first_round": audit_round,
+                "last_round": audit_round,
+                "last_event_id": event.get("event_id"),
+            }
+            boundaries[expected_scope] = boundary
+        else:
+            if boundary.get("legacy_scope_key") != legacy_scope:
+                raise ValueError(
+                    f"checkpoint canonical scope {expected_scope} has multiple legacy aliases"
+                )
+            boundary["last_position"] = position
+            boundary["event_count"] += 1
+            boundary["last_round"] = audit_round
+            boundary["last_event_id"] = event.get("event_id")
+    return sorted(boundaries.values(), key=lambda row: int(row["first_position"]))
+
+
+def _build_replay_checkpoint(
+    ledger: dict[str, Any],
+    *,
+    migration_id: str,
+    old_ledger_canonical_sha256: str,
+    timestamp: str | None,
+) -> dict[str, Any]:
+    events = ledger.get("events", [])
+    if not isinstance(events, list) or not events or any(
+        not isinstance(event, dict) for event in events
+    ):
+        raise ValueError("a replay checkpoint requires one or more historical event objects")
+    if not _is_canonical_identifier(migration_id):
+        raise ValueError("replay checkpoint requires an explicit signed-journal migration_id")
+    for position, event in enumerate(events, 1):
+        if event.get("sequence") != position:
+            raise ValueError(
+                f"checkpoint event {event.get('event_id')} has a non-append-only sequence"
+            )
+    return {
+        "contract_version": "R10-LEDGER-REPLAY-CHECKPOINT-1",
+        "migration_id": migration_id,
+        "old_ledger_canonical_sha256": old_ledger_canonical_sha256,
+        "event_count": len(events),
+        "events_prefix_canonical_sha256": _canonical_json_sha256(events),
+        "issue_histories_canonical_sha256": _canonical_json_sha256([
+            issue.get("history", [])
+            for issue in ledger.get("issues", [])
+            if isinstance(issue, dict)
+        ]),
+        "occurrence_locations_canonical_sha256": _canonical_json_sha256([
+            issue.get("occurrence_locations", [])
+            for issue in ledger.get("issues", [])
+            if isinstance(issue, dict)
+        ]),
+        "issue_prefixes": [
+            _checkpoint_issue_baseline(issue)
+            for issue in ledger.get("issues", [])
+            if isinstance(issue, dict)
+        ],
+        "scope_boundaries": _checkpoint_scope_boundaries(ledger, events),
+        "created_at": _timestamp(timestamp),
+        "authority_verification": "required_external_signed_cas",
+    }
+
+
+_CHECKPOINT_IMMUTABLE_ISSUE_FIELDS = (
+    "dedup_key",
+    "pattern_key",
+    "error_code",
+    "category",
+    "logical_file",
+    "episode_id",
+    "issue_type",
+    "field_class",
+    "normalized_root_cause",
+    "first_seen_at",
+)
+
+
+def _checkpoint_issue_baseline(issue: dict[str, Any]) -> dict[str, Any]:
+    """Describe one migrated issue at the sealed event-prefix boundary."""
+
+    return {
+        "issue_id": issue.get("issue_id"),
+        "history_count": len(issue.get("history", [])),
+        "occurrence_location_count": len(issue.get("occurrence_locations", [])),
+        "immutable_identity": {
+            field: copy.deepcopy(issue.get(field))
+            for field in _CHECKPOINT_IMMUTABLE_ISSUE_FIELDS
+        },
+        "baseline_open_scope_keys": copy.deepcopy(
+            issue.get("open_scope_keys", [])
+        ),
+        "baseline_status": issue.get("status"),
+        "baseline_legacy_resolution_requires_reaudit": issue.get(
+            "legacy_resolution_requires_reaudit"
+        ),
+        "baseline_occurrence_count": issue.get("occurrence_count"),
+        "baseline_observation_count": issue.get("observation_count"),
+        "baseline_introduced_by_repair_count": issue.get(
+            "introduced_by_repair_count"
+        ),
+        "baseline_consecutive_rounds": issue.get("consecutive_rounds"),
+        "baseline_max_consecutive_rounds": issue.get(
+            "max_consecutive_rounds"
+        ),
+        "baseline_last_seen_at": issue.get("last_seen_at"),
+    }
+
+
+def _replay_checkpoint_errors(
+    ledger: dict[str, Any],
+    checkpoint_authorizer: Callable[[dict[str, Any]], bool] | None = None,
+) -> list[str]:
+    checkpoint = ledger.get("replay_checkpoint")
+    if checkpoint is None:
+        return []
+    if not isinstance(checkpoint, dict):
+        return ["replay_checkpoint must be an object"]
+    errors: list[str] = []
+    required = (
+        "contract_version", "migration_id", "old_ledger_canonical_sha256",
+        "event_count", "events_prefix_canonical_sha256",
+        "issue_histories_canonical_sha256",
+        "occurrence_locations_canonical_sha256", "issue_prefixes",
+        "scope_boundaries", "created_at",
+        "authority_verification",
+    )
+    for field in required:
+        if field not in checkpoint:
+            errors.append(f"replay_checkpoint missing field: {field}")
+    if checkpoint.get("contract_version") != "R10-LEDGER-REPLAY-CHECKPOINT-1":
+        errors.append("replay_checkpoint.contract_version is invalid")
+    old_sha = checkpoint.get("old_ledger_canonical_sha256")
+    if not _is_sha256(old_sha):
+        errors.append("replay_checkpoint.old_ledger_canonical_sha256 must be SHA-256")
+    if not _is_canonical_identifier(checkpoint.get("migration_id")):
+        errors.append("replay_checkpoint.migration_id must bind an external signed journal")
+    if checkpoint.get("authority_verification") != "required_external_signed_cas":
+        errors.append("replay_checkpoint must require external signed CAS authority")
+    if checkpoint_authorizer is None:
+        errors.append("replay_checkpoint has no externally verified migration/CAS authority")
+    else:
+        try:
+            authorized = checkpoint_authorizer(copy.deepcopy(checkpoint)) is True
+        except Exception:
+            authorized = False
+        if not authorized:
+            errors.append("replay_checkpoint external migration/CAS authority was rejected")
+    if not _validate_iso_timestamp(checkpoint.get("created_at")):
+        errors.append("replay_checkpoint.created_at must be ISO-8601")
+    events = ledger.get("events", [])
+    event_count = checkpoint.get("event_count")
+    if (
+        isinstance(event_count, bool)
+        or not isinstance(event_count, int)
+        or event_count < 1
+        or not isinstance(events, list)
+        or event_count > len(events)
+    ):
+        errors.append("replay_checkpoint.event_count is outside the event history")
+        return errors
+    event_prefix = events[:event_count]
+    if _identity(checkpoint.get("events_prefix_canonical_sha256")) != _canonical_json_sha256(event_prefix):
+        errors.append("replay_checkpoint event-prefix canonical SHA-256 does not match")
+    issues_by_id = {
+        _identity(issue.get("issue_id")): issue
+        for issue in ledger.get("issues", [])
+        if isinstance(issue, dict) and _identity(issue.get("issue_id"))
+    }
+    issue_prefixes = checkpoint.get("issue_prefixes")
+    if not isinstance(issue_prefixes, list):
+        errors.append("replay_checkpoint.issue_prefixes must be an array")
+        issue_prefixes = []
+    issue_histories: list[list[Any]] = []
+    occurrence_locations: list[list[Any]] = []
+    seen_prefix_issue_ids: set[str] = set()
+    for index, issue_prefix in enumerate(issue_prefixes, 1):
+        if not isinstance(issue_prefix, dict):
+            errors.append(f"replay_checkpoint.issue_prefixes[{index}] must be an object")
+            continue
+        prefix_issue_id = _identity(issue_prefix.get("issue_id"))
+        if prefix_issue_id in seen_prefix_issue_ids:
+            errors.append(
+                f"replay_checkpoint.issue_prefixes[{index}] duplicates issue_id"
+            )
+        seen_prefix_issue_ids.add(prefix_issue_id)
+        issue = issues_by_id.get(prefix_issue_id)
+        history_count = issue_prefix.get("history_count")
+        location_count = issue_prefix.get("occurrence_location_count")
+        immutable_identity = issue_prefix.get("immutable_identity")
+        baseline_open_scope_keys = issue_prefix.get("baseline_open_scope_keys")
+        baseline_status = issue_prefix.get("baseline_status")
+        baseline_requires_reaudit = issue_prefix.get(
+            "baseline_legacy_resolution_requires_reaudit"
+        )
+        baseline_count_fields = (
+            "baseline_occurrence_count",
+            "baseline_observation_count",
+            "baseline_introduced_by_repair_count",
+            "baseline_consecutive_rounds",
+            "baseline_max_consecutive_rounds",
+        )
+        if (
+            issue is None
+            or isinstance(history_count, bool)
+            or not isinstance(history_count, int)
+            or history_count < 0
+            or isinstance(location_count, bool)
+            or not isinstance(location_count, int)
+            or location_count < 0
+            or len(issue.get("history", [])) < history_count
+            or len(issue.get("occurrence_locations", [])) < location_count
+        ):
+            errors.append(
+                f"replay_checkpoint.issue_prefixes[{index}] does not bind an available immutable prefix"
+            )
+            continue
+        if (
+            not isinstance(immutable_identity, dict)
+            or set(immutable_identity) != set(_CHECKPOINT_IMMUTABLE_ISSUE_FIELDS)
+            or any(
+                issue.get(field) != immutable_identity.get(field)
+                for field in _CHECKPOINT_IMMUTABLE_ISSUE_FIELDS
+            )
+        ):
+            errors.append(
+                f"replay_checkpoint.issue_prefixes[{index}] immutable issue identity differs"
+            )
+        if (
+            not isinstance(baseline_open_scope_keys, list)
+            or any(not _is_canonical_identifier(value) for value in baseline_open_scope_keys)
+            or baseline_open_scope_keys != sorted(set(baseline_open_scope_keys))
+        ):
+            errors.append(
+                f"replay_checkpoint.issue_prefixes[{index}].baseline_open_scope_keys is invalid"
+            )
+        if baseline_status not in {"open", "resolved"}:
+            errors.append(
+                f"replay_checkpoint.issue_prefixes[{index}].baseline_status is invalid"
+            )
+        if not isinstance(baseline_requires_reaudit, bool):
+            errors.append(
+                f"replay_checkpoint.issue_prefixes[{index}].baseline_legacy_resolution_requires_reaudit must be boolean"
+            )
+        for field in baseline_count_fields:
+            value = issue_prefix.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                errors.append(
+                    f"replay_checkpoint.issue_prefixes[{index}].{field} must be a non-negative integer"
+                )
+        if not _validate_iso_timestamp(issue_prefix.get("baseline_last_seen_at")):
+            errors.append(
+                f"replay_checkpoint.issue_prefixes[{index}].baseline_last_seen_at must be ISO-8601"
+            )
+        issue_histories.append(copy.deepcopy(issue.get("history", [])[:history_count]))
+        occurrence_locations.append(
+            copy.deepcopy(issue.get("occurrence_locations", [])[:location_count])
+        )
+    if _identity(checkpoint.get("issue_histories_canonical_sha256")) != _canonical_json_sha256(issue_histories):
+        errors.append("replay_checkpoint issue-history canonical SHA-256 does not match")
+    if _identity(checkpoint.get("occurrence_locations_canonical_sha256")) != _canonical_json_sha256(occurrence_locations):
+        errors.append("replay_checkpoint occurrence-location canonical SHA-256 does not match")
+    try:
+        expected_boundaries = _checkpoint_scope_boundaries(ledger, event_prefix)
+    except (KeyError, TypeError, ValueError) as exc:
+        errors.append(f"replay_checkpoint sealed prefix is invalid: {exc}")
+    else:
+        if checkpoint.get("scope_boundaries") != expected_boundaries:
+            errors.append("replay_checkpoint.scope_boundaries do not match the sealed event prefix")
+    return errors
+
+
+def _is_canonical_identifier(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and value == value.strip()
+        and "\n" not in value
+        and "\r" not in value
+    )
+
+
+def _is_sha256(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[A-Fa-f0-9]{64}", value) is not None
 
 
 def _project_id(project_name: str) -> str:
@@ -92,6 +470,7 @@ def new_ledger(project_name: str, project_id: str | None = None, timestamp: str 
             "formal_rule_auto_mutation": False,
             "exact_cross_window_claim_requires_shared_ledger": True,
             "pass_requires_zero_issues": True,
+            "ledger_replay_contract_version": "R10-LEDGER-REPLAY-1",
             "cross_batch_pattern_identity_required": True,
             "failed_draft_recording_required": True,
             "first_draft_correctness_threshold_percent": 98.0,
@@ -165,13 +544,27 @@ def migrate_ledger_to_current(
     ledger: dict[str, Any],
     *,
     timestamp: str | None = None,
+    migration_id: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Return a history-preserving candidate with cross-batch pattern identity."""
 
     if not isinstance(ledger, dict):
         raise ValueError("ledger must be an object")
+    old_ledger_canonical_sha256 = _canonical_json_sha256(ledger)
     migrated = copy.deepcopy(ledger)
     changed: list[str] = []
+    pending_checkpoint = None
+    if migrated.get("events") and "replay_checkpoint" not in migrated:
+        if not _is_canonical_identifier(migration_id):
+            raise ValueError(
+                "historical event migration requires the signed-journal migration_id"
+            )
+        pending_checkpoint = _build_replay_checkpoint(
+            migrated,
+            migration_id=str(migration_id),
+            old_ledger_canonical_sha256=old_ledger_canonical_sha256,
+            timestamp=timestamp,
+        )
     defaults = new_ledger(
         str(migrated.get("project_name") or "迁移项目"),
         project_id=str(migrated.get("project_id") or "SB-migration"),
@@ -196,20 +589,9 @@ def migrate_ledger_to_current(
             row for row in record.get("history", []) if isinstance(row, dict)
         ]
         if not history_rows:
-            synthetic_event_id = f"LEGACY-{_stable_hash(str(record.get('issue_id') or index), 12)}"
-            synthetic_scope_key = str(
-                next(iter(record.get("open_scope_keys", [])), "LEGACY-SCOPE")
+            raise ValueError(
+                f"legacy issue {record.get('issue_id') or index} has no immutable history"
             )
-            history_rows = [{
-                "event_id": synthetic_event_id,
-                "timestamp": str(record.get("last_seen_at") or migrated.get("updated_at") or _timestamp(timestamp)),
-                "scope_key": synthetic_scope_key,
-                "audit_round": 0,
-                "source_version": "legacy",
-                "migration_note": "legacy issue history reconstructed from retained issue record",
-            }]
-            record["history"] = copy.deepcopy(history_rows)
-            changed.append(f"issues[{index}].history")
         latest_history = next(
             (
                 row
@@ -263,42 +645,12 @@ def migrate_ledger_to_current(
         if record.get("pattern_key") != pattern:
             record["pattern_key"] = pattern
             changed.append(f"issues[{index}].pattern_key")
-        if "occurrence_locations" not in record:
-            record["occurrence_locations"] = []
-            changed.append(f"issues[{index}].occurrence_locations")
+        locations_existed = isinstance(record.get("occurrence_locations"), list)
+        if not locations_existed:
+            raise ValueError(
+                f"legacy issue {record.get('issue_id') or index} has no immutable occurrence_locations"
+            )
         locations = record["occurrence_locations"]
-        for location_index, location in enumerate(locations):
-            if not isinstance(location, dict):
-                continue
-            for field, value in {
-                "event_id": "unknown",
-                "scope_key": "unknown",
-                "episode_id": str(record.get("episode_id") or "unknown"),
-                "file_name": str(record.get("logical_file") or "unknown"),
-                "source_version": "unknown",
-                "shot_ids": [],
-                "field": "全表",
-            }.items():
-                if field not in location or location[field] in (None, ""):
-                    location[field] = copy.deepcopy(value)
-                    changed.append(
-                        f"issues[{index}].occurrence_locations[{location_index}].{field}"
-                    )
-        for history in record.get("history", []):
-            if not isinstance(history, dict):
-                continue
-            location = {
-                "event_id": str(history.get("event_id") or "unknown"),
-                "scope_key": str(history.get("scope_key") or "unknown"),
-                "episode_id": str(history.get("episode_id") or record.get("episode_id") or "unknown"),
-                "file_name": str(history.get("file_name") or record.get("logical_file") or "unknown"),
-                "source_version": str(history.get("source_version") or "unknown"),
-                "shot_ids": copy.deepcopy(history.get("shot_ids", [])),
-                "field": str(history.get("field") or "全表"),
-            }
-            if location not in locations:
-                locations.append(location)
-                changed.append(f"issues[{index}].occurrence_locations")
         observation_count = int(record.get("occurrence_count") or 0)
         if observation_count <= 0:
             observation_count = sum(
@@ -348,10 +700,260 @@ def migrate_ledger_to_current(
             if record.get("pattern_observation_count") != pattern_observation_count:
                 record["pattern_observation_count"] = pattern_observation_count
                 changed.append(f"issues[{index}].pattern_observation_count")
+    _migrate_ledger_control_replay(migrated, changed)
+    if pending_checkpoint is not None:
+        # Control replay establishes the authoritative post-migration issue
+        # baseline (canonical scope aliases, open scopes and legacy re-audit
+        # state).  Seal that baseline only after replay; the history/location
+        # arrays themselves remain the byte-identical old prefix hashed above.
+        pending_checkpoint["issue_prefixes"] = [
+            _checkpoint_issue_baseline(issue)
+            for issue in migrated.get("issues", [])
+            if isinstance(issue, dict)
+        ]
+        migrated["replay_checkpoint"] = pending_checkpoint
+        changed.append("replay_checkpoint")
     if changed:
         migrated["updated_at"] = _timestamp(timestamp)
         changed.append("updated_at")
     return migrated, sorted(set(changed))
+
+
+def _migrate_ledger_control_replay(
+    ledger: dict[str, Any], changed: list[str]
+) -> None:
+    """Bind legacy control records without granting them independent authority."""
+
+    events = ledger.setdefault("events", [])
+    if not isinstance(events, list) or any(not isinstance(row, dict) for row in events):
+        raise ValueError("legacy ledger events must be an array of objects")
+    original_scope_by_event: dict[str, str] = {}
+    event_by_id: dict[str, dict[str, Any]] = {}
+    event_position: dict[str, int] = {}
+    scope_rounds: dict[str, int] = {}
+    for position, event in enumerate(events, 1):
+        event_id = _identity(event.get("event_id"))
+        if not event_id or not _is_canonical_identifier(event.get("event_id")):
+            raise ValueError(f"legacy event at position {position} has no canonical event_id")
+        if event_id in event_by_id:
+            raise ValueError(f"legacy event identity collision: {event.get('event_id')}")
+        event_by_id[event_id] = event
+        event_position[event_id] = position
+        original_scope_by_event[event_id] = str(event.get("scope_key") or "")
+        if event.get("result") == "pass" and event.get("blockers"):
+            raise ValueError(
+                f"legacy pass event {event.get('event_id')} contains blockers and cannot be promoted"
+            )
+        scope_key = _scope_key(ledger, event)
+        if event.get("sequence") != position:
+            raise ValueError(
+                f"legacy event {event.get('event_id')} has a non-append-only sequence"
+            )
+        previous_round = scope_rounds.get(scope_key)
+        if previous_round is not None and event.get("audit_round") != previous_round + 1:
+            raise ValueError(
+                f"legacy event {event.get('event_id')} has a non-contiguous audit_round"
+            )
+        scope_rounds[scope_key] = int(event.get("audit_round"))
+
+    old_scopes = [
+        row for row in ledger.get("scope_states", []) if isinstance(row, dict)
+    ]
+    old_scope_last_event = {
+        str(row.get("scope_key") or ""): _identity(row.get("last_event_id"))
+        for row in old_scopes
+        if row.get("scope_key") and row.get("last_event_id")
+    }
+
+    def resolve_legacy_basis(record: dict[str, Any], record_name: str) -> str:
+        supplied = _identity(record.get("basis_event_id"))
+        if supplied:
+            if supplied not in event_by_id:
+                raise ValueError(f"{record_name} basis_event_id is unknown")
+            return supplied
+        old_scope_key = str(record.get("scope_key") or "")
+        timestamp = record.get("timestamp")
+        if not _validate_iso_timestamp(timestamp):
+            raise ValueError(f"{record_name} timestamp is not ISO-8601")
+        candidates = [
+            event_id
+            for event_id, event in event_by_id.items()
+            if original_scope_by_event.get(event_id) == old_scope_key
+            and _validate_iso_timestamp(event.get("timestamp"))
+            and _parse_iso_timestamp(str(event.get("timestamp")))
+            <= _parse_iso_timestamp(str(timestamp))
+        ]
+        last_event_id = old_scope_last_event.get(old_scope_key, "")
+        if last_event_id in candidates:
+            return last_event_id
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
+            raise ValueError(f"{record_name} cannot be uniquely bound to a historical event")
+        raise ValueError(
+            f"{record_name} has multiple historical event candidates and no provable scope last_event"
+        )
+
+    human_signoffs = ledger.setdefault("human_signoffs", [])
+    if not isinstance(human_signoffs, list):
+        raise ValueError("legacy human_signoffs must be an array")
+    for index, record in enumerate(human_signoffs):
+        if not isinstance(record, dict):
+            raise ValueError(f"human_signoffs[{index}] must be an object")
+        was_unbound = not record.get("basis_event_id")
+        basis_id = resolve_legacy_basis(record, f"human_signoffs[{index}]")
+        basis_event = event_by_id[basis_id]
+        expected_values = {
+            "scope_key": _scope_key(ledger, basis_event),
+            "basis_event_id": basis_event["event_id"],
+            "authority_class": (
+                "legacy" if was_unbound else record.get("authority_class", "legacy")
+            ),
+        }
+        for field, value in expected_values.items():
+            if record.get(field) != value:
+                record[field] = value
+                changed.append(f"human_signoffs[{index}].{field}")
+
+    authority_reopens = ledger.setdefault("authority_reopens", [])
+    if not isinstance(authority_reopens, list):
+        raise ValueError("legacy authority_reopens must be an array")
+    for index, record in enumerate(authority_reopens):
+        if not isinstance(record, dict):
+            raise ValueError(f"authority_reopens[{index}] must be an object")
+        basis_id = resolve_legacy_basis(record, f"authority_reopens[{index}]")
+        basis_event = event_by_id[basis_id]
+        if (
+            basis_event.get("audit_class") != "independent_audit"
+            or basis_event.get("result") != "pass"
+        ):
+            raise ValueError(
+                f"authority_reopens[{index}] cannot bind to a non-independent or failed event"
+            )
+        for field, value in {
+            "scope_key": _scope_key(ledger, basis_event),
+            "basis_event_id": basis_event["event_id"],
+        }.items():
+            if record.get(field) != value:
+                record[field] = value
+                changed.append(f"authority_reopens[{index}].{field}")
+
+    human_by_basis: dict[str, list[dict[str, Any]]] = {}
+    for record in human_signoffs:
+        human_by_basis.setdefault(_identity(record.get("basis_event_id")), []).append(record)
+    authority_by_basis: dict[str, list[dict[str, Any]]] = {}
+    for record in authority_reopens:
+        authority_by_basis.setdefault(_identity(record.get("basis_event_id")), []).append(record)
+
+    replay: dict[str, dict[str, Any]] = {}
+    for event in events:
+        scope_key = _scope_key(ledger, event)
+        normalized_issues = [
+            _normalize_issue(issue)
+            for issue in event.get("issues", [])
+            if isinstance(issue, dict) and issue.get("status") in ISSUE_STATUS_ALIASES
+        ]
+        incoming_issue_ids = sorted(
+            {
+                f"ISS-{_stable_hash(_issue_dedup_key(ledger, event, issue))}"
+                for issue in normalized_issues
+            }
+        )
+        closure_state = _event_closure_state(event)
+        state = {
+            "scope_key": scope_key,
+            "episode_id": event.get("episode_id"),
+            "file_name": event.get("file_name"),
+            "audit_cycle_id": event.get("audit_cycle_id"),
+            "last_event_id": event.get("event_id"),
+            "last_result": event.get("result"),
+            "last_audit_round": event.get("audit_round"),
+            "open_issue_ids": incoming_issue_ids,
+            "closure_state": closure_state,
+            "can_advance": False,
+            "human_signoff": None,
+        }
+        replay[scope_key] = state
+        event_id = _identity(event.get("event_id"))
+        for record in human_by_basis.get(event_id, []):
+            state["human_signoff"] = copy.deepcopy(record)
+            if record.get("authority_class") == "legacy":
+                state["closure_state"] = (
+                    "reopened_by_human"
+                    if record.get("decision") == "reopen"
+                    else "legacy_signoff_requires_reaudit"
+                )
+                state["can_advance"] = False
+            elif record.get("decision") == "approve":
+                state["closure_state"] = "human_signed_off"
+                state["can_advance"] = True
+            else:
+                state["closure_state"] = "reopened_by_human"
+                state["can_advance"] = False
+        for record in authority_by_basis.get(event_id, []):
+            state["closure_state"] = "reopened_by_independent_reaudit"
+            state["can_advance"] = False
+            state["authority_reopen"] = copy.deepcopy(record)
+
+    rebuilt_scopes = list(replay.values())
+    if ledger.get("scope_states") != rebuilt_scopes:
+        ledger["scope_states"] = rebuilt_scopes
+        changed.append("scope_states")
+
+    for issue_index, issue in enumerate(ledger.get("issues", [])):
+        if not isinstance(issue, dict):
+            continue
+        issue_id = str(issue.get("issue_id") or "")
+        expected_open_scopes = sorted(
+            scope_key
+            for scope_key, state in replay.items()
+            if issue_id in state.get("open_issue_ids", [])
+        )
+        if (
+            (issue.get("status") == "open" or issue.get("open_scope_keys"))
+            and not expected_open_scopes
+        ):
+            raise ValueError(
+                f"issues[{issue_index}] is open but has no replayable event occurrence"
+            )
+        if issue.get("open_scope_keys") != expected_open_scopes:
+            issue["open_scope_keys"] = expected_open_scopes
+            changed.append(f"issues[{issue_index}].open_scope_keys")
+        expected_status = "open" if expected_open_scopes else "resolved"
+        if issue.get("status") != expected_status:
+            issue["status"] = expected_status
+            changed.append(f"issues[{issue_index}].status")
+        last_history_event = next(
+            (
+                event_by_id.get(_identity(row.get("event_id")))
+                for row in reversed(issue.get("history", []))
+                if isinstance(row, dict)
+                and _identity(row.get("event_id")) in event_by_id
+            ),
+            None,
+        )
+        requires_reaudit = not (
+            isinstance(last_history_event, dict)
+            and last_history_event.get("audit_class") == "independent_audit"
+            and last_history_event.get("result") == "pass"
+        )
+        if issue.get("legacy_resolution_requires_reaudit") != requires_reaudit:
+            issue["legacy_resolution_requires_reaudit"] = requires_reaudit
+            changed.append(
+                f"issues[{issue_index}].legacy_resolution_requires_reaudit"
+            )
+
+    counters = ledger.setdefault("counters", {})
+    expected_counters = {
+        "event_sequence": len(events),
+        "event_count": len(events),
+        "issue_record_count": len(ledger.get("issues", [])),
+        "rule_candidate_count": len(ledger.get("rule_candidates", [])),
+    }
+    for field, value in expected_counters.items():
+        if counters.get(field) != value:
+            counters[field] = value
+            changed.append(f"counters.{field}")
 
 
 def read_json(path: str | Path) -> dict[str, Any]:
@@ -371,13 +973,21 @@ def write_json_atomic(path: str | Path, data: dict[str, Any]) -> None:
 
 
 def _validate_iso_timestamp(value: Any) -> bool:
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, str) or re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+        value,
+    ) is None:
         return False
     try:
         datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return False
     return True
+
+
+def _parse_iso_timestamp(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 def validate_event(event: Any, max_rounds: int = 3) -> list[str]:
@@ -392,7 +1002,21 @@ def validate_event(event: Any, max_rounds: int = 3) -> list[str]:
     for field in required:
         if field not in event or event[field] in (None, ""):
             errors.append(f"missing event field: {field}")
-    if event.get("timestamp") and not _validate_iso_timestamp(event.get("timestamp")):
+    for field in ("episode_id", "file_name", "source_version"):
+        if field in event and (
+            not isinstance(event.get(field), str) or not event.get(field).strip()
+        ):
+            errors.append(f"{field} must be a non-empty string")
+    for field in ("event_id", "audit_cycle_id"):
+        if field in event and not _is_canonical_identifier(event.get(field)):
+            errors.append(f"{field} must be a non-empty identifier without leading or trailing whitespace")
+    if "file_fingerprint" in event and not _is_canonical_identifier(
+        event.get("file_fingerprint")
+    ):
+        errors.append(
+            "file_fingerprint must be a non-empty identifier without leading or trailing whitespace"
+        )
+    if not _validate_iso_timestamp(event.get("timestamp")):
         errors.append("timestamp must be ISO-8601")
     if event.get("task_type") not in TASK_TYPES:
         errors.append(f"unsupported task_type: {event.get('task_type')!r}")
@@ -419,6 +1043,16 @@ def validate_event(event: Any, max_rounds: int = 3) -> list[str]:
         for field in issue_required:
             if field not in issue or issue[field] in (None, ""):
                 errors.append(f"issue[{index}] missing field: {field}")
+        for field in ("error_code", "field", "source_sentence", "repair_action"):
+            if field in issue and (
+                not isinstance(issue.get(field), str) or not issue.get(field, "").strip()
+            ):
+                errors.append(f"issue[{index}].{field} must be a non-empty string")
+        evidence = issue.get("evidence")
+        if "evidence" in issue and not (
+            isinstance(evidence, str) and bool(evidence.strip())
+        ):
+            errors.append(f"issue[{index}].evidence must be a non-empty string")
         category = issue.get("category")
         if category not in AUDIT_CATEGORIES and category not in LEGACY_AUDIT_CATEGORY_ALIASES:
             errors.append(f"issue[{index}] unsupported category: {issue.get('category')!r}")
@@ -430,14 +1064,62 @@ def validate_event(event: Any, max_rounds: int = 3) -> list[str]:
             errors.append(f"issue[{index}] unsupported status: {issue.get('status')!r}")
         if "blocking" in issue and not isinstance(issue.get("blocking"), bool):
             errors.append(f"issue[{index}].blocking must be boolean")
-    if event.get("result") == "pass" and issues:
-        errors.append("result=pass requires zero issues")
-    if event.get("result") in {"fail_current", "blocked"} and not issues and not event.get("blockers"):
+    blockers = event.get("blockers", [])
+    if not isinstance(blockers, list):
+        errors.append("blockers must be an array")
+        blockers = []
+    else:
+        for index, blocker in enumerate(blockers, 1):
+            if not _is_canonical_identifier(blocker):
+                errors.append(
+                    f"blockers[{index}] must be a non-empty string without leading or trailing whitespace"
+                )
+    if event.get("result") == "pass":
+        if issues:
+            errors.append("result=pass requires issues=[]")
+        if blockers:
+            errors.append("result=pass requires blockers=[]")
+    if event.get("result") in {"fail_current", "blocked"} and not issues and not blockers:
         errors.append("failed or blocked event requires issues or blockers")
+    if event.get("audit_class") == "independent_audit":
+        for field in INDEPENDENT_AUDIT_REQUIRED_FIELDS:
+            if field not in event or event[field] in (None, ""):
+                errors.append(f"independent_audit missing field: {field}")
+        if event.get("task_type") != "audit":
+            errors.append("independent_audit task_type must equal 'audit'")
+        if event.get("validation_role") != "independent_audit":
+            errors.append("independent_audit validation_role must equal 'independent_audit'")
+        for field in ("handoff_id", "runtime_test_certificate_id", "stage_trace_id"):
+            if field in event and not _is_canonical_identifier(event.get(field)):
+                errors.append(
+                    f"{field} must be a non-empty identifier without leading or trailing whitespace"
+                )
+        for field in SHA256_FIELDS:
+            if field in event and not _is_sha256(event.get(field)):
+                errors.append(f"{field} must be a 64-character SHA-256 hex string")
+        if "cache_evidence" in event and not isinstance(event.get("cache_evidence"), list):
+            errors.append("independent_audit cache_evidence must be an array")
+        assertions = event.get("independence_assertions")
+        if not isinstance(assertions, dict):
+            errors.append("independent_audit independence_assertions must be an object")
+        else:
+            for assertion in INDEPENDENT_ASSERTIONS:
+                if assertions.get(assertion) is not True:
+                    errors.append(
+                        f"independent_audit independence_assertions.{assertion} must equal true"
+                    )
+        if event.get("result") == "pass" and checked == 0:
+            errors.append("independent_audit result=pass requires checked_shot_count >= 1")
+    elif event.get("validation_role") == "independent_audit":
+        errors.append("validation_role=independent_audit requires audit_class=independent_audit")
     return errors
 
 
-def validate_ledger(ledger: Any) -> list[str]:
+def validate_ledger(
+    ledger: Any,
+    *,
+    checkpoint_authorizer: Callable[[dict[str, Any]], bool] | None = None,
+) -> list[str]:
     errors: list[str] = []
     if not isinstance(ledger, dict):
         return ["ledger must be an object"]
@@ -445,6 +1127,7 @@ def validate_ledger(ledger: Any) -> list[str]:
         "schema_version", "project_id", "project_name", "runtime_version", "workflow_revision",
         "agent_mode", "created_at", "updated_at", "policy", "counters", "scope_states",
         "events", "issues", "rule_candidates", "promotion_history", "human_signoffs",
+        "authority_reopens",
         "historical_patterns",
     ]
     for field in required:
@@ -472,6 +1155,7 @@ def validate_ledger(ledger: Any) -> list[str]:
         "formal_rule_auto_mutation": False,
         "exact_cross_window_claim_requires_shared_ledger": True,
         "pass_requires_zero_issues": True,
+        "ledger_replay_contract_version": "R10-LEDGER-REPLAY-1",
         "cross_batch_pattern_identity_required": True,
         "failed_draft_recording_required": True,
         "first_draft_correctness_threshold_percent": 98.0,
@@ -483,15 +1167,41 @@ def validate_ledger(ledger: Any) -> list[str]:
     for field, value in policy_expected.items():
         if policy.get(field) != value:
             errors.append(f"policy.{field} must equal {value!r}")
+    errors.extend(_replay_checkpoint_errors(ledger, checkpoint_authorizer))
     events = ledger.get("events")
     if not isinstance(events, list):
         errors.append("events must be an array")
         events = []
     event_ids: set[str] = set()
+    checkpoint = ledger.get("replay_checkpoint")
+    sealed_event_count = (
+        int(checkpoint.get("event_count"))
+        if isinstance(checkpoint, dict)
+        and isinstance(checkpoint.get("event_count"), int)
+        and not isinstance(checkpoint.get("event_count"), bool)
+        else 0
+    )
     for index, event in enumerate(events, 1):
-        for error in validate_event(event, max_rounds=3):
+        event_validation_errors = validate_event(event, max_rounds=3)
+        if index <= sealed_event_count:
+            sealed_legacy_missing_semantic_bindings = {
+                f"independent_audit missing field: {field}"
+                for field in CURRENT_SEMANTIC_AUDIT_SHA256_FIELDS
+            }
+            event_validation_errors = [
+                error
+                for error in event_validation_errors
+                if (
+                    error not in sealed_legacy_missing_semantic_bindings
+                    and not re.fullmatch(
+                        r"issue\[\d+\]\.evidence must be a non-empty string",
+                        error,
+                    )
+                )
+            ]
+        for error in event_validation_errors:
             errors.append(f"events[{index}]: {error}")
-        event_id = str(event.get("event_id")) if isinstance(event, dict) else ""
+        event_id = _identity(event.get("event_id")) if isinstance(event, dict) else ""
         if event_id in event_ids:
             errors.append(f"duplicate event_id: {event_id}")
         event_ids.add(event_id)
@@ -509,6 +1219,7 @@ def validate_ledger(ledger: Any) -> list[str]:
             "issue_id", "dedup_key", "pattern_key", "error_code", "category",
             "logical_file", "episode_id", "issue_type", "field_class",
             "normalized_root_cause", "status", "open_scope_keys",
+            "legacy_resolution_requires_reaudit",
             "recurrence_state", "occurrence_count", "observation_count",
             "pattern_occurrence_count", "pattern_observation_count",
             "distinct_event_count", "distinct_scope_count", "consecutive_rounds",
@@ -519,8 +1230,8 @@ def validate_ledger(ledger: Any) -> list[str]:
         for field in required_issue_fields:
             if field not in issue:
                 errors.append(f"issues[{index}] missing field: {field}")
-        issue_id = str(issue.get("issue_id", ""))
-        dedup_key = str(issue.get("dedup_key", ""))
+        issue_id = _identity(issue.get("issue_id", ""))
+        dedup_key = _identity(issue.get("dedup_key", ""))
         if issue_id in issue_ids:
             errors.append(f"duplicate issue_id: {issue_id}")
         if dedup_key in dedup_keys:
@@ -556,10 +1267,10 @@ def validate_ledger(ledger: Any) -> list[str]:
             errors.append(f"issues[{index}].repair_strategy is invalid")
         open_scope_keys = issue.get("open_scope_keys")
         if not isinstance(open_scope_keys, list) or any(
-            not isinstance(value, str) or not value for value in open_scope_keys
+            not _is_canonical_identifier(value) for value in open_scope_keys
         ):
-            errors.append(f"issues[{index}].open_scope_keys must be an array of non-empty strings")
-        elif len(open_scope_keys) != len(set(open_scope_keys)):
+            errors.append(f"issues[{index}].open_scope_keys must be an array of canonical identifiers")
+        elif len(open_scope_keys) != len({_identity(value) for value in open_scope_keys}):
             errors.append(f"issues[{index}].open_scope_keys must be unique")
         if issue.get("status") == "resolved" and open_scope_keys:
             errors.append(f"issues[{index}] resolved issue cannot retain open scopes")
@@ -662,7 +1373,7 @@ def validate_ledger(ledger: Any) -> list[str]:
         if not isinstance(candidate, dict):
             errors.append(f"rule_candidates[{index}] must be an object")
             continue
-        candidate_id = str(candidate.get("candidate_id", ""))
+        candidate_id = _identity(candidate.get("candidate_id", ""))
         if candidate_id in candidate_ids:
             errors.append(f"duplicate candidate_id: {candidate_id}")
         candidate_ids.add(candidate_id)
@@ -686,13 +1397,14 @@ def validate_ledger(ledger: Any) -> list[str]:
         if not isinstance(scope, dict):
             errors.append(f"scope_states[{index}] must be an object")
             continue
-        key = str(scope.get("scope_key", ""))
+        key = _identity(scope.get("scope_key", ""))
         if key in scope_keys:
             errors.append(f"duplicate scope_key: {key}")
         scope_keys.add(key)
         if scope.get("can_advance") is True:
             if scope.get("closure_state") != "human_signed_off" or scope.get("last_result") != "pass" or scope.get("open_issue_ids"):
                 errors.append(f"scope {key} can_advance without clean human sign-off")
+    errors.extend(_ledger_replay_errors(ledger))
     return errors
 
 
@@ -704,6 +1416,796 @@ def _scope_key(ledger: dict[str, Any], event: dict[str, Any]) -> str:
         _normalize(event["audit_cycle_id"]),
     ])
     return f"SCOPE-{_stable_hash(value)}"
+
+
+def _independent_freshness_errors(
+    prior_events: list[dict[str, Any]],
+    event: dict[str, Any],
+) -> list[str]:
+    """Reject evidence relabeling across rounds, cycles, and logical filenames."""
+
+    if event.get("audit_class") != "independent_audit":
+        return []
+    errors: list[str] = []
+    handoff = _identity(event.get("handoff_id"))
+    trace = _identity(event.get("stage_trace_id"))
+    failed_values: dict[str, set[str]] = {field: set() for field in FAILED_BINDING_FIELDS}
+    for prior in prior_events:
+        if not isinstance(prior, dict) or prior.get("audit_class") != "independent_audit":
+            continue
+        if handoff and handoff == _identity(prior.get("handoff_id")):
+            errors.append("independent_audit handoff_id must be globally unique across audit events")
+        if trace and trace == _identity(prior.get("stage_trace_id")):
+            errors.append("independent_audit stage_trace_id must be globally unique across audit events")
+        if prior.get("result") in {"fail_current", "blocked"}:
+            for field in FAILED_BINDING_FIELDS:
+                value = _identity(prior.get(field))
+                if value:
+                    failed_values[field].add(value)
+    if event.get("result") == "pass":
+        for field, values in failed_values.items():
+            value = _identity(event.get(field))
+            if value and value in values:
+                errors.append(
+                    f"independent_audit pass must not reuse failed {field}; issue a new repair binding"
+                )
+    return errors
+
+
+def _checkpoint_issue_suffix_errors(
+    ledger: dict[str, Any],
+    checkpoint: dict[str, Any],
+    event_scope_by_id: dict[str, str],
+) -> list[str]:
+    """Rebuild every post-checkpoint issue row from real appended events.
+
+    Legacy history and occurrence locations are allowed only inside the
+    checkpoint's hashed prefix.  Every suffix row, including a newly created
+    issue, must be the deterministic projection that ``ingest_event`` would
+    have produced from an event after ``event_count``.
+    """
+
+    errors: list[str] = []
+    events = ledger.get("events", [])
+    issues = ledger.get("issues", [])
+    issue_prefixes = checkpoint.get("issue_prefixes", [])
+    checkpoint_count = checkpoint.get("event_count")
+    if (
+        not isinstance(events, list)
+        or not isinstance(issues, list)
+        or not isinstance(issue_prefixes, list)
+        or isinstance(checkpoint_count, bool)
+        or not isinstance(checkpoint_count, int)
+        or checkpoint_count < 0
+        or checkpoint_count > len(events)
+    ):
+        return errors
+
+    records_by_id = {
+        _identity(issue.get("issue_id")): issue
+        for issue in issues
+        if isinstance(issue, dict) and _identity(issue.get("issue_id"))
+    }
+    prefixes_by_id = {
+        _identity(prefix.get("issue_id")): prefix
+        for prefix in issue_prefixes
+        if isinstance(prefix, dict) and _identity(prefix.get("issue_id"))
+    }
+    expected_histories: dict[str, list[dict[str, Any]]] = {
+        issue_id: [] for issue_id in prefixes_by_id
+    }
+    expected_locations: dict[str, list[dict[str, Any]]] = {
+        issue_id: [] for issue_id in prefixes_by_id
+    }
+    states: dict[str, dict[str, Any]] = {}
+    for issue_id, prefix in prefixes_by_id.items():
+        def baseline_int(field: str) -> int:
+            value = prefix.get(field, 0)
+            return (
+                value
+                if isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+                else 0
+            )
+
+        identity = prefix.get("immutable_identity")
+        if not isinstance(identity, dict):
+            identity = {}
+        states[issue_id] = {
+            "identity": copy.deepcopy(identity),
+            "open_scopes": set(prefix.get("baseline_open_scope_keys", [])),
+            "requires_reaudit": prefix.get(
+                "baseline_legacy_resolution_requires_reaudit"
+            )
+            is True,
+            "occurrence_count": baseline_int("baseline_occurrence_count"),
+            "observation_count": baseline_int("baseline_observation_count"),
+            "introduced_by_repair_count": baseline_int(
+                "baseline_introduced_by_repair_count"
+            ),
+            "consecutive_rounds": baseline_int(
+                "baseline_consecutive_rounds"
+            ),
+            "max_consecutive_rounds": baseline_int(
+                "baseline_max_consecutive_rounds"
+            ),
+            "last_seen_at": prefix.get("baseline_last_seen_at"),
+        }
+
+    for event in events[checkpoint_count:]:
+        if not isinstance(event, dict):
+            continue
+        event_id = _identity(event.get("event_id"))
+        event_record_id = event.get("event_id")
+        scope_key = event_scope_by_id.get(event_id)
+        if not event_id or not scope_key:
+            continue
+        previous_open = {
+            issue_id
+            for issue_id, state in states.items()
+            if scope_key in state["open_scopes"]
+        }
+        incoming_ids: set[str] = set()
+        for raw_issue in event.get("issues", []):
+            if not isinstance(raw_issue, dict):
+                continue
+            try:
+                issue = _normalize_issue(raw_issue)
+                dedup_key = _issue_dedup_key(ledger, event, issue)
+            except (KeyError, TypeError, ValueError):
+                continue
+            issue_id = _identity(f"ISS-{_stable_hash(dedup_key)}")
+            incoming_ids.add(issue_id)
+            identity = {
+                "dedup_key": dedup_key,
+                "pattern_key": issue_pattern_key(str(ledger.get("project_id") or ""), issue),
+                "error_code": issue.get("error_code"),
+                "category": issue.get("category"),
+                "logical_file": event.get("file_name"),
+                "episode_id": event.get("episode_id"),
+                "issue_type": issue.get("issue_type", issue.get("category")),
+                "field_class": _field_class(issue.get("field")),
+                "normalized_root_cause": _normalized_root_cause(issue),
+                "first_seen_at": event.get("timestamp"),
+            }
+            state = states.get(issue_id)
+            if state is None:
+                state = {
+                    "identity": identity,
+                    "open_scopes": set(),
+                    "requires_reaudit": False,
+                    "occurrence_count": 0,
+                    "observation_count": 0,
+                    "introduced_by_repair_count": 0,
+                    "consecutive_rounds": 0,
+                    "max_consecutive_rounds": 0,
+                    "last_seen_at": event.get("timestamp"),
+                }
+                states[issue_id] = state
+                expected_histories[issue_id] = []
+                expected_locations[issue_id] = []
+            elif any(
+                state.get("identity", {}).get(field) != identity.get(field)
+                for field in _CHECKPOINT_IMMUTABLE_ISSUE_FIELDS
+                if field != "first_seen_at"
+            ):
+                errors.append(
+                    f"post-checkpoint issue {issue_id} changes immutable identity"
+                )
+
+            was_open = scope_key in state["open_scopes"]
+            state["occurrence_count"] = int(state["occurrence_count"]) + 1
+            state["observation_count"] = int(state["observation_count"]) + 1
+            state["introduced_by_repair_count"] = int(
+                state["introduced_by_repair_count"]
+            ) + int(issue.get("status") == "introduced")
+            state["consecutive_rounds"] = (
+                int(state["consecutive_rounds"]) + 1 if was_open else 1
+            )
+            state["max_consecutive_rounds"] = max(
+                int(state["max_consecutive_rounds"]),
+                int(state["consecutive_rounds"]),
+            )
+            state["last_seen_at"] = event.get("timestamp")
+            state["open_scopes"].add(scope_key)
+            expected_histories[issue_id].append(
+                {
+                    "event_id": event_record_id,
+                    "timestamp": event.get("timestamp"),
+                    "scope_key": scope_key,
+                    "audit_round": event.get("audit_round"),
+                    "source_version": event.get("source_version"),
+                    "file_fingerprint": event.get("file_fingerprint"),
+                    "issue_status": issue.get("status"),
+                    "severity": issue.get("severity"),
+                    "shot_ids": copy.deepcopy(issue.get("shot_ids", [])),
+                    "field": issue.get("field"),
+                    "evidence": issue.get("evidence"),
+                    "source_sentence": issue.get("source_sentence"),
+                    "repair_action": issue.get("repair_action"),
+                    "impact_scope": copy.deepcopy(issue.get("impact_scope", [])),
+                    "root_cause": issue.get("root_cause"),
+                }
+            )
+            location = {
+                "event_id": event_record_id,
+                "scope_key": scope_key,
+                "episode_id": event.get("episode_id"),
+                "file_name": event.get("file_name"),
+                "source_version": event.get("source_version"),
+                "shot_ids": copy.deepcopy(issue.get("shot_ids", [])),
+                "field": issue.get("field"),
+            }
+            if location not in expected_locations[issue_id]:
+                expected_locations[issue_id].append(location)
+
+        for issue_id in previous_open - incoming_ids:
+            state = states[issue_id]
+            state["open_scopes"].discard(scope_key)
+            state["consecutive_rounds"] = 0
+            state["requires_reaudit"] = (
+                event.get("audit_class") != "independent_audit"
+            )
+            expected_histories[issue_id].append(
+                {
+                    "event_id": event_record_id,
+                    "timestamp": event.get("timestamp"),
+                    "scope_key": scope_key,
+                    "audit_round": event.get("audit_round"),
+                    "resolution": "not_present_in_follow-up_event",
+                }
+            )
+
+        if (
+            event.get("audit_class") == "independent_audit"
+            and event.get("result") == "pass"
+        ):
+            for issue_id, state in states.items():
+                identity = state["identity"]
+                if (
+                    not state["requires_reaudit"]
+                    or _normalize(identity.get("logical_file"))
+                    != _normalize(event.get("file_name"))
+                    or _normalize(identity.get("episode_id"))
+                    != _normalize(event.get("episode_id"))
+                ):
+                    continue
+                cleared_scope_keys = sorted(state["open_scopes"])
+                state["open_scopes"].clear()
+                state["requires_reaudit"] = False
+                expected_histories[issue_id].append(
+                    {
+                        "event_id": event_record_id,
+                        "timestamp": event.get("timestamp"),
+                        "scope_key": scope_key,
+                        "audit_round": event.get("audit_round"),
+                        "source_version": event.get("source_version"),
+                        "resolution": "legacy_quality_block_cleared_by_independent_audit",
+                        "cleared_scope_keys": cleared_scope_keys,
+                        "handoff_id": event.get("handoff_id"),
+                        "stage_trace_id": event.get("stage_trace_id"),
+                        "artifact_semantic_fingerprint": event.get(
+                            "artifact_semantic_fingerprint"
+                        ),
+                        "canonical_fingerprint": event.get("canonical_fingerprint"),
+                    }
+                )
+
+    expected_issue_ids = set(states)
+    actual_issue_ids = set(records_by_id)
+    if actual_issue_ids != expected_issue_ids:
+        errors.append(
+            "post-checkpoint issue ids do not exactly match sealed issues plus appended events"
+        )
+    for issue_id, state in states.items():
+        record = records_by_id.get(issue_id)
+        if not isinstance(record, dict):
+            continue
+        prefix = prefixes_by_id.get(issue_id, {})
+        raw_history_count = prefix.get("history_count", 0)
+        raw_location_count = prefix.get("occurrence_location_count", 0)
+        history_count = (
+            raw_history_count
+            if isinstance(raw_history_count, int)
+            and not isinstance(raw_history_count, bool)
+            and raw_history_count >= 0
+            else 0
+        )
+        location_count = (
+            raw_location_count
+            if isinstance(raw_location_count, int)
+            and not isinstance(raw_location_count, bool)
+            and raw_location_count >= 0
+            else 0
+        )
+        if record.get("history", [])[history_count:] != expected_histories[issue_id]:
+            errors.append(
+                f"issue {issue_id} history suffix is not derived from appended events"
+            )
+        if (
+            record.get("occurrence_locations", [])[location_count:]
+            != expected_locations[issue_id]
+        ):
+            errors.append(
+                f"issue {issue_id} occurrence suffix is not derived from appended events"
+            )
+        if issue_id not in prefixes_by_id and any(
+            record.get(field) != value
+            for field, value in state["identity"].items()
+        ):
+            errors.append(
+                f"new post-checkpoint issue {issue_id} identity is not event-derived"
+            )
+        for field in (
+            "occurrence_count",
+            "observation_count",
+            "introduced_by_repair_count",
+            "consecutive_rounds",
+            "max_consecutive_rounds",
+            "last_seen_at",
+        ):
+            if record.get(field) != state[field]:
+                errors.append(
+                    f"issue {issue_id}.{field} is not derived from the sealed baseline and appended events"
+                )
+        if record.get("legacy_resolution_requires_reaudit") is not state[
+            "requires_reaudit"
+        ]:
+            errors.append(
+                f"issue {issue_id}.legacy_resolution_requires_reaudit is not replay-derived"
+            )
+    return errors
+
+
+def _ledger_replay_errors(ledger: dict[str, Any]) -> list[str]:
+    """Replay append-only control state instead of trusting cached scope labels."""
+
+    events = ledger.get("events")
+    scopes = ledger.get("scope_states")
+    counters = ledger.get("counters")
+    if not isinstance(events, list) or not isinstance(scopes, list) or not isinstance(counters, dict):
+        return []
+    errors: list[str] = []
+    replay: dict[str, dict[str, Any]] = {}
+    event_scope_by_id: dict[str, str] = {}
+    event_by_id: dict[str, dict[str, Any]] = {}
+    prior_events: list[dict[str, Any]] = []
+    checkpoint = ledger.get("replay_checkpoint")
+    checkpoint_count = (
+        int(checkpoint.get("event_count"))
+        if isinstance(checkpoint, dict)
+        and isinstance(checkpoint.get("event_count"), int)
+        and not isinstance(checkpoint.get("event_count"), bool)
+        and checkpoint.get("event_count", 0) > 0
+        else 0
+    )
+    checkpoint_boundaries = (
+        checkpoint.get("scope_boundaries", [])
+        if isinstance(checkpoint, dict)
+        and isinstance(checkpoint.get("scope_boundaries"), list)
+        else []
+    )
+    checkpoint_first_rounds = {
+        str(boundary.get("scope_key")): boundary.get("first_round")
+        for boundary in checkpoint_boundaries
+        if isinstance(boundary, dict)
+    }
+    checkpoint_legacy_scopes = {
+        str(boundary.get("scope_key")): str(boundary.get("legacy_scope_key"))
+        for boundary in checkpoint_boundaries
+        if isinstance(boundary, dict)
+    }
+    checkpoint_allowed_scopes_by_event: dict[str, set[str]] = {}
+
+    for position, event in enumerate(events, 1):
+        if not isinstance(event, dict):
+            continue
+        event_id = _identity(event.get("event_id"))
+        try:
+            expected_scope_key = _scope_key(ledger, event)
+        except (KeyError, TypeError):
+            continue
+        if event_id:
+            event_scope_by_id[event_id] = expected_scope_key
+            event_by_id[event_id] = event
+            checkpoint_allowed_scopes_by_event[event_id] = {
+                expected_scope_key,
+                (
+                    str(event.get("scope_key"))
+                    if position <= checkpoint_count
+                    else expected_scope_key
+                ),
+            }
+
+    if isinstance(checkpoint, dict):
+        errors.extend(
+            _checkpoint_issue_suffix_errors(
+                ledger, checkpoint, event_scope_by_id
+            )
+        )
+
+    human_signoffs = ledger.get("human_signoffs", [])
+    if not isinstance(human_signoffs, list):
+        errors.append("human_signoffs must be an array")
+        human_signoffs = []
+    human_actions_by_basis: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for index, record in enumerate(human_signoffs, 1):
+        if not isinstance(record, dict):
+            errors.append(f"human_signoffs[{index}] must be an object")
+            continue
+        for field in ("scope_key", "basis_event_id"):
+            if not _is_canonical_identifier(record.get(field)):
+                errors.append(f"human_signoffs[{index}].{field} must be canonical")
+        if not _validate_iso_timestamp(record.get("timestamp")):
+            errors.append(f"human_signoffs[{index}].timestamp must be ISO-8601")
+        if record.get("decision") not in {"approve", "reopen"}:
+            errors.append(f"human_signoffs[{index}].decision must be approve or reopen")
+        if record.get("authority_class") not in {"independent_audit", "legacy"}:
+            errors.append(
+                f"human_signoffs[{index}].authority_class must be independent_audit or legacy"
+            )
+        basis_id = _identity(record.get("basis_event_id"))
+        if basis_id:
+            human_actions_by_basis.setdefault(basis_id, []).append((index, record))
+
+    authority_reopens = ledger.get("authority_reopens", [])
+    if not isinstance(authority_reopens, list):
+        errors.append("authority_reopens must be an array")
+        authority_reopens = []
+    authority_actions_by_basis: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    seen_reopen_triggers: set[str] = set()
+    for index, record in enumerate(authority_reopens, 1):
+        if not isinstance(record, dict):
+            errors.append(f"authority_reopens[{index}] must be an object")
+            continue
+        for field in ("scope_key", "basis_event_id", "trigger_event_id"):
+            if not _is_canonical_identifier(record.get(field)):
+                errors.append(f"authority_reopens[{index}].{field} must be canonical")
+        if record.get("authority") != "independent_audit":
+            errors.append(f"authority_reopens[{index}].authority must equal independent_audit")
+        if not isinstance(record.get("reason"), str) or not record.get("reason", "").strip():
+            errors.append(f"authority_reopens[{index}].reason must be a non-empty string")
+        if not _validate_iso_timestamp(record.get("timestamp")):
+            errors.append(f"authority_reopens[{index}].timestamp must be ISO-8601")
+        trigger_id = _identity(record.get("trigger_event_id"))
+        if trigger_id in seen_reopen_triggers:
+            errors.append(f"duplicate authority reopen trigger_event_id: {trigger_id}")
+        seen_reopen_triggers.add(trigger_id)
+        basis_id = _identity(record.get("basis_event_id"))
+        if basis_id:
+            authority_actions_by_basis.setdefault(basis_id, []).append((index, record))
+        trigger_scope = event_scope_by_id.get(trigger_id)
+        if trigger_scope is not None and trigger_scope != str(record.get("scope_key") or ""):
+            errors.append(f"authority_reopens[{index}] trigger event belongs to another scope")
+
+    consumed_human_actions: set[int] = set()
+    consumed_authority_actions: set[int] = set()
+    for position, event in enumerate(events, 1):
+        if not isinstance(event, dict):
+            continue
+        sequence = event.get("sequence")
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence != position:
+            errors.append(f"events[{position}].sequence must equal append position {position}")
+        try:
+            expected_scope_key = _scope_key(ledger, event)
+        except (KeyError, TypeError):
+            continue
+        persisted_scope_key = str(event.get("scope_key") or "")
+        sealed_scope_alias = checkpoint_legacy_scopes.get(expected_scope_key)
+        if persisted_scope_key != expected_scope_key and not (
+            position <= checkpoint_count and persisted_scope_key == sealed_scope_alias
+        ):
+            errors.append(
+                f"events[{position}].scope_key does not match episode/file/audit_cycle identity"
+            )
+        event_id = _identity(event.get("event_id"))
+        try:
+            expected_counts = _event_counts(event)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            expected_counts = None
+            errors.append(f"events[{position}].counts cannot be derived from malformed event data")
+        if (
+            expected_counts is not None
+            and position > checkpoint_count
+            and "counts" in event
+            and event.get("counts") != expected_counts
+        ):
+            errors.append(f"events[{position}].counts does not match replayed event counts")
+        state = replay.get(expected_scope_key)
+        if state is None:
+            expected_round = (
+                checkpoint_first_rounds.get(expected_scope_key)
+                if position <= checkpoint_count
+                else 1
+            )
+            if not isinstance(expected_round, int) or isinstance(expected_round, bool):
+                expected_round = 1
+        else:
+            expected_round = int(state["last_audit_round"]) + 1
+            closure_state = state.get("closure_state")
+            if closure_state == "reopened_by_independent_reaudit":
+                if _identity(state.get("pending_trigger_event_id")) != event_id:
+                    errors.append(
+                        f"events[{position}] does not match the authority reopen trigger"
+                    )
+                if (
+                    event.get("audit_class") != "independent_audit"
+                    or event.get("validation_role") != "independent_audit"
+                    or event.get("task_type") != "audit"
+                ):
+                    errors.append(
+                        f"events[{position}] authority reopen trigger must be a complete independent audit"
+                    )
+            elif closure_state in {
+                "legacy_signoff_requires_reaudit",
+                "legacy_resolution_requires_reaudit",
+            }:
+                if (
+                    event.get("audit_class") != "independent_audit"
+                    or event.get("validation_role") != "independent_audit"
+                    or event.get("task_type") != "audit"
+                ):
+                    errors.append(
+                        f"events[{position}] after a legacy sign-off must be a complete independent audit"
+                    )
+            elif closure_state == "preflight_clean":
+                if event.get("task_type") != "production_draft_preflight":
+                    errors.append(
+                        f"events[{position}] after preflight_clean must be a production draft preflight"
+                    )
+            elif closure_state not in {"open", "reopened_by_human"}:
+                errors.append(
+                    f"events[{position}] follows {closure_state} without an authorized reopen"
+                )
+        if event.get("audit_round") != expected_round:
+            errors.append(
+                f"events[{position}].audit_round must continue as {expected_round} in scope {expected_scope_key}"
+            )
+        errors.extend(
+            f"events[{position}]: {error}"
+            for error in _independent_freshness_errors(prior_events, event)
+        )
+        normalized_issues = [
+            _normalize_issue(issue)
+            for issue in event.get("issues", [])
+            if isinstance(issue, dict) and issue.get("status") in ISSUE_STATUS_ALIASES
+        ]
+        incoming_issue_ids = sorted(
+            {
+                f"ISS-{_stable_hash(_issue_dedup_key(ledger, event, issue))}"
+                for issue in normalized_issues
+            }
+        )
+        closure_state = _event_closure_state(event)
+        state = {
+            "scope_key": expected_scope_key,
+            "episode_id": event.get("episode_id"),
+            "file_name": event.get("file_name"),
+            "audit_cycle_id": event.get("audit_cycle_id"),
+            "last_event_id": event.get("event_id"),
+            "last_result": event.get("result"),
+            "last_audit_round": event.get("audit_round"),
+            "last_audit_class": event.get("audit_class"),
+            "open_issue_ids": incoming_issue_ids,
+            "closure_state": closure_state,
+            "can_advance": False,
+            "human_signoff": None,
+            "pending_trigger_event_id": None,
+        }
+        replay[expected_scope_key] = state
+
+        for index, record in human_actions_by_basis.get(event_id, []):
+            consumed_human_actions.add(index)
+            if record.get("scope_key") != expected_scope_key:
+                errors.append(f"human_signoffs[{index}] basis event belongs to another scope")
+                continue
+            decision = record.get("decision")
+            authority_class = record.get("authority_class", "independent_audit")
+            if authority_class == "legacy":
+                if decision == "reopen":
+                    state["closure_state"] = "reopened_by_human"
+                elif decision == "approve":
+                    state["closure_state"] = "legacy_signoff_requires_reaudit"
+                else:
+                    errors.append(f"human_signoffs[{index}].decision must be approve or reopen")
+                state["can_advance"] = False
+                state["human_signoff"] = copy.deepcopy(record)
+                continue
+            if decision == "approve":
+                if (
+                    state.get("closure_state") != "awaiting_human_signoff"
+                    or state.get("last_result") != "pass"
+                    or state.get("last_audit_class") != "independent_audit"
+                    or state.get("open_issue_ids")
+                ):
+                    errors.append(
+                        f"human_signoffs[{index}] approves a scope without a fresh clean independent audit"
+                    )
+                state["closure_state"] = "human_signed_off"
+                state["can_advance"] = True
+            elif decision == "reopen":
+                if state.get("closure_state") not in {"awaiting_human_signoff", "human_signed_off"}:
+                    errors.append(f"human_signoffs[{index}] reopens a scope from an invalid state")
+                state["closure_state"] = "reopened_by_human"
+                state["can_advance"] = False
+            else:
+                errors.append(f"human_signoffs[{index}].decision must be approve or reopen")
+            state["human_signoff"] = copy.deepcopy(record)
+
+        for index, record in authority_actions_by_basis.get(event_id, []):
+            consumed_authority_actions.add(index)
+            if record.get("scope_key") != expected_scope_key:
+                errors.append(f"authority_reopens[{index}] basis event belongs to another scope")
+                continue
+            if (
+                state.get("closure_state") != "awaiting_human_signoff"
+                or state.get("last_result") != "pass"
+                or state.get("last_audit_class") != "independent_audit"
+                or state.get("open_issue_ids")
+            ):
+                errors.append(
+                    f"authority_reopens[{index}] requires a fresh clean independent audit basis"
+                )
+            if int(state.get("last_audit_round", 0)) >= 3:
+                errors.append(f"authority_reopens[{index}] would exceed audit round three")
+            state["closure_state"] = "reopened_by_independent_reaudit"
+            state["can_advance"] = False
+            state["pending_trigger_event_id"] = record.get("trigger_event_id")
+        prior_events.append(event)
+
+    for index, record in enumerate(human_signoffs, 1):
+        if isinstance(record, dict) and index not in consumed_human_actions:
+            errors.append(f"human_signoffs[{index}] basis_event_id is unknown")
+    for index, record in enumerate(authority_reopens, 1):
+        if isinstance(record, dict) and index not in consumed_authority_actions:
+            errors.append(f"authority_reopens[{index}] basis_event_id is unknown")
+
+    for issue_index, issue in enumerate(ledger.get("issues", []), 1):
+        if not isinstance(issue, dict):
+            continue
+        issue_id = str(issue.get("issue_id") or "")
+        for row_index, row in enumerate(issue.get("history", []), 1):
+            if not isinstance(row, dict) or row.get("resolution") != (
+                "legacy_quality_block_cleared_by_independent_audit"
+            ):
+                continue
+            clearing_event = event_by_id.get(_identity(row.get("event_id")))
+            if not (
+                isinstance(clearing_event, dict)
+                and clearing_event.get("audit_class") == "independent_audit"
+                and clearing_event.get("validation_role") == "independent_audit"
+                and clearing_event.get("task_type") == "audit"
+                and clearing_event.get("result") == "pass"
+                and not clearing_event.get("issues")
+                and not clearing_event.get("blockers")
+                and _normalize(clearing_event.get("file_name"))
+                == _normalize(issue.get("logical_file"))
+                and _normalize(clearing_event.get("episode_id"))
+                == _normalize(issue.get("episode_id"))
+            ):
+                errors.append(
+                    f"issues[{issue_index}].history[{row_index}] has no clean independent clearance authority"
+                )
+                continue
+            cleared_scope_keys = row.get("cleared_scope_keys")
+            if not isinstance(cleared_scope_keys, list):
+                errors.append(
+                    f"issues[{issue_index}].history[{row_index}].cleared_scope_keys must be an array"
+                )
+                continue
+            for cleared_scope_key in cleared_scope_keys:
+                state = replay.get(str(cleared_scope_key))
+                if state is None or issue_id not in state.get("open_issue_ids", []):
+                    errors.append(
+                        f"issues[{issue_index}].history[{row_index}] clears a scope without that legacy issue"
+                    )
+                    continue
+                state["open_issue_ids"] = sorted(
+                    set(state.get("open_issue_ids", [])) - {issue_id}
+                )
+
+    stored_scopes: dict[str, dict[str, Any]] = {}
+    for index, scope in enumerate(scopes, 1):
+        if not isinstance(scope, dict):
+            continue
+        scope_key = str(scope.get("scope_key") or "")
+        if scope_key != _scope_key(ledger, scope):
+            errors.append(f"scope_states[{index}].scope_key does not match its scope identity")
+        stored_scopes[scope_key] = scope
+        last_event_id = _identity(scope.get("last_event_id"))
+        if last_event_id and event_scope_by_id.get(last_event_id) != scope_key:
+            errors.append(f"scope_states[{index}].last_event_id belongs to another scope or is unknown")
+    if set(stored_scopes) != set(replay):
+        errors.append("scope_states keys do not exactly match replayed event scopes")
+    for scope_key, expected in replay.items():
+        stored = stored_scopes.get(scope_key)
+        if stored is None:
+            continue
+        for field in (
+            "episode_id", "file_name", "audit_cycle_id", "last_event_id",
+            "last_result", "last_audit_round", "open_issue_ids", "closure_state",
+            "can_advance", "human_signoff",
+        ):
+            if stored.get(field) != expected.get(field):
+                errors.append(f"scope {scope_key}.{field} does not match replayed event state")
+
+    checkpoint_issue_prefix_by_id = {
+        _identity(prefix.get("issue_id")): prefix
+        for prefix in (
+            checkpoint.get("issue_prefixes", [])
+            if isinstance(checkpoint, dict)
+            and isinstance(checkpoint.get("issue_prefixes"), list)
+            else []
+        )
+        if isinstance(prefix, dict) and _identity(prefix.get("issue_id"))
+    }
+    for issue_index, issue in enumerate(ledger.get("issues", []), 1):
+        if not isinstance(issue, dict):
+            continue
+        issue_prefix = checkpoint_issue_prefix_by_id.get(
+            _identity(issue.get("issue_id")), {}
+        )
+        for collection_name in ("occurrence_locations", "history"):
+            raw_sealed_count = issue_prefix.get(
+                "occurrence_location_count"
+                if collection_name == "occurrence_locations"
+                else "history_count",
+                0,
+            )
+            sealed_count = (
+                raw_sealed_count
+                if isinstance(raw_sealed_count, int)
+                and not isinstance(raw_sealed_count, bool)
+                and raw_sealed_count >= 0
+                else 0
+            )
+            for row_index, row in enumerate(issue.get(collection_name, []), 1):
+                if not isinstance(row, dict) or not row.get("event_id") or not row.get("scope_key"):
+                    continue
+                if row_index <= sealed_count:
+                    continue
+                event_id = _identity(row.get("event_id"))
+                if isinstance(checkpoint, dict) and event_id.startswith("legacy-"):
+                    errors.append(
+                        f"issues[{issue_index}].{collection_name}[{row_index}] appends a legacy-only row after the sealed checkpoint"
+                    )
+                    continue
+                expected_scope_key = event_scope_by_id.get(event_id)
+                if expected_scope_key is None:
+                    errors.append(
+                        f"issues[{issue_index}].{collection_name}[{row_index}] references unknown event"
+                    )
+                elif str(row.get("scope_key")) not in checkpoint_allowed_scopes_by_event.get(
+                    event_id, {expected_scope_key}
+                ):
+                    errors.append(
+                        f"issues[{issue_index}].{collection_name}[{row_index}] references an event from another scope"
+                    )
+        issue_id = str(issue.get("issue_id") or "")
+        expected_open_scopes = sorted(
+            scope_key
+            for scope_key, state in replay.items()
+            if issue_id in state.get("open_issue_ids", [])
+        )
+        if sorted(issue.get("open_scope_keys", [])) != expected_open_scopes:
+            errors.append(
+                f"issues[{issue_index}].open_scope_keys does not match replayed scope issue state"
+            )
+        expected_status = "open" if expected_open_scopes else "resolved"
+        if issue.get("status") != expected_status:
+            errors.append(f"issues[{issue_index}].status does not match replayed scope issue state")
+
+    expected_counters = {
+        "event_sequence": len(events),
+        "event_count": len(events),
+        "issue_record_count": len(ledger.get("issues", [])),
+        "rule_candidate_count": len(ledger.get("rule_candidates", [])),
+    }
+    for field, expected in expected_counters.items():
+        if counters.get(field) != expected:
+            errors.append(f"counters.{field} must equal replayed value {expected}")
+    return errors
 
 
 def _issue_dedup_key(ledger: dict[str, Any], event: dict[str, Any], issue: dict[str, Any]) -> str:
@@ -750,6 +2252,16 @@ def _event_counts(event: dict[str, Any]) -> dict[str, int]:
         "introduced_error_count": sum(issue["status"] == "introduced" for issue in issues),
         "blocking_error_count": sum(bool(issue.get("blocking")) for issue in issues),
     }
+
+
+def _event_closure_state(event: dict[str, Any]) -> str:
+    if event.get("result") != "pass":
+        return "open"
+    if event.get("task_type") == "production_draft_preflight":
+        return "preflight_clean"
+    if event.get("audit_class") == "independent_audit":
+        return "awaiting_human_signoff"
+    return "legacy_resolution_requires_reaudit"
 
 
 def _candidate_for_issue(issue: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
@@ -812,14 +2324,130 @@ def _refresh_candidate_status(candidate: dict[str, Any]) -> None:
         candidate["status"] = "proposed"
 
 
-def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str, Any]:
-    ledger_errors = validate_ledger(ledger)
+def _event_request_identity(event: dict[str, Any]) -> str:
+    payload = copy.deepcopy(event)
+    for field in ("scope_key", "sequence", "counts", "legacy_aliases_applied"):
+        payload.pop(field, None)
+    if isinstance(payload.get("issues"), list):
+        payload["issues"] = [
+            _normalize_issue(issue)
+            for issue in payload["issues"]
+            if isinstance(issue, dict) and issue.get("status") in ISSUE_STATUS_ALIASES
+        ]
+    for field in (
+        "event_id", "audit_cycle_id", "handoff_id", "stage_trace_id",
+        "runtime_test_certificate_id", "file_fingerprint", "source_version",
+        *SHA256_FIELDS,
+    ):
+        if field in payload:
+            payload[field] = _identity(payload[field])
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _ingest_transition_errors(
+    ledger: dict[str, Any],
+    event: dict[str, Any],
+) -> list[str]:
+    errors = _independent_freshness_errors(ledger.get("events", []), event)
+    scope_key = _scope_key(ledger, event)
+    scope = next(
+        (
+            item for item in ledger.get("scope_states", [])
+            if isinstance(item, dict) and item.get("scope_key") == scope_key
+        ),
+        None,
+    )
+    if scope is None:
+        if event.get("audit_round") != 1:
+            errors.append("a new audit scope must start at audit_round=1")
+        return errors
+    closure_state = scope.get("closure_state")
+    if closure_state == "awaiting_human_signoff":
+        errors.append(
+            "scope has a clean pass and awaits human sign-off; sign off or reopen it before another event"
+        )
+    elif closure_state == "human_signed_off":
+        errors.append("scope is already signed off; start a new audit_cycle_id for a changed source")
+    elif closure_state == "preflight_clean":
+        if event.get("task_type") != "production_draft_preflight":
+            errors.append(
+                "a clean production preflight may be superseded only by another production draft preflight"
+            )
+    elif closure_state == "reopened_by_independent_reaudit":
+        reopen = scope.get("authority_reopen")
+        if event.get("audit_class") != "independent_audit":
+            errors.append("an independent re-audit reopen accepts only an independent_audit event")
+        if not isinstance(reopen, dict) or _identity(reopen.get("trigger_event_id")) != _identity(event.get("event_id")):
+            errors.append("independent re-audit event_id does not match the authorized reopen trigger")
+    elif closure_state in {
+        "legacy_signoff_requires_reaudit",
+        "legacy_resolution_requires_reaudit",
+    }:
+        if (
+            event.get("audit_class") != "independent_audit"
+            or event.get("validation_role") != "independent_audit"
+            or event.get("task_type") != "audit"
+        ):
+            errors.append("a legacy sign-off requires a new complete independent audit")
+    expected_round = int(scope.get("last_audit_round", 0)) + 1
+    if event.get("audit_round") != expected_round:
+        errors.append(
+            f"audit_round must continue from {scope.get('last_audit_round')} to {expected_round} in this cycle"
+        )
+    return errors
+
+
+def ingest_event(
+    ledger: dict[str, Any],
+    raw_event: dict[str, Any],
+    *,
+    checkpoint_authorizer: Callable[[dict[str, Any]], bool] | None = None,
+) -> dict[str, Any]:
+    """Commit an accepted event atomically; every rejection leaves byte state intact."""
+
+    candidate = copy.deepcopy(ledger)
+    checkpoint_before = copy.deepcopy(candidate.get("replay_checkpoint"))
+    result = _ingest_event_in_place(
+        candidate, raw_event, checkpoint_authorizer=checkpoint_authorizer
+    )
+    if result.get("status") == "duplicate":
+        return result
+    if candidate.get("replay_checkpoint") != checkpoint_before:
+        raise ValueError("event mutation must not create or modify replay_checkpoint")
+    post_errors = validate_ledger(
+        candidate, checkpoint_authorizer=checkpoint_authorizer
+    )
+    if post_errors:
+        raise ValueError("event would create invalid ledger: " + "; ".join(post_errors))
+    ledger.clear()
+    ledger.update(candidate)
+    return result
+
+
+def _ingest_event_in_place(
+    ledger: dict[str, Any],
+    raw_event: dict[str, Any],
+    *,
+    checkpoint_authorizer: Callable[[dict[str, Any]], bool] | None = None,
+) -> dict[str, Any]:
+    ledger_errors = validate_ledger(
+        ledger, checkpoint_authorizer=checkpoint_authorizer
+    )
     if ledger_errors:
         raise ValueError("invalid ledger: " + "; ".join(ledger_errors))
     event_errors = validate_event(raw_event, int(ledger["policy"]["max_auto_repair_rounds"]))
     if event_errors:
         raise ValueError("invalid event: " + "; ".join(event_errors))
-    if any(event["event_id"] == raw_event["event_id"] for event in ledger["events"]):
+    duplicate = next(
+        (
+            event for event in ledger["events"]
+            if _identity(event.get("event_id")) == _identity(raw_event.get("event_id"))
+        ),
+        None,
+    )
+    if duplicate is not None:
+        if _event_request_identity(duplicate) != _event_request_identity(raw_event):
+            raise ValueError("event_id conflicts with a different persisted event payload")
         return {"status": "duplicate", "event_id": raw_event["event_id"], "summary": summarize(ledger)}
 
     event = copy.deepcopy(raw_event)
@@ -833,6 +2461,9 @@ def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str,
         event["legacy_aliases_applied"] = {
             value: LEGACY_AUDIT_CATEGORY_ALIASES[value] for value in legacy_aliases
         }
+    transition_errors = _ingest_transition_errors(ledger, event)
+    if transition_errors:
+        raise ValueError("invalid event transition: " + "; ".join(transition_errors))
     scope_key = _scope_key(ledger, event)
     event["scope_key"] = scope_key
     ledger["counters"]["event_sequence"] += 1
@@ -855,14 +2486,6 @@ def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str,
             "human_signoff": None,
         }
         ledger["scope_states"].append(scope)
-    elif scope.get("closure_state") == "awaiting_human_signoff":
-        raise ValueError("scope has a clean pass and awaits human sign-off; sign off or reopen it before another event")
-    elif scope.get("closure_state") == "human_signed_off":
-        raise ValueError("scope is already signed off; start a new audit_cycle_id for a changed source")
-    else:
-        expected_round = int(scope["last_audit_round"]) + 1
-        if event["audit_round"] != expected_round:
-            raise ValueError(f"audit_round must continue from {scope['last_audit_round']} to {expected_round} in this cycle")
 
     previous_open = set(scope["open_issue_ids"])
     records_by_key: dict[str, dict[str, Any]] = {}
@@ -910,6 +2533,7 @@ def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str,
                 "normalized_root_cause": _normalized_root_cause(issue),
                 "field_class": _field_class(issue.get("field")),
                 "status": "open",
+                "legacy_resolution_requires_reaudit": False,
                 "open_scope_keys": [scope_key],
                 "recurrence_state": "first_occurrence",
                 "occurrence_count": 1,
@@ -1061,6 +2685,9 @@ def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str,
             record["consecutive_rounds"] = 0
             if record["status"] == "resolved":
                 record["resolved_at"] = event["timestamp"]
+                record["legacy_resolution_requires_reaudit"] = (
+                    event.get("audit_class") != "independent_audit"
+                )
             record["history"].append({
                 "event_id": event["event_id"],
                 "timestamp": event["timestamp"],
@@ -1069,16 +2696,59 @@ def ingest_event(ledger: dict[str, Any], raw_event: dict[str, Any]) -> dict[str,
                 "resolution": "not_present_in_follow-up_event",
             })
 
+    if event.get("audit_class") == "independent_audit" and event.get("result") == "pass":
+        for record in ledger["issues"]:
+            if not isinstance(record, dict) or not record.get(
+                "legacy_resolution_requires_reaudit"
+            ):
+                continue
+            if (
+                _normalize(record.get("logical_file")) != _normalize(event.get("file_name"))
+                or _normalize(record.get("episode_id")) != _normalize(event.get("episode_id"))
+            ):
+                continue
+            cleared_scope_keys = sorted(set(record.get("open_scope_keys", [])))
+            for legacy_scope_key in cleared_scope_keys:
+                legacy_scope = next(
+                    (
+                        row
+                        for row in ledger.get("scope_states", [])
+                        if row.get("scope_key") == legacy_scope_key
+                    ),
+                    None,
+                )
+                if isinstance(legacy_scope, dict):
+                    legacy_scope["open_issue_ids"] = sorted(
+                        set(legacy_scope.get("open_issue_ids", []))
+                        - {str(record.get("issue_id"))}
+                    )
+            record["open_scope_keys"] = []
+            record["status"] = "resolved"
+            record["legacy_resolution_requires_reaudit"] = False
+            record["resolved_at"] = event["timestamp"]
+            record["history"].append({
+                "event_id": event["event_id"],
+                "timestamp": event["timestamp"],
+                "scope_key": scope_key,
+                "audit_round": event["audit_round"],
+                "source_version": event["source_version"],
+                "resolution": "legacy_quality_block_cleared_by_independent_audit",
+                "cleared_scope_keys": cleared_scope_keys,
+                "handoff_id": event["handoff_id"],
+                "stage_trace_id": event["stage_trace_id"],
+                "artifact_semantic_fingerprint": event[
+                    "artifact_semantic_fingerprint"
+                ],
+                "canonical_fingerprint": event["canonical_fingerprint"],
+            })
+
     scope["last_event_id"] = event["event_id"]
     scope["last_result"] = event["result"]
     scope["last_audit_round"] = event["audit_round"]
     scope["open_issue_ids"] = sorted(incoming_ids)
     scope["human_signoff"] = None
     scope["can_advance"] = False
-    if event.get("task_type") == "production_draft_preflight":
-        scope["closure_state"] = "preflight_clean" if event["result"] == "pass" else "open"
-    else:
-        scope["closure_state"] = "awaiting_human_signoff" if event["result"] == "pass" else "open"
+    scope["closure_state"] = _event_closure_state(event)
 
     ledger["events"].append(event)
     ledger["updated_at"] = event["timestamp"]
@@ -1106,7 +2776,14 @@ def check_candidate(
     conflict_check: str,
     all_tests_pass: bool,
     timestamp: str | None = None,
+    *,
+    checkpoint_authorizer: Callable[[dict[str, Any]], bool] | None = None,
 ) -> dict[str, Any]:
+    ledger_errors = validate_ledger(
+        ledger, checkpoint_authorizer=checkpoint_authorizer
+    )
+    if ledger_errors:
+        raise ValueError("invalid ledger: " + "; ".join(ledger_errors))
     candidate = next((item for item in ledger["rule_candidates"] if item["candidate_id"] == candidate_id), None)
     if candidate is None:
         raise ValueError(f"unknown candidate_id: {candidate_id}")
@@ -1124,7 +2801,19 @@ def check_candidate(
     return {"status": candidate["status"], "candidate_id": candidate_id, "formal_rule_mutated": False}
 
 
-def decide_candidate(ledger: dict[str, Any], candidate_id: str, decision: str, timestamp: str | None = None) -> dict[str, Any]:
+def decide_candidate(
+    ledger: dict[str, Any],
+    candidate_id: str,
+    decision: str,
+    timestamp: str | None = None,
+    *,
+    checkpoint_authorizer: Callable[[dict[str, Any]], bool] | None = None,
+) -> dict[str, Any]:
+    ledger_errors = validate_ledger(
+        ledger, checkpoint_authorizer=checkpoint_authorizer
+    )
+    if ledger_errors:
+        raise ValueError("invalid ledger: " + "; ".join(ledger_errors))
     if decision not in {"approve", "reject"}:
         raise ValueError("decision must be approve or reject")
     candidate = next((item for item in ledger["rule_candidates"] if item["candidate_id"] == candidate_id), None)
@@ -1138,7 +2827,48 @@ def decide_candidate(ledger: dict[str, Any], candidate_id: str, decision: str, t
     return {"status": candidate["status"], "candidate_id": candidate_id, "formal_rule_mutated": False}
 
 
-def signoff_scope(ledger: dict[str, Any], scope_key: str, decision: str, timestamp: str | None = None) -> dict[str, Any]:
+def signoff_scope(
+    ledger: dict[str, Any],
+    scope_key: str,
+    decision: str,
+    timestamp: str | None = None,
+    *,
+    checkpoint_authorizer: Callable[[dict[str, Any]], bool] | None = None,
+) -> dict[str, Any]:
+    candidate = copy.deepcopy(ledger)
+    checkpoint_before = copy.deepcopy(candidate.get("replay_checkpoint"))
+    result = _signoff_scope_in_place(
+        candidate,
+        scope_key,
+        decision,
+        timestamp,
+        checkpoint_authorizer=checkpoint_authorizer,
+    )
+    if candidate.get("replay_checkpoint") != checkpoint_before:
+        raise ValueError("sign-off must not create or modify replay_checkpoint")
+    post_errors = validate_ledger(
+        candidate, checkpoint_authorizer=checkpoint_authorizer
+    )
+    if post_errors:
+        raise ValueError("sign-off would create invalid ledger: " + "; ".join(post_errors))
+    ledger.clear()
+    ledger.update(candidate)
+    return result
+
+
+def _signoff_scope_in_place(
+    ledger: dict[str, Any],
+    scope_key: str,
+    decision: str,
+    timestamp: str | None = None,
+    *,
+    checkpoint_authorizer: Callable[[dict[str, Any]], bool] | None = None,
+) -> dict[str, Any]:
+    ledger_errors = validate_ledger(
+        ledger, checkpoint_authorizer=checkpoint_authorizer
+    )
+    if ledger_errors:
+        raise ValueError("invalid ledger: " + "; ".join(ledger_errors))
     if decision not in {"approve", "reopen"}:
         raise ValueError("decision must be approve or reopen")
     scope = next((item for item in ledger["scope_states"] if item["scope_key"] == scope_key), None)
@@ -1146,14 +2876,48 @@ def signoff_scope(ledger: dict[str, Any], scope_key: str, decision: str, timesta
         raise ValueError(f"unknown scope_key: {scope_key}")
     now = _timestamp(timestamp)
     if decision == "approve":
-        if scope.get("last_result") != "pass" or scope.get("open_issue_ids"):
-            raise ValueError("human sign-off requires a clean pass and zero open issues")
+        last_event = next(
+            (
+                event for event in ledger.get("events", [])
+                if _identity(event.get("event_id")) == _identity(scope.get("last_event_id"))
+            ),
+            None,
+        )
+        if (
+            scope.get("closure_state") != "awaiting_human_signoff"
+            or scope.get("last_result") != "pass"
+            or scope.get("open_issue_ids")
+            or not isinstance(last_event, dict)
+            or last_event.get("audit_class") != "independent_audit"
+        ):
+            raise ValueError(
+                "human sign-off requires a fresh clean independent audit after any reopen"
+            )
         scope["closure_state"] = "human_signed_off"
         scope["can_advance"] = True
     else:
+        if scope.get("closure_state") not in {"awaiting_human_signoff", "human_signed_off"}:
+            raise ValueError("human reopen requires a clean pending or signed scope")
         scope["closure_state"] = "reopened_by_human"
         scope["can_advance"] = False
-    record = {"scope_key": scope_key, "decision": decision, "timestamp": now}
+    last_event = next(
+        (
+            event for event in ledger.get("events", [])
+            if _identity(event.get("event_id")) == _identity(scope.get("last_event_id"))
+        ),
+        None,
+    )
+    record = {
+        "scope_key": scope_key,
+        "basis_event_id": scope["last_event_id"],
+        "authority_class": (
+            "independent_audit"
+            if isinstance(last_event, dict) and last_event.get("audit_class") == "independent_audit"
+            else "legacy"
+        ),
+        "decision": decision,
+        "timestamp": now,
+    }
     scope["human_signoff"] = record
     ledger["human_signoffs"].append(record)
     ledger["updated_at"] = now
@@ -1165,8 +2929,47 @@ def reopen_scope_for_independent_reaudit(
     scope_key: str,
     trigger_event_id: str,
     timestamp: str | None = None,
+    *,
+    checkpoint_authorizer: Callable[[dict[str, Any]], bool] | None = None,
 ) -> dict[str, Any]:
     """Reopen a clean audit scope without fabricating a human decision."""
+
+    candidate = copy.deepcopy(ledger)
+    checkpoint_before = copy.deepcopy(candidate.get("replay_checkpoint"))
+    record = _reopen_scope_for_independent_reaudit_in_place(
+        candidate,
+        scope_key,
+        trigger_event_id,
+        timestamp,
+        checkpoint_authorizer=checkpoint_authorizer,
+    )
+    if candidate.get("replay_checkpoint") != checkpoint_before:
+        raise ValueError("reopen must not create or modify replay_checkpoint")
+    post_errors = validate_ledger(
+        candidate, checkpoint_authorizer=checkpoint_authorizer
+    )
+    if post_errors:
+        raise ValueError("reopen would create invalid ledger: " + "; ".join(post_errors))
+    ledger.clear()
+    ledger.update(candidate)
+    return record
+
+
+def _reopen_scope_for_independent_reaudit_in_place(
+    ledger: dict[str, Any],
+    scope_key: str,
+    trigger_event_id: str,
+    timestamp: str | None = None,
+    *,
+    checkpoint_authorizer: Callable[[dict[str, Any]], bool] | None = None,
+) -> dict[str, Any]:
+    ledger_errors = validate_ledger(
+        ledger, checkpoint_authorizer=checkpoint_authorizer
+    )
+    if ledger_errors:
+        raise ValueError("invalid ledger: " + "; ".join(ledger_errors))
+    if not _is_canonical_identifier(trigger_event_id):
+        raise ValueError("trigger_event_id must be a non-empty canonical identifier")
 
     scope = next(
         (
@@ -1182,9 +2985,41 @@ def reopen_scope_for_independent_reaudit(
         raise ValueError(
             "independent re-audit may reopen only a clean scope awaiting human sign-off"
         )
+    if int(scope.get("last_audit_round", 0)) >= int(
+        ledger.get("policy", {}).get("max_auto_repair_rounds", 3)
+    ):
+        raise ValueError("independent re-audit cannot exceed the maximum audit round")
+    last_event = next(
+        (
+            event for event in ledger.get("events", [])
+            if _identity(event.get("event_id")) == _identity(scope.get("last_event_id"))
+        ),
+        None,
+    )
+    if (
+        not isinstance(last_event, dict)
+        or last_event.get("audit_class") != "independent_audit"
+        or last_event.get("result") != "pass"
+        or last_event.get("issues")
+        or last_event.get("blockers")
+    ):
+        raise ValueError("independent re-audit requires the latest clean independent audit event")
+    if any(
+        _identity(event.get("event_id")) == _identity(trigger_event_id)
+        for event in ledger.get("events", [])
+        if isinstance(event, dict)
+    ):
+        raise ValueError("trigger_event_id must identify the not-yet-recorded re-audit event")
+    if any(
+        _identity(record.get("trigger_event_id")) == _identity(trigger_event_id)
+        for record in ledger.get("authority_reopens", [])
+        if isinstance(record, dict)
+    ):
+        raise ValueError("trigger_event_id is already bound to an authority reopen")
     now = _timestamp(timestamp)
     record = {
         "scope_key": scope_key,
+        "basis_event_id": scope["last_event_id"],
         "authority": "independent_audit",
         "reason": "fingerprint-invalidating explicit re-audit",
         "trigger_event_id": str(trigger_event_id),
@@ -1219,7 +3054,7 @@ def summarize(ledger: dict[str, Any]) -> dict[str, Any]:
         "blocking_error_count": 0,
     }
     for event in events:
-        counts = event.get("counts") or _event_counts(event)
+        counts = _event_counts(event)
         for key in totals:
             totals[key] += int(counts.get(key, 0))
     initial = totals["initial_error_count"]
@@ -1259,7 +3094,7 @@ def summarize(ledger: dict[str, Any]) -> dict[str, Any]:
                 quality.get("unique_affected_shot_count", 0)
             )
         else:
-            counts = event.get("counts") or _event_counts(event)
+            counts = _event_counts(event)
             first_checked += int(counts.get("checked_shot_count", 0))
             first_problem_shots += int(counts.get("problem_shot_count", 0))
 
@@ -1300,7 +3135,7 @@ def summarize(ledger: dict[str, Any]) -> dict[str, Any]:
     }
     current_independent = independent_events[-1] if independent_events else None
     current_counts = (
-        (current_independent.get("counts") or _event_counts(current_independent))
+        _event_counts(current_independent)
         if isinstance(current_independent, dict)
         else None
     )
@@ -1363,7 +3198,7 @@ def summarize(ledger: dict[str, Any]) -> dict[str, Any]:
             "episode_id": latest_event.get("episode_id"),
             "audit_round": latest_event.get("audit_round"),
             "result": latest_event.get("result"),
-            "counts": latest_event.get("counts"),
+            "counts": _event_counts(latest_event),
         },
         "advance_ready_scope_count": sum(scope.get("can_advance") is True for scope in scopes),
         "awaiting_human_signoff_count": sum(scope.get("closure_state") == "awaiting_human_signoff" for scope in scopes),
