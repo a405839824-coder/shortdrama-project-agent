@@ -60,7 +60,7 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.11",
+    "plugin_version": "0.5.12",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
     "canonical_atomic_field_count": 27,
@@ -460,6 +460,7 @@
         "minimum_plugin_version": "0.5.8",
         "legacy_handoff_recovery_introduced_in": "0.5.6",
         "historical_contract_attestation_introduced_in": "0.5.11",
+        "sealed_per_handoff_current_report_profiles_corrected_in": "0.5.12",
         "public_tool_contract": {
           "exact_tool_count": 19,
           "tool": "recover_storyboard_handoff",
@@ -512,16 +513,128 @@
             "historical_contract_issue_count": 0,
             "historical_validator_policy": "frozen_report_must_exactly_equal_signed_original_production_report",
             "current_validation_status": "fail_current",
-            "allowed_current_failure_scope": {
-              "error_code": "E-I2V-INDEP-002",
-              "template_gate_id": "THG-01",
-              "severity": "fail",
-              "blocking": true,
-              "location_pattern": "^shots\\[[1-9][0-9]*\\]\\.生成限制$",
-              "exact_evidence": "逐字短语'9:16竖屏'应恰好出现1次，当前=0",
-              "warning_count": 0,
-              "report_issue_error_and_shot_counts_must_close": true,
-              "other_current_failures": "fail_closed_before_mutation"
+            "sealed_current_report_profile_policy": {
+              "qualification": "exact_non_interchangeable_profile_per_handoff",
+              "required_fields": [
+                "handoff_id",
+                "canonical_sha256",
+                "current_report_sha256",
+                "shot_count",
+                "error_count",
+                "warning_count",
+                "error_code_histogram",
+                "current_validator_composite",
+                "current_validator_sha256"
+              ],
+              "current_validator_composite": "V16.3-148-R10-StableRuntime:R10.1:R10-PG1:af1fccfe2ab8c3bc",
+              "current_validator_sha256": "af1fccfe2ab8c3bc946b0537cf9fe23241f51afc776a9d33275c133599570140",
+              "plan_and_execute_rerun_current_validator": true,
+              "category_level_allowlist_forbidden": true,
+              "cross_handoff_profile_reuse": false,
+              "mismatch_policy": "fail_closed_before_any_authoritative_write",
+              "profiles_by_handoff": {
+                "HND-f6fd29730a074d2c": {
+                  "canonical_sha256": "35cf1227e70e4ced71df80b3db92a68586c121e821f87de05c0b46371ab5131f",
+                  "current_report_sha256": "8b85adf678601819044974fb42510034568a57a77f3cbaea733052a1c2a0225a",
+                  "shot_count": 56,
+                  "error_count": 334,
+                  "warning_count": 0,
+                  "error_code_histogram": {
+                    "E-AUDIO-STAGE-001": 56,
+                    "E-BATCH-004": 56,
+                    "E-CONTINUITY-001": 163,
+                    "E-I2V-INDEP-001": 1,
+                    "E-I2V-INDEP-002": 56,
+                    "E-INTEGRATION-001": 1,
+                    "E-JIMENG-TIMING-001": 1
+                  }
+                },
+                "HND-95e3b1c141a64783": {
+                  "canonical_sha256": "e4fcc1f6e4eab3a357ae8db96ec988a5bd661bf476d8c3af8c7f8fc4febe4423",
+                  "current_report_sha256": "a6c26b492db69c8aae0b53eb10bf10f07618914a2ba6c2e7ff1755e2c4d89ed7",
+                  "shot_count": 61,
+                  "error_count": 373,
+                  "warning_count": 0,
+                  "error_code_histogram": {
+                    "E-AUDIO-STAGE-001": 61,
+                    "E-BATCH-003": 19,
+                    "E-BATCH-004": 61,
+                    "E-CONTINUITY-001": 156,
+                    "E-I2V-INDEP-001": 1,
+                    "E-I2V-INDEP-002": 61,
+                    "E-INTEGRATION-001": 1,
+                    "E-JIMENG-TIMING-001": 10,
+                    "E-SOURCE-SELECT-001": 3
+                  }
+                },
+                "HND-c88ee199d5fb4676": {
+                  "canonical_sha256": "8e2470c4e3e31eb53675d0c1a65c64f3fca6f40e720089faf32661721e04ffe6",
+                  "current_report_sha256": "f6c231d4d1388bc24b550e6fdaf6f0621482edca57b5d6c853dc98816e9f2473",
+                  "shot_count": 55,
+                  "error_count": 380,
+                  "warning_count": 0,
+                  "error_code_histogram": {
+                    "E-AUDIO-STAGE-001": 55,
+                    "E-BATCH-003": 29,
+                    "E-BATCH-004": 55,
+                    "E-CONTINUITY-001": 158,
+                    "E-I2V-INDEP-002": 55,
+                    "E-JIMENG-TIMING-001": 3,
+                    "E-VIS-001": 25
+                  }
+                },
+                "HND-e8ca409208134104": {
+                  "canonical_sha256": "c550aa4e9f4c8f1d7ffa4d598a2344d4c1a34091eed675d0cb39c05226b53e12",
+                  "current_report_sha256": "7b5b09ee117190694b47f730ce52cf53db6657a8f74b995a09ff77964c48371e",
+                  "shot_count": 60,
+                  "error_count": 401,
+                  "warning_count": 0,
+                  "error_code_histogram": {
+                    "E-AUDIO-STAGE-001": 60,
+                    "E-BATCH-003": 20,
+                    "E-BATCH-004": 60,
+                    "E-CONTINUITY-001": 175,
+                    "E-I2V-INDEP-002": 60,
+                    "E-JIMENG-TIMING-001": 11,
+                    "E-VIS-001": 15
+                  }
+                },
+                "HND-0dd8fa51a9e24cd0": {
+                  "canonical_sha256": "8c6f7a1946fa52b3df40e2f169f24b22c05c923f7e1d70446732a5c088207bd6",
+                  "current_report_sha256": "997b93a683703d121c0a0b99b4ee9fb5a40289b8e75dd7b8073d85aa454d5a3c",
+                  "shot_count": 57,
+                  "error_count": 375,
+                  "warning_count": 0,
+                  "error_code_histogram": {
+                    "E-AUDIO-STAGE-001": 57,
+                    "E-BATCH-003": 18,
+                    "E-BATCH-004": 57,
+                    "E-CONTINUITY-001": 162,
+                    "E-I2V-INDEP-001": 1,
+                    "E-I2V-INDEP-002": 57,
+                    "E-INTEGRATION-001": 1,
+                    "E-JIMENG-TIMING-001": 10,
+                    "E-SOURCE-SELECT-001": 1,
+                    "E-VIS-001": 11
+                  }
+                },
+                "HND-9029110f35d74270": {
+                  "canonical_sha256": "472f1e6457fcbc1ba9cf220b9bee4953a8fa93cbd9de4baffe0c782cbf644480",
+                  "current_report_sha256": "bbb6549df6ea9e403664237ed95edde78d075d2f5fad48e582b09ee3ec4b38ee",
+                  "shot_count": 59,
+                  "error_count": 378,
+                  "warning_count": 0,
+                  "error_code_histogram": {
+                    "E-AUDIO-STAGE-001": 59,
+                    "E-BATCH-003": 17,
+                    "E-BATCH-004": 59,
+                    "E-CONTINUITY-001": 174,
+                    "E-I2V-INDEP-002": 59,
+                    "E-JIMENG-TIMING-001": 1,
+                    "E-VIS-001": 9
+                  }
+                }
+              }
             },
             "current_validation_report_policy": "preserve_complete_current_validator_failure_diagnostics_unchanged",
             "current_production_pass_claimed": false,

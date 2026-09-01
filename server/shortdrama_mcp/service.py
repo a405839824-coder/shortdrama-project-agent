@@ -255,7 +255,181 @@ FROZEN_V053_HANDOFF_RULESET_PROFILES = {
         "d8841a2f52d86bed8554b21c3543e85f753b4b6f01a1b0a94964a9da4bcf90dc",
     ),
 }
-HISTORICAL_COMPATIBILITY_ERROR_CODE = "E-I2V-INDEP-002"
+CONTROLLED_V053_CURRENT_VALIDATOR_COMPOSITE = (
+    "V16.3-148-R10-StableRuntime:R10.1:R10-PG1:af1fccfe2ab8c3bc"
+)
+CONTROLLED_V053_CURRENT_VALIDATOR_FINGERPRINT = (
+    "af1fccfe2ab8c3bc946b0537cf9fe23241f51afc776a9d33275c133599570140"
+)
+CONTROLLED_V053_CURRENT_VALIDATION_PROFILES = {
+    "HND-f6fd29730a074d2c": {
+        "handoff_id": "HND-f6fd29730a074d2c",
+        "canonical_sha256": (
+            "35cf1227e70e4ced71df80b3db92a68586c121e821f87de05c0b46371ab5131f"
+        ),
+        "current_report_sha256": (
+            "8b85adf678601819044974fb42510034568a57a77f3cbaea733052a1c2a0225a"
+        ),
+        "shot_count": 56,
+        "error_count": 334,
+        "warning_count": 0,
+        "error_histogram": {
+            "E-AUDIO-STAGE-001": 56,
+            "E-BATCH-004": 56,
+            "E-CONTINUITY-001": 163,
+            "E-I2V-INDEP-001": 1,
+            "E-I2V-INDEP-002": 56,
+            "E-INTEGRATION-001": 1,
+            "E-JIMENG-TIMING-001": 1,
+        },
+        "current_validator_composite": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_COMPOSITE
+        ),
+        "current_validator_fingerprint": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_FINGERPRINT
+        ),
+    },
+    "HND-95e3b1c141a64783": {
+        "handoff_id": "HND-95e3b1c141a64783",
+        "canonical_sha256": (
+            "e4fcc1f6e4eab3a357ae8db96ec988a5bd661bf476d8c3af8c7f8fc4febe4423"
+        ),
+        "current_report_sha256": (
+            "a6c26b492db69c8aae0b53eb10bf10f07618914a2ba6c2e7ff1755e2c4d89ed7"
+        ),
+        "shot_count": 61,
+        "error_count": 373,
+        "warning_count": 0,
+        "error_histogram": {
+            "E-AUDIO-STAGE-001": 61,
+            "E-BATCH-003": 19,
+            "E-BATCH-004": 61,
+            "E-CONTINUITY-001": 156,
+            "E-I2V-INDEP-001": 1,
+            "E-I2V-INDEP-002": 61,
+            "E-INTEGRATION-001": 1,
+            "E-JIMENG-TIMING-001": 10,
+            "E-SOURCE-SELECT-001": 3,
+        },
+        "current_validator_composite": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_COMPOSITE
+        ),
+        "current_validator_fingerprint": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_FINGERPRINT
+        ),
+    },
+    "HND-c88ee199d5fb4676": {
+        "handoff_id": "HND-c88ee199d5fb4676",
+        "canonical_sha256": (
+            "8e2470c4e3e31eb53675d0c1a65c64f3fca6f40e720089faf32661721e04ffe6"
+        ),
+        "current_report_sha256": (
+            "f6c231d4d1388bc24b550e6fdaf6f0621482edca57b5d6c853dc98816e9f2473"
+        ),
+        "shot_count": 55,
+        "error_count": 380,
+        "warning_count": 0,
+        "error_histogram": {
+            "E-AUDIO-STAGE-001": 55,
+            "E-BATCH-003": 29,
+            "E-BATCH-004": 55,
+            "E-CONTINUITY-001": 158,
+            "E-I2V-INDEP-002": 55,
+            "E-JIMENG-TIMING-001": 3,
+            "E-VIS-001": 25,
+        },
+        "current_validator_composite": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_COMPOSITE
+        ),
+        "current_validator_fingerprint": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_FINGERPRINT
+        ),
+    },
+    "HND-e8ca409208134104": {
+        "handoff_id": "HND-e8ca409208134104",
+        "canonical_sha256": (
+            "c550aa4e9f4c8f1d7ffa4d598a2344d4c1a34091eed675d0cb39c05226b53e12"
+        ),
+        "current_report_sha256": (
+            "7b5b09ee117190694b47f730ce52cf53db6657a8f74b995a09ff77964c48371e"
+        ),
+        "shot_count": 60,
+        "error_count": 401,
+        "warning_count": 0,
+        "error_histogram": {
+            "E-AUDIO-STAGE-001": 60,
+            "E-BATCH-003": 20,
+            "E-BATCH-004": 60,
+            "E-CONTINUITY-001": 175,
+            "E-I2V-INDEP-002": 60,
+            "E-JIMENG-TIMING-001": 11,
+            "E-VIS-001": 15,
+        },
+        "current_validator_composite": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_COMPOSITE
+        ),
+        "current_validator_fingerprint": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_FINGERPRINT
+        ),
+    },
+    "HND-0dd8fa51a9e24cd0": {
+        "handoff_id": "HND-0dd8fa51a9e24cd0",
+        "canonical_sha256": (
+            "8c6f7a1946fa52b3df40e2f169f24b22c05c923f7e1d70446732a5c088207bd6"
+        ),
+        "current_report_sha256": (
+            "997b93a683703d121c0a0b99b4ee9fb5a40289b8e75dd7b8073d85aa454d5a3c"
+        ),
+        "shot_count": 57,
+        "error_count": 375,
+        "warning_count": 0,
+        "error_histogram": {
+            "E-AUDIO-STAGE-001": 57,
+            "E-BATCH-003": 18,
+            "E-BATCH-004": 57,
+            "E-CONTINUITY-001": 162,
+            "E-I2V-INDEP-001": 1,
+            "E-I2V-INDEP-002": 57,
+            "E-INTEGRATION-001": 1,
+            "E-JIMENG-TIMING-001": 10,
+            "E-SOURCE-SELECT-001": 1,
+            "E-VIS-001": 11,
+        },
+        "current_validator_composite": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_COMPOSITE
+        ),
+        "current_validator_fingerprint": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_FINGERPRINT
+        ),
+    },
+    "HND-9029110f35d74270": {
+        "handoff_id": "HND-9029110f35d74270",
+        "canonical_sha256": (
+            "472f1e6457fcbc1ba9cf220b9bee4953a8fa93cbd9de4baffe0c782cbf644480"
+        ),
+        "current_report_sha256": (
+            "bbb6549df6ea9e403664237ed95edde78d075d2f5fad48e582b09ee3ec4b38ee"
+        ),
+        "shot_count": 59,
+        "error_count": 378,
+        "warning_count": 0,
+        "error_histogram": {
+            "E-AUDIO-STAGE-001": 59,
+            "E-BATCH-003": 17,
+            "E-BATCH-004": 59,
+            "E-CONTINUITY-001": 174,
+            "E-I2V-INDEP-002": 59,
+            "E-JIMENG-TIMING-001": 1,
+            "E-VIS-001": 9,
+        },
+        "current_validator_composite": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_COMPOSITE
+        ),
+        "current_validator_fingerprint": (
+            CONTROLLED_V053_CURRENT_VALIDATOR_FINGERPRINT
+        ),
+    },
+}
 DRAFT_PREFLIGHT_PASS = "draft_preflight_pass"
 DRAFT_PREFLIGHT_FAIL = "draft_preflight_fail"
 
@@ -5181,36 +5355,78 @@ class StoryboardService:
             )
         )
 
-    @staticmethod
-    def _sealed_legacy_aspect_contract_drift(
-        report: dict[str, Any], *, shot_count: int
+    def _sealed_historical_current_validation_profile(
+        self,
+        *,
+        handoff_id: str,
+        storyboard: dict[str, Any],
+        report: dict[str, Any],
     ) -> bool:
-        """Accept only the known post-v0.5.3 exact-aspect wording drift."""
+        """Match one immutable handoff-specific current-validation seal."""
 
+        profile = CONTROLLED_V053_CURRENT_VALIDATION_PROFILES.get(
+            handoff_id
+        )
+        if not isinstance(profile, dict):
+            return False
         issues = report.get("issues")
+        error_count = report.get("error_count")
+        warning_count = report.get("warning_count")
+        report_shot_count = report.get("shot_count")
+        profile_error_count = profile.get("error_count")
+        profile_warning_count = profile.get("warning_count")
+        profile_shot_count = profile.get("shot_count")
+        profile_histogram = profile.get("error_histogram")
+        strict_report_counts = all(
+            isinstance(value, int) and not isinstance(value, bool)
+            for value in (error_count, warning_count, report_shot_count)
+        )
+        strict_profile_counts = all(
+            isinstance(value, int) and not isinstance(value, bool)
+            for value in (
+                profile_error_count,
+                profile_warning_count,
+                profile_shot_count,
+            )
+        )
         if (
-            report.get("status") != "fail"
+            profile.get("handoff_id") != handoff_id
+            or report.get("status") != "fail"
             or not isinstance(issues, list)
             or not issues
-            or report.get("error_count") != len(issues)
-            or int(report.get("warning_count") or 0) != 0
-            or report.get("shot_count") != shot_count
+            or not all(isinstance(issue, dict) for issue in issues)
+            or not strict_report_counts
+            or not strict_profile_counts
+            or not isinstance(profile_histogram, dict)
+            or not profile_histogram
+            or not all(
+                isinstance(code, str)
+                and bool(code)
+                and isinstance(count, int)
+                and not isinstance(count, bool)
+                and count > 0
+                for code, count in profile_histogram.items()
+            )
+            or error_count != len(issues)
+            or error_count != profile_error_count
+            or warning_count != 0
+            or warning_count != profile_warning_count
+            or report_shot_count != profile_shot_count
+            or len(storyboard.get("shots", [])) != profile_shot_count
+            or sum(profile_histogram.values()) != profile_error_count
+            or self._validation_error_histogram(report)
+            != profile_histogram
+            or canonical_storyboard_sha256(storyboard)
+            != profile.get("canonical_sha256")
+            or sha256_bytes(_stable_json_bytes(report))
+            != profile.get("current_report_sha256")
+            or self._validator_version()
+            != profile.get("current_validator_composite")
+            or self._validator_fingerprint
+            != profile.get("current_validator_fingerprint")
         ):
             return False
-        location_pattern = re.compile(r"^shots\[[1-9][0-9]*\]\.生成限制$")
-        return all(
-            isinstance(issue, dict)
-            and issue.get("error_code")
-            == HISTORICAL_COMPATIBILITY_ERROR_CODE
-            and issue.get("severity") == "fail"
-            and issue.get("blocking") is True
-            and issue.get("template_gate_id") == "THG-01"
-            and isinstance(issue.get("location"), str)
-            and location_pattern.fullmatch(issue["location"]) is not None
-            and issue.get("evidence")
-            == "逐字短语'9:16竖屏'应恰好出现1次，当前=0"
-            for issue in issues
-        )
+        return True
 
     def _historical_production_validation_replay(
         self,
@@ -5227,13 +5443,15 @@ class StoryboardService:
                 "historical_preflight_replay_not_required: current "
                 "validation already passes"
             )
-        if not self._sealed_legacy_aspect_contract_drift(
-            current_report,
-            shot_count=len(storyboard.get("shots", [])),
+        if not self._sealed_historical_current_validation_profile(
+            handoff_id=handoff_id,
+            storyboard=storyboard,
+            report=current_report,
         ):
             raise ValueError(
-                "historical_preflight_current_issue_scope_mismatch: only "
-                "the sealed legacy 9:16 aspect-wording drift is eligible"
+                "historical_preflight_current_issue_scope_mismatch: "
+                "current validation does not exactly match the sealed "
+                "handoff profile"
             )
         expected_profile = FROZEN_V053_HANDOFF_RULESET_PROFILES.get(
             handoff_id

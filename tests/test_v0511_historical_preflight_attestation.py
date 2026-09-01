@@ -88,6 +88,47 @@ class V0511HistoricalPreflightAttestationTests(_V057FixtureOnly):
         self.historical_report = historical_report
         self.current_historical_report = current_report
 
+        # Production carries six immutable, real-record seals.  Synthetic
+        # fixtures must establish their own equally exact seals instead of
+        # weakening or reusing those production constants.
+        synthetic_canonical_sha256 = (
+            service_module.canonical_storyboard_sha256(
+                self.historical_storyboard
+            )
+        )
+        synthetic_report_sha256 = service_module.sha256_bytes(
+            service_module._stable_json_bytes(current_report)
+        )
+        synthetic_histogram = self.service._validation_error_histogram(
+            current_report
+        )
+        synthetic_profiles = {
+            handoff_id: {
+                "handoff_id": handoff_id,
+                "canonical_sha256": synthetic_canonical_sha256,
+                "current_report_sha256": synthetic_report_sha256,
+                "shot_count": len(self.historical_storyboard["shots"]),
+                "error_count": len(current_report["issues"]),
+                "warning_count": 0,
+                "error_histogram": copy.deepcopy(synthetic_histogram),
+                "current_validator_composite": (
+                    self.service._validator_version()
+                ),
+                "current_validator_fingerprint": (
+                    self.service._validator_fingerprint
+                ),
+            }
+            for handoff_id in self.historical_ids
+        }
+        self.synthetic_current_validation_profiles = synthetic_profiles
+        self._synthetic_profiles_patch = patch.object(
+            service_module,
+            "CONTROLLED_V053_CURRENT_VALIDATION_PROFILES",
+            synthetic_profiles,
+        )
+        self._synthetic_profiles_patch.start()
+        self.addCleanup(self._synthetic_profiles_patch.stop)
+
         # Produce a synthetically old authority chain without opening a second
         # production work order (the fixture correctly has a pending handoff,
         # so the public production gate must remain closed).  Its workbook is
@@ -1031,6 +1072,127 @@ class V0511HistoricalPreflightAttestationTests(_V057FixtureOnly):
             self._historical_plan()
         self.assertEqual(self._recovery_authority_snapshot(), snapshot)
         self.assertEqual(self._historical_artifact_bytes(), artifact_before)
+
+    async def test_same_histogram_but_changed_report_evidence_fails_closed_before_any_write(
+        self,
+    ) -> None:
+        poisoned_report = copy.deepcopy(self.current_historical_report)
+        poisoned_report["issues"][0]["evidence"] += " [resigned poison]"
+        self.assertEqual(
+            self.service._validation_error_histogram(poisoned_report),
+            self.service._validation_error_histogram(
+                self.current_historical_report
+            ),
+        )
+        self.assertNotEqual(
+            service_module.sha256_bytes(
+                service_module._stable_json_bytes(poisoned_report)
+            ),
+            self.synthetic_current_validation_profiles[
+                self.historical_ids[0]
+            ]["current_report_sha256"],
+        )
+        snapshot = self._recovery_authority_snapshot()
+        artifact_before = self._historical_artifact_bytes()
+        with patch.object(
+            service_module.validate_storyboard,
+            "validate_project",
+            return_value=poisoned_report,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "historical_preflight_current_issue_scope_mismatch",
+            ):
+                self._historical_plan()
+        self.assertEqual(self._recovery_authority_snapshot(), snapshot)
+        self.assertEqual(self._historical_artifact_bytes(), artifact_before)
+
+    async def test_swapped_exact_current_profiles_fail_closed_before_any_write(
+        self,
+    ) -> None:
+        first, second = self.historical_ids[:2]
+        swapped_profiles = copy.deepcopy(
+            self.synthetic_current_validation_profiles
+        )
+        swapped_profiles[first], swapped_profiles[second] = (
+            swapped_profiles[second],
+            swapped_profiles[first],
+        )
+        snapshot = self._recovery_authority_snapshot()
+        artifact_before = self._historical_artifact_bytes()
+        with patch.object(
+            service_module,
+            "CONTROLLED_V053_CURRENT_VALIDATION_PROFILES",
+            swapped_profiles,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "historical_preflight_current_issue_scope_mismatch",
+            ):
+                self._historical_plan()
+        self.assertEqual(self._recovery_authority_snapshot(), snapshot)
+        self.assertEqual(self._historical_artifact_bytes(), artifact_before)
+
+    async def test_current_report_bool_count_fails_closed_even_with_resigned_hash(
+        self,
+    ) -> None:
+        poisoned_report = copy.deepcopy(self.current_historical_report)
+        poisoned_report["error_count"] = True
+        poisoned_profiles = copy.deepcopy(
+            self.synthetic_current_validation_profiles
+        )
+        poisoned_profiles[self.historical_ids[0]][
+            "current_report_sha256"
+        ] = service_module.sha256_bytes(
+            service_module._stable_json_bytes(poisoned_report)
+        )
+        snapshot = self._recovery_authority_snapshot()
+        artifact_before = self._historical_artifact_bytes()
+        with patch.object(
+            service_module,
+            "CONTROLLED_V053_CURRENT_VALIDATION_PROFILES",
+            poisoned_profiles,
+        ), patch.object(
+            service_module.validate_storyboard,
+            "validate_project",
+            return_value=poisoned_report,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "historical_preflight_current_issue_scope_mismatch",
+            ):
+                self._historical_plan()
+        self.assertEqual(self._recovery_authority_snapshot(), snapshot)
+        self.assertEqual(self._historical_artifact_bytes(), artifact_before)
+
+    async def test_current_validator_composite_and_fingerprint_drift_fail_closed_before_any_write(
+        self,
+    ) -> None:
+        artifact_before = self._historical_artifact_bytes()
+        for field, poisoned_value in (
+            ("_validator_digest", "0" * 16),
+            ("_validator_fingerprint", "0" * 64),
+        ):
+            with self.subTest(field=field):
+                snapshot = self._recovery_authority_snapshot()
+                with patch.object(
+                    self.service, field, poisoned_value
+                ):
+                    self.assertFalse(
+                        self.service._sealed_historical_current_validation_profile(
+                            handoff_id=self.historical_ids[0],
+                            storyboard=self.historical_storyboard,
+                            report=self.current_historical_report,
+                        )
+                    )
+                    with self.assertRaises(ValueError):
+                        self._historical_plan()
+                self.assertEqual(
+                    self._recovery_authority_snapshot(), snapshot
+                )
+                self.assertEqual(
+                    self._historical_artifact_bytes(), artifact_before
+                )
 
     async def test_frozen_init_tamper_fails_closed_before_any_write(
         self,
