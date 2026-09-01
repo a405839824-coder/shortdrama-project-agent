@@ -87,7 +87,7 @@ class V057PreflightEvidenceReissueTests(
                 "controlled_phase:preflight_evidence_backfill",
             ],
             authoritative_source="signed project records",
-            latest_version="0.5.7",
+            latest_version="0.5.8",
             target_boundary="one exact legacy handoff",
             must_keep=["history", "content", "independent audit separation"],
             must_remove=[],
@@ -169,6 +169,57 @@ class V057PreflightEvidenceReissueTests(
             for field in fields:
                 row.pop(field, None)
 
+    def _replace_hub_handoff_rows(
+        self,
+        handoff_id: str,
+        rows: list[dict[str, Any]],
+    ) -> None:
+        """Replace one handoff's Hub rows without changing its signed record."""
+
+        with self.service.store.mutate_project(
+            self.namespace, self.project_id
+        ) as (hub, _ledger):
+            hub["handoffs"] = [
+                row
+                for row in hub.get("handoffs", [])
+                if not (
+                    isinstance(row, dict)
+                    and row.get("handoff_id") == handoff_id
+                )
+            ]
+            hub["handoffs"].extend(copy.deepcopy(rows))
+
+    def _recovery_authority_snapshot(self) -> dict[str, Any]:
+        """Capture all authority stores that a rejected plan must not mutate."""
+
+        records: dict[str, list[tuple[str, str]]] = {}
+        for kind in (
+            "handoffs",
+            "preflight_evidence_reissues",
+            "certificates",
+            "telemetry",
+            "handoff_recoveries",
+        ):
+            rows = self.service.store.list_project_records(
+                self.namespace,
+                self.project_id,
+                kind=kind,
+            )
+            records[kind] = [
+                (
+                    str(row.get("record_id") or ""),
+                    self.service.store.project_state_sha256(row),
+                )
+                for row in rows
+            ]
+        hub = self.service.store.load_hub(
+            self.namespace, self.project_id
+        )
+        return {
+            "hub_sha256": self.service.store.project_state_sha256(hub),
+            "records": records,
+        }
+
     def _controlled_work_order(
         self, *, phase: str, handoff_ids: list[str], operation: str = "rule_improvement"
     ) -> str:
@@ -185,7 +236,7 @@ class V057PreflightEvidenceReissueTests(
                 f"controlled_phase:{phase}",
             ],
             authoritative_source="signed project records",
-            latest_version="0.5.7",
+            latest_version="0.5.8",
             target_boundary="exact authorized handoff batch",
             must_keep=["history", "content", "independent audit separation"],
             must_remove=[],
@@ -351,6 +402,248 @@ class V057PreflightEvidenceReissueTests(
             ),
             1,
         )
+
+    async def test_exact_legacy_signed_hub_envelope_supports_full_chain(
+        self,
+    ) -> None:
+        signed_old = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=self.old_handoff_id,
+        )
+        self.assertEqual(
+            {
+                "record_id",
+                "project_id",
+                "integrity_hmac",
+            },
+            {
+                field
+                for field in signed_old
+                if field
+                in {"record_id", "project_id", "integrity_hmac"}
+            },
+        )
+        self._replace_hub_handoff_rows(
+            self.old_handoff_id,
+            [signed_old],
+        )
+        legacy_hub_before = self.service.store.load_hub(
+            self.namespace, self.project_id
+        )
+        legacy_row_before = next(
+            row
+            for row in legacy_hub_before["handoffs"]
+            if row.get("handoff_id") == self.old_handoff_id
+        )
+        self.assertEqual(legacy_row_before, signed_old)
+
+        old_handoff_sha256 = self.service.store.project_state_sha256(
+            signed_old
+        )
+        original_certificate = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="certificates",
+            record_id=str(signed_old["certificate_id"]),
+        )
+        original_certificate_sha256 = (
+            self.service.store.project_state_sha256(original_certificate)
+        )
+        artifact_before = self._artifact_bytes()
+
+        backfill_plan = self._backfill_plan().data[
+            "preflight_evidence_plan"
+        ]
+        backfill_result = self._backfill_execute(
+            backfill_plan["plan_sha256"]
+        )
+        self.assertEqual(
+            backfill_result.status, "preflight_evidence_reissued"
+        )
+        backfill_mapping = backfill_result.data["mappings"][0]
+        backfill_replay = self._backfill_execute(
+            backfill_plan["plan_sha256"]
+        )
+        self.assertEqual(
+            backfill_replay.data["mappings"][0][
+                "preflight_evidence_id"
+            ],
+            backfill_mapping["preflight_evidence_id"],
+        )
+        self.assertTrue(
+            backfill_replay.data["mappings"][0]["idempotent_replay"]
+        )
+
+        signed_after_backfill = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=self.old_handoff_id,
+        )
+        self.assertEqual(
+            self.service.store.project_state_sha256(
+                signed_after_backfill
+            ),
+            old_handoff_sha256,
+        )
+        hub_after_backfill = self.service.store.load_hub(
+            self.namespace, self.project_id
+        )
+        legacy_rows_after_backfill = [
+            row
+            for row in hub_after_backfill["handoffs"]
+            if row.get("handoff_id") == self.old_handoff_id
+        ]
+        self.assertEqual(legacy_rows_after_backfill, [signed_old])
+        self.assertEqual(
+            self.service.store.project_state_sha256(
+                self.service.store.get_project_record(
+                    self.namespace,
+                    self.project_id,
+                    kind="certificates",
+                    record_id=str(signed_old["certificate_id"]),
+                )
+            ),
+            original_certificate_sha256,
+        )
+        self.assertEqual(self._artifact_bytes(), artifact_before)
+
+        recovery_plan = self._plan().data["recovery_plan"]
+        self.assertEqual(
+            recovery_plan["items"][0]["preflight_evidence_source"],
+            "controlled_current_revalidation",
+        )
+        recovery_result = self._execute(
+            recovery_plan["plan_sha256"]
+        )
+        self.assertEqual(recovery_result.status, "handoffs_recovered")
+        recovery_mapping = recovery_result.data["mappings"][0]
+        recovery_replay = self._execute(recovery_plan["plan_sha256"])
+        self.assertEqual(
+            recovery_replay.data["mappings"][0]["new_handoff_id"],
+            recovery_mapping["new_handoff_id"],
+        )
+        self.assertTrue(
+            recovery_replay.data["mappings"][0]["idempotent_replay"]
+        )
+
+        old_after = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=self.old_handoff_id,
+        )
+        new_after = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=str(recovery_mapping["new_handoff_id"]),
+        )
+        self.assertEqual(old_after["status"], "superseded")
+        self.assertEqual(
+            old_after["superseded_by_handoff_id"],
+            new_after["handoff_id"],
+        )
+        self.assertEqual(new_after["status"], "prepared")
+        self.assertEqual(
+            new_after["independent_audit_status"], "PENDING_AUDIT"
+        )
+        self.assertEqual(
+            new_after["supersedes_handoff_id"], old_after["handoff_id"]
+        )
+
+        final_hub = self.service.store.load_hub(
+            self.namespace, self.project_id
+        )
+        final_old_rows = [
+            row
+            for row in final_hub["handoffs"]
+            if row.get("handoff_id") == old_after["handoff_id"]
+        ]
+        final_new_rows = [
+            row
+            for row in final_hub["handoffs"]
+            if row.get("handoff_id") == new_after["handoff_id"]
+        ]
+        self.assertEqual(
+            final_old_rows,
+            [self.service._handoff_record_projection(old_after)],
+        )
+        self.assertEqual(
+            final_new_rows,
+            [self.service._handoff_record_projection(new_after)],
+        )
+        for row in (*final_old_rows, *final_new_rows):
+            self.assertTrue(
+                {"record_id", "project_id", "integrity_hmac"}.isdisjoint(
+                    row
+                )
+            )
+        self.assertEqual(self._artifact_bytes(), artifact_before)
+
+    async def test_legacy_signed_hub_envelope_poison_is_zero_write(
+        self,
+    ) -> None:
+        signed_old = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=self.old_handoff_id,
+        )
+
+        poison_cases = {
+            "integrity_hmac_drift": lambda row: row.__setitem__(
+                "integrity_hmac", "0" * 64
+            ),
+            "record_id_drift": lambda row: row.__setitem__(
+                "record_id", "HND-v058-envelope-drift"
+            ),
+            "project_id_drift": lambda row: row.__setitem__(
+                "project_id", "SBP-v058-envelope-drift"
+            ),
+            "extra_key": lambda row: row.__setitem__(
+                "legacy_shadow", True
+            ),
+            "partial_envelope": lambda row: row.pop(
+                "integrity_hmac"
+            ),
+            "missing_business_field": lambda row: row.pop(
+                "canonical_sha256"
+            ),
+            "semantic_drift": lambda row: row.__setitem__(
+                "canonical_sha256", "1" * 64
+            ),
+        }
+        for label, poison in poison_cases.items():
+            with self.subTest(case=label):
+                poisoned = copy.deepcopy(signed_old)
+                poison(poisoned)
+                self._replace_hub_handoff_rows(
+                    self.old_handoff_id,
+                    [poisoned],
+                )
+                before = self._recovery_authority_snapshot()
+                with self.assertRaisesRegex(
+                    ValueError, "handoff_recovery_projection_invalid"
+                ):
+                    self._backfill_plan()
+                self.assertEqual(
+                    self._recovery_authority_snapshot(), before
+                )
+
+        with self.subTest(case="duplicate_row"):
+            self._replace_hub_handoff_rows(
+                self.old_handoff_id,
+                [signed_old, signed_old],
+            )
+            before = self._recovery_authority_snapshot()
+            with self.assertRaisesRegex(
+                ValueError, "handoff_recovery_projection_invalid"
+            ):
+                self._backfill_plan()
+            self.assertEqual(self._recovery_authority_snapshot(), before)
 
     async def test_wrong_confirmation_is_zero_write(self) -> None:
         plan = self._backfill_plan().data["preflight_evidence_plan"]
@@ -918,7 +1211,7 @@ class V057PreflightEvidenceReissueTests(
                 "controlled_phase:handoff_recovery",
             ],
             authoritative_source="signed project records",
-            latest_version="0.5.7",
+            latest_version="0.5.8",
             target_boundary="two exact handoffs",
             must_keep=["history", "content", "independent audit separation"],
             must_remove=[],

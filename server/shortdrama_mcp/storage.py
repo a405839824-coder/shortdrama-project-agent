@@ -1223,16 +1223,18 @@ class ProjectStore:
                 if current_hub_sha == hub_before_sha
                 else current_old
             )
-            current_old_projection = self._hub_record_projection(
-                expected_hub_old
-            )
             current_old_matches = [
                 row
                 for row in current_hub.get("handoffs", [])
                 if isinstance(row, dict)
                 and row.get("handoff_id") == clean_old_id
             ]
-            if current_old_matches != [current_old_projection]:
+            if (
+                len(current_old_matches) != 1
+                or not self._hub_handoff_matches_signed_record(
+                    current_old_matches[0], expected_hub_old
+                )
+            ):
                 raise ValueError(
                     "handoff_recovery_required: old Hub projection differs from signed record"
                 )
@@ -1607,14 +1609,18 @@ class ProjectStore:
                 raise ValueError(
                     "preflight_evidence_reissue_plan_stale: project authority changed before commit"
                 )
-            current_projection = self._hub_record_projection(current_handoff)
             matching_projections = [
                 row
                 for row in hub.get("handoffs", [])
                 if isinstance(row, dict)
                 and row.get("handoff_id") == clean_handoff_id
             ]
-            if matching_projections != [current_projection]:
+            if (
+                len(matching_projections) != 1
+                or not self._hub_handoff_matches_signed_record(
+                    matching_projections[0], current_handoff
+                )
+            ):
                 raise ValueError(
                     "preflight_evidence_reissue_plan_stale: Hub projection differs from signed handoff"
                 )
@@ -2778,6 +2784,17 @@ class ProjectStore:
             for key, item in value.items()
             if key not in {"record_id", "project_id", "integrity_hmac"}
         }
+
+    @classmethod
+    def _hub_handoff_matches_signed_record(
+        cls,
+        hub_handoff: dict[str, Any],
+        signed_handoff: dict[str, Any],
+    ) -> bool:
+        """Accept a canonical projection or the exact legacy signed copy."""
+
+        expected_projection = cls._hub_record_projection(signed_handoff)
+        return hub_handoff == expected_projection or hub_handoff == signed_handoff
 
     def find_project_record(
         self,

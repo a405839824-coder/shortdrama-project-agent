@@ -4741,6 +4741,25 @@ class StoryboardService:
             if key not in {"record_id", "project_id", "integrity_hmac"}
         }
 
+    @classmethod
+    def _hub_handoff_matches_signed_record(
+        cls,
+        hub_handoff: dict[str, Any],
+        signed_handoff: dict[str, Any],
+    ) -> bool:
+        """Accept only the two historically emitted exact Hub shapes.
+
+        Current writers embed the envelope-free projection.  A legacy
+        production finalizer instead copied the complete signed handoff into
+        the Hub, including ``record_id``, ``project_id`` and
+        ``integrity_hmac``.  Those rows are safe to consume only when every
+        byte represented by the parsed JSON still equals the signed record;
+        no other missing, additional or changed field is tolerated.
+        """
+
+        expected_projection = cls._handoff_record_projection(signed_handoff)
+        return hub_handoff == expected_projection or hub_handoff == signed_handoff
+
     def _assert_handoff_recovery_authority(
         self,
         namespace: str,
@@ -5037,7 +5056,9 @@ class StoryboardService:
         ]
         if (
             len(projections) != 1
-            or projections[0] != self._handoff_record_projection(handoff)
+            or not self._hub_handoff_matches_signed_record(
+                projections[0], handoff
+            )
         ):
             raise ValueError(
                 f"handoff_recovery_projection_invalid: {handoff_id} Hub projection differs from signed record"
@@ -6906,8 +6927,16 @@ class StoryboardService:
             raise ValueError(
                 "handoff_recovery_projection_invalid: successor already exists in hub"
             )
-        hub_after["handoffs"][matches[0]] = copy.deepcopy(old_after)
-        hub_after["handoffs"].append(copy.deepcopy(new_after))
+        # The authorized recovery is the first write allowed to normalize a
+        # legacy full-record Hub row.  Signed project records remain intact;
+        # only their mutable Hub projections use the canonical envelope-free
+        # shape from this point forward.
+        hub_after["handoffs"][matches[0]] = self._handoff_record_projection(
+            old_after
+        )
+        hub_after["handoffs"].append(
+            self._handoff_record_projection(new_after)
+        )
         hub_after["updated_at"] = now
         journal = self.store.commit_handoff_recovery(
             namespace,
@@ -12759,7 +12788,9 @@ class StoryboardService:
         with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
             for index, row in enumerate(hub.setdefault("handoffs", [])):
                 if str(row.get("handoff_id") or "") == handoff_id:
-                    hub["handoffs"][index] = copy.deepcopy(handoff)
+                    hub["handoffs"][index] = self._handoff_record_projection(
+                        handoff
+                    )
             deliverable = next(
                 (
                     row
@@ -14764,7 +14795,7 @@ class StoryboardService:
             and not draft_preflight_id
         ):
             raise ValueError(
-                "draft_preflight_required: cloud 0.5.7 full commits require a signed full-draft preflight"
+                "draft_preflight_required: cloud 0.5.8 full commits require a signed full-draft preflight"
             )
         stage_trace_id = _new_id("TRC")
         materialize_started_ns = time.perf_counter_ns()
@@ -15446,7 +15477,9 @@ class StoryboardService:
                 row.get("handoff_id") == handoff.get("handoff_id")
                 for row in hub.setdefault("handoffs", [])
             ):
-                hub["handoffs"].append(copy.deepcopy(handoff))
+                hub["handoffs"].append(
+                    self._handoff_record_projection(handoff)
+                )
             internal_round = work_order.get("internal_round", 0)
         ledger_ns = time.perf_counter_ns()
         download_url = self.store.signed_download_url(

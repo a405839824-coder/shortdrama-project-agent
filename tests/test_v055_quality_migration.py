@@ -371,7 +371,7 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         )
         current_sequence = int(current["certificate_sequence"])
         report_base = {
-            "version": "0.5.7",
+            "version": "0.5.8",
             "workflow_revision": "R10-PG1",
         }
         with patch(
@@ -1315,6 +1315,27 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         self.assertEqual(
             committed.data["artifact"]["metadata"]["draft_preflight_id"],
             preflight_id,
+        )
+        handoff_id = str(committed.data["handoff"]["handoff_id"])
+        signed_handoff = self.service.store.get_project_record(
+            self.namespace,
+            project_id,
+            kind="handoffs",
+            record_id=handoff_id,
+        )
+        hub_handoff = next(
+            row
+            for row in self.service.store.load_hub(
+                self.namespace, project_id
+            )["handoffs"]
+            if row["handoff_id"] == handoff_id
+        )
+        self.assertEqual(
+            hub_handoff,
+            self.service._handoff_record_projection(signed_handoff),
+        )
+        self.assertFalse(
+            {"record_id", "project_id", "integrity_hmac"} & hub_handoff.keys()
         )
         artifact_count = len(
             self.service.store.list_artifacts(self.namespace, project_id)

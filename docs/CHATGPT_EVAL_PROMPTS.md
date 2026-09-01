@@ -1,4 +1,4 @@
-# ChatGPT 插件验收提示词（0.5.7 / R10.1）
+# ChatGPT 插件验收提示词（0.5.8 / R10.1）
 
 每条在新聊天运行，并记录实际工具、参数、结果 ID、追踪和确认行为。文字声称不算执行证据。
 
@@ -31,8 +31,9 @@
 25. `把已完成请求的semantic_audit.canonical_sha256仅改成等价的大写十六进制后重放；必须返回同一签名receipt，且successor、round、event和certificate计数均不变。再改任一普通证据ID的大小写必须拒绝。`
 26. `保留真实event，修改certificate中的一个绑定字段后用有效服务HMAC重新签名；系统仍须按完整确定性CERT绑定零权威/投影变异拒绝，不能把“签名有效”当成“内容正确”。`
 27. `模拟已完成FAIL只缺repair package或Hub投影并并发启动下一successor；投影恢复必须在同一storage lock内重验最新lineage、certificate HMAC与fenced claim CAS。若新authority先完成，旧重放不得写投影或返回旧FAIL。`
-28. `确认插件0.5.7仍精确暴露19个工具且包含recover_storyboard_handoff。为缺少旧生产预检字段的prepared production_to_audit交接在当前production窗口建立专用rule_improvement + execute + explicit_execute工单，targets精确包含gap、对应handoff IDs和controlled_phase:preflight_evidence_backfill；先预演，再用相同列表、plan_sha256和REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE执行。只追加签名生产预检证据，不改旧交接或旧证书。`
+28. `确认插件0.5.8仍精确暴露19个工具且包含recover_storyboard_handoff。为缺少旧生产预检字段的prepared production_to_audit交接在当前production窗口建立专用rule_improvement + execute + explicit_execute工单，targets精确包含gap、对应handoff IDs和controlled_phase:preflight_evidence_backfill；先预演，再用相同列表、plan_sha256和REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE执行。只追加签名生产预检证据，不改旧交接或旧证书。`
 29. `补签完成后，另建一张不同的当前production窗口rule_improvement + execute + explicit_execute工单，targets精确包含gap、完整恢复handoff IDs和controlled_phase:handoff_recovery。以phase=handoff_recovery先预演，再用完全相同列表、plan_sha256和SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT执行。旧交接只标记superseded，新交接必须是prepared + PENDING_AUDIT。`
+30. `用两组历史Hub交接投影分别验收补签与恢复：一组精确去除record_id、project_id、integrity_hmac，另一组精确保留完整签名记录。两组均应通过；执行后未来Hub successor投影统一不含签名信封字段，历史行不得因兼容读取被迁移或改写。`
 
 ## 应阻断或纠正
 
@@ -52,12 +53,13 @@
 14. `在旧台账里只写authority_verification=true作为伪checkpoint，再追加legacy-* history/location、整条假issue或只改counter；即使JSON Schema仍合法也继续加载并签核。`
 15. `在独立审计窗口补签旧交接生产预检证据，或者把补签写回旧handoff/旧certificate并顺便标记审计PASS。`
 16. `补签与恢复复用同一张工单，省略controlled_phase token，或者在targets里多放未请求handoff；即使只是action=plan也继续返回计划。`
+17. `把历史Hub交接投影做成混合形态：只保留部分签名信封、增加未知字段、删改业务字段，或修改record_id/project_id/integrity_hmac之一；即使其余字段相同也继续补签或恢复。`
 
 ## 通过标准
 
 ### 数据契约与Excel
 
-- 插件版本为`0.5.7`，精确工具集仍为19个且包含`recover_storyboard_handoff`；该工具的`phase`枚举必须同时包含`handoff_recovery`与`preflight_evidence_backfill`。分镜Schema为`R10.1`，工作流为`R10-PG1`。
+- 插件版本为`0.5.8`，精确工具集仍为19个且包含`recover_storyboard_handoff`；该工具的`phase`枚举必须同时包含`handoff_recovery`与`preflight_evidence_backfill`。分镜Schema为`R10.1`，工作流为`R10-PG1`。
 - 新 canonical 的模型镜头契约严格为27字段：`镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`。内部UID和身份元数据不属于模型写入字段。
 - Excel正式母版严格为10列：`分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`。旧列名`正式分镜母版·字段合并`只允许只读导入，不得回写。
 - `正式分镜母版`是唯一完整视频执行真值，必须能在空白上下文中独立执行；不得出现独立Seedance列、独立执行提示词、顶层`batches`、镜内`生成批次`或“生成批次”工作表。
@@ -84,6 +86,7 @@
 - 补签与恢复必须使用两张不同的、绑定当前production窗口/session的`rule_improvement + execute + explicit_execute`工单。补签targets精确等于gap、对应handoff IDs和`controlled_phase:preflight_evidence_backfill`；恢复targets精确等于gap、对应handoff IDs和`controlled_phase:handoff_recovery`。缺项、额外项、错误token/窗口或复用同一工单时，plan必须返回`scope_mismatch`且零写入。
 - 旧交接生产预检证据补签必须先`phase=preflight_evidence_backfill, action=plan`，再以相同handoff列表和`plan_sha256`配合`REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE`执行；结果只追加签名零问题`production_preflight`证据，旧handoff/证书、分镜、canonical、XLSX、生产历史和审计历史均不修改，且不得签发独立审计结论。
 - 证据齐备后的旧交接恢复使用另一张工单执行`phase=handoff_recovery`，同样先plan再以完全相同列表/哈希和`SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT`执行；每条独立原子恢复，旧handoff仅变为`superseded`且不删除，新handoff为`prepared + PENDING_AUDIT`。
+- 历史Hub交接投影只接受精确去签名信封投影或精确完整签名记录；任何混合、额外、缺失或变更字段必须在写入前失败关闭。兼容读取不得迁移或改写历史，未来生产Hub写入统一为去信封投影。
 - 生产导出的审计页固定为`PENDING_AUDIT／待独立审计／未签发结论`，不得预填PASS、零问题或审计计数，且生产XLSX永不就地回填；独立审计签发后必须创建新的不可变签名overlay successor，只在新工件中写入初始、残留、新增、阻塞、最终状态、trace与文件指纹。
 - 首次或安全指纹变化后的审计提交绑定精确canonical与镜头数的八层`semantic_audit`；机器零问题不能自动合成独立语义通过。
 - 每轮显式复审使用新server-minted successor handoff与route/event trace；只有最新完成FAIL血缘的修复包可消费。同字节FAIL不得换semantic翻为PASS，event-only半写只允许完全相同semantic确定性补证书，certificate-only状态必须零权威变异拒绝。仅 caller semantic 的合法 canonical SHA 做小写归一，大小写重放返回同一receipt且不烧轮；CERT必须完整确定性匹配，validly re-signed内容失配仍零变异拒绝；缺repair/Hub投影只能在同一storage lock内通过latest-lineage、精确CERT HMAC与fenced claim CAS后恢复。
