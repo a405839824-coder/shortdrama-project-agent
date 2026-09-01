@@ -1,4 +1,4 @@
-# ChatGPT 插件验收提示词（0.5.11 / R10.1）
+# ChatGPT 插件验收提示词（0.5.12 / R10.1）
 
 每条在新聊天运行，并记录实际工具、参数、结果 ID、追踪和确认行为。文字声称不算执行证据。
 
@@ -31,13 +31,13 @@
 25. `把已完成请求的semantic_audit.canonical_sha256仅改成等价的大写十六进制后重放；必须返回同一签名receipt，且successor、round、event和certificate计数均不变。再改任一普通证据ID的大小写必须拒绝。`
 26. `保留真实event，修改certificate中的一个绑定字段后用有效服务HMAC重新签名；系统仍须按完整确定性CERT绑定零权威/投影变异拒绝，不能把“签名有效”当成“内容正确”。`
 27. `模拟已完成FAIL只缺repair package或Hub投影并并发启动下一successor；投影恢复必须在同一storage lock内重验最新lineage、certificate HMAC与fenced claim CAS。若新authority先完成，旧重放不得写投影或返回旧FAIL。`
-28. `确认插件0.5.11仍精确暴露19个工具且包含recover_storyboard_handoff。为缺少旧生产预检字段的prepared production_to_audit交接在当前production窗口建立专用rule_improvement + execute + explicit_execute工单，targets精确包含gap、对应handoff IDs和controlled_phase:preflight_evidence_backfill；模拟宿主缓存旧schema而省略phase，先预演，再用相同列表、plan_sha256和REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE执行。普通分支只追加当前零问题production_preflight；精确历史分支只追加独立历史证明，不改旧交接或旧证书。`
+28. `确认插件0.5.12仍精确暴露19个工具且包含recover_storyboard_handoff。为缺少旧生产预检字段的prepared production_to_audit交接在当前production窗口建立专用rule_improvement + execute + explicit_execute工单，targets精确包含gap、对应handoff IDs和controlled_phase:preflight_evidence_backfill；模拟宿主缓存旧schema而省略phase，先预演，再用相同列表、plan_sha256和REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE执行。普通分支只追加当前零问题production_preflight；精确历史分支只追加独立历史证明，不改旧交接或旧证书。`
 29. `补签完成后，另建一张不同的当前production窗口rule_improvement + execute + explicit_execute工单，targets精确包含gap、完整恢复handoff IDs和controlled_phase:handoff_recovery。以phase=handoff_recovery先预演，再用完全相同列表、plan_sha256和SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT执行。旧交接只标记superseded，新交接必须是prepared + PENDING_AUDIT。`
 30. `用两组历史Hub交接投影分别验收补签与恢复：一组精确去除record_id、project_id、integrity_hmac，另一组精确保留完整签名记录。两组均应通过；执行后未来Hub successor投影统一不含签名信封字段，历史行不得因兼容读取被迁移或改写。`
 31. `用旧交接所绑定的0.5.3合法基线XLSX预演补签：侧车是精确8列信封且veryHidden，可见表是短10列表头，每个正式/GPT单元格由冻结0.5.3投影器重放完全一致。返回的受控复验证明必须封存选定投影器、冻结来源、raw XLSX/canonical、旧handoff、旧生产证书和原生产trace哈希；普通extract_xlsx对同一历史特例仍应拒绝。`
 32. `用带精确shortdrama-projector/0.5.4投影契约和审计签名的旧XLSX预演补签，受控路由应通过并标明strict_projection_contract；改一个可见单元格、投影签名、审计签名或侧车状态后，计划必须零写入失败。`
-33. `为GAP-1bb91d83751b422f按文档中的精确顺序预演后六条补签。逐条核对冻结报告与原签名生产报告完全相等且PASS/0；当前报告只能包含E-I2V-INDEP-002、THG-01、blocking fail、shots[n].生成限制和精确缺少一次“9:16竖屏”证据，warning=0且计数闭合。执行后必须得到historical_production_preflight_attestation + historical_contract_pass、完整双报告、HISTCACHE和四个不可复用/强制复审标志，绝不能声称current pass。`
-34. `在同一后六条历史补签样本中，分别混入其他error code、非THG-01、warning、非blocking、错误location/evidence、计数漂移、错误handoff规则画像或篡改冻结validator/rules/manifest/error catalog；plan或execute必须在权威写入前失败关闭。`
+33. `为GAP-1bb91d83751b422f按UPGRADE_0.5.12.md中的精确顺序预演后六条补签。逐条核对冻结报告与原签名生产报告完全相等且PASS/0；真实当前报告须精确匹配该handoff独有的canonical SHA、完整current-report SHA、shot/error/warning计数、完整error-code histogram，以及当前validator composite和完整SHA，不能用error类别集合或另一条画像代替。执行后必须得到historical_production_preflight_attestation + historical_contract_pass、完整双报告、HISTCACHE和四个不可复用/强制复审标志，绝不能声称current pass。`
+34. `在同一后六条历史补签样本中，分别篡改canonical、完整current-report SHA、shot/error/warning任一计数、histogram任一键值、当前validator composite/完整SHA、handoff规则画像，或篡改冻结validator/rules/manifest/error catalog；逐条交叉复用另一handoff的完整画像。plan或execute必须在任何PFE、证书、trace、handoff或恢复记录权威写入前失败关闭。`
 35. `后六条补签完成后，为GAP-0e5d48969c4c494e按文档精确顺序统一恢复原11条；先plan，再用相同列表、plan_sha256和SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT执行并重放。旧handoff只标记superseded，新handoff均为prepared + PENDING_AUDIT；后六条的HISTCACHE与历史结论不得命中独立审计，必须按当前validator完成完整独审。`
 
 ## 应阻断或纠正
@@ -62,13 +62,13 @@
 18. `省略phase，但在工单targets中不放controlled_phase、重复同一token、同时放两个合法token、混入unknown token，或者把token改大小写/加空格；仍自动默认handoff_recovery并继续计划或执行。`
 19. `把0.5.3基线工作簿中的正式母版/GPT单元格换成当前投影行、修改短表头、让canonical侧车只是hidden或加删一个侧车字段，再要求用“历史兼容”继续补签。`
 20. `在0.5.4签名工作簿中改一个投影或审计SHA，或让原XLSX/canonical与旧handoff、旧生产证书或原生产trace不再绑定；仍要求受控路由生成plan。`
-21. `把后六条历史证明写成production_preflight_pass，删除当前FAIL报告，把HISTCACHE当作独立审计cache hit，或允许非E-I2V-INDEP-002/THG-01问题继续补签。`
+21. `把后六条历史证明写成production_preflight_pass，删除当前FAIL报告，把HISTCACHE当作独立审计cache hit，或用0.5.11已勘误的aspect-only集合判断代替0.5.12逐handoff完整封存画像。`
 
 ## 通过标准
 
 ### 数据契约与Excel
 
-- 插件版本为`0.5.11`，精确工具集仍为19个且包含`recover_storyboard_handoff`；该工具的`phase`非必填且枚举必须同时包含`handoff_recovery`与`preflight_evidence_backfill`，不得保留默认恢复阶段。省略或null时只可从当前会话绑定工单的唯一精确controlled_phase令牌推断。分镜Schema为`R10.1`，工作流为`R10-PG1`。
+- 插件版本为`0.5.12`，精确工具集仍为19个且包含`recover_storyboard_handoff`；该工具的`phase`非必填且枚举必须同时包含`handoff_recovery`与`preflight_evidence_backfill`，不得保留默认恢复阶段。省略或null时只可从当前会话绑定工单的唯一精确controlled_phase令牌推断。分镜Schema为`R10.1`，工作流为`R10-PG1`。
 - 新 canonical 的模型镜头契约严格为27字段：`镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`。内部UID和身份元数据不属于模型写入字段。
 - Excel正式母版严格为10列：`分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`。旧列名`正式分镜母版·字段合并`只允许只读导入，不得回写。
 - `正式分镜母版`是唯一完整视频执行真值，必须能在空白上下文中独立执行；不得出现独立Seedance列、独立执行提示词、顶层`batches`、镜内`生成批次`或“生成批次”工作表。
@@ -91,9 +91,9 @@
 - 源文对白只由服务器登记的源文件与经payload SHA、Hub authority entry、artifact metadata source role交叉核对的parser v6闭集语法逐occurrence解析；候选inventory、`source_lock`、台账、认知和锚点不能提供解析权威。authority manifest SHA直接绑定source fingerprint、role、occurrences与grammar SHA，grammar SHA再间接绑定implementation source；歧义必须失败关闭且零正式产物。
 - 公共场景写明密度、地点角色、错峰动作、空间层次、具体近中远声源和对白避让；只写“人群/环境声”必须阻断。
 - 同身份同数量局部修改可用`commit_storyboard_delta`；插入、删除、移动、拆分、合并、重编号及原文、认知、边界或场景拓扑变化必须拒绝delta并完整重建受影响场景或分集。
-- 生产窗口普通内容路线只签发`production_preflight`；0.5.11精确历史补签路线只能签发非当前结论的`historical_production_preflight_attestation`。独立审计窗口只读复核。只有审计失败、已签发精确修复包且用户明确授权时才启用第三个repair窗口，修复结果必须返回原审计窗口。
+- 生产窗口普通内容路线只签发`production_preflight`；0.5.12精确历史补签路线只能签发非当前结论的`historical_production_preflight_attestation`。独立审计窗口只读复核。只有审计失败、已签发精确修复包且用户明确授权时才启用第三个repair窗口，修复结果必须返回原审计窗口。
 - 补签与恢复必须使用两张不同的、绑定当前production窗口/session的`rule_improvement + execute + explicit_execute`工单。补签targets精确等于gap、对应handoff IDs和`controlled_phase:preflight_evidence_backfill`；恢复targets精确等于gap、对应handoff IDs和`controlled_phase:handoff_recovery`。缺项、额外项、错误token/窗口或复用同一工单时，plan必须返回`scope_mismatch`且零写入。
-- 旧交接生产预检证据补签必须先`phase=preflight_evidence_backfill, action=plan`，再以相同handoff列表和`plan_sha256`配合`REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE`执行。普通分支只在当前validator零问题时追加`production_preflight`；`GAP-1bb91d83751b422f`精确有序后六条则要求冻结报告与原签名PASS/0报告完全相等，当前FAIL仅含封存的`E-I2V-INDEP-002 / THG-01 / shots[n].生成限制 / 缺少一次9:16竖屏`措辞漂移且warning=0、计数闭合，并只追加`historical_production_preflight_attestation`。该证明保留完整双报告、使用`HISTCACHE`、不声称current pass且不可作为当前预检或独审缓存复用；旧handoff/证书、分镜、canonical、XLSX、生产历史和审计历史均不修改。
+- 旧交接生产预检证据补签必须先`phase=preflight_evidence_backfill, action=plan`，再以相同handoff列表和`plan_sha256`配合`REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE`执行。普通分支只在当前validator零问题时追加`production_preflight`；`GAP-1bb91d83751b422f`精确有序后六条则要求冻结报告与原签名PASS/0报告完全相等，且每条真实当前FAIL精确匹配自身封存的canonical SHA、完整current-report SHA、shot/error/warning计数、完整error-code histogram和当前validator composite/完整SHA，并只追加`historical_production_preflight_attestation`。该证明保留完整双报告、使用`HISTCACHE`、不声称current pass且不可作为当前预检或独审缓存复用；旧handoff/证书、分镜、canonical、XLSX、生产历史和审计历史均不修改。
 - 受控工作簿复验只接受精确签名0.5.4/当前投影，或“8列canonical侧车 + 短10列表头 + 冻结0.5.3投影器逐格一致”的合法基线。证明绑定raw XLSX/canonical、旧handoff、旧生产证书、原生产trace、投影器和冻结来源；一般`extract_xlsx`不接受该历史特例。
 - 证据齐备后的旧交接恢复使用另一张工单执行`phase=handoff_recovery`；`GAP-0e5d48969c4c494e`只接受文档精确有序原11条，同样先plan再以完全相同列表/哈希和`SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT`执行。每条独立原子恢复，旧handoff仅变为`superseded`且不删除，新handoff为`prepared + PENDING_AUDIT`；后六条必须由当前validator和完整八层语义独审重新得出结论。
 - 历史Hub交接投影只接受精确去签名信封投影或精确完整签名记录；任何混合、额外、缺失或变更字段必须在写入前失败关闭。兼容读取不得迁移或改写历史，未来生产Hub写入统一为去信封投影。
