@@ -60,7 +60,7 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.6",
+    "plugin_version": "0.5.7",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
     "canonical_atomic_field_count": 27,
@@ -457,9 +457,39 @@
       "missing_or_mismatch": "cache_miss_or_block",
       "forbid_silent_stale_fallback": true,
       "controlled_recovery": {
-        "minimum_plugin_version": "0.5.6",
-        "authority": "production rule_improvement_or_version_management explicit_execute",
-        "requires": ["registered_gap", "exact_targets", "current_full_regression_certificate", "plan_sha256", "exact_confirmation"],
+        "minimum_plugin_version": "0.5.7",
+        "legacy_handoff_recovery_introduced_in": "0.5.6",
+        "public_tool_contract": {
+          "exact_tool_count": 19,
+          "tool": "recover_storyboard_handoff",
+          "phase_enum": ["handoff_recovery", "preflight_evidence_backfill"]
+        },
+        "authority": "current_window production rule_improvement execute explicit_execute",
+        "work_order_contract": {
+          "distinct_work_order_per_phase": true,
+          "window_binding": "current_production_window_and_session",
+          "task_type": "rule_improvement",
+          "execution_mode": "execute",
+          "approval_mode": "explicit_execute",
+          "exact_target_set_required": true,
+          "scope_failure": "scope_mismatch_before_plan_with_zero_writes"
+        },
+        "requires": ["registered_gap", "corresponding_handoff_ids", "machine_readable_controlled_phase_token", "current_full_regression_certificate", "plan_sha256", "exact_confirmation"],
+        "preflight_evidence_backfill": {
+          "phase": "preflight_evidence_backfill",
+          "work_order_target_token": "controlled_phase:preflight_evidence_backfill",
+          "action_sequence": ["plan", "execute"],
+          "exact_confirmation": "REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE",
+          "evidence_policy": "append_only",
+          "preserve_unchanged": ["old_handoff", "old_production_preflight_certificate", "storyboard", "xlsx", "canonical", "historical_audit_records"],
+          "independent_audit_verdict": "forbidden"
+        },
+        "handoff_recovery": {
+          "phase": "handoff_recovery",
+          "work_order_target_token": "controlled_phase:handoff_recovery",
+          "action_sequence": ["plan", "execute"],
+          "exact_confirmation": "SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT"
+        },
         "transaction": "signed_journal_plus_before_after_cas",
         "old_record_policy": "preserve_and_mark_superseded",
         "new_record_policy": "one_current_complete_fingerprint_prepared_successor",

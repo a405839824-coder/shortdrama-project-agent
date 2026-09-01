@@ -148,7 +148,21 @@ ARTIFACT_OPERATION_BINDINGS: dict[str, set[str]] = {
 SOURCE_INTAKE_OPERATIONS = {"project_intake", "source_lock", "chapter_intake"}
 WRITE_READY_WORK_ORDER_STATUSES = {"approved", "scope_locked", "executing", "failed_current"}
 HANDOFF_RECOVERY_CONFIRMATION = "SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT"
+PREFLIGHT_EVIDENCE_REISSUE_CONFIRMATION = (
+    "REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE"
+)
 MAX_HANDOFF_RECOVERY_ITEMS = 32
+HANDOFF_IMMUTABLE_CONTENT_FINGERPRINTS = frozenset(
+    {
+        "source_bytes",
+        "normalized_source",
+        "episode_boundary",
+        "artifact_raw",
+        "artifact_semantic",
+        "canonical",
+        "project_anchors",
+    }
+)
 
 AUDIT_CLASS_PRODUCTION_PREFLIGHT = "production_preflight"
 AUDIT_CLASS_INDEPENDENT = "independent_audit"
@@ -4734,13 +4748,23 @@ class StoryboardService:
         *,
         gap_id: str,
         handoff_ids: list[str],
+        phase: str,
         request_session_id: str | None,
     ) -> None:
+        if work_order.get("operation") != "rule_improvement":
+            raise ValueError(
+                "handoff_recovery_authority_required: use an explicit "
+                "rule_improvement production work order"
+            )
         self._assert_project_migration_authority(
             namespace, work_order, request_session_id
         )
         targets = {str(value) for value in work_order.get("targets", [])}
-        required = {gap_id, *handoff_ids}
+        required = {
+            gap_id,
+            *handoff_ids,
+            f"controlled_phase:{phase}",
+        }
         if targets != required:
             missing = sorted(required - targets)
             extra = sorted(targets - required)
@@ -4765,7 +4789,535 @@ class StoryboardService:
             )
         return gap
 
-    def _prepare_handoff_recovery_item(
+    def _production_preflight_certificate_value(
+        self,
+        *,
+        certificate_id: str,
+        artifact_id: str,
+        canonical_artifact_id: str,
+        cache_components: dict[str, str],
+        report: dict[str, Any],
+        work_order_id: str,
+        production_work_order_id: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build, but do not persist, one production-only certificate."""
+
+        cache_key = self._cache_key_from_components(cache_components)
+        clean = not report.get("issues")
+        value: dict[str, Any] = {
+            "certificate_id": certificate_id,
+            "certificate_type": AUDIT_CLASS_PRODUCTION_PREFLIGHT,
+            "work_order_id": work_order_id,
+            "production_work_order_id": production_work_order_id,
+            "artifact_id": artifact_id,
+            "canonical_artifact_id": canonical_artifact_id,
+            "canonical_sha256": cache_components["canonical"],
+            "source_fingerprint": cache_components["source"],
+            "boundary_hash": cache_components["boundary"],
+            "ruleset_version": cache_components["ruleset"],
+            "validator_version": cache_components["validator"],
+            "audit_class": AUDIT_CLASS_PRODUCTION_PREFLIGHT,
+            "cache_key": cache_key,
+            "cache_components": copy.deepcopy(cache_components),
+            "checked_shot_count": int(report.get("shot_count", 0)),
+            "report_sha256": sha256_bytes(_stable_json_bytes(report)),
+            "report": copy.deepcopy(report),
+            "preflight_status": (
+                PRODUCTION_PREFLIGHT_PASS
+                if clean
+                else PRODUCTION_PREFLIGHT_FAIL
+            ),
+            "preflight_issue_count": len(report.get("issues", [])),
+            "independent_audit_status": "PENDING_AUDIT",
+        }
+        if extra:
+            value.update(copy.deepcopy(extra))
+        return value
+
+    def _controlled_production_revalidation_trace_value(
+        self,
+        *,
+        trace_id: str,
+        phase: str,
+        work_order: dict[str, Any],
+        production_work_order_id: str,
+        gap_id: str,
+        plan_sha256: str,
+        artifact_id: str,
+        artifact_size_bytes: int,
+        fingerprints: dict[str, str],
+        shot_count: int,
+        authority_record_id: str,
+        revalidation_measurement: dict[str, Any],
+    ) -> dict[str, Any]:
+        started_at = str(revalidation_measurement.get("started_at") or "")
+        ended_at = str(revalidation_measurement.get("ended_at") or "")
+        duration_ms = int(revalidation_measurement.get("duration_ms") or 0)
+        if not started_at or not ended_at or duration_ms <= 0:
+            raise ValueError(
+                "controlled_production_revalidation_measurement_required"
+            )
+        value = {
+            "telemetry_id": trace_id,
+            "trace_id": trace_id,
+            "operation": "recover_storyboard_handoff",
+            "phase": phase,
+            "window_role": "production",
+            "task_type": "production_preflight",
+            "measurement_scope": "server_only",
+            "unmeasured_stages": [],
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "wall_duration_ms": duration_ms,
+            "work_order_id": str(work_order.get("work_order_id") or ""),
+            "production_work_order_id": production_work_order_id,
+            "gap_id": gap_id,
+            "plan_sha256": plan_sha256,
+            "authority_record_id": authority_record_id,
+            "artifact_id": artifact_id,
+            "input_fingerprints": copy.deepcopy(fingerprints),
+            "input_payload_bytes": max(0, int(artifact_size_bytes)),
+            "output_payload_bytes": 0,
+            "affected_shot_count": 0,
+            "preserved_semantic_count": max(0, int(shot_count)),
+            "schema_version": COMPACT_SCHEMA_VERSION,
+            "schema_profile": COMPACT_SCHEMA_PROFILE,
+            "materializer_contract": COMPACT_MATERIALIZER_CONTRACT,
+            "materialization_passes": 0,
+            **NO_DUPLICATE_GENERATION_EVIDENCE,
+            "stages": [
+                {
+                    "stage": "validation",
+                    "started_at": started_at,
+                    "ended_at": ended_at,
+                    "duration_ms": duration_ms,
+                    "tool_call_count": 0,
+                    "source_character_count": None,
+                    "payload_bytes": max(0, int(artifact_size_bytes)),
+                    "shot_count": max(0, int(shot_count)),
+                    "batch_count": 0,
+                    "cache_status": "miss",
+                    "cache_reason": (
+                        "current controlled production revalidation; no generation"
+                    ),
+                    "retry_count": 0,
+                    "error_status": "none",
+                }
+            ],
+        }
+        self._validate_schema_record(
+            self._project_schema, "stage_timing_trace", value
+        )
+        return value
+
+    @staticmethod
+    def _legacy_handoff_preflight_fields_missing(
+        handoff: dict[str, Any],
+    ) -> bool:
+        return all(
+            handoff.get(field) is None or handoff.get(field) == ""
+            for field in (
+                "production_preflight_status",
+                "production_preflight_issue_count",
+                "independent_audit_status",
+            )
+        )
+
+    @staticmethod
+    def _clean_pending_preflight_fields(value: dict[str, Any]) -> bool:
+        issue_count = value.get("production_preflight_issue_count")
+        return (
+            value.get("production_preflight_status")
+            == PRODUCTION_PREFLIGHT_PASS
+            and isinstance(issue_count, int)
+            and not isinstance(issue_count, bool)
+            and issue_count == 0
+            and value.get("independent_audit_status") == "PENDING_AUDIT"
+        )
+
+    @classmethod
+    def _legacy_certificate_evidence_invalid(
+        cls,
+        certificate: dict[str, Any],
+        handoff: dict[str, Any],
+    ) -> bool:
+        """Reject failed, ambiguous, or misbound legacy preflight evidence."""
+
+        report = certificate.get("report")
+        if not isinstance(report, dict):
+            return True
+        issues = report.get("issues")
+        if not isinstance(issues, list) or issues:
+            return True
+        if certificate.get("report_sha256") != sha256_bytes(
+            _stable_json_bytes(report)
+        ):
+            return True
+        if not cls._valid_cache_identity(
+            certificate, AUDIT_CLASS_PRODUCTION_PREFLIGHT
+        ):
+            return True
+        if certificate.get("cache_components") != handoff.get(
+            "cache_components"
+        ):
+            return True
+        for field in (
+            "certificate_id",
+            "work_order_id",
+            "artifact_id",
+            "canonical_artifact_id",
+            "canonical_sha256",
+            "source_fingerprint",
+            "boundary_hash",
+            "ruleset_version",
+            "validator_version",
+            "audit_class",
+            "cache_key",
+        ):
+            handoff_field = (
+                "storyboard_artifact_id"
+                if field == "artifact_id"
+                else field
+            )
+            if certificate.get(field) != handoff.get(handoff_field):
+                return True
+        if (
+            certificate.get("certificate_type")
+            != AUDIT_CLASS_PRODUCTION_PREFLIGHT
+        ):
+            return True
+        status = certificate.get("preflight_status")
+        if status is not None and status != "" and status != PRODUCTION_PREFLIGHT_PASS:
+            return True
+        issue_count = certificate.get("preflight_issue_count")
+        if issue_count is not None and issue_count != "":
+            if (
+                not isinstance(issue_count, int)
+                or isinstance(issue_count, bool)
+                or issue_count != 0
+            ):
+                return True
+        independent_status = certificate.get("independent_audit_status")
+        return (
+            independent_status is not None
+            and independent_status != ""
+            and independent_status != "PENDING_AUDIT"
+        )
+
+    def _load_handoff_revalidation_context(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        hub: dict[str, Any],
+        handoff_id: str,
+        runtime_certificate: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Load immutable production evidence and recompute current validity."""
+
+        revalidation_started_ns = time.perf_counter_ns()
+        revalidation_started_at = utc_stamp()
+
+        handoff = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="handoffs",
+            record_id=handoff_id,
+        )
+        if not self.store.project_record_is_signed(handoff):
+            raise ValueError(f"handoff_reissue_required: {handoff_id} is unsigned")
+        self._validate_schema_record(
+            self._project_schema, "handoff_manifest", handoff
+        )
+        projections = [
+            row
+            for row in hub.get("handoffs", [])
+            if isinstance(row, dict) and row.get("handoff_id") == handoff_id
+        ]
+        if (
+            len(projections) != 1
+            or projections[0] != self._handoff_record_projection(handoff)
+        ):
+            raise ValueError(
+                f"handoff_recovery_projection_invalid: {handoff_id} Hub projection differs from signed record"
+            )
+        if handoff.get("status") != "prepared":
+            raise ValueError(
+                f"handoff_recovery_state_conflict: {handoff_id} status is "
+                f"{handoff.get('status')!r}, expected 'prepared'"
+            )
+        if (
+            handoff.get("handoff_type") != "production_to_audit"
+            or handoff.get("from_window_role") != "production"
+            or handoff.get("to_window_role") != "independent_audit"
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} is not a production_to_audit handoff"
+            )
+        if handoff.get("claim_authority_work_order_id") or handoff.get(
+            "claimed_by_work_order_id"
+        ):
+            raise ValueError(
+                f"handoff_recovery_state_conflict: {handoff_id} has audit claim authority"
+            )
+        if not self.store.handoff_is_published(namespace, project_id, handoff):
+            raise ValueError(
+                f"handoff_recovery_state_conflict: {handoff_id} is not committed"
+            )
+        if not self._valid_cache_identity(
+            handoff, AUDIT_CLASS_PRODUCTION_PREFLIGHT
+        ):
+            raise ValueError(
+                f"handoff_recovery_identity_invalid: {handoff_id} has an invalid original cache identity"
+            )
+
+        original_work_order = _find_work_order(
+            hub, str(handoff.get("work_order_id") or "")
+        )
+        if original_work_order.get("server_actor_role") != "production":
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} producer authority is invalid"
+            )
+        artifact_id = str(handoff.get("storyboard_artifact_id") or "")
+        canonical_artifact_id = str(
+            handoff.get("canonical_artifact_id") or ""
+        )
+        storyboard, artifact_record = self._storyboard_from_artifact(
+            namespace,
+            project_id,
+            artifact_id,
+            persist_recovered_canonical=False,
+            require_bound_projection=True,
+        )
+        _verified_artifact_record, artifact_path = self.store.get_artifact(
+            namespace, project_id, artifact_id
+        )
+        artifact_bytes = artifact_path.read_bytes()
+        if sha256_bytes(artifact_bytes) != artifact_record.get(
+            "fingerprint"
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} workbook payload fingerprint differs"
+            )
+        if artifact_path.suffix.casefold() not in {".xlsx", ".xlsm"}:
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} production artifact is not a workbook"
+            )
+        extracted_workbook = extract_file(
+            artifact_bytes,
+            str(artifact_record.get("file_name") or artifact_path.name),
+            artifact_record.get("metadata", {}).get("mime_type"),
+        )
+        if (
+            extracted_workbook.get("kind") != "workbook"
+            or extracted_workbook.get("canonical_sidecar_present") is not True
+            or extracted_workbook.get("canonical_storyboard") != storyboard
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} visible workbook, embedded sidecar, and canonical artifact differ"
+            )
+        artifact_metadata = artifact_record.get("metadata")
+        if not isinstance(artifact_metadata, dict):
+            artifact_metadata = {}
+        if str(artifact_metadata.get("canonical_json_artifact_id") or "") != (
+            canonical_artifact_id
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} canonical sidecar differs"
+            )
+        canonical_record, _canonical_path = self.store.get_artifact(
+            namespace, project_id, canonical_artifact_id
+        )
+        canonical_hash = canonical_storyboard_sha256(storyboard)
+        if (
+            str(handoff.get("canonical_sha256") or "") != canonical_hash
+            or str(
+                canonical_record.get("metadata", {}).get(
+                    "canonical_sha256"
+                )
+                or canonical_hash
+            )
+            != canonical_hash
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} canonical hash differs"
+            )
+
+        source_fingerprint = str(
+            artifact_metadata.get("source_fingerprint")
+            or handoff.get("source_fingerprint")
+            or ""
+        )
+        boundary_hash = self._boundary_hash(storyboard)
+        if (
+            not source_fingerprint
+            or str(handoff.get("source_fingerprint") or "")
+            != source_fingerprint
+            or str(handoff.get("boundary_hash") or "") != boundary_hash
+        ):
+            raise ValueError(
+                f"handoff_recovery_binding_mismatch: {handoff_id} source or boundary differs"
+            )
+
+        old_certificate = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=str(handoff.get("certificate_id") or ""),
+        )
+        if (
+            not self.store.project_record_is_signed(old_certificate)
+            or old_certificate.get("certificate_type")
+            != AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            or old_certificate.get("certificate_id")
+            != handoff.get("certificate_id")
+            or old_certificate.get("work_order_id")
+            != handoff.get("work_order_id")
+            or old_certificate.get("artifact_id") != artifact_id
+            or old_certificate.get("canonical_artifact_id")
+            != canonical_artifact_id
+            or old_certificate.get("canonical_sha256") != canonical_hash
+            or self._legacy_certificate_evidence_invalid(
+                old_certificate, handoff
+            )
+        ):
+            raise ValueError(
+                f"handoff_recovery_certificate_invalid: {handoff_id} production preflight certificate is invalid"
+            )
+        for field, expected in (
+            ("production_preflight_status", PRODUCTION_PREFLIGHT_PASS),
+            ("production_preflight_issue_count", 0),
+            ("independent_audit_status", "PENDING_AUDIT"),
+        ):
+            value = artifact_metadata.get(field)
+            if value is None or value == "":
+                continue
+            if field == "production_preflight_issue_count":
+                matches = (
+                    isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and value == 0
+                )
+            else:
+                matches = value == expected
+            if not matches:
+                raise ValueError(
+                    f"handoff_recovery_evidence_invalid: {handoff_id} artifact metadata contains an explicit preflight conflict"
+                )
+
+        report = validate_storyboard.validate_project(storyboard, mode="audit")
+        if report.get("issues"):
+            raise ValueError(
+                f"handoff_recovery_validation_failed: {handoff_id} has "
+                f"{len(report.get('issues', []))} current validation issue(s)"
+            )
+        current_fingerprints = self._fingerprint_bundle(
+            storyboard,
+            artifact_record,
+            canonical_hash=canonical_hash,
+            source_fingerprint=source_fingerprint,
+            boundary_hash=boundary_hash,
+        )
+        old_fingerprints = handoff.get("fingerprints")
+        if not isinstance(old_fingerprints, dict):
+            raise ValueError(
+                f"handoff_recovery_identity_invalid: {handoff_id} has no complete fingerprints"
+            )
+        content_changes = sorted(
+            key
+            for key in HANDOFF_IMMUTABLE_CONTENT_FINGERPRINTS
+            if old_fingerprints.get(key) != current_fingerprints.get(key)
+        )
+        if content_changes:
+            raise ValueError(
+                f"handoff_recovery_content_changed: {handoff_id} immutable content fingerprints differ: {content_changes}"
+            )
+        stale_components = sorted(
+            key
+            for key, value in current_fingerprints.items()
+            if old_fingerprints.get(key) != value
+        )
+        cache_components = self._audit_cache_components(
+            canonical_hash=canonical_hash,
+            source_fingerprint=source_fingerprint,
+            boundary_hash=boundary_hash,
+            audit_class=AUDIT_CLASS_PRODUCTION_PREFLIGHT,
+            artifact_fingerprint=str(artifact_record.get("fingerprint") or ""),
+            storyboard=storyboard,
+            scope={
+                "targets": original_work_order.get("targets", []),
+                "protected_scope": original_work_order.get(
+                    "protected_scope", []
+                ),
+            },
+            runtime_test_certificate_id=str(
+                runtime_certificate["certificate_id"]
+            ),
+        )
+        revalidation_ended_at = utc_stamp()
+        elapsed_ns = time.perf_counter_ns() - revalidation_started_ns
+        revalidation_duration_ms = max(1, (elapsed_ns + 999_999) // 1_000_000)
+        return {
+            "handoff": handoff,
+            "storyboard": storyboard,
+            "artifact_record": artifact_record,
+            "artifact_metadata": artifact_metadata,
+            "old_certificate": old_certificate,
+            "report": report,
+            "current_fingerprints": current_fingerprints,
+            "old_fingerprints": old_fingerprints,
+            "stale_components": stale_components,
+            "cache_components": cache_components,
+            "original_work_order": original_work_order,
+            "artifact_id": artifact_id,
+            "canonical_artifact_id": canonical_artifact_id,
+            "canonical_hash": canonical_hash,
+            "source_fingerprint": source_fingerprint,
+            "boundary_hash": boundary_hash,
+            "old_record_sha256": self.store.project_state_sha256(handoff),
+            "current_fingerprints_sha256": sha256_bytes(
+                _stable_json_bytes(current_fingerprints)
+            ),
+            "revalidation_measurement": {
+                "started_at": revalidation_started_at,
+                "ended_at": revalidation_ended_at,
+                "duration_ms": revalidation_duration_ms,
+            },
+        }
+
+    @staticmethod
+    def _preflight_evidence_identity(
+        *,
+        project_id: str,
+        work_order_id: str,
+        gap_id: str,
+        handoff_id: str,
+        old_record_sha256: str,
+        current_fingerprints_sha256: str,
+        runtime_test_certificate_id: str,
+    ) -> tuple[str, str, str]:
+        evidence_key = sha256_bytes(
+            _stable_json_bytes(
+                {
+                    "spec": "controlled-preflight-evidence-reissue-v1",
+                    "project_id": project_id,
+                    "work_order_id": work_order_id,
+                    "gap_id": gap_id,
+                    "old_handoff_id": handoff_id,
+                    "old_record_sha256": old_record_sha256,
+                    "current_fingerprints_sha256": current_fingerprints_sha256,
+                    "runtime_test_certificate_id": runtime_test_certificate_id,
+                }
+            )
+        )
+        return (
+            evidence_key,
+            f"PFE-{sha256_bytes((evidence_key + ':evidence').encode())[:20]}",
+            f"CERT-{sha256_bytes((evidence_key + ':certificate').encode())[:20]}",
+        )
+
+    def _prepare_handoff_recovery_item_v056(
         self,
         namespace: str,
         project_id: str,
@@ -5004,6 +5556,1056 @@ class StoryboardService:
             "original_work_order": original_work_order,
         }
 
+    def _verified_preflight_evidence_reissue(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        context: dict[str, Any],
+        runtime_certificate: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        handoff = context["handoff"]
+        matching_evidence = [
+            row
+            for row in self.store.list_project_records_strict(
+                namespace,
+                project_id,
+                kind="preflight_evidence_reissues",
+            )
+            if row.get("old_handoff_id") == handoff.get("handoff_id")
+            and row.get("old_handoff_sha256")
+            == context["old_record_sha256"]
+            and row.get("current_fingerprints_sha256")
+            == context["current_fingerprints_sha256"]
+            and row.get("runtime_test_certificate_id")
+            == runtime_certificate["certificate_id"]
+            and row.get("status") == "committed"
+        ]
+        if not matching_evidence:
+            raise ValueError(
+                f"handoff_preflight_evidence_reissue_required: {handoff['handoff_id']} has no committed current evidence successor"
+            )
+        if len(matching_evidence) != 1:
+            raise ValueError(
+                f"handoff_preflight_evidence_reissue_conflict: {handoff['handoff_id']} has non-unique current evidence"
+            )
+        evidence = matching_evidence[0]
+        self._validate_schema_record(
+            self._project_schema,
+            "preflight_evidence_reissue",
+            evidence,
+        )
+        evidence_key, evidence_id, certificate_id = (
+            self._preflight_evidence_identity(
+                project_id=project_id,
+                work_order_id=str(evidence.get("work_order_id") or ""),
+                gap_id=str(evidence.get("gap_id") or ""),
+                handoff_id=str(handoff["handoff_id"]),
+                old_record_sha256=str(context["old_record_sha256"]),
+                current_fingerprints_sha256=str(
+                    context["current_fingerprints_sha256"]
+                ),
+                runtime_test_certificate_id=str(
+                    runtime_certificate["certificate_id"]
+                ),
+            )
+        )
+        expected_report_sha256 = sha256_bytes(
+            _stable_json_bytes(context["report"])
+        )
+        expected_trace_id = (
+            f"TRC-{sha256_bytes((evidence_key + ':evidence-trace').encode())[:20]}"
+        )
+        evidence_work_order = _find_work_order(
+            self.store.load_hub(namespace, project_id),
+            str(evidence.get("work_order_id") or ""),
+        )
+        authorized_handoff_ids = evidence.get("authorized_handoff_ids")
+        authorized_ids_valid = (
+            isinstance(authorized_handoff_ids, list)
+            and bool(authorized_handoff_ids)
+            and all(
+                isinstance(value, str) and bool(value)
+                for value in authorized_handoff_ids
+            )
+            and len(set(authorized_handoff_ids))
+            == len(authorized_handoff_ids)
+            and handoff.get("handoff_id") in authorized_handoff_ids
+        )
+        expected_targets = {
+            str(evidence.get("gap_id") or ""),
+            *(authorized_handoff_ids if authorized_ids_valid else []),
+            "controlled_phase:preflight_evidence_backfill",
+        }
+        expected_batch_trace_id = (
+            "TRC-"
+            + sha256_bytes(
+                (
+                    str(evidence.get("plan_sha256") or "")
+                    + ":preflight-evidence-trace"
+                ).encode()
+            )[:20]
+        )
+        expected_shot_count = int(context["report"].get("shot_count", 0))
+        if (
+            not self.store.project_record_is_signed(evidence)
+            or evidence.get("status") != "committed"
+            or evidence.get("evidence_type")
+            != "controlled_current_production_preflight_revalidation"
+            or evidence.get("preflight_evidence_id") != evidence_id
+            or evidence.get("evidence_key") != evidence_key
+            or evidence.get("old_handoff_id") != handoff.get("handoff_id")
+            or evidence.get("old_handoff_sha256")
+            != context["old_record_sha256"]
+            or evidence.get("original_certificate_id")
+            != context["old_certificate"].get("certificate_id")
+            or evidence.get("artifact_id") != context["artifact_id"]
+            or evidence.get("canonical_artifact_id")
+            != context["canonical_artifact_id"]
+            or evidence.get("canonical_sha256") != context["canonical_hash"]
+            or evidence.get("current_fingerprints_sha256")
+            != context["current_fingerprints_sha256"]
+            or evidence.get("current_fingerprints")
+            != context["current_fingerprints"]
+            or evidence.get("runtime_test_certificate_id")
+            != runtime_certificate["certificate_id"]
+            or evidence.get("validation_report_sha256")
+            != expected_report_sha256
+            or evidence.get("checked_shot_count") != expected_shot_count
+            or evidence.get("certificate_id") != certificate_id
+            or evidence.get("production_preflight_status")
+            != PRODUCTION_PREFLIGHT_PASS
+            or evidence.get("production_preflight_issue_count") != 0
+            or evidence.get("independent_audit_status") != "PENDING_AUDIT"
+            or evidence.get("first_draft_grade_reconstructed") is not False
+            or evidence.get("authored_artifacts_modified") is not False
+            or evidence.get("history_records_modified") != 0
+            or evidence.get("independent_audit_verdict_issued") is not False
+            or evidence.get("original_production_trace_id")
+            != handoff.get("stage_trace_id")
+            or evidence.get("confirmation")
+            != PREFLIGHT_EVIDENCE_REISSUE_CONFIRMATION
+            or evidence.get("trace_id") != expected_trace_id
+            or evidence.get("batch_trace_id") != expected_batch_trace_id
+            or not authorized_ids_valid
+            or evidence_work_order.get("operation") != "rule_improvement"
+            or evidence_work_order.get("mode") != "execute"
+            or evidence_work_order.get("authorization")
+            != "explicit_execute"
+            or evidence_work_order.get("server_actor_role") != "production"
+            or {
+                str(value)
+                for value in evidence_work_order.get("targets", [])
+            }
+            != expected_targets
+        ):
+            raise ValueError(
+                f"handoff_preflight_evidence_reissue_invalid: {handoff['handoff_id']} evidence successor is invalid"
+            )
+        batch_trace = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="telemetry",
+            record_id=expected_batch_trace_id,
+        )
+        batch_mappings = batch_trace.get("mappings")
+        current_mapping = [
+            row
+            for row in batch_mappings
+            if isinstance(row, dict)
+            and row.get("old_handoff_id") == handoff.get("handoff_id")
+        ] if isinstance(batch_mappings, list) else []
+        if (
+            not self.store.project_record_is_signed(batch_trace)
+            or batch_trace.get("operation") != "recover_storyboard_handoff"
+            or batch_trace.get("phase") != "preflight_evidence_backfill"
+            or batch_trace.get("trace_id") != expected_batch_trace_id
+            or batch_trace.get("telemetry_id") != expected_batch_trace_id
+            or batch_trace.get("work_order_id") != evidence.get("work_order_id")
+            or batch_trace.get("gap_id") != evidence.get("gap_id")
+            or batch_trace.get("plan_sha256") != evidence.get("plan_sha256")
+            or batch_trace.get("authorized_handoff_ids")
+            != authorized_handoff_ids
+            or batch_trace.get("evidence_count") != len(authorized_handoff_ids)
+            or not isinstance(batch_mappings, list)
+            or len(batch_mappings) != len(authorized_handoff_ids)
+            or [
+                row.get("old_handoff_id")
+                for row in batch_mappings
+                if isinstance(row, dict)
+            ] != authorized_handoff_ids
+            or len(current_mapping) != 1
+            or current_mapping[0].get("preflight_evidence_id") != evidence_id
+            or current_mapping[0].get("certificate_id") != certificate_id
+            or current_mapping[0].get("trace_id") != expected_trace_id
+            or current_mapping[0].get("production_preflight_status")
+            != PRODUCTION_PREFLIGHT_PASS
+            or current_mapping[0].get("production_preflight_issue_count") != 0
+            or current_mapping[0].get("independent_audit_status")
+            != "PENDING_AUDIT"
+        ):
+            raise ValueError(
+                f"handoff_preflight_evidence_reissue_invalid: {handoff['handoff_id']} batch trace is invalid"
+            )
+        original_trace_id = str(
+            evidence.get("original_production_trace_id") or ""
+        )
+        original_trace = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="telemetry",
+            record_id=original_trace_id,
+        )
+        if (
+            not self.store.project_record_is_signed(original_trace)
+            or original_trace.get("trace_id") != original_trace_id
+            or original_trace.get("telemetry_id") != original_trace_id
+            or original_trace.get("operation") != "commit_storyboard"
+            or original_trace.get("window_role") != "production"
+            or original_trace.get("task_type") != "production_preflight"
+            or original_trace.get("artifact_id") != context["artifact_id"]
+            or original_trace.get("input_fingerprints")
+            != context["old_fingerprints"]
+        ):
+            raise ValueError(
+                f"handoff_preflight_evidence_reissue_invalid: {handoff['handoff_id']} original production trace is invalid"
+            )
+        self._validate_schema_record(
+            self._project_schema, "stage_timing_trace", original_trace
+        )
+        certificate = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=certificate_id,
+        )
+        self._validate_schema_record(
+            self._project_schema,
+            "production_preflight_certificate",
+            certificate,
+        )
+        certificate_report = certificate.get("report")
+        if (
+            not self.store.project_record_is_signed(certificate)
+            or self.store.project_state_sha256(certificate)
+            != evidence.get("certificate_after_sha256")
+            or certificate.get("certificate_type")
+            != AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            or certificate.get("work_order_id")
+            != evidence.get("work_order_id")
+            or certificate.get("evidence_reissue_work_order_id")
+            != evidence.get("work_order_id")
+            or certificate.get("evidence_reissue_gap_id")
+            != evidence.get("gap_id")
+            or certificate.get("production_work_order_id")
+            != handoff.get("work_order_id")
+            or certificate.get("artifact_id") != context["artifact_id"]
+            or certificate.get("canonical_artifact_id")
+            != context["canonical_artifact_id"]
+            or certificate.get("canonical_sha256")
+            != context["canonical_hash"]
+            or certificate.get("source_fingerprint")
+            != context["source_fingerprint"]
+            or certificate.get("boundary_hash")
+            != context["boundary_hash"]
+            or certificate.get("ruleset_version")
+            != context["cache_components"]["ruleset"]
+            or certificate.get("validator_version")
+            != context["cache_components"]["validator"]
+            or certificate.get("audit_class")
+            != AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            or certificate.get("cache_components")
+            != context["cache_components"]
+            or certificate.get("cache_key")
+            != self._cache_key_from_components(
+                context["cache_components"]
+            )
+            or not self._valid_cache_identity(
+                certificate, AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            )
+            or certificate.get("preflight_status")
+            != PRODUCTION_PREFLIGHT_PASS
+            or certificate.get("preflight_issue_count") != 0
+            or certificate.get("independent_audit_status")
+            != "PENDING_AUDIT"
+            or certificate.get("evidence_origin")
+            != "controlled_current_revalidation"
+            or certificate.get("preflight_evidence_id") != evidence_id
+            or certificate.get("backfill_for_handoff_id")
+            != handoff.get("handoff_id")
+            or certificate.get("original_certificate_id")
+            != context["old_certificate"].get("certificate_id")
+            or certificate.get("original_handoff_sha256")
+            != context["old_record_sha256"]
+            or certificate.get("authorized_handoff_ids")
+            != authorized_handoff_ids
+            or certificate.get("runtime_test_certificate_id")
+            != runtime_certificate["certificate_id"]
+            or certificate.get("report_sha256") != expected_report_sha256
+            or not isinstance(certificate_report, dict)
+            or certificate_report != context["report"]
+            or sha256_bytes(_stable_json_bytes(certificate_report))
+            != expected_report_sha256
+            or certificate.get("current_fingerprints")
+            != context["current_fingerprints"]
+            or certificate.get("current_fingerprints_sha256")
+            != context["current_fingerprints_sha256"]
+            or certificate.get("evidence_trace_id") != expected_trace_id
+            or certificate.get("checked_shot_count") != expected_shot_count
+            or certificate.get("first_draft_grade_reconstructed") is not False
+            or certificate.get("authored_artifacts_modified") is not False
+            or certificate.get("independent_audit_verdict_issued") is not False
+            or evidence.get("certificate_after") != certificate
+        ):
+            raise ValueError(
+                f"handoff_preflight_evidence_reissue_invalid: {handoff['handoff_id']} evidence certificate is invalid"
+            )
+        stage_trace = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="telemetry",
+            record_id=expected_trace_id,
+        )
+        if (
+            not self.store.project_record_is_signed(stage_trace)
+            or self.store.project_state_sha256(stage_trace)
+            != evidence.get("stage_trace_after_sha256")
+            or stage_trace.get("operation")
+            != "recover_storyboard_handoff"
+            or stage_trace.get("phase")
+            != "preflight_evidence_backfill"
+            or stage_trace.get("trace_id") != expected_trace_id
+            or stage_trace.get("telemetry_id") != expected_trace_id
+            or stage_trace.get("window_role") != "production"
+            or stage_trace.get("task_type") != "production_preflight"
+            or stage_trace.get("work_order_id")
+            != evidence.get("work_order_id")
+            or stage_trace.get("production_work_order_id")
+            != handoff.get("work_order_id")
+            or stage_trace.get("gap_id") != evidence.get("gap_id")
+            or stage_trace.get("plan_sha256")
+            != evidence.get("plan_sha256")
+            or stage_trace.get("authority_record_id") != evidence_id
+            or stage_trace.get("artifact_id") != context["artifact_id"]
+            or stage_trace.get("input_fingerprints")
+            != context["current_fingerprints"]
+            or stage_trace.get("authorized_handoff_ids")
+            != authorized_handoff_ids
+            or evidence.get("stage_trace_after") != stage_trace
+        ):
+            raise ValueError(
+                f"handoff_preflight_evidence_reissue_invalid: {handoff['handoff_id']} evidence trace is invalid"
+            )
+        self._validate_schema_record(
+            self._project_schema, "stage_timing_trace", stage_trace
+        )
+        return evidence, certificate
+
+    def _prepare_handoff_recovery_item(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        hub: dict[str, Any],
+        work_order_id: str,
+        gap_id: str,
+        handoff_id: str,
+        runtime_certificate: dict[str, Any],
+    ) -> dict[str, Any]:
+        context = self._load_handoff_revalidation_context(
+            namespace,
+            project_id,
+            hub=hub,
+            handoff_id=handoff_id,
+            runtime_certificate=runtime_certificate,
+        )
+        handoff = context["handoff"]
+        old_certificate = context["old_certificate"]
+        evidence_id: str | None = None
+        evidence_source = "original_handoff"
+        effective_certificate_id = str(old_certificate["certificate_id"])
+        if self._clean_pending_preflight_fields(handoff):
+            if (
+                old_certificate.get("preflight_status")
+                != PRODUCTION_PREFLIGHT_PASS
+                or old_certificate.get("preflight_issue_count") != 0
+                or old_certificate.get("independent_audit_status")
+                != "PENDING_AUDIT"
+            ):
+                raise ValueError(
+                    f"handoff_recovery_certificate_invalid: {handoff_id} clean handoff lacks exact original evidence"
+                )
+        elif self._legacy_handoff_preflight_fields_missing(handoff):
+            evidence, evidence_certificate = (
+                self._verified_preflight_evidence_reissue(
+                    namespace,
+                    project_id,
+                    context=context,
+                    runtime_certificate=runtime_certificate,
+                )
+            )
+            evidence_id = str(evidence["preflight_evidence_id"])
+            evidence_source = "controlled_current_revalidation"
+            effective_certificate_id = str(
+                evidence_certificate["certificate_id"]
+            )
+        else:
+            raise ValueError(
+                f"handoff_recovery_evidence_invalid: {handoff_id} has ambiguous or failed preflight fields"
+            )
+        stale_components = context["stale_components"]
+        if not stale_components:
+            raise ValueError(
+                f"handoff_recovery_not_required: {handoff_id} already matches the current complete fingerprint"
+            )
+        recovery_key = sha256_bytes(
+            _stable_json_bytes(
+                {
+                    "spec": "controlled-storyboard-handoff-recovery-v2",
+                    "project_id": project_id,
+                    "work_order_id": work_order_id,
+                    "gap_id": gap_id,
+                    "old_handoff_id": handoff_id,
+                    "old_record_sha256": context["old_record_sha256"],
+                    "current_fingerprints_sha256": context[
+                        "current_fingerprints_sha256"
+                    ],
+                    "runtime_test_certificate_id": runtime_certificate[
+                        "certificate_id"
+                    ],
+                    "preflight_evidence_source": evidence_source,
+                    "preflight_evidence_id": evidence_id,
+                    "effective_preflight_certificate_id": (
+                        effective_certificate_id
+                    ),
+                }
+            )
+        )
+        public = {
+            "old_handoff_id": handoff_id,
+            "new_handoff_id": (
+                f"HND-{sha256_bytes((recovery_key + ':handoff').encode())[:20]}"
+            ),
+            "new_certificate_id": (
+                f"CERT-{sha256_bytes((recovery_key + ':certificate').encode())[:20]}"
+            ),
+            "recovery_id": f"REC-{recovery_key[:20]}",
+            "recovery_key": recovery_key,
+            "production_revalidation_trace_id": (
+                f"TRC-{sha256_bytes((recovery_key + ':production-revalidation-trace').encode())[:20]}"
+            ),
+            "artifact_id": context["artifact_id"],
+            "canonical_artifact_id": context["canonical_artifact_id"],
+            "canonical_sha256": context["canonical_hash"],
+            "old_record_sha256": context["old_record_sha256"],
+            "old_fingerprints_sha256": sha256_bytes(
+                _stable_json_bytes(context["old_fingerprints"])
+            ),
+            "current_fingerprints_sha256": context[
+                "current_fingerprints_sha256"
+            ],
+            "current_fingerprints": copy.deepcopy(
+                context["current_fingerprints"]
+            ),
+            "stale_components": copy.deepcopy(stale_components),
+            "preflight_evidence_source": evidence_source,
+            "preflight_evidence_id": evidence_id,
+            "effective_preflight_certificate_id": effective_certificate_id,
+            "cache_status": "miss",
+            "cache_reason": (
+                "complete fingerprint changed; current production preflight was revalidated"
+            ),
+            "independent_audit_status": "PENDING_AUDIT",
+        }
+        return {
+            "public": public,
+            "handoff": handoff,
+            "storyboard": context["storyboard"],
+            "artifact_record": context["artifact_record"],
+            "report": context["report"],
+            "current_fingerprints": context["current_fingerprints"],
+            "cache_components": context["cache_components"],
+            "original_work_order": context["original_work_order"],
+            "revalidation_measurement": context[
+                "revalidation_measurement"
+            ],
+        }
+
+    def _prepare_handoff_preflight_evidence_item(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        hub: dict[str, Any],
+        work_order_id: str,
+        gap_id: str,
+        handoff_id: str,
+        runtime_certificate: dict[str, Any],
+    ) -> dict[str, Any]:
+        context = self._load_handoff_revalidation_context(
+            namespace,
+            project_id,
+            hub=hub,
+            handoff_id=handoff_id,
+            runtime_certificate=runtime_certificate,
+        )
+        handoff = context["handoff"]
+        if not self._legacy_handoff_preflight_fields_missing(handoff):
+            if self._clean_pending_preflight_fields(handoff):
+                raise ValueError(
+                    f"preflight_evidence_reissue_not_required: {handoff_id} already carries clean production evidence"
+                )
+            raise ValueError(
+                f"preflight_evidence_reissue_forbidden: {handoff_id} contains explicit or ambiguous preflight fields"
+            )
+        existing_evidence = [
+            row
+            for row in self.store.list_project_records_strict(
+                namespace,
+                project_id,
+                kind="preflight_evidence_reissues",
+            )
+            if row.get("old_handoff_id") == handoff_id
+            and row.get("old_handoff_sha256")
+            == context["old_record_sha256"]
+            and row.get("current_fingerprints_sha256")
+            == context["current_fingerprints_sha256"]
+            and row.get("runtime_test_certificate_id")
+            == runtime_certificate["certificate_id"]
+            and row.get("status") in {"prepared", "committed"}
+        ]
+        if len(existing_evidence) > 1:
+            raise ValueError(
+                f"preflight_evidence_reissue_conflict: {handoff_id} has non-unique current evidence"
+            )
+        if existing_evidence and (
+            existing_evidence[0].get("work_order_id") != work_order_id
+            or existing_evidence[0].get("gap_id") != gap_id
+        ):
+            if existing_evidence[0].get("status") == "committed":
+                self._verified_preflight_evidence_reissue(
+                    namespace,
+                    project_id,
+                    context=context,
+                    runtime_certificate=runtime_certificate,
+                )
+            raise ValueError(
+                f"preflight_evidence_reissue_not_required: {handoff_id} already has current controlled evidence from another authorized work order"
+            )
+        original_trace_id = str(handoff.get("stage_trace_id") or "")
+        original_trace = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="telemetry",
+            record_id=original_trace_id,
+        )
+        self._validate_schema_record(
+            self._project_schema, "stage_timing_trace", original_trace
+        )
+        if (
+            not self.store.project_record_is_signed(original_trace)
+            or original_trace.get("trace_id") != original_trace_id
+            or original_trace.get("telemetry_id") != original_trace_id
+            or original_trace.get("operation") != "commit_storyboard"
+            or original_trace.get("window_role") != "production"
+            or original_trace.get("task_type") != "production_preflight"
+            or original_trace.get("artifact_id") != context["artifact_id"]
+            or original_trace.get("input_fingerprints")
+            != context["old_fingerprints"]
+            or original_trace.get("work_order_id")
+            not in {None, handoff.get("work_order_id")}
+        ):
+            raise ValueError(
+                f"preflight_evidence_reissue_origin_invalid: {handoff_id} lacks an exact production commit trace"
+            )
+        evidence_key, evidence_id, certificate_id = (
+            self._preflight_evidence_identity(
+                project_id=project_id,
+                work_order_id=work_order_id,
+                gap_id=gap_id,
+                handoff_id=handoff_id,
+                old_record_sha256=str(context["old_record_sha256"]),
+                current_fingerprints_sha256=str(
+                    context["current_fingerprints_sha256"]
+                ),
+                runtime_test_certificate_id=str(
+                    runtime_certificate["certificate_id"]
+                ),
+            )
+        )
+        report_sha256 = sha256_bytes(_stable_json_bytes(context["report"]))
+        public = {
+            "old_handoff_id": handoff_id,
+            "work_order_id": work_order_id,
+            "gap_id": gap_id,
+            "preflight_evidence_id": evidence_id,
+            "evidence_trace_id": (
+                f"TRC-{sha256_bytes((evidence_key + ':evidence-trace').encode())[:20]}"
+            ),
+            "new_certificate_id": certificate_id,
+            "original_certificate_id": handoff.get("certificate_id"),
+            "artifact_id": context["artifact_id"],
+            "canonical_artifact_id": context["canonical_artifact_id"],
+            "canonical_sha256": context["canonical_hash"],
+            "old_handoff_sha256": context["old_record_sha256"],
+            "current_fingerprints_sha256": context[
+                "current_fingerprints_sha256"
+            ],
+            "current_fingerprints": copy.deepcopy(
+                context["current_fingerprints"]
+            ),
+            "validation_report_sha256": report_sha256,
+            "checked_shot_count": int(context["report"].get("shot_count", 0)),
+            "stale_components": copy.deepcopy(context["stale_components"]),
+            "production_preflight_status": PRODUCTION_PREFLIGHT_PASS,
+            "production_preflight_issue_count": 0,
+            "independent_audit_status": "PENDING_AUDIT",
+            "first_draft_grade_reconstructed": False,
+            "authored_artifacts_modified": False,
+            "history_records_modified": 0,
+        }
+        return {
+            "public": public,
+            "context": context,
+            "evidence_key": evidence_key,
+            "original_trace_id": original_trace_id,
+            "runtime_test_certificate_id": runtime_certificate[
+                "certificate_id"
+            ],
+        }
+
+    @staticmethod
+    def _preflight_evidence_reissue_plan_payload(
+        *,
+        project_id: str,
+        work_order_id: str,
+        gap_id: str,
+        runtime_test_certificate_id: str,
+        authorized_handoff_ids: list[str],
+        items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "spec": "controlled-preflight-evidence-reissue-v1",
+            "phase": "preflight_evidence_backfill",
+            "project_id": project_id,
+            "work_order_id": work_order_id,
+            "gap_id": gap_id,
+            "runtime_test_certificate_id": runtime_test_certificate_id,
+            "authorized_handoff_ids": copy.deepcopy(authorized_handoff_ids),
+            "items": copy.deepcopy(items),
+        }
+
+    def _execute_handoff_preflight_evidence_item(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        work_order_id: str,
+        gap_id: str,
+        plan_sha256: str,
+        trace_id: str,
+        prepared: dict[str, Any],
+        authorized_handoff_ids: list[str],
+        request_session_id: str | None,
+    ) -> dict[str, Any]:
+        context = prepared["context"]
+        public = prepared["public"]
+        live_hub = self.store.load_hub(namespace, project_id)
+        live_work_order = _find_work_order(live_hub, work_order_id)
+        self._assert_handoff_recovery_authority(
+            namespace,
+            live_work_order,
+            gap_id=gap_id,
+            handoff_ids=authorized_handoff_ids,
+            phase="preflight_evidence_backfill",
+            request_session_id=request_session_id,
+        )
+        self._require_capability_gap(live_hub, gap_id)
+        live_runtime_certificate = self._require_runtime_test_certificate(
+            namespace, project_id
+        )
+        if (
+            live_runtime_certificate.get("certificate_id")
+            != prepared["runtime_test_certificate_id"]
+        ):
+            raise ValueError(
+                "preflight_evidence_reissue_plan_stale: runtime certificate changed after plan"
+            )
+        certificate = self._production_preflight_certificate_value(
+            certificate_id=str(public["new_certificate_id"]),
+            artifact_id=str(public["artifact_id"]),
+            canonical_artifact_id=str(public["canonical_artifact_id"]),
+            cache_components=context["cache_components"],
+            report=context["report"],
+            work_order_id=work_order_id,
+            production_work_order_id=str(
+                context["handoff"]["work_order_id"]
+            ),
+            extra={
+                "created_at": str(live_work_order.get("created_at") or ""),
+                "evidence_origin": "controlled_current_revalidation",
+                "evidence_reissue_work_order_id": work_order_id,
+                "evidence_reissue_gap_id": gap_id,
+                "authorized_handoff_ids": copy.deepcopy(
+                    authorized_handoff_ids
+                ),
+                "evidence_trace_id": public["evidence_trace_id"],
+                "preflight_evidence_id": public["preflight_evidence_id"],
+                "backfill_for_handoff_id": public["old_handoff_id"],
+                "original_certificate_id": public[
+                    "original_certificate_id"
+                ],
+                "original_handoff_sha256": public[
+                    "old_handoff_sha256"
+                ],
+                "current_fingerprints": copy.deepcopy(
+                    context["current_fingerprints"]
+                ),
+                "current_fingerprints_sha256": public[
+                    "current_fingerprints_sha256"
+                ],
+                "runtime_test_certificate_id": prepared[
+                    "runtime_test_certificate_id"
+                ],
+                "first_draft_grade_reconstructed": False,
+                "authored_artifacts_modified": False,
+                "independent_audit_verdict_issued": False,
+            },
+        )
+        self._validate_schema_record(
+            self._project_schema,
+            "production_preflight_certificate",
+            certificate,
+        )
+        evidence_value = {
+            "preflight_evidence_id": public["preflight_evidence_id"],
+            "evidence_type": "controlled_current_production_preflight_revalidation",
+            "work_order_id": work_order_id,
+            "gap_id": gap_id,
+            "authorized_handoff_ids": copy.deepcopy(
+                authorized_handoff_ids
+            ),
+            "trace_id": public["evidence_trace_id"],
+            "batch_trace_id": trace_id,
+            "plan_sha256": plan_sha256,
+            "confirmation": PREFLIGHT_EVIDENCE_REISSUE_CONFIRMATION,
+            "old_handoff_id": public["old_handoff_id"],
+            "old_handoff_sha256": public["old_handoff_sha256"],
+            "original_certificate_id": public["original_certificate_id"],
+            "original_production_trace_id": prepared[
+                "original_trace_id"
+            ],
+            "certificate_id": public["new_certificate_id"],
+            "artifact_id": public["artifact_id"],
+            "canonical_artifact_id": public["canonical_artifact_id"],
+            "canonical_sha256": public["canonical_sha256"],
+            "current_fingerprints": copy.deepcopy(
+                context["current_fingerprints"]
+            ),
+            "current_fingerprints_sha256": public[
+                "current_fingerprints_sha256"
+            ],
+            "runtime_test_certificate_id": prepared[
+                "runtime_test_certificate_id"
+            ],
+            "validation_report_sha256": public[
+                "validation_report_sha256"
+            ],
+            "checked_shot_count": public["checked_shot_count"],
+            "production_preflight_status": PRODUCTION_PREFLIGHT_PASS,
+            "production_preflight_issue_count": 0,
+            "independent_audit_status": "PENDING_AUDIT",
+            "first_draft_grade_reconstructed": False,
+            "authored_artifacts_modified": False,
+            "history_records_modified": 0,
+            "independent_audit_verdict_issued": False,
+        }
+        self._validate_schema_record(
+            self._project_schema,
+            "preflight_evidence_reissue",
+            evidence_value,
+        )
+        stage_trace = self._controlled_production_revalidation_trace_value(
+            trace_id=str(public["evidence_trace_id"]),
+            phase="preflight_evidence_backfill",
+            work_order=live_work_order,
+            production_work_order_id=str(
+                context["handoff"]["work_order_id"]
+            ),
+            gap_id=gap_id,
+            plan_sha256=plan_sha256,
+            artifact_id=str(public["artifact_id"]),
+            artifact_size_bytes=int(
+                context["artifact_record"].get("size_bytes") or 0
+            ),
+            fingerprints=context["current_fingerprints"],
+            shot_count=int(context["report"].get("shot_count", 0)),
+            authority_record_id=str(public["preflight_evidence_id"]),
+            revalidation_measurement=context[
+                "revalidation_measurement"
+            ],
+        )
+        stage_trace["authorized_handoff_ids"] = copy.deepcopy(
+            authorized_handoff_ids
+        )
+        try:
+            existing_evidence = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="preflight_evidence_reissues",
+                record_id=str(public["preflight_evidence_id"]),
+            )
+        except ValueError as exc:
+            if not str(exc).startswith(
+                "unknown preflight_evidence_reissues record_id:"
+            ):
+                raise
+        else:
+            if (
+                not self.store.project_record_is_signed(existing_evidence)
+                or existing_evidence.get("work_order_id") != work_order_id
+                or existing_evidence.get("gap_id") != gap_id
+                or existing_evidence.get("plan_sha256") != plan_sha256
+                or existing_evidence.get("authorized_handoff_ids")
+                != authorized_handoff_ids
+                or existing_evidence.get("old_handoff_id")
+                != public["old_handoff_id"]
+                or not isinstance(
+                    existing_evidence.get("stage_trace_after"), dict
+                )
+            ):
+                raise ValueError(
+                    "preflight_evidence_reissue_id_conflict"
+                )
+            # The first committed execution owns the measured timing.  Exact
+            # retries reuse that signed trace rather than manufacturing a new
+            # zero-duration or wall-clock-dependent after-image.
+            stage_trace = copy.deepcopy(
+                existing_evidence["stage_trace_after"]
+            )
+        journal = self.store.commit_preflight_evidence_reissue(
+            namespace,
+            project_id,
+            preflight_evidence_id=str(public["preflight_evidence_id"]),
+            evidence_key=str(prepared["evidence_key"]),
+            old_handoff_id=str(public["old_handoff_id"]),
+            old_handoff_sha256=str(public["old_handoff_sha256"]),
+            certificate_after=certificate,
+            stage_trace_after=stage_trace,
+            evidence_after=evidence_value,
+            expected_hub_sha256=self.store.project_state_sha256(
+                live_hub
+            ),
+            runtime_test_certificate_id=str(
+                live_runtime_certificate["certificate_id"]
+            ),
+            runtime_test_certificate_key=self._runtime_certificate_key(),
+        )
+        return {
+            "old_handoff_id": public["old_handoff_id"],
+            "preflight_evidence_id": public["preflight_evidence_id"],
+            "certificate_id": public["new_certificate_id"],
+            "original_certificate_id": public["original_certificate_id"],
+            "artifact_id": public["artifact_id"],
+            "canonical_artifact_id": public["canonical_artifact_id"],
+            "canonical_sha256": public["canonical_sha256"],
+            "trace_id": public["evidence_trace_id"],
+            "production_preflight_status": PRODUCTION_PREFLIGHT_PASS,
+            "production_preflight_issue_count": 0,
+            "independent_audit_status": "PENDING_AUDIT",
+            "idempotent_replay": bool(
+                journal.get("idempotent_replay", False)
+            ),
+        }
+
+    def _reissue_handoff_preflight_evidence(
+        self,
+        namespace: str,
+        *,
+        project_id: str,
+        work_order_id: str,
+        gap_id: str,
+        handoff_ids: list[str],
+        action: str,
+        expected_plan_sha256: str | None,
+        confirmation: str | None,
+        request_session_id: str | None,
+    ) -> ToolResponse:
+        started_ns = time.perf_counter_ns()
+        hub = self.store.load_hub(namespace, project_id)
+        work_order = _find_work_order(hub, work_order_id)
+        self._assert_handoff_recovery_authority(
+            namespace,
+            work_order,
+            gap_id=gap_id,
+            handoff_ids=handoff_ids,
+            phase="preflight_evidence_backfill",
+            request_session_id=request_session_id,
+        )
+        gap = self._require_capability_gap(hub, gap_id)
+        runtime_certificate = self._require_runtime_test_certificate(
+            namespace, project_id
+        )
+        prepared_items: dict[str, dict[str, Any]] = {}
+        public_items: list[dict[str, Any]] = []
+        for handoff_id in handoff_ids:
+            prepared = self._prepare_handoff_preflight_evidence_item(
+                namespace,
+                project_id,
+                hub=hub,
+                work_order_id=work_order_id,
+                gap_id=gap_id,
+                handoff_id=handoff_id,
+                runtime_certificate=runtime_certificate,
+            )
+            prepared_items[handoff_id] = prepared
+            public_items.append(copy.deepcopy(prepared["public"]))
+        plan_payload = self._preflight_evidence_reissue_plan_payload(
+            project_id=project_id,
+            work_order_id=work_order_id,
+            gap_id=gap_id,
+            runtime_test_certificate_id=str(
+                runtime_certificate["certificate_id"]
+            ),
+            authorized_handoff_ids=handoff_ids,
+            items=public_items,
+        )
+        plan_body = {
+            **plan_payload,
+            "item_count": len(public_items),
+            "old_handoffs_modified": 0,
+            "old_certificates_modified": 0,
+            "storyboard_artifacts_modified": 0,
+            "independent_audit_verdict_issued": False,
+            "expected_confirmation": (
+                PREFLIGHT_EVIDENCE_REISSUE_CONFIRMATION
+            ),
+        }
+        plan_sha256 = sha256_bytes(_stable_json_bytes(plan_body))
+        trace_id = (
+            f"TRC-{sha256_bytes((plan_sha256 + ':preflight-evidence-trace').encode())[:20]}"
+        )
+        plan = {
+            **plan_body,
+            "plan_sha256": plan_sha256,
+            "trace_id": trace_id,
+        }
+        if action == "plan":
+            return ToolResponse(
+                status="preflight_evidence_reissue_plan_ready",
+                summary=(
+                    f"生产预检证据补签预演完成｜{len(public_items)}条｜内容零修改｜待确认执行"
+                ),
+                project_id=project_id,
+                work_order_id=work_order_id,
+                trace_id=trace_id,
+                data={
+                    "preflight_evidence_plan": plan,
+                    "gap": {"gap_id": gap_id, "status": gap.get("status")},
+                },
+            )
+        if not expected_plan_sha256 or expected_plan_sha256 != plan_sha256:
+            raise ValueError(
+                "preflight_evidence_reissue_plan_stale: expected_plan_sha256 does not match the current exact plan"
+            )
+        if confirmation != PREFLIGHT_EVIDENCE_REISSUE_CONFIRMATION:
+            raise ValueError(
+                "preflight_evidence_reissue_confirmation_required: exact confirmation literal is required"
+            )
+        mappings = [
+            self._execute_handoff_preflight_evidence_item(
+                namespace,
+                project_id,
+                work_order_id=work_order_id,
+                gap_id=gap_id,
+                plan_sha256=plan_sha256,
+                trace_id=trace_id,
+                prepared=prepared_items[handoff_id],
+                authorized_handoff_ids=handoff_ids,
+                request_session_id=request_session_id,
+            )
+            for handoff_id in handoff_ids
+        ]
+        trace_value = {
+            "telemetry_id": trace_id,
+            "trace_id": trace_id,
+            "operation": "recover_storyboard_handoff",
+            "phase": "preflight_evidence_backfill",
+            "measurement_scope": "server_only",
+            "duration_ms": round(
+                (time.perf_counter_ns() - started_ns) / 1_000_000, 3
+            ),
+            "project_id": project_id,
+            "work_order_id": work_order_id,
+            "gap_id": gap_id,
+            "plan_sha256": plan_sha256,
+            "authorized_handoff_ids": copy.deepcopy(handoff_ids),
+            "evidence_count": len(mappings),
+            "mappings": copy.deepcopy(mappings),
+            "old_handoffs_modified": 0,
+            "old_certificates_modified": 0,
+            "storyboard_artifacts_modified": 0,
+            "independent_audit_verdict_issued": False,
+            "independent_audit_status": "PENDING_AUDIT",
+        }
+        try:
+            trace_record = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="telemetry",
+                record_id=trace_id,
+            )
+        except ValueError as exc:
+            if not str(exc).startswith("unknown telemetry record_id:"):
+                raise
+            trace_record = self.store.save_project_record(
+                namespace,
+                project_id,
+                kind="telemetry",
+                record_id=trace_id,
+                value=trace_value,
+            )
+        else:
+            def identity(rows: Any) -> list[dict[str, Any]]:
+                if not isinstance(rows, list):
+                    return []
+                return [
+                    {
+                        key: copy.deepcopy(value)
+                        for key, value in row.items()
+                        if key != "idempotent_replay"
+                    }
+                    for row in rows
+                    if isinstance(row, dict)
+                ]
+
+            if (
+                trace_record.get("plan_sha256") != plan_sha256
+                or identity(trace_record.get("mappings"))
+                != identity(mappings)
+            ):
+                raise ValueError("preflight_evidence_reissue_trace_conflict")
+        return ToolResponse(
+            status="preflight_evidence_reissued",
+            summary=(
+                f"生产预检证据补签完成｜{len(mappings)}条｜旧交接与内容均未修改｜仍待独立审计"
+            ),
+            project_id=project_id,
+            work_order_id=work_order_id,
+            trace_id=trace_id,
+            data={
+                "gap_id": gap_id,
+                "plan_sha256": plan_sha256,
+                "mappings": mappings,
+                "old_handoffs_modified": 0,
+                "old_certificates_modified": 0,
+                "storyboard_artifacts_modified": 0,
+                "independent_audit_verdict_issued": False,
+                "independent_audit_status": "PENDING_AUDIT",
+                "trace": trace_record,
+            },
+        )
+
     @staticmethod
     def _handoff_recovery_plan_payload(
         *,
@@ -5014,7 +6616,8 @@ class StoryboardService:
         items: list[dict[str, Any]],
     ) -> dict[str, Any]:
         return {
-            "spec": "controlled-storyboard-handoff-recovery-v1",
+            "spec": "controlled-storyboard-handoff-recovery-v2",
+            "phase": "handoff_recovery",
             "project_id": project_id,
             "work_order_id": work_order_id,
             "gap_id": gap_id,
@@ -5032,21 +6635,106 @@ class StoryboardService:
         plan_sha256: str,
         trace_id: str,
         prepared: dict[str, Any],
+        authorized_handoff_ids: list[str],
         request_session_id: str | None,
     ) -> dict[str, Any]:
         public = prepared["public"]
         old_handoff = prepared["handoff"]
-        certificate = self._persist_audit_certificate(
+        hub_before = self.store.load_hub(namespace, project_id)
+        live_recovery_order = _find_work_order(hub_before, work_order_id)
+        self._assert_handoff_recovery_authority(
             namespace,
-            project_id,
+            live_recovery_order,
+            gap_id=gap_id,
+            handoff_ids=authorized_handoff_ids,
+            phase="handoff_recovery",
+            request_session_id=request_session_id,
+        )
+        self._require_capability_gap(hub_before, gap_id)
+        live_runtime_certificate = self._require_runtime_test_certificate(
+            namespace, project_id
+        )
+        planned_runtime_certificate_id = str(
+            prepared["cache_components"].get(
+                "runtime_test_certificate_id"
+            )
+            or ""
+        )
+        if (
+            live_runtime_certificate.get("certificate_id")
+            != planned_runtime_certificate_id
+        ):
+            raise ValueError(
+                "handoff_recovery_plan_stale: runtime certificate changed after plan"
+            )
+        certificate = self._production_preflight_certificate_value(
+            certificate_id=str(public["new_certificate_id"]),
             artifact_id=str(public["artifact_id"]),
             canonical_artifact_id=str(public["canonical_artifact_id"]),
             cache_components=prepared["cache_components"],
             report=prepared["report"],
-            work_order_id=str(old_handoff["work_order_id"]),
-            certificate_id=str(public["new_certificate_id"]),
+            work_order_id=work_order_id,
+            production_work_order_id=str(old_handoff["work_order_id"]),
+            extra={
+                "created_at": str(
+                    live_recovery_order.get("created_at") or ""
+                ),
+                "evidence_origin": "controlled_handoff_recovery_revalidation",
+                "issuing_work_order_id": work_order_id,
+                "recovery_work_order_id": work_order_id,
+                "recovery_gap_id": gap_id,
+                "recovery_plan_sha256": plan_sha256,
+                "recovery_trace_id": public[
+                    "production_revalidation_trace_id"
+                ],
+                "current_fingerprints": copy.deepcopy(
+                    prepared["current_fingerprints"]
+                ),
+                "current_fingerprints_sha256": public[
+                    "current_fingerprints_sha256"
+                ],
+                "authorized_handoff_ids": copy.deepcopy(
+                    authorized_handoff_ids
+                ),
+                "source_handoff_id": public["old_handoff_id"],
+                "source_preflight_evidence_id": public.get(
+                    "preflight_evidence_id"
+                ),
+                "source_preflight_evidence_certificate_id": public.get(
+                    "effective_preflight_certificate_id"
+                ),
+                "first_draft_grade_reconstructed": False,
+                "authored_artifacts_modified": False,
+                "independent_audit_verdict_issued": False,
+            },
+        )
+        self._validate_schema_record(
+            self._project_schema,
+            "production_preflight_certificate",
+            certificate,
         )
         now = utc_stamp()
+        stage_trace = self._controlled_production_revalidation_trace_value(
+            trace_id=str(public["production_revalidation_trace_id"]),
+            phase="handoff_recovery",
+            work_order=live_recovery_order,
+            production_work_order_id=str(old_handoff["work_order_id"]),
+            gap_id=gap_id,
+            plan_sha256=plan_sha256,
+            artifact_id=str(public["artifact_id"]),
+            artifact_size_bytes=int(
+                prepared["artifact_record"].get("size_bytes") or 0
+            ),
+            fingerprints=prepared["current_fingerprints"],
+            shot_count=int(prepared["report"].get("shot_count", 0)),
+            authority_record_id=str(public["recovery_id"]),
+            revalidation_measurement=prepared[
+                "revalidation_measurement"
+            ],
+        )
+        stage_trace["authorized_handoff_ids"] = copy.deepcopy(
+            authorized_handoff_ids
+        )
         old_projection = self._handoff_record_projection(old_handoff)
         old_after = copy.deepcopy(old_projection)
         old_after.update(
@@ -5058,7 +6746,9 @@ class StoryboardService:
                 "recovery_id": public["recovery_id"],
                 "recovery_gap_id": gap_id,
                 "recovery_work_order_id": work_order_id,
-                "recovery_trace_id": trace_id,
+                "recovery_trace_id": public[
+                    "production_revalidation_trace_id"
+                ],
                 "recovery_plan_sha256": plan_sha256,
                 "recovery_plan_item": copy.deepcopy(public),
                 "history_preserved": True,
@@ -5093,7 +6783,9 @@ class StoryboardService:
                 "fingerprints": copy.deepcopy(
                     prepared["current_fingerprints"]
                 ),
-                "stage_trace_id": trace_id,
+                "stage_trace_id": public[
+                    "production_revalidation_trace_id"
+                ],
                 "certificate_id": certificate["certificate_id"],
                 "cache_key": certificate["cache_key"],
                 "cache_components": copy.deepcopy(
@@ -5113,16 +6805,27 @@ class StoryboardService:
                 "recovery_id": public["recovery_id"],
                 "recovery_gap_id": gap_id,
                 "recovery_work_order_id": work_order_id,
-                "recovery_trace_id": trace_id,
+                "recovery_trace_id": public[
+                    "production_revalidation_trace_id"
+                ],
                 "recovery_plan_sha256": plan_sha256,
                 "recovery_plan_item": copy.deepcopy(public),
                 "recovery_cache_status": "invalidated_and_reissued",
+                "recovery_publication_fenced": True,
+                "preflight_evidence_source": public[
+                    "preflight_evidence_source"
+                ],
+                "source_preflight_certificate_id": public[
+                    "effective_preflight_certificate_id"
+                ],
                 "history_preserved": True,
             }
         )
-        recovery_work_order = _find_work_order(
-            self.store.load_hub(namespace, project_id), work_order_id
-        )
+        if public.get("preflight_evidence_id"):
+            new_after["preflight_evidence_reissue_id"] = public[
+                "preflight_evidence_id"
+            ]
+        recovery_work_order = live_recovery_order
         new_after.update(
             {
                 "from_window_binding_id": recovery_work_order.get(
@@ -5172,14 +6875,6 @@ class StoryboardService:
             self._project_schema, "handoff_manifest", new_after
         )
 
-        hub_before = self.store.load_hub(namespace, project_id)
-        live_recovery_order = _find_work_order(hub_before, work_order_id)
-        self._assert_project_migration_authority(
-            namespace,
-            live_recovery_order,
-            request_session_id,
-        )
-        self._require_capability_gap(hub_before, gap_id)
         current_old = self.store.get_project_record(
             namespace,
             project_id,
@@ -5221,14 +6916,18 @@ class StoryboardService:
             recovery_key=str(public["recovery_key"]),
             work_order_id=work_order_id,
             gap_id=gap_id,
-            trace_id=trace_id,
+            trace_id=str(public["production_revalidation_trace_id"]),
             old_handoff_id=str(public["old_handoff_id"]),
             new_handoff_id=str(public["new_handoff_id"]),
             old_before=current_old,
             old_after=old_after,
             new_after=new_after,
+            certificate_after=certificate,
+            stage_trace_after=stage_trace,
             hub_before=hub_before,
             hub_after=hub_after,
+            runtime_test_certificate_id=planned_runtime_certificate_id,
+            runtime_test_certificate_key=self._runtime_certificate_key(),
         )
         successor = self.store.get_project_record(
             namespace,
@@ -5240,10 +6939,15 @@ class StoryboardService:
             "old_handoff_id": public["old_handoff_id"],
             "new_handoff_id": public["new_handoff_id"],
             "recovery_id": public["recovery_id"],
+            "trace_id": public["production_revalidation_trace_id"],
             "artifact_id": public["artifact_id"],
             "canonical_artifact_id": public["canonical_artifact_id"],
             "canonical_sha256": public["canonical_sha256"],
             "certificate_id": successor["certificate_id"],
+            "preflight_evidence_source": public[
+                "preflight_evidence_source"
+            ],
+            "preflight_evidence_id": public.get("preflight_evidence_id"),
             "old_status": "superseded",
             "new_status": "prepared",
             "cache_status": "miss",
@@ -5261,14 +6965,24 @@ class StoryboardService:
         gap_id: str,
         plan_sha256: str,
         trace_id: str,
+        authorized_handoff_ids: list[str],
         request_session_id: str | None,
     ) -> dict[str, Any]:
+        plan_item = old_handoff.get("recovery_plan_item")
+        if not isinstance(plan_item, dict):
+            raise ValueError(
+                "handoff_recovery_state_conflict: superseded handoff has no recovery plan item"
+            )
+        expected_item_trace_id = str(
+            plan_item.get("production_revalidation_trace_id") or ""
+        )
         if (
             old_handoff.get("status") != "superseded"
             or old_handoff.get("recovery_plan_sha256") != plan_sha256
             or old_handoff.get("recovery_work_order_id") != work_order_id
             or old_handoff.get("recovery_gap_id") != gap_id
-            or old_handoff.get("recovery_trace_id") != trace_id
+            or old_handoff.get("recovery_trace_id")
+            != expected_item_trace_id
         ):
             raise ValueError(
                 "handoff_recovery_state_conflict: superseded handoff belongs to another recovery"
@@ -5280,13 +6994,66 @@ class StoryboardService:
             kind="handoff_recoveries",
             record_id=recovery_id,
         )
+        completed = self.store.completed_handoff_recovery(
+            namespace,
+            project_id,
+            recovery_id=recovery_id,
+            old_handoff_id=str(journal["old_handoff_id"]),
+            new_handoff_id=str(journal["new_handoff_id"]),
+        )
+        if completed is not None:
+            successor = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="handoffs",
+                record_id=str(journal["new_handoff_id"]),
+            )
+            return {
+                "old_handoff_id": old_handoff["handoff_id"],
+                "new_handoff_id": successor["handoff_id"],
+                "recovery_id": recovery_id,
+                "trace_id": successor.get("recovery_trace_id"),
+                "artifact_id": successor["storyboard_artifact_id"],
+                "canonical_artifact_id": successor[
+                    "canonical_artifact_id"
+                ],
+                "canonical_sha256": successor["canonical_sha256"],
+                "certificate_id": successor["certificate_id"],
+                "preflight_evidence_source": successor.get(
+                    "preflight_evidence_source"
+                ),
+                "preflight_evidence_id": successor.get(
+                    "preflight_evidence_reissue_id"
+                ),
+                "old_status": "superseded",
+                "new_status": "prepared",
+                "cache_status": "miss",
+                "independent_audit_status": "PENDING_AUDIT",
+                "idempotent_replay": True,
+            }
         hub = self.store.load_hub(namespace, project_id)
         work_order = _find_work_order(hub, work_order_id)
-        self._assert_project_migration_authority(
+        self._assert_handoff_recovery_authority(
             namespace,
             work_order,
-            request_session_id,
+            gap_id=gap_id,
+            handoff_ids=authorized_handoff_ids,
+            phase="handoff_recovery",
+            request_session_id=request_session_id,
         )
+        self._require_capability_gap(hub, gap_id)
+        journal_certificate = journal.get("certificate_after")
+        if not isinstance(journal_certificate, dict):
+            raise ValueError(
+                "handoff_recovery_required: journal certificate is missing"
+            )
+        journal_cache_components = journal_certificate.get(
+            "cache_components"
+        )
+        if not isinstance(journal_cache_components, dict):
+            raise ValueError(
+                "handoff_recovery_required: journal runtime binding is missing"
+            )
         self.store.commit_handoff_recovery(
             namespace,
             project_id,
@@ -5294,14 +7061,23 @@ class StoryboardService:
             recovery_key=str(journal["recovery_key"]),
             work_order_id=work_order_id,
             gap_id=gap_id,
-            trace_id=trace_id,
+            trace_id=str(journal["trace_id"]),
             old_handoff_id=str(journal["old_handoff_id"]),
             new_handoff_id=str(journal["new_handoff_id"]),
             old_before=old_handoff,
             old_after=dict(journal["old_after"]),
             new_after=dict(journal["new_after"]),
+            certificate_after=dict(journal_certificate),
+            stage_trace_after=dict(journal["stage_trace_after"]),
             hub_before=hub,
             hub_after=dict(journal["hub_after"]),
+            runtime_test_certificate_id=str(
+                journal_cache_components.get(
+                    "runtime_test_certificate_id"
+                )
+                or ""
+            ),
+            runtime_test_certificate_key=self._runtime_certificate_key(),
         )
         successor = self.store.get_project_record(
             namespace,
@@ -5313,10 +7089,17 @@ class StoryboardService:
             "old_handoff_id": old_handoff["handoff_id"],
             "new_handoff_id": successor["handoff_id"],
             "recovery_id": recovery_id,
+            "trace_id": successor.get("recovery_trace_id"),
             "artifact_id": successor["storyboard_artifact_id"],
             "canonical_artifact_id": successor["canonical_artifact_id"],
             "canonical_sha256": successor["canonical_sha256"],
             "certificate_id": successor["certificate_id"],
+            "preflight_evidence_source": successor.get(
+                "preflight_evidence_source"
+            ),
+            "preflight_evidence_id": successor.get(
+                "preflight_evidence_reissue_id"
+            ),
             "old_status": "superseded",
             "new_status": "prepared",
             "cache_status": "miss",
@@ -5336,10 +7119,18 @@ class StoryboardService:
         expected_plan_sha256: str | None,
         confirmation: str | None,
         request_session_id: str | None,
+        phase: str = "handoff_recovery",
     ) -> ToolResponse:
-        """Plan or execute a controlled stale production-handoff recovery."""
+        """Plan/execute evidence backfill or stale-handoff recovery."""
 
         self._require_runtime()
+        if phase not in {
+            "handoff_recovery",
+            "preflight_evidence_backfill",
+        }:
+            raise ValueError(
+                "handoff recovery phase must be handoff_recovery or preflight_evidence_backfill"
+            )
         if action not in {"plan", "execute"}:
             raise ValueError("handoff recovery action must be plan or execute")
         clean_ids = [str(value).strip() for value in handoff_ids]
@@ -5352,6 +7143,18 @@ class StoryboardService:
             raise ValueError(
                 f"handoff_ids must contain 1-{MAX_HANDOFF_RECOVERY_ITEMS} unique ids"
             )
+        if phase == "preflight_evidence_backfill":
+            return self._reissue_handoff_preflight_evidence(
+                namespace,
+                project_id=project_id,
+                work_order_id=work_order_id,
+                gap_id=gap_id,
+                handoff_ids=clean_ids,
+                action=action,
+                expected_plan_sha256=expected_plan_sha256,
+                confirmation=confirmation,
+                request_session_id=request_session_id,
+            )
         started_ns = time.perf_counter_ns()
         hub = self.store.load_hub(namespace, project_id)
         work_order = _find_work_order(hub, work_order_id)
@@ -5360,6 +7163,7 @@ class StoryboardService:
             work_order,
             gap_id=gap_id,
             handoff_ids=clean_ids,
+            phase="handoff_recovery",
             request_session_id=request_session_id,
         )
         gap = self._require_capability_gap(hub, gap_id)
@@ -5406,17 +7210,20 @@ class StoryboardService:
             ),
             items=public_items,
         )
-        plan_sha256 = sha256_bytes(_stable_json_bytes(plan_payload))
-        trace_id = f"TRC-{sha256_bytes((plan_sha256 + ':trace').encode())[:20]}"
-        plan = {
+        plan_body = {
             **plan_payload,
-            "plan_sha256": plan_sha256,
-            "trace_id": trace_id,
             "item_count": len(public_items),
             "history_records_deleted": 0,
             "storyboard_artifacts_modified": 0,
             "independent_audit_verdict_issued": False,
             "expected_confirmation": HANDOFF_RECOVERY_CONFIRMATION,
+        }
+        plan_sha256 = sha256_bytes(_stable_json_bytes(plan_body))
+        trace_id = f"TRC-{sha256_bytes((plan_sha256 + ':trace').encode())[:20]}"
+        plan = {
+            **plan_body,
+            "plan_sha256": plan_sha256,
+            "trace_id": trace_id,
         }
         if action == "plan":
             return ToolResponse(
@@ -5456,6 +7263,7 @@ class StoryboardService:
                     gap_id=gap_id,
                     plan_sha256=plan_sha256,
                     trace_id=trace_id,
+                    authorized_handoff_ids=clean_ids,
                     request_session_id=request_session_id,
                 )
             else:
@@ -5467,6 +7275,7 @@ class StoryboardService:
                     plan_sha256=plan_sha256,
                     trace_id=trace_id,
                     prepared=prepared,
+                    authorized_handoff_ids=clean_ids,
                     request_session_id=request_session_id,
                 )
             mappings.append(mapping)
@@ -8200,6 +10009,18 @@ class StoryboardService:
             "cache_components",
             "production_preflight_status",
             "production_preflight_issue_count",
+            "preflight_evidence_source",
+            "preflight_evidence_reissue_id",
+            "source_preflight_certificate_id",
+            "supersedes_handoff_id",
+            "recovery_id",
+            "recovery_gap_id",
+            "recovery_work_order_id",
+            "recovery_trace_id",
+            "recovery_plan_sha256",
+            "recovery_plan_item",
+            "recovery_cache_status",
+            "history_preserved",
             "checked_shot_count",
             "facts_reusable",
             "conclusion_reusable_for_independent_audit",
@@ -10561,6 +12382,7 @@ class StoryboardService:
             "reaudit_count",
             "reaudited_at",
             "latest_audit_certificate_id",
+            "recovery_publication_fenced",
         ):
             successor.pop(key, None)
         parent_authority_record = parent_authority(
@@ -12942,7 +14764,7 @@ class StoryboardService:
             and not draft_preflight_id
         ):
             raise ValueError(
-                "draft_preflight_required: cloud 0.5.6 full commits require a signed full-draft preflight"
+                "draft_preflight_required: cloud 0.5.7 full commits require a signed full-draft preflight"
             )
         stage_trace_id = _new_id("TRC")
         materialize_started_ns = time.perf_counter_ns()

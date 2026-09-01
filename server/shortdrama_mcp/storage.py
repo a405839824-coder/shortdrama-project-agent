@@ -27,6 +27,7 @@ SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 PROJECT_RECORD_KINDS = {
     "handoffs",
     "handoff_recoveries",
+    "preflight_evidence_reissues",
     "certificates",
     "telemetry",
     "diagnostics",
@@ -41,6 +42,7 @@ SIGNED_ONLY_PROJECT_RECORD_KINDS = PROJECT_RECORD_KINDS - {
 PROJECT_RECORD_PRIMARY_ID_KEYS = {
     "handoffs": "handoff_id",
     "handoff_recoveries": "recovery_id",
+    "preflight_evidence_reissues": "preflight_evidence_id",
     "certificates": "certificate_id",
     "telemetry": "trace_id",
     "diagnostics": "diagnostic_run_id",
@@ -87,6 +89,18 @@ REAUDIT_IMMUTABLE_IDENTITY_KEYS = (
     "cache_components",
     "production_preflight_status",
     "production_preflight_issue_count",
+    "preflight_evidence_source",
+    "preflight_evidence_reissue_id",
+    "source_preflight_certificate_id",
+    "supersedes_handoff_id",
+    "recovery_id",
+    "recovery_gap_id",
+    "recovery_work_order_id",
+    "recovery_trace_id",
+    "recovery_plan_sha256",
+    "recovery_plan_item",
+    "recovery_cache_status",
+    "history_preserved",
     "checked_shot_count",
     "facts_reusable",
     "conclusion_reusable_for_independent_audit",
@@ -102,6 +116,29 @@ REAUDIT_IMMUTABLE_IDENTITY_KEYS = (
     "return_to_audit_window_binding_id",
     "return_to_audit_actor_binding_id",
     "return_to_audit_session_fingerprint",
+)
+RECOVERY_HANDOFF_AUDIT_MUTABLE_KEYS = frozenset(
+    {
+        "status",
+        "claim_authority_work_order_id",
+        "claimed_by_work_order_id",
+        "claim_token",
+        "claim_generation",
+        "claim_epoch_seconds",
+        "claim_lease_seconds",
+        "claim_lease_expires_at",
+        "claim_lease_expires_epoch_seconds",
+        "claim_history",
+        "consumed_by_work_order_id",
+        "consumed_at",
+        "consumption_claim",
+        "audit_certificate_id",
+        "audit_certificate_ids",
+        "latest_audit_certificate_id",
+        "independent_audit_status",
+        "reaudit_count",
+        "reaudited_at",
+    }
 )
 
 
@@ -1019,8 +1056,12 @@ class ProjectStore:
         old_before: dict[str, Any],
         old_after: dict[str, Any],
         new_after: dict[str, Any],
+        certificate_after: dict[str, Any],
+        stage_trace_after: dict[str, Any],
         hub_before: dict[str, Any],
         hub_after: dict[str, Any],
+        runtime_test_certificate_id: str,
+        runtime_test_certificate_key: str,
     ) -> dict[str, Any]:
         """Commit or recover one journaled handoff supersession.
 
@@ -1037,6 +1078,16 @@ class ProjectStore:
         directory = self.project_dir(namespace, project_id)
         old_path = directory / "handoffs" / f"{clean_old_id}.json"
         new_path = directory / "handoffs" / f"{clean_new_id}.json"
+        certificate_id = safe_id(
+            str(certificate_after.get("certificate_id") or ""),
+            "certificate_id",
+        )
+        certificate_path = directory / "certificates" / f"{certificate_id}.json"
+        stage_trace_id = safe_id(
+            str(stage_trace_after.get("trace_id") or ""),
+            "stage_trace_id",
+        )
+        stage_trace_path = directory / "telemetry" / f"{stage_trace_id}.json"
         hub_path = directory / "hub.json"
         journal_path = (
             directory / "handoff_recoveries" / f"{clean_recovery_id}.json"
@@ -1051,9 +1102,30 @@ class ProjectStore:
 
         old_after = sealed(old_after, clean_old_id)
         new_after = sealed(new_after, clean_new_id)
+        certificate_after = sealed(certificate_after, certificate_id)
+        stage_trace_after = sealed(stage_trace_after, stage_trace_id)
+        stage_traces = hub_after.setdefault("performance_traces", [])
+        matching_stage_traces = [
+            row
+            for row in stage_traces
+            if isinstance(row, dict)
+            and str(row.get("trace_id") or row.get("telemetry_id") or "")
+            == stage_trace_id
+        ]
+        if matching_stage_traces and matching_stage_traces != [
+            stage_trace_after
+        ]:
+            raise ValueError(
+                "handoff_recovery_required: production stage trace already exists in Hub"
+            )
+        if not matching_stage_traces:
+            stage_traces.append(copy.deepcopy(stage_trace_after))
+        old_before_snapshot = copy.deepcopy(old_before)
         old_before_sha = self.project_state_sha256(old_before)
         old_after_sha = self.project_state_sha256(old_after)
         new_after_sha = self.project_state_sha256(new_after)
+        certificate_after_sha = self.project_state_sha256(certificate_after)
+        stage_trace_after_sha = self.project_state_sha256(stage_trace_after)
         hub_before_sha = self.project_state_sha256(hub_before)
         hub_after_sha = self.project_state_sha256(hub_after)
 
@@ -1075,6 +1147,44 @@ class ProjectStore:
                 if not self.project_record_is_signed(current_new):
                     raise ValueError("handoff_recovery_required: unsigned successor")
                 current_new_sha = self.project_state_sha256(current_new)
+            current_certificate: dict[str, Any] | None = None
+            current_certificate_sha: str | None = None
+            if certificate_path.is_file():
+                current_certificate = self.read_json(certificate_path)
+                self._verify_record_integrity(
+                    current_certificate, record_id=certificate_id
+                )
+                self._verify_project_record_primary_id(
+                    "certificates",
+                    current_certificate,
+                    record_id=certificate_id,
+                )
+                if not self.project_record_is_signed(current_certificate):
+                    raise ValueError(
+                        "handoff_recovery_required: unsigned production certificate"
+                    )
+                current_certificate_sha = self.project_state_sha256(
+                    current_certificate
+                )
+            current_stage_trace: dict[str, Any] | None = None
+            current_stage_trace_sha: str | None = None
+            if stage_trace_path.is_file():
+                current_stage_trace = self.read_json(stage_trace_path)
+                self._verify_record_integrity(
+                    current_stage_trace, record_id=stage_trace_id
+                )
+                self._verify_project_record_primary_id(
+                    "telemetry",
+                    current_stage_trace,
+                    record_id=stage_trace_id,
+                )
+                if not self.project_record_is_signed(current_stage_trace):
+                    raise ValueError(
+                        "handoff_recovery_required: unsigned production stage trace"
+                    )
+                current_stage_trace_sha = self.project_state_sha256(
+                    current_stage_trace
+                )
 
             journal: dict[str, Any] | None = None
             if journal_path.is_file():
@@ -1093,15 +1203,45 @@ class ProjectStore:
                 old_before_sha = str(journal["old_before_sha256"])
                 old_after_sha = str(journal["old_after_sha256"])
                 new_after_sha = str(journal["new_after_sha256"])
+                certificate_after_sha = str(
+                    journal["certificate_after_sha256"]
+                )
+                stage_trace_after_sha = str(
+                    journal["stage_trace_after_sha256"]
+                )
                 hub_before_sha = str(journal["hub_before_sha256"])
                 hub_after_sha = str(journal["hub_after_sha256"])
                 old_after = dict(journal["old_after"])
+                old_before_snapshot = dict(journal["old_before"])
                 new_after = dict(journal["new_after"])
+                certificate_after = dict(journal["certificate_after"])
+                stage_trace_after = dict(journal["stage_trace_after"])
                 hub_after = dict(journal["hub_after"])
+
+            expected_hub_old = (
+                old_before_snapshot
+                if current_hub_sha == hub_before_sha
+                else current_old
+            )
+            current_old_projection = self._hub_record_projection(
+                expected_hub_old
+            )
+            current_old_matches = [
+                row
+                for row in current_hub.get("handoffs", [])
+                if isinstance(row, dict)
+                and row.get("handoff_id") == clean_old_id
+            ]
+            if current_old_matches != [current_old_projection]:
+                raise ValueError(
+                    "handoff_recovery_required: old Hub projection differs from signed record"
+                )
 
             if (
                 current_old_sha == old_after_sha
                 and current_new_sha == new_after_sha
+                and current_certificate_sha == certificate_after_sha
+                and current_stage_trace_sha == stage_trace_after_sha
                 and current_hub_sha == hub_after_sha
             ):
                 if journal is not None and journal.get("status") != "committed":
@@ -1135,16 +1275,39 @@ class ProjectStore:
                 raise ValueError(
                     "handoff_recovery_required: successor id is already occupied"
                 )
+            if current_certificate_sha not in {None, certificate_after_sha}:
+                raise ValueError(
+                    "handoff_recovery_required: production certificate id is already occupied"
+                )
+            if current_stage_trace_sha not in {None, stage_trace_after_sha}:
+                raise ValueError(
+                    "handoff_recovery_required: production stage trace id is already occupied"
+                )
             if journal is None and (
                 current_old_sha != old_before_sha
                 or current_hub_sha != hub_before_sha
                 or current_new_sha is not None
+                or current_certificate_sha is not None
+                or current_stage_trace_sha is not None
             ):
                 raise ValueError(
                     "handoff_recovery_required: unsigned partial recovery"
                 )
 
             if journal is None:
+                current_runtime = self.latest_runtime_certificate(
+                    namespace,
+                    project_id,
+                    certificate_key=runtime_test_certificate_key,
+                )
+                if (
+                    current_runtime is None
+                    or current_runtime.get("certificate_id")
+                    != runtime_test_certificate_id
+                ):
+                    raise ValueError(
+                        "handoff_recovery_plan_stale: runtime certificate changed before commit"
+                    )
                 journal = {
                     "record_id": clean_recovery_id,
                     "recovery_id": clean_recovery_id,
@@ -1160,10 +1323,15 @@ class ProjectStore:
                     "old_before_sha256": old_before_sha,
                     "old_after_sha256": old_after_sha,
                     "new_after_sha256": new_after_sha,
+                    "certificate_after_sha256": certificate_after_sha,
+                    "stage_trace_after_sha256": stage_trace_after_sha,
                     "hub_before_sha256": hub_before_sha,
                     "hub_after_sha256": hub_after_sha,
+                    "old_before": old_before_snapshot,
                     "old_after": old_after,
                     "new_after": new_after,
+                    "certificate_after": certificate_after,
+                    "stage_trace_after": stage_trace_after,
                     "hub_after": hub_after,
                     "history_preserved": True,
                     "independent_audit_status": "PENDING_AUDIT",
@@ -1178,6 +1346,10 @@ class ProjectStore:
             # following interruption idempotently recoverable.
             if current_old_sha == old_before_sha:
                 self.atomic_write_json(old_path, old_after)
+            if current_certificate_sha is None:
+                self.atomic_write_json(certificate_path, certificate_after)
+            if current_stage_trace_sha is None:
+                self.atomic_write_json(stage_trace_path, stage_trace_after)
             if current_new_sha is None:
                 self.atomic_write_json(new_path, new_after)
             if current_hub_sha == hub_before_sha:
@@ -1185,10 +1357,24 @@ class ProjectStore:
 
             final_old_sha = self.project_state_sha256(self.read_json(old_path))
             final_new_sha = self.project_state_sha256(self.read_json(new_path))
+            final_certificate_sha = self.project_state_sha256(
+                self.read_json(certificate_path)
+            )
+            final_stage_trace_sha = self.project_state_sha256(
+                self.read_json(stage_trace_path)
+            )
             final_hub_sha = self.project_state_sha256(self.read_json(hub_path))
-            if (final_old_sha, final_new_sha, final_hub_sha) != (
+            if (
+                final_old_sha,
+                final_new_sha,
+                final_certificate_sha,
+                final_stage_trace_sha,
+                final_hub_sha,
+            ) != (
                 old_after_sha,
                 new_after_sha,
+                certificate_after_sha,
+                stage_trace_after_sha,
                 hub_after_sha,
             ):
                 raise RuntimeError("handoff_recovery_commit_incomplete")
@@ -1197,6 +1383,436 @@ class ProjectStore:
             journal["integrity_hmac"] = self._record_integrity_hmac(journal)
             self.atomic_write_json(journal_path, journal)
             return journal
+
+    def completed_handoff_recovery(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        recovery_id: str,
+        old_handoff_id: str,
+        new_handoff_id: str,
+    ) -> dict[str, Any] | None:
+        """Verify a committed recovery against the current additive Hub.
+
+        A batch stores one journal per item, so an early item's ``hub_after``
+        is only an intermediate snapshot.  Exact idempotent replay therefore
+        verifies that item's signed old/new/certificate after-images and their
+        unique current Hub projections while allowing later batch items to be
+        appended.  Nonterminal journals return ``None`` for normal WAL resume.
+        """
+
+        clean_recovery_id = safe_id(recovery_id, "recovery_id")
+        clean_old_id = safe_id(old_handoff_id, "old_handoff_id")
+        clean_new_id = safe_id(new_handoff_id, "new_handoff_id")
+        directory = self.project_dir(namespace, project_id)
+        journal_path = (
+            directory / "handoff_recoveries" / f"{clean_recovery_id}.json"
+        )
+        with self.project_write_lock(namespace, project_id):
+            if not journal_path.is_file():
+                raise ValueError("handoff_recovery_required: journal is missing")
+            journal = self.read_json(journal_path)
+            self._verify_record_integrity(
+                journal, record_id=clean_recovery_id
+            )
+            self._verify_project_record_primary_id(
+                "handoff_recoveries",
+                journal,
+                record_id=clean_recovery_id,
+            )
+            if not self.project_record_is_signed(journal):
+                raise ValueError("handoff_recovery_signature_required")
+            if (
+                journal.get("old_handoff_id") != clean_old_id
+                or journal.get("new_handoff_id") != clean_new_id
+            ):
+                raise ValueError("handoff_recovery_id_conflict")
+            if journal.get("status") != "committed":
+                return None
+
+            old_path = directory / "handoffs" / f"{clean_old_id}.json"
+            new_path = directory / "handoffs" / f"{clean_new_id}.json"
+            certificate_after = journal.get("certificate_after")
+            if not isinstance(certificate_after, dict):
+                raise ValueError("handoff_recovery_required: certificate after-image is missing")
+            certificate_id = safe_id(
+                str(certificate_after.get("certificate_id") or ""),
+                "certificate_id",
+            )
+            certificate_path = (
+                directory / "certificates" / f"{certificate_id}.json"
+            )
+            stage_trace_after = journal.get("stage_trace_after")
+            if not isinstance(stage_trace_after, dict):
+                raise ValueError(
+                    "handoff_recovery_required: production stage trace after-image is missing"
+                )
+            stage_trace_id = safe_id(
+                str(stage_trace_after.get("trace_id") or ""),
+                "stage_trace_id",
+            )
+            stage_trace_path = (
+                directory / "telemetry" / f"{stage_trace_id}.json"
+            )
+            if not (
+                old_path.is_file()
+                and new_path.is_file()
+                and certificate_path.is_file()
+                and stage_trace_path.is_file()
+            ):
+                raise RuntimeError("handoff_recovery_commit_incomplete")
+            old = self.read_json(old_path)
+            new = self.read_json(new_path)
+            certificate = self.read_json(certificate_path)
+            stage_trace = self.read_json(stage_trace_path)
+            for value, record_id, kind in (
+                (old, clean_old_id, "handoffs"),
+                (new, clean_new_id, "handoffs"),
+                (certificate, certificate_id, "certificates"),
+                (stage_trace, stage_trace_id, "telemetry"),
+            ):
+                self._verify_record_integrity(value, record_id=record_id)
+                self._verify_project_record_primary_id(
+                    kind, value, record_id=record_id
+                )
+                if not self.project_record_is_signed(value):
+                    raise ValueError("handoff_recovery_signature_required")
+            if (
+                self.project_state_sha256(old)
+                != journal.get("old_after_sha256")
+                or self.project_state_sha256(new)
+                != journal.get("new_after_sha256")
+                or self.project_state_sha256(certificate)
+                != journal.get("certificate_after_sha256")
+                or self.project_state_sha256(stage_trace)
+                != journal.get("stage_trace_after_sha256")
+            ):
+                raise ValueError(
+                    "handoff_recovery_required: committed after-image changed"
+                )
+            hub = self.read_json(directory / "hub.json")
+            old_projection = self._hub_record_projection(old)
+            new_projection = self._hub_record_projection(new)
+            old_matches = [
+                row
+                for row in hub.get("handoffs", [])
+                if isinstance(row, dict)
+                and row.get("handoff_id") == clean_old_id
+            ]
+            new_matches = [
+                row
+                for row in hub.get("handoffs", [])
+                if isinstance(row, dict)
+                and row.get("handoff_id") == clean_new_id
+            ]
+            trace_matches = [
+                row
+                for row in hub.get("performance_traces", [])
+                if isinstance(row, dict)
+                and str(row.get("trace_id") or row.get("telemetry_id") or "")
+                == stage_trace_id
+            ]
+            if old_matches != [old_projection] or new_matches != [new_projection]:
+                raise ValueError(
+                    "handoff_recovery_required: committed Hub projection changed"
+                )
+            if trace_matches != [stage_trace]:
+                raise ValueError(
+                    "handoff_recovery_required: committed production trace projection changed"
+                )
+            result = dict(journal)
+            result["idempotent_replay"] = True
+            return result
+
+    def commit_preflight_evidence_reissue(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        preflight_evidence_id: str,
+        evidence_key: str,
+        old_handoff_id: str,
+        old_handoff_sha256: str,
+        certificate_after: dict[str, Any],
+        stage_trace_after: dict[str, Any],
+        evidence_after: dict[str, Any],
+        expected_hub_sha256: str,
+        runtime_test_certificate_id: str,
+        runtime_test_certificate_key: str,
+    ) -> dict[str, Any]:
+        """Append one crash-recoverable production-preflight evidence successor.
+
+        The old handoff is compare-and-set but never changed.  A signed
+        ``prepared`` evidence journal is durable before the deterministic
+        certificate is written; only a ``committed`` journal is consumable by
+        handoff recovery.  Exact retries finish or reuse the same identities.
+        """
+
+        clean_evidence_id = safe_id(
+            preflight_evidence_id, "preflight_evidence_id"
+        )
+        clean_handoff_id = safe_id(old_handoff_id, "old_handoff_id")
+        certificate_id = safe_id(
+            str(certificate_after.get("certificate_id") or ""),
+            "certificate_id",
+        )
+        directory = self.project_dir(namespace, project_id)
+        handoff_path = directory / "handoffs" / f"{clean_handoff_id}.json"
+        certificate_path = directory / "certificates" / f"{certificate_id}.json"
+        stage_trace_id = safe_id(
+            str(stage_trace_after.get("trace_id") or ""),
+            "stage_trace_id",
+        )
+        stage_trace_path = directory / "telemetry" / f"{stage_trace_id}.json"
+        evidence_path = (
+            directory
+            / "preflight_evidence_reissues"
+            / f"{clean_evidence_id}.json"
+        )
+
+        def sealed(value: dict[str, Any], record_id: str) -> dict[str, Any]:
+            result = dict(value)
+            result["record_id"] = record_id
+            result["project_id"] = project_id
+            result["integrity_hmac"] = self._record_integrity_hmac(result)
+            return result
+
+        certificate_after = sealed(certificate_after, certificate_id)
+        certificate_after_sha256 = self.project_state_sha256(certificate_after)
+        stage_trace_after = sealed(stage_trace_after, stage_trace_id)
+        stage_trace_after_sha256 = self.project_state_sha256(
+            stage_trace_after
+        )
+
+        with self.project_write_lock(namespace, project_id):
+            if not handoff_path.is_file():
+                raise ValueError(
+                    "preflight_evidence_reissue_required: old handoff is missing"
+                )
+            current_handoff = self.read_json(handoff_path)
+            self._verify_record_integrity(
+                current_handoff, record_id=clean_handoff_id
+            )
+            if not self.project_record_is_signed(current_handoff):
+                raise ValueError(
+                    "preflight_evidence_reissue_required: old handoff is unsigned"
+                )
+            if self.project_state_sha256(current_handoff) != old_handoff_sha256:
+                raise ValueError(
+                    "preflight_evidence_reissue_plan_stale: old handoff changed after plan"
+                )
+            hub = self.read_json(directory / "hub.json")
+            if self.project_state_sha256(hub) != expected_hub_sha256:
+                raise ValueError(
+                    "preflight_evidence_reissue_plan_stale: project authority changed before commit"
+                )
+            current_projection = self._hub_record_projection(current_handoff)
+            matching_projections = [
+                row
+                for row in hub.get("handoffs", [])
+                if isinstance(row, dict)
+                and row.get("handoff_id") == clean_handoff_id
+            ]
+            if matching_projections != [current_projection]:
+                raise ValueError(
+                    "preflight_evidence_reissue_plan_stale: Hub projection differs from signed handoff"
+                )
+
+            evidence_directory = directory / "preflight_evidence_reissues"
+            for candidate_path in sorted(evidence_directory.glob("*.json")):
+                if candidate_path == evidence_path:
+                    continue
+                candidate = self.read_json(candidate_path)
+                candidate_id = str(
+                    candidate.get("preflight_evidence_id")
+                    or candidate.get("record_id")
+                    or ""
+                )
+                self._verify_record_integrity(
+                    candidate, record_id=candidate_id
+                )
+                self._verify_project_record_primary_id(
+                    "preflight_evidence_reissues",
+                    candidate,
+                    record_id=candidate_id,
+                )
+                if not self.project_record_is_signed(candidate):
+                    raise ValueError(
+                        "preflight_evidence_reissue_signature_required"
+                    )
+                if (
+                    candidate.get("status") in {"prepared", "committed"}
+                    and candidate.get("old_handoff_id")
+                    == clean_handoff_id
+                    and candidate.get("old_handoff_sha256")
+                    == old_handoff_sha256
+                    and candidate.get("current_fingerprints_sha256")
+                    == evidence_after.get("current_fingerprints_sha256")
+                    and candidate.get("runtime_test_certificate_id")
+                    == evidence_after.get("runtime_test_certificate_id")
+                ):
+                    raise ValueError(
+                        "preflight_evidence_reissue_fact_conflict: current revalidation evidence already exists"
+                    )
+
+            journal: dict[str, Any] | None = None
+            if evidence_path.is_file():
+                journal = self.read_json(evidence_path)
+                self._verify_record_integrity(
+                    journal, record_id=clean_evidence_id
+                )
+                self._verify_project_record_primary_id(
+                    "preflight_evidence_reissues",
+                    journal,
+                    record_id=clean_evidence_id,
+                )
+                if not self.project_record_is_signed(journal):
+                    raise ValueError(
+                        "preflight_evidence_reissue_signature_required"
+                    )
+                if (
+                    journal.get("evidence_key") != evidence_key
+                    or journal.get("old_handoff_id") != clean_handoff_id
+                    or journal.get("certificate_id") != certificate_id
+                    or journal.get("old_handoff_sha256")
+                    != old_handoff_sha256
+                    or journal.get("certificate_after_sha256")
+                    != certificate_after_sha256
+                    or journal.get("stage_trace_after_sha256")
+                    != stage_trace_after_sha256
+                ):
+                    raise ValueError(
+                        "preflight_evidence_reissue_id_conflict"
+                    )
+                certificate_after = dict(journal["certificate_after"])
+                stage_trace_after = dict(journal["stage_trace_after"])
+                evidence_after = {
+                    key: copy.deepcopy(value)
+                    for key, value in journal.items()
+                    if key not in {"integrity_hmac", "record_id", "project_id"}
+                }
+
+            current_certificate_sha256: str | None = None
+            if certificate_path.is_file():
+                current_certificate = self.read_json(certificate_path)
+                self._verify_record_integrity(
+                    current_certificate, record_id=certificate_id
+                )
+                self._verify_project_record_primary_id(
+                    "certificates",
+                    current_certificate,
+                    record_id=certificate_id,
+                )
+                if not self.project_record_is_signed(current_certificate):
+                    raise ValueError(
+                        "preflight_evidence_reissue_certificate_unsigned"
+                    )
+                current_certificate_sha256 = self.project_state_sha256(
+                    current_certificate
+                )
+                if current_certificate_sha256 != certificate_after_sha256:
+                    raise ValueError(
+                        "preflight_evidence_reissue_certificate_conflict"
+                    )
+            current_stage_trace_sha256: str | None = None
+            if stage_trace_path.is_file():
+                current_stage_trace = self.read_json(stage_trace_path)
+                self._verify_record_integrity(
+                    current_stage_trace, record_id=stage_trace_id
+                )
+                self._verify_project_record_primary_id(
+                    "telemetry",
+                    current_stage_trace,
+                    record_id=stage_trace_id,
+                )
+                if not self.project_record_is_signed(current_stage_trace):
+                    raise ValueError(
+                        "preflight_evidence_reissue_trace_unsigned"
+                    )
+                current_stage_trace_sha256 = self.project_state_sha256(
+                    current_stage_trace
+                )
+                if current_stage_trace_sha256 != stage_trace_after_sha256:
+                    raise ValueError(
+                        "preflight_evidence_reissue_trace_conflict"
+                    )
+
+            if journal is not None and journal.get("status") == "committed":
+                if current_certificate_sha256 != certificate_after_sha256:
+                    raise RuntimeError(
+                        "preflight_evidence_reissue_commit_incomplete"
+                    )
+                if current_stage_trace_sha256 != stage_trace_after_sha256:
+                    raise RuntimeError(
+                        "preflight_evidence_reissue_commit_incomplete"
+                    )
+                result = dict(journal)
+                result["idempotent_replay"] = True
+                return result
+
+            if journal is None:
+                current_runtime = self.latest_runtime_certificate(
+                    namespace,
+                    project_id,
+                    certificate_key=runtime_test_certificate_key,
+                )
+                if (
+                    current_runtime is None
+                    or current_runtime.get("certificate_id")
+                    != runtime_test_certificate_id
+                ):
+                    raise ValueError(
+                        "preflight_evidence_reissue_plan_stale: runtime certificate changed before commit"
+                    )
+                journal = dict(evidence_after)
+                journal.update(
+                    {
+                        "record_id": clean_evidence_id,
+                        "preflight_evidence_id": clean_evidence_id,
+                        "project_id": project_id,
+                        "evidence_key": evidence_key,
+                        "old_handoff_id": clean_handoff_id,
+                        "old_handoff_sha256": old_handoff_sha256,
+                        "certificate_id": certificate_id,
+                        "certificate_after_sha256": certificate_after_sha256,
+                        "certificate_after": certificate_after,
+                        "stage_trace_after_sha256": stage_trace_after_sha256,
+                        "stage_trace_after": stage_trace_after,
+                        "status": "prepared",
+                        "created_at": utc_stamp(),
+                    }
+                )
+                journal["integrity_hmac"] = self._record_integrity_hmac(
+                    journal
+                )
+                self.atomic_write_json(evidence_path, journal)
+
+            if current_certificate_sha256 is None:
+                self.atomic_write_json(certificate_path, certificate_after)
+            if current_stage_trace_sha256 is None:
+                self.atomic_write_json(stage_trace_path, stage_trace_after)
+            final_certificate_sha256 = self.project_state_sha256(
+                self.read_json(certificate_path)
+            )
+            if final_certificate_sha256 != certificate_after_sha256:
+                raise RuntimeError(
+                    "preflight_evidence_reissue_commit_incomplete"
+                )
+            final_stage_trace_sha256 = self.project_state_sha256(
+                self.read_json(stage_trace_path)
+            )
+            if final_stage_trace_sha256 != stage_trace_after_sha256:
+                raise RuntimeError(
+                    "preflight_evidence_reissue_commit_incomplete"
+                )
+            journal["status"] = "committed"
+            journal["committed_at"] = utc_stamp()
+            journal["integrity_hmac"] = self._record_integrity_hmac(journal)
+            self.atomic_write_json(evidence_path, journal)
+            result = dict(journal)
+            result["idempotent_replay"] = False
+            return result
 
     def rollback_project_state_migration(
         self,
@@ -2306,6 +2922,293 @@ class ProjectStore:
         handoff: dict[str, Any],
     ) -> bool:
         """Return whether a successor-bound handoff is publicly consumable."""
+
+        if handoff.get("recovery_publication_fenced") is True:
+            recovery_id = str(handoff.get("recovery_id") or "")
+            try:
+                clean_recovery_id = safe_id(recovery_id, "recovery_id")
+            except ValueError:
+                return False
+            journal_path = (
+                self.project_dir(namespace, project_id)
+                / "handoff_recoveries"
+                / f"{clean_recovery_id}.json"
+            )
+            if not journal_path.is_file():
+                return False
+            try:
+                journal = self.read_json(journal_path)
+                self._verify_record_integrity(
+                    journal, record_id=clean_recovery_id
+                )
+                self._verify_project_record_primary_id(
+                    "handoff_recoveries",
+                    journal,
+                    record_id=clean_recovery_id,
+                )
+                handoff_id = safe_id(
+                    str(handoff.get("handoff_id") or ""),
+                    "handoff_id",
+                )
+                self._verify_record_integrity(
+                    handoff, record_id=handoff_id
+                )
+                self._verify_project_record_primary_id(
+                    "handoffs", handoff, record_id=handoff_id
+                )
+                journal_new = journal.get("new_after")
+                if not isinstance(journal_new, dict):
+                    return False
+                base_projection = self._hub_record_projection(journal_new)
+                current_projection = self._hub_record_projection(handoff)
+
+                def production_projection(
+                    value: dict[str, Any],
+                ) -> dict[str, Any]:
+                    return {
+                        key: copy.deepcopy(item)
+                        for key, item in value.items()
+                        if key not in RECOVERY_HANDOFF_AUDIT_MUTABLE_KEYS
+                    }
+
+                if (
+                    not self.project_record_is_signed(journal)
+                    or not self.project_record_is_signed(handoff)
+                    or journal.get("status") != "committed"
+                    or journal.get("new_handoff_id")
+                    != handoff.get("handoff_id")
+                    or journal.get("recovery_id") != recovery_id
+                    or self.project_state_sha256(journal_new)
+                    != journal.get("new_after_sha256")
+                    or production_projection(current_projection)
+                    != production_projection(base_projection)
+                ):
+                    return False
+                certificate_after = journal.get("certificate_after")
+                stage_trace_after = journal.get("stage_trace_after")
+                if not isinstance(certificate_after, dict) or not isinstance(
+                    stage_trace_after, dict
+                ):
+                    return False
+                certificate_id = safe_id(
+                    str(certificate_after.get("certificate_id") or ""),
+                    "certificate_id",
+                )
+                stage_trace_id = safe_id(
+                    str(stage_trace_after.get("trace_id") or ""),
+                    "stage_trace_id",
+                )
+                directory = self.project_dir(namespace, project_id)
+                certificate = self.read_json(
+                    directory / "certificates" / f"{certificate_id}.json"
+                )
+                stage_trace = self.read_json(
+                    directory / "telemetry" / f"{stage_trace_id}.json"
+                )
+                for value, record_id, kind in (
+                    (certificate, certificate_id, "certificates"),
+                    (stage_trace, stage_trace_id, "telemetry"),
+                ):
+                    self._verify_record_integrity(value, record_id=record_id)
+                    self._verify_project_record_primary_id(
+                        kind, value, record_id=record_id
+                    )
+                    if not self.project_record_is_signed(value):
+                        return False
+                if (
+                    self.project_state_sha256(certificate)
+                    != journal.get("certificate_after_sha256")
+                    or self.project_state_sha256(stage_trace)
+                    != journal.get("stage_trace_after_sha256")
+                    or certificate != certificate_after
+                    or stage_trace != stage_trace_after
+                ):
+                    return False
+                report = certificate.get("report")
+                if (
+                    certificate.get("certificate_type")
+                    != "production_preflight"
+                    or certificate.get("audit_class")
+                    != "production_preflight"
+                    or certificate.get("certificate_id")
+                    != handoff.get("certificate_id")
+                    or certificate.get("work_order_id")
+                    != journal.get("work_order_id")
+                    or certificate.get("production_work_order_id")
+                    != handoff.get("work_order_id")
+                    or certificate.get("artifact_id")
+                    != handoff.get("storyboard_artifact_id")
+                    or certificate.get("canonical_artifact_id")
+                    != handoff.get("canonical_artifact_id")
+                    or certificate.get("canonical_sha256")
+                    != handoff.get("canonical_sha256")
+                    or certificate.get("source_fingerprint")
+                    != handoff.get("source_fingerprint")
+                    or certificate.get("boundary_hash")
+                    != handoff.get("boundary_hash")
+                    or certificate.get("ruleset_version")
+                    != handoff.get("ruleset_version")
+                    or certificate.get("validator_version")
+                    != handoff.get("validator_version")
+                    or certificate.get("cache_key")
+                    != handoff.get("cache_key")
+                    or certificate.get("cache_components")
+                    != handoff.get("cache_components")
+                    or certificate.get("checked_shot_count")
+                    != handoff.get("checked_shot_count")
+                    or certificate.get("preflight_status")
+                    != "production_preflight_pass"
+                    or certificate.get("preflight_issue_count") != 0
+                    or certificate.get("independent_audit_status")
+                    != "PENDING_AUDIT"
+                    or certificate.get("evidence_origin")
+                    != "controlled_handoff_recovery_revalidation"
+                    or certificate.get("issuing_work_order_id")
+                    != journal.get("work_order_id")
+                    or certificate.get("recovery_work_order_id")
+                    != journal.get("work_order_id")
+                    or certificate.get("recovery_gap_id")
+                    != journal.get("gap_id")
+                    or certificate.get("recovery_plan_sha256")
+                    != handoff.get("recovery_plan_sha256")
+                    or certificate.get("recovery_trace_id")
+                    != handoff.get("recovery_trace_id")
+                    or certificate.get("source_handoff_id")
+                    != journal.get("old_handoff_id")
+                    or certificate.get("current_fingerprints")
+                    != handoff.get("fingerprints")
+                    or certificate.get("current_fingerprints_sha256")
+                    != handoff.get("recovery_plan_item", {}).get(
+                        "current_fingerprints_sha256"
+                    )
+                    or not isinstance(report, dict)
+                    or certificate.get("report_sha256")
+                    != sha256_bytes(canonical_json_bytes(report))
+                    or certificate.get("first_draft_grade_reconstructed")
+                    is not False
+                    or certificate.get("authored_artifacts_modified")
+                    is not False
+                    or certificate.get("independent_audit_verdict_issued")
+                    is not False
+                    or stage_trace.get("trace_id")
+                    != handoff.get("stage_trace_id")
+                    or stage_trace.get("telemetry_id")
+                    != handoff.get("stage_trace_id")
+                    or stage_trace.get("trace_id")
+                    != handoff.get("recovery_trace_id")
+                    or stage_trace.get("trace_id") != journal.get("trace_id")
+                    or stage_trace.get("operation")
+                    != "recover_storyboard_handoff"
+                    or stage_trace.get("phase") != "handoff_recovery"
+                    or stage_trace.get("window_role") != "production"
+                    or stage_trace.get("task_type")
+                    != "production_preflight"
+                    or stage_trace.get("work_order_id")
+                    != journal.get("work_order_id")
+                    or stage_trace.get("production_work_order_id")
+                    != handoff.get("work_order_id")
+                    or stage_trace.get("gap_id") != journal.get("gap_id")
+                    or stage_trace.get("plan_sha256")
+                    != handoff.get("recovery_plan_sha256")
+                    or stage_trace.get("authority_record_id")
+                    != clean_recovery_id
+                    or stage_trace.get("artifact_id")
+                    != handoff.get("storyboard_artifact_id")
+                    or stage_trace.get("input_fingerprints")
+                    != handoff.get("fingerprints")
+                ):
+                    return False
+
+                status = handoff.get("status")
+                live_claim_fields = {
+                    "claimed_by_work_order_id",
+                    "claim_token",
+                    "claim_epoch_seconds",
+                    "claim_lease_seconds",
+                    "claim_lease_expires_at",
+                    "claim_lease_expires_epoch_seconds",
+                }
+                consumed_fields = {
+                    "consumed_by_work_order_id",
+                    "consumed_at",
+                    "audit_certificate_id",
+                }
+                if status == "prepared":
+                    if live_claim_fields & set(handoff) or consumed_fields & set(
+                        handoff
+                    ):
+                        return False
+                elif status == "consuming":
+                    owner = handoff.get("claimed_by_work_order_id")
+                    authority = handoff.get("claim_authority_work_order_id")
+                    generation = handoff.get("claim_generation")
+                    token = handoff.get("claim_token")
+                    lease_seconds = handoff.get("claim_lease_seconds")
+                    if (
+                        not live_claim_fields <= set(handoff)
+                        or consumed_fields & set(handoff)
+                        or not isinstance(owner, str)
+                        or not owner
+                        or owner != authority
+                        or not isinstance(token, str)
+                        or not token
+                        or not isinstance(generation, int)
+                        or isinstance(generation, bool)
+                        or generation < 1
+                        or not isinstance(lease_seconds, int)
+                        or isinstance(lease_seconds, bool)
+                        or not 1
+                        <= lease_seconds
+                        <= MAX_CONSUMPTION_LEASE_SECONDS
+                    ):
+                        return False
+                elif status == "consumed":
+                    if (
+                        live_claim_fields & set(handoff)
+                        or not consumed_fields <= set(handoff)
+                        or handoff.get("consumed_by_work_order_id")
+                        != handoff.get("claim_authority_work_order_id")
+                        or not isinstance(
+                            handoff.get("audit_certificate_id"), str
+                        )
+                        or not handoff.get("audit_certificate_id")
+                        or not isinstance(handoff.get("consumed_at"), str)
+                        or not handoff.get("consumed_at")
+                    ):
+                        return False
+                else:
+                    return False
+                hub = self.read_json(directory / "hub.json")
+                handoff_matches = [
+                    row
+                    for row in hub.get("handoffs", [])
+                    if isinstance(row, dict)
+                    and row.get("handoff_id") == handoff.get("handoff_id")
+                ]
+                trace_matches = [
+                    row
+                    for row in hub.get("performance_traces", [])
+                    if isinstance(row, dict)
+                    and str(
+                        row.get("trace_id")
+                        or row.get("telemetry_id")
+                        or ""
+                    )
+                    == stage_trace_id
+                ]
+                expected_hub_projection = copy.deepcopy(base_projection)
+                if status == "consumed":
+                    expected_hub_projection["status"] = "consumed"
+                    expected_hub_projection["audit_certificate_id"] = (
+                        handoff["audit_certificate_id"]
+                    )
+                if handoff_matches != [
+                    expected_hub_projection
+                ] or trace_matches != [stage_trace]:
+                    return False
+            except (OSError, TypeError, ValueError):
+                return False
+            return True
 
         state = str(handoff.get("publication_state") or "committed")
         transaction_id = str(handoff.get("successor_transaction_id") or "")

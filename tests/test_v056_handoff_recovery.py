@@ -74,7 +74,11 @@ class V056HandoffRecoveryTests(unittest.IsolatedAsyncioTestCase):
             mode="execute",
             authorization="explicit_execute",
             request_text="authorized controlled handoff recovery",
-            targets=[self.gap_id, self.old_handoff_id],
+            targets=[
+                self.gap_id,
+                self.old_handoff_id,
+                "controlled_phase:handoff_recovery",
+            ],
             authoritative_source="signed project records",
             latest_version="0.5.6",
             target_boundary="one exact handoff",
@@ -133,10 +137,18 @@ class V056HandoffRecoveryTests(unittest.IsolatedAsyncioTestCase):
             work_order_id=production_work_order_id,
             metadata={"canonical_sha256": canonical_hash},
         )
+        report = service_module.validate_storyboard.validate_project(
+            storyboard, mode="audit"
+        )
+        self.assertEqual(report.get("issues"), [])
         artifact_record = self.service.store.save_artifact_bytes(
             self.namespace,
             self.project_id,
-            b"immutable-xlsx-fixture",
+            service_module.storyboard_to_xlsx(
+                storyboard,
+                report,
+                assume_compact=True,
+            ),
             file_name="fixture.xlsx",
             artifact_type="storyboard",
             version="v1",
@@ -152,10 +164,6 @@ class V056HandoffRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 "independent_audit_status": "PENDING_AUDIT",
             },
         )
-        report = service_module.validate_storyboard.validate_project(
-            storyboard, mode="audit"
-        )
-        self.assertEqual(report.get("issues"), [])
         cache_components = self.service._audit_cache_components(
             canonical_hash=canonical_hash,
             source_fingerprint=source_fingerprint,
@@ -175,6 +183,29 @@ class V056HandoffRecoveryTests(unittest.IsolatedAsyncioTestCase):
             report=report,
             work_order_id=production_work_order_id,
         )
+        stage_trace = self.service._save_telemetry(
+            self.namespace,
+            self.project_id,
+            operation="commit_storyboard",
+            started_ns=service_module.time.perf_counter_ns(),
+            stages_ms={"validation": 0.0},
+            artifact_id=str(artifact_record["artifact_id"]),
+            telemetry_id="TRC-fixture-production",
+            window_role="production",
+            task_type="production_preflight",
+            input_fingerprints=self.service._fingerprint_bundle(
+                storyboard,
+                artifact_record,
+                canonical_hash=canonical_hash,
+                source_fingerprint=source_fingerprint,
+                boundary_hash=boundary_hash,
+            ),
+            shot_count=len(storyboard.get("shots", [])),
+            batch_count=0,
+            input_payload_bytes=int(artifact_record["size_bytes"]),
+            output_payload_bytes=int(artifact_record["size_bytes"]),
+            materialization_passes=1,
+        )
         handoff = self.service._persist_production_handoff(
             self.namespace,
             self.project_id,
@@ -187,6 +218,7 @@ class V056HandoffRecoveryTests(unittest.IsolatedAsyncioTestCase):
             work_order=production_work_order,
             stage_trace_id="TRC-fixture-production",
         )
+        self.assertEqual(stage_trace["trace_id"], handoff["stage_trace_id"])
         with self.service.store.mutate_project(
             self.namespace, self.project_id
         ) as (live_hub, _ledger):
@@ -209,6 +241,13 @@ class V056HandoffRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 if item["handoff_id"] == handoff["handoff_id"]
             )
             row["fingerprints"]["runtime"] = "0" * 64
+        with self.service.store.mutate_project_record(
+            self.namespace,
+            self.project_id,
+            kind="telemetry",
+            record_id="TRC-fixture-production",
+        ) as stale_trace:
+            stale_trace["input_fingerprints"]["runtime"] = "0" * 64
         return str(handoff["handoff_id"])
 
     def _plan(self) -> Any:
@@ -420,6 +459,10 @@ class V056HandoffRecoveryTests(unittest.IsolatedAsyncioTestCase):
             {row["old_handoff_id"] for row in result.data["mappings"]},
             set(handoff_ids),
         )
+        self.assertEqual(
+            len({row["trace_id"] for row in result.data["mappings"]}),
+            2,
+        )
         for mapping in result.data["mappings"]:
             new = self.service.store.get_project_record(
                 self.namespace,
@@ -427,7 +470,9 @@ class V056HandoffRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 kind="handoffs",
                 record_id=mapping["new_handoff_id"],
             )
-            self.assertEqual(new["recovery_trace_id"], result.trace_id)
+            self.assertEqual(
+                new["recovery_trace_id"], mapping["trace_id"]
+            )
             self.assertEqual(new["status"], "prepared")
 
     async def test_interrupted_commit_fails_closed_and_retry_recovers(self) -> None:
