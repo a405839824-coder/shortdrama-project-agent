@@ -1489,7 +1489,8 @@
     "recover_storyboard_handoff必须维持精确19工具集，并覆盖phase=preflight_evidence_backfill的plan→execute、确认字面量REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE、append-only证据，以及旧交接/生产预检证书/分镜/XLSX/canonical/历史审计不变且不签发独立审计结论；phase=handoff_recovery的恢复确认仍为SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT",
     "补签与恢复必须使用两张不同且绑定当前production窗口的rule_improvement + execute + explicit_execute工单；各工单targets精确等于gap、对应handoff IDs和controlled_phase:preflight_evidence_backfill或controlled_phase:handoff_recovery，缺项、额外项、错误token/窗口或复用同一工单时plan必须scope_mismatch且零写入",
     "0.5.8历史Hub交接投影只读兼容必须覆盖exact stripped与exact full signed正例，以及部分信封、额外字段、缺失字段、业务字段或签名信封漂移的零写入失败关闭；兼容读取不迁移历史，未来生产Hub只写stripped投影",
-    "插件当前发布版本、清单与活跃发布报告统一标记0.5.8；0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门、compact_master_version与历史升级文档保留其原始语义"
+    "0.5.9省略或null phase兼容必须先校验当前session和精确production工单权限，再只从唯一recognized controlled_phase token推断；缺失、重复、多阶段、未知、大小写/空白漂移、混合或任意额外target均须在plan/execute前零写入失败关闭，且不得默认handoff_recovery",
+    "插件当前发布版本、清单与活跃发布报告统一标记0.5.9；0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门、compact_master_version与历史升级文档保留其原始语义"
     ],
     "minimum_input_required": [
       "用户任务范围",

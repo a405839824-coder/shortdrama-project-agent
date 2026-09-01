@@ -1,4 +1,4 @@
-# 分镜项目 Agent 0.5.8
+# 分镜项目 Agent 0.5.9
 
 这是一个“技能 + MCP 执行服务”的完整工具型插件。ChatGPT 负责理解、生成与改写内容，MCP 负责项目状态、文件导入、版本化提交、全表审计、修复回归、跨聊天问题台账和人工签核。没有真实工具调用时，插件规则禁止声称“已经执行”。
 
@@ -16,6 +16,7 @@
 - 精确 10 列 Excel：`分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`
 - 0.5.5 初稿质量门：生成前读取跨批次问题画像，逐场景执行无产物预检，再对完整 canonical 签发全量预检证书；总体正确率与直接可用率均须至少98%，每集至少96%，新增局部问题率最多2%，硬错、重大问题、已知问题复发和系统性重复均为0
 - 0.5.5 模板硬门禁：逐镜`9:16竖屏`、转场去重、静态关键帧、无跨镜代指、对白逐字与说话人一致、主角人数/单机位/状态/道具/时长容量闭合；单镜执行字段禁止`BGM`字面量
+- 0.5.9 旧工具参数表受控兼容：`recover_storyboard_handoff`省略或提交`null` phase时，不再默认恢复阶段；服务端先校验当前会话和`rule_improvement + execute + explicit_execute` production工单，再只从targets中唯一、精确的`controlled_phase:preflight_evidence_backfill`或`controlled_phase:handoff_recovery`令牌推断。无令牌、重复、双阶段、未知、大小写/空白漂移或任意额外target全部零写入失败关闭；工具总数仍精确为19
 - 0.5.8 历史Hub交接投影严格兼容：旧交接恢复/补签读取只接受两种精确形态——去掉`record_id`、`project_id`、`integrity_hmac`的签名记录投影，或包含这三个信封字段的完整签名记录。任何混合、增删或字段漂移一律在写入前失败关闭。该兼容只读，不迁移、不规范化或改写历史记录；未来生产Hub写入统一使用去信封投影
 - 0.5.7 旧交接生产预检证据受控补签：精确19工具不增项，在`recover_storyboard_handoff`内新增`phase=preflight_evidence_backfill`。补签与恢复必须分别使用两张不同的、绑定当前production窗口的`rule_improvement + execute + explicit_execute`工单；各自targets精确包含gap、对应handoff IDs及`controlled_phase:preflight_evidence_backfill`或`controlled_phase:handoff_recovery`。缺项、额外项、token错误或复用同一工单时，plan以`scope_mismatch`零写入阻断。整批有序handoff授权同时绑定计划、逐条证据/证书、真实计时trace和批次trace；补签执行必须回传原样`plan_sha256`与`REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE`，且只追加签名生产预检证据，不改旧handoff/证书、分镜、canonical、XLSX或历史审计，也不签发独立审计结论
 - 0.5.6 源文对白权威：只从服务器登记的导入源文运行闭集 parser v6，并交叉核对 payload SHA、Hub authority entry 与 artifact metadata 中的 source role；逐 occurrence 绑定精确文本、标点、说话人和源文位置。候选 inventory/`source_lock`/台账/认知/锚点不能反向教解析器。任何歧义整批失败关闭且零正式产物
@@ -108,7 +109,7 @@ ChatGPT 不能直接访问普通的 `localhost`。先保持本地服务运行，
 
 判断是否真的走完优化流程，要同时看到同一 artifact/canonical 绑定的草稿预检证书、生产 `trace_id` 和独立审计 `trace_id`，以及 handoff 与 audit certificate；缺少任一追踪只能记为 `fast_path_incomplete`。只有文字说明而没有这些标识，等于没有执行。
 
-0.5.8 的历史Hub交接投影严格只读兼容见 [docs/UPGRADE_0.5.8.md](docs/UPGRADE_0.5.8.md)；0.5.7 的旧交接生产预检证据受控补签见 [docs/UPGRADE_0.5.7.md](docs/UPGRADE_0.5.7.md)；0.5.6 首次引入的源文权威、独立复审、台账重放与受控交接恢复见 [docs/UPGRADE_0.5.6.md](docs/UPGRADE_0.5.6.md)；0.5.5 的初稿质量门、项目迁移和发布验收见 [docs/UPGRADE_0.5.5.md](docs/UPGRADE_0.5.5.md)；0.5.4 的集成升级历史见 [docs/UPGRADE_0.5.4.md](docs/UPGRADE_0.5.4.md)。十二项模板硬门禁的原始设计见 [docs/UPGRADE_0.5.1.md](docs/UPGRADE_0.5.1.md)，无API性能诊断见 [docs/UPGRADE_0.5.3.md](docs/UPGRADE_0.5.3.md)。
+0.5.9 的旧工具参数表受控阶段推断见 [docs/UPGRADE_0.5.9.md](docs/UPGRADE_0.5.9.md)；0.5.8 的历史Hub交接投影严格只读兼容见 [docs/UPGRADE_0.5.8.md](docs/UPGRADE_0.5.8.md)；0.5.7 的旧交接生产预检证据受控补签见 [docs/UPGRADE_0.5.7.md](docs/UPGRADE_0.5.7.md)；0.5.6 首次引入的源文权威、独立复审、台账重放与受控交接恢复见 [docs/UPGRADE_0.5.6.md](docs/UPGRADE_0.5.6.md)；0.5.5 的初稿质量门、项目迁移和发布验收见 [docs/UPGRADE_0.5.5.md](docs/UPGRADE_0.5.5.md)；0.5.4 的集成升级历史见 [docs/UPGRADE_0.5.4.md](docs/UPGRADE_0.5.4.md)。十二项模板硬门禁的原始设计见 [docs/UPGRADE_0.5.1.md](docs/UPGRADE_0.5.1.md)，无API性能诊断见 [docs/UPGRADE_0.5.3.md](docs/UPGRADE_0.5.3.md)。
 
 ## 云端 MCP
 

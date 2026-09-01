@@ -1,4 +1,4 @@
-# ChatGPT 插件验收提示词（0.5.8 / R10.1）
+# ChatGPT 插件验收提示词（0.5.9 / R10.1）
 
 每条在新聊天运行，并记录实际工具、参数、结果 ID、追踪和确认行为。文字声称不算执行证据。
 
@@ -31,7 +31,7 @@
 25. `把已完成请求的semantic_audit.canonical_sha256仅改成等价的大写十六进制后重放；必须返回同一签名receipt，且successor、round、event和certificate计数均不变。再改任一普通证据ID的大小写必须拒绝。`
 26. `保留真实event，修改certificate中的一个绑定字段后用有效服务HMAC重新签名；系统仍须按完整确定性CERT绑定零权威/投影变异拒绝，不能把“签名有效”当成“内容正确”。`
 27. `模拟已完成FAIL只缺repair package或Hub投影并并发启动下一successor；投影恢复必须在同一storage lock内重验最新lineage、certificate HMAC与fenced claim CAS。若新authority先完成，旧重放不得写投影或返回旧FAIL。`
-28. `确认插件0.5.8仍精确暴露19个工具且包含recover_storyboard_handoff。为缺少旧生产预检字段的prepared production_to_audit交接在当前production窗口建立专用rule_improvement + execute + explicit_execute工单，targets精确包含gap、对应handoff IDs和controlled_phase:preflight_evidence_backfill；先预演，再用相同列表、plan_sha256和REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE执行。只追加签名生产预检证据，不改旧交接或旧证书。`
+28. `确认插件0.5.9仍精确暴露19个工具且包含recover_storyboard_handoff。为缺少旧生产预检字段的prepared production_to_audit交接在当前production窗口建立专用rule_improvement + execute + explicit_execute工单，targets精确包含gap、对应handoff IDs和controlled_phase:preflight_evidence_backfill；模拟宿主缓存旧schema而省略phase，先预演，再用相同列表、plan_sha256和REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE执行。只追加签名生产预检证据，不改旧交接或旧证书。`
 29. `补签完成后，另建一张不同的当前production窗口rule_improvement + execute + explicit_execute工单，targets精确包含gap、完整恢复handoff IDs和controlled_phase:handoff_recovery。以phase=handoff_recovery先预演，再用完全相同列表、plan_sha256和SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT执行。旧交接只标记superseded，新交接必须是prepared + PENDING_AUDIT。`
 30. `用两组历史Hub交接投影分别验收补签与恢复：一组精确去除record_id、project_id、integrity_hmac，另一组精确保留完整签名记录。两组均应通过；执行后未来Hub successor投影统一不含签名信封字段，历史行不得因兼容读取被迁移或改写。`
 
@@ -54,12 +54,13 @@
 15. `在独立审计窗口补签旧交接生产预检证据，或者把补签写回旧handoff/旧certificate并顺便标记审计PASS。`
 16. `补签与恢复复用同一张工单，省略controlled_phase token，或者在targets里多放未请求handoff；即使只是action=plan也继续返回计划。`
 17. `把历史Hub交接投影做成混合形态：只保留部分签名信封、增加未知字段、删改业务字段，或修改record_id/project_id/integrity_hmac之一；即使其余字段相同也继续补签或恢复。`
+18. `省略phase，但在工单targets中不放controlled_phase、重复同一token、同时放两个合法token、混入unknown token，或者把token改大小写/加空格；仍自动默认handoff_recovery并继续计划或执行。`
 
 ## 通过标准
 
 ### 数据契约与Excel
 
-- 插件版本为`0.5.8`，精确工具集仍为19个且包含`recover_storyboard_handoff`；该工具的`phase`枚举必须同时包含`handoff_recovery`与`preflight_evidence_backfill`。分镜Schema为`R10.1`，工作流为`R10-PG1`。
+- 插件版本为`0.5.9`，精确工具集仍为19个且包含`recover_storyboard_handoff`；该工具的`phase`非必填且枚举必须同时包含`handoff_recovery`与`preflight_evidence_backfill`，不得保留默认恢复阶段。省略或null时只可从当前会话绑定工单的唯一精确controlled_phase令牌推断。分镜Schema为`R10.1`，工作流为`R10-PG1`。
 - 新 canonical 的模型镜头契约严格为27字段：`镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`。内部UID和身份元数据不属于模型写入字段。
 - Excel正式母版严格为10列：`分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`。旧列名`正式分镜母版·字段合并`只允许只读导入，不得回写。
 - `正式分镜母版`是唯一完整视频执行真值，必须能在空白上下文中独立执行；不得出现独立Seedance列、独立执行提示词、顶层`batches`、镜内`生成批次`或“生成批次”工作表。

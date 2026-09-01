@@ -87,7 +87,7 @@ class V057PreflightEvidenceReissueTests(
                 "controlled_phase:preflight_evidence_backfill",
             ],
             authoritative_source="signed project records",
-            latest_version="0.5.8",
+            latest_version="0.5.9",
             target_boundary="one exact legacy handoff",
             must_keep=["history", "content", "independent audit separation"],
             must_remove=[],
@@ -236,7 +236,7 @@ class V057PreflightEvidenceReissueTests(
                 f"controlled_phase:{phase}",
             ],
             authoritative_source="signed project records",
-            latest_version="0.5.8",
+            latest_version="0.5.9",
             target_boundary="exact authorized handoff batch",
             must_keep=["history", "content", "independent audit separation"],
             must_remove=[],
@@ -256,9 +256,243 @@ class V057PreflightEvidenceReissueTests(
             if tool.name == "recover_storyboard_handoff"
         )
         phase = recovery["inputSchema"]["properties"]["phase"]
+        phase_variants = phase.get("anyOf", [phase])
+        advertised = {
+            value
+            for variant in phase_variants
+            for value in variant.get("enum", [])
+        }
         self.assertEqual(
-            set(phase["enum"]),
+            advertised,
             {"handoff_recovery", "preflight_evidence_backfill"},
+        )
+        self.assertNotIn("phase", recovery["inputSchema"].get("required", []))
+        self.assertNotEqual(phase.get("default"), "handoff_recovery")
+
+    async def test_omitted_phase_infers_backfill_and_replays_exact_plan(self) -> None:
+        snapshot_before = self._recovery_authority_snapshot()
+        explicit = self._backfill_plan().data["preflight_evidence_plan"]
+        inferred_response = self.service.recover_storyboard_handoff(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=self.backfill_work_order_id,
+            gap_id=self.gap_id,
+            handoff_ids=[self.old_handoff_id],
+            action="plan",
+            expected_plan_sha256=None,
+            confirmation=None,
+            request_session_id=self.session_id,
+        )
+        inferred = inferred_response.data["preflight_evidence_plan"]
+        self.assertEqual(inferred["phase"], "preflight_evidence_backfill")
+        self.assertEqual(inferred["plan_sha256"], explicit["plan_sha256"])
+        self.assertEqual(self._recovery_authority_snapshot(), snapshot_before)
+
+        result = self.service.recover_storyboard_handoff(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=self.backfill_work_order_id,
+            gap_id=self.gap_id,
+            handoff_ids=[self.old_handoff_id],
+            action="execute",
+            expected_plan_sha256=inferred["plan_sha256"],
+            confirmation=service_module.PREFLIGHT_EVIDENCE_REISSUE_CONFIRMATION,
+            request_session_id=self.session_id,
+        )
+        replay = self.service.recover_storyboard_handoff(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=self.backfill_work_order_id,
+            gap_id=self.gap_id,
+            handoff_ids=[self.old_handoff_id],
+            action="execute",
+            expected_plan_sha256=inferred["plan_sha256"],
+            confirmation=service_module.PREFLIGHT_EVIDENCE_REISSUE_CONFIRMATION,
+            request_session_id=self.session_id,
+        )
+        self.assertEqual(
+            replay.data["mappings"][0]["preflight_evidence_id"],
+            result.data["mappings"][0]["preflight_evidence_id"],
+        )
+        self.assertTrue(replay.data["mappings"][0]["idempotent_replay"])
+
+    async def test_public_tool_accepts_stale_schema_call_without_phase(self) -> None:
+        result = await self.server.call_tool(
+            "recover_storyboard_handoff",
+            {
+                "project_id": self.project_id,
+                "work_order_id": self.backfill_work_order_id,
+                "gap_id": self.gap_id,
+                "handoff_ids": [self.old_handoff_id],
+                "action": "plan",
+            },
+        )
+        self.assertFalse(result.is_error, result.content)
+        self.assertIsNotNone(result.structured_content)
+        response = result.structured_content or {}
+        self.assertEqual(
+            response["status"], "preflight_evidence_reissue_plan_ready"
+        )
+        self.assertEqual(
+            response["data"]["preflight_evidence_plan"]["phase"],
+            "preflight_evidence_backfill",
+        )
+
+    async def test_omitted_phase_rejects_ambiguous_tokens_without_mutation(self) -> None:
+        malformed_targets = (
+            [self.gap_id, self.old_handoff_id],
+            [
+                self.gap_id,
+                self.old_handoff_id,
+                "controlled_phase:preflight_evidence_backfill",
+                "controlled_phase:preflight_evidence_backfill",
+            ],
+            [
+                self.gap_id,
+                self.old_handoff_id,
+                "controlled_phase:preflight_evidence_backfill",
+                "controlled_phase:handoff_recovery",
+            ],
+            [
+                self.gap_id,
+                self.old_handoff_id,
+                "controlled_phase:unknown",
+            ],
+            [
+                self.gap_id,
+                self.old_handoff_id,
+                "controlled_phase:preflight_evidence_backfill",
+                "controlled_phase:unknown",
+            ],
+        )
+        for index, targets in enumerate(malformed_targets):
+            with self.subTest(index=index):
+                response = self.service.begin_task(
+                    self.namespace,
+                    project_id=self.project_id,
+                    operation="rule_improvement",
+                    mode="execute",
+                    authorization="explicit_execute",
+                    request_text="malformed omitted-phase authority",
+                    targets=targets,
+                    authoritative_source="signed project records",
+                    latest_version="0.5.9",
+                    target_boundary="exact authorized handoff batch",
+                    must_keep=["history"],
+                    must_remove=[],
+                    protected_scope=["storyboard", "audit history"],
+                    expected_outputs=["controlled recovery"],
+                    window_key=self.session_id,
+                    request_session_id=self.session_id,
+                )
+                snapshot_before = self._recovery_authority_snapshot()
+                for action in ("plan", "execute"):
+                    with self.subTest(index=index, action=action):
+                        with self.assertRaisesRegex(
+                            ValueError, "handoff_recovery_phase_required"
+                        ):
+                            self.service.recover_storyboard_handoff(
+                                self.namespace,
+                                project_id=self.project_id,
+                                work_order_id=str(response.work_order_id),
+                                gap_id=self.gap_id,
+                                handoff_ids=[self.old_handoff_id],
+                                action=action,
+                                expected_plan_sha256=(
+                                    "0" * 64 if action == "execute" else None
+                                ),
+                                confirmation=(
+                                    service_module.PREFLIGHT_EVIDENCE_REISSUE_CONFIRMATION
+                                    if action == "execute"
+                                    else None
+                                ),
+                                request_session_id=self.session_id,
+                            )
+                self.assertEqual(
+                    self._recovery_authority_snapshot(), snapshot_before
+                )
+
+    async def test_explicit_phase_rejects_duplicate_targets_without_mutation(self) -> None:
+        base_targets = [
+            self.gap_id,
+            self.old_handoff_id,
+            "controlled_phase:preflight_evidence_backfill",
+        ]
+        for duplicate_index in range(len(base_targets)):
+            with self.subTest(duplicate_index=duplicate_index):
+                targets = [*base_targets, base_targets[duplicate_index]]
+                response = self.service.begin_task(
+                    self.namespace,
+                    project_id=self.project_id,
+                    operation="rule_improvement",
+                    mode="execute",
+                    authorization="explicit_execute",
+                    request_text="duplicate exact-scope target",
+                    targets=targets,
+                    authoritative_source="signed project records",
+                    latest_version="0.5.9",
+                    target_boundary="exact authorized handoff batch",
+                    must_keep=["history"],
+                    must_remove=[],
+                    protected_scope=["storyboard", "audit history"],
+                    expected_outputs=["controlled recovery"],
+                    window_key=self.session_id,
+                    request_session_id=self.session_id,
+                )
+                snapshot_before = self._recovery_authority_snapshot()
+                with self.assertRaisesRegex(
+                    ValueError, "handoff_recovery_scope_mismatch"
+                ):
+                    self.service.recover_storyboard_handoff(
+                        self.namespace,
+                        project_id=self.project_id,
+                        work_order_id=str(response.work_order_id),
+                        gap_id=self.gap_id,
+                        handoff_ids=[self.old_handoff_id],
+                        action="plan",
+                        expected_plan_sha256=None,
+                        confirmation=None,
+                        request_session_id=self.session_id,
+                        phase="preflight_evidence_backfill",
+                    )
+                self.assertEqual(
+                    self._recovery_authority_snapshot(), snapshot_before
+                )
+
+    async def test_omitted_phase_checks_session_before_target_shape(self) -> None:
+        response = self.service.begin_task(
+            self.namespace,
+            project_id=self.project_id,
+            operation="rule_improvement",
+            mode="execute",
+            authorization="explicit_execute",
+            request_text="session ordering for omitted phase",
+            targets=[self.gap_id, self.old_handoff_id],
+            authoritative_source="signed project records",
+            latest_version="0.5.9",
+            target_boundary="exact authorized handoff batch",
+            must_keep=["history"],
+            must_remove=[],
+            protected_scope=["storyboard", "audit history"],
+            expected_outputs=["controlled recovery"],
+            window_key=self.session_id,
+            request_session_id=self.session_id,
+        )
+        snapshot_before = self._recovery_authority_snapshot()
+        with self.assertRaisesRegex(ValueError, "window_session_mismatch"):
+            self.service.recover_storyboard_handoff(
+                self.namespace,
+                project_id=self.project_id,
+                work_order_id=str(response.work_order_id),
+                gap_id=self.gap_id,
+                handoff_ids=[self.old_handoff_id],
+                action="plan",
+                expected_plan_sha256=None,
+                confirmation=None,
+                request_session_id="another-production-session",
+            )
+        self.assertEqual(
+            self._recovery_authority_snapshot(), snapshot_before
         )
 
     async def test_backfill_plan_is_zero_write_and_binds_exact_evidence(self) -> None:
@@ -1211,7 +1445,7 @@ class V057PreflightEvidenceReissueTests(
                 "controlled_phase:handoff_recovery",
             ],
             authoritative_source="signed project records",
-            latest_version="0.5.8",
+            latest_version="0.5.9",
             target_boundary="two exact handoffs",
             must_keep=["history", "content", "independent audit separation"],
             must_remove=[],
