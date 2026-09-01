@@ -60,7 +60,7 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.7",
+    "plugin_version": "0.5.8",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
     "canonical_atomic_field_count": 27,
@@ -457,7 +457,7 @@
       "missing_or_mismatch": "cache_miss_or_block",
       "forbid_silent_stale_fallback": true,
       "controlled_recovery": {
-        "minimum_plugin_version": "0.5.7",
+        "minimum_plugin_version": "0.5.8",
         "legacy_handoff_recovery_introduced_in": "0.5.6",
         "public_tool_contract": {
           "exact_tool_count": 19,
@@ -491,6 +491,10 @@
           "exact_confirmation": "SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT"
         },
         "transaction": "signed_journal_plus_before_after_cas",
+        "historical_hub_projection_read_shapes": ["exact_stripped_signed_record_projection", "exact_full_signed_record"],
+        "historical_hub_projection_mismatch_policy": "fail_closed_before_mutation_for_any_hybrid_extra_missing_or_altered_field",
+        "historical_hub_projection_compatibility": "read_only_no_migration_or_history_rewrite",
+        "future_production_hub_projection": "stripped_signed_record_projection_only",
         "old_record_policy": "preserve_and_mark_superseded",
         "new_record_policy": "one_current_complete_fingerprint_prepared_successor",
         "independent_audit_status": "PENDING_AUDIT",
