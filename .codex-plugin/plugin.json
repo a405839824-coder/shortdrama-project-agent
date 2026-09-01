@@ -1,6 +1,6 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Chinese short-drama production with controlled storyboard-handoff recovery, project-state migration, scene/full draft preflight, cross-batch issue prevention, first-draft quality gates, the R10-SPC-1 strict single-shot contract, independent audit, and conditional repair.",
   "author": {
     "name": "Storyboard Project Agent"
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.6新增受控的分镜交接恢复：签名预演、精确确认、逐条CAS supersede与当前完整指纹重签，历史记录和独立审计边界不变。0.5.5的项目迁移、问题画像、分场/整批初稿预检、失败学习和98%/96%初稿质量门继续有效。生产负责先把已知问题清零，程序负责确定性阻断，独立审计独占最终100%通过结论。历史分镜、对白、canonical与XLSX保持只读。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.7在保持精确19个工具的前提下，为旧prepared生产交接新增当前验证器复验与追加式生产预检证据补签；旧交接、旧证书、分镜、对白、canonical、XLSX及历史审计均不改写。0.5.6的受控交接恢复继续通过签名预演、精确确认、逐条CAS supersede与当前完整指纹重签工作，新交接仍待独立审计。生产负责先把已知问题清零，程序负责确定性阻断，独立审计独占最终100%通过结论。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [

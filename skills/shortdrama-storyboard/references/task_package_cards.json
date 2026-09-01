@@ -1486,7 +1486,9 @@
     "独立复审回归必须覆盖PASS转FAIL撤销latest/signoff资格、event-only确定性补证书、certificate-only零变异拒绝、完整CERT绑定下validly-resigned内容失配零变异、现代CERT event_sha256、successor父CERT HMAC/父event SHA桥、旧CERT只能强制新独审不能普通重放/签核、仅caller semantic canonical SHA小写归一且大小写重放同receipt不烧轮，以及同一storage lock内latest-lineage/CERT HMAC/fenced claim CAS约束的repair/Hub投影恢复",
     "修复包生命周期回归必须覆盖issued零下游恢复、真实consumed闭环、伪consumed零变异拒绝、consuming完成态拒绝、删除已消费包且保留下游证据不得复活，以及storage lock内绕过service预检仍失败关闭",
     "台账重放回归必须覆盖签名migration journal checkpoint、伪authority marker、checkpoint后legacy-* suffix、整条假issue与counter-only篡改",
-    "插件当前发布版本、清单与活跃发布报告统一标记0.5.6；0.5.5质量门、compact_master_version与历史升级文档保留其原始语义"
+    "recover_storyboard_handoff必须维持精确19工具集，并覆盖phase=preflight_evidence_backfill的plan→execute、确认字面量REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE、append-only证据，以及旧交接/生产预检证书/分镜/XLSX/canonical/历史审计不变且不签发独立审计结论；phase=handoff_recovery的恢复确认仍为SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT",
+    "补签与恢复必须使用两张不同且绑定当前production窗口的rule_improvement + execute + explicit_execute工单；各工单targets精确等于gap、对应handoff IDs和controlled_phase:preflight_evidence_backfill或controlled_phase:handoff_recovery，缺项、额外项、错误token/窗口或复用同一工单时plan必须scope_mismatch且零写入",
+    "插件当前发布版本、清单与活跃发布报告统一标记0.5.7；0.5.6受控旧交接恢复历史契约、0.5.5质量门、compact_master_version与历史升级文档保留其原始语义"
     ],
     "minimum_input_required": [
       "用户任务范围",

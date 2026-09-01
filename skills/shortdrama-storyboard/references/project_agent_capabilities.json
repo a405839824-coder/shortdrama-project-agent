@@ -3,7 +3,7 @@
   "runtime_version": "V16.3-148-R10-StableRuntime",
   "workflow_revision": "R10-PG1",
   "compact_master_contract": {
-    "plugin_version": "0.5.6",
+    "plugin_version": "0.5.7",
     "schema_version": "R10.1",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
@@ -282,6 +282,14 @@
       "approval_policy": "explicit_execute_plus_full_regression_certificate"
     },
     {
+      "operation": "legacy_handoff_preflight_evidence_reissue",
+      "group": "项目管理",
+      "status": "guarded",
+      "condition": "旧prepared production_to_audit交接缺少生产预检字段、存在可验证的原生产提交血缘、已登记能力缺口、production显式执行工单、精确handoff集合、有效全量回归证书及双阶段确认",
+      "output": "使用当前验证器复验不可变canonical与XLSX并追加一个确定性签名生产预检证据后继；旧handoff、旧证书、内容产物和历史审计记录零修改，独立审计仍为PENDING_AUDIT",
+      "approval_policy": "plan_hash_plus_exact_confirmation_plus_current_revalidation"
+    },
+    {
       "operation": "storyboard_handoff_recovery",
       "group": "项目管理",
       "status": "guarded",
@@ -360,7 +368,7 @@
     },
     {
       "id": "delta_no_structural_edit_v054",
-      "description": "历史稳定ID（保留v054标识用于兼容，请勿改名）：0.5.6增量路线只支持稳定UID、同数量且精确对白与说话人不变的视觉或其他非认知执行变化；不支持任何对白/说话人增删改、重排、拆并或改归属，也不支持镜头插入、删除、移动、拆分、合并或重编号；这些变化及原文/认知/保护对白/边界/拓扑失效必须完整重建受影响场景或分集。"
+      "description": "历史稳定ID（保留v054标识用于兼容，请勿改名）：0.5.7增量路线只支持稳定UID、同数量且精确对白与说话人不变的视觉或其他非认知执行变化；不支持任何对白/说话人增删改、重排、拆并或改归属，也不支持镜头插入、删除、移动、拆分、合并或重编号；这些变化及原文/认知/保护对白/边界/拓扑失效必须完整重建受影响场景或分集。"
     }
   ]
 }
