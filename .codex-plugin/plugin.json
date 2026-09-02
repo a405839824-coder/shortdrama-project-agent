@@ -1,6 +1,6 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.12",
+  "version": "0.5.13",
   "description": "Chinese short-drama production with controlled storyboard-handoff recovery, project-state migration, scene/full draft preflight, cross-batch issue prevention, first-draft quality gates, the R10-SPC-1 strict single-shot contract, independent audit, and conditional repair.",
   "author": {
     "name": "Storyboard Project Agent"
