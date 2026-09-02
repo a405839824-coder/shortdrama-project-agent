@@ -5,6 +5,7 @@ import contextvars
 import copy
 import functools
 import hashlib
+import inspect
 import json
 import re
 import sys
@@ -152,6 +153,9 @@ ARTIFACT_OPERATION_BINDINGS: dict[str, set[str]] = {
 SOURCE_INTAKE_OPERATIONS = {"project_intake", "source_lock", "chapter_intake"}
 WRITE_READY_WORK_ORDER_STATUSES = {"approved", "scope_locked", "executing", "failed_current"}
 HANDOFF_RECOVERY_CONFIRMATION = "SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT"
+ROLE_CONTINUATION_CONFIRMATION = (
+    "ROTATE_WINDOW_AUTHORITY_REVOKE_PREVIOUS_SESSION"
+)
 PREFLIGHT_EVIDENCE_REISSUE_CONFIRMATION = (
     "REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE"
 )
@@ -656,6 +660,83 @@ def _release_consumption_claims_on_error(method: Any) -> Any:
 
     return wrapped
 
+
+def _fence_role_operation(method: Any) -> Any:
+    """Keep one storyboard role generation active for the whole tool call.
+
+    The short-lived storage lease prevents a continuation from rotating the
+    authority between validation and persistence.  Every storage write made
+    inside the call also rechecks and renews the same signed lease, so a stale
+    request that wakes after a crash/expiry cannot cross the new authority
+    head.  Nested repair/delta calls reuse the outer lease.
+    """
+
+    signature = inspect.signature(method)
+
+    @functools.wraps(method)
+    def wrapped(self: "StoryboardService", *args: Any, **kwargs: Any) -> Any:
+        bound = signature.bind(self, *args, **kwargs)
+        bound.apply_defaults()
+        namespace = bound.arguments.get("namespace")
+        project_id = bound.arguments.get("project_id")
+        work_order_id = bound.arguments.get("work_order_id")
+        request_session_id = bound.arguments.get("request_session_id")
+        if not all(
+            isinstance(value, str) and value
+            for value in (namespace, project_id, work_order_id)
+        ):
+            # Local compatibility audit may mint its audit work order inside
+            # the method.  Role continuation is cloud-only, so there is no
+            # rotatable authority to fence on this path.
+            return method(self, *args, **kwargs)
+
+        existing = self.store.current_authority_operation()
+        if existing is not None:
+            if (
+                existing.get("namespace") != namespace
+                or existing.get("project_id") != project_id
+                or existing.get("work_order_id") != work_order_id
+            ):
+                raise ValueError("authority_operation_scope_conflict")
+            return method(self, *args, **kwargs)
+
+        hub = self.store.load_hub(namespace, project_id)
+        work_order = _find_work_order(hub, work_order_id)
+        operation = str(work_order.get("operation") or "")
+        if operation not in STORYBOARD_OPERATIONS | {"storyboard_audit"}:
+            return method(self, *args, **kwargs)
+        binding = self._assert_work_order_session(
+            namespace, work_order, request_session_id
+        )
+        lease = self.store.claim_authority_operation(
+            namespace,
+            project_id,
+            work_order_id=work_order_id,
+            expected_authority_root_id=str(binding["authority_root_id"]),
+            expected_authority_generation=int(binding.get("generation") or 0),
+            expected_session_fingerprint=binding.get("session_fingerprint"),
+        )
+        failed = False
+        try:
+            with self.store.bind_authority_operation(lease):
+                return method(self, *args, **kwargs)
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            try:
+                self.store.release_authority_operation(
+                    namespace,
+                    project_id,
+                    authority_root_id=str(lease["authority_root_id"]),
+                    claim_token=str(lease["claim_token"]),
+                )
+            except Exception:
+                if not failed:
+                    raise
+
+    return wrapped
+
 # These columns are deterministic projections of the atomic shot fields.  A
 # protected-scope comparison must ignore them or an older, unmaterialized
 # canonical would look semantically different from the same current shot.
@@ -673,6 +754,39 @@ def canonical_storyboard_sha256(storyboard: dict[str, Any]) -> str:
     """Return the layout-independent identity of a canonical storyboard."""
 
     return _canonical_sha256(storyboard)
+
+
+def _draft_commit_payload_sha256(
+    *,
+    project_id: str,
+    work_order_id: str,
+    draft_preflight_id: str,
+    canonical_sha256: str,
+    source_artifact_id: str | None,
+    file_name: str,
+) -> str:
+    """Hash the logical commit independently from a physical window.
+
+    ``commit_request_sha256`` remains the issuance identity used to derive the
+    deterministic artifact/certificate/handoff ids.  This second identity is
+    deliberately session-free: after a hard crash, a signed descendant of the
+    same authority root can prove that it is finishing the exact logical
+    payload without minting a second publication.
+    """
+
+    return sha256_bytes(
+        _stable_json_bytes(
+            {
+                "contract": "draft-commit-logical-payload-v0511",
+                "project_id": project_id,
+                "work_order_id": work_order_id,
+                "draft_preflight_id": draft_preflight_id,
+                "canonical_sha256": canonical_sha256,
+                "source_artifact_id": source_artifact_id,
+                "file_name": file_name,
+            }
+        )
+    )
 
 
 def _prepare_compact_storyboard_for_commit(
@@ -2178,20 +2292,527 @@ class StoryboardService:
             "delta_scope_unparseable: use EPxx/EPxx-EPyy, scene:<id>, or shot_uids:<ordered uids>"
         )
 
+    @staticmethod
+    def _authority_root_id(project_id: str, work_order_id: str) -> str:
+        return "AUTH-" + sha256_bytes(
+            _stable_json_bytes(
+                {
+                    "project_id": project_id,
+                    "work_order_id": work_order_id,
+                    "contract": "window-role-authority-root-v1",
+                }
+            )
+        )[:24]
+
+    @staticmethod
+    def _work_order_authority_contract(work_order: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "work_order_id": str(work_order.get("work_order_id") or ""),
+            "operation": str(work_order.get("operation") or ""),
+            "mode": str(work_order.get("mode") or ""),
+            "authorization": str(work_order.get("authorization") or ""),
+            "server_actor_role": str(work_order.get("server_actor_role") or ""),
+            "targets": copy.deepcopy(work_order.get("targets") or []),
+            "source_lock": copy.deepcopy(work_order.get("source_lock") or {}),
+            "protected_scope": copy.deepcopy(
+                work_order.get("protected_scope") or []
+            ),
+            "expected_outputs": copy.deepcopy(
+                work_order.get("expected_outputs") or []
+            ),
+        }
+
+    def _project_and_hub_for_work_order(
+        self, namespace: str, work_order_id: str
+    ) -> tuple[str, dict[str, Any]] | None:
+        matches: list[tuple[str, dict[str, Any]]] = []
+        for project in self.store.list_projects(namespace):
+            project_id = str(project.get("project_id") or "")
+            if not project_id:
+                continue
+            hub = self.store.load_hub(namespace, project_id)
+            if any(
+                isinstance(row, dict)
+                and row.get("work_order_id") == work_order_id
+                for row in hub.get("work_orders", [])
+            ):
+                matches.append((project_id, hub))
+        if len(matches) > 1:
+            raise ValueError(
+                "authority_root_ambiguous: work order appears in more than one project"
+            )
+        return matches[0] if matches else None
+
+    def _active_authority_binding(
+        self,
+        namespace: str,
+        project_id: str,
+        work_order: dict[str, Any],
+        *,
+        hub: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Resolve one signed active physical binding for a stable work order.
+
+        Generation zero is the immutable binding minted with the original work
+        order.  Later generations live in append-only signed continuation
+        records; Hub contains only the active-head projection.
+        """
+
+        work_order_id = str(work_order.get("work_order_id") or "")
+        authority_root_id = self._authority_root_id(project_id, work_order_id)
+        authority_contract = self._work_order_authority_contract(work_order)
+        contract_sha256 = sha256_bytes(_stable_json_bytes(authority_contract))
+        current_hub = hub or self.store.load_hub(namespace, project_id)
+        raw_heads = current_hub.get("active_authority_bindings")
+        if raw_heads is None:
+            raw_heads = []
+        if not isinstance(raw_heads, list):
+            raise ValueError(
+                "authority_head_invalid: active authority heads must be an array"
+            )
+        matching_heads = [
+            row
+            for row in raw_heads
+            if isinstance(row, dict)
+            and row.get("authority_root_id") == authority_root_id
+        ]
+        if len(matching_heads) > 1:
+            raise ValueError(
+                "authority_head_invalid: authority root has multiple active heads"
+            )
+        if not matching_heads:
+            signed_generations = [
+                row
+                for row in self.store.list_project_records_strict(
+                    namespace,
+                    project_id,
+                    kind="authority_continuations",
+                )
+                if isinstance(row, dict)
+                and row.get("authority_root_id") == authority_root_id
+                and self.store.project_record_is_signed(row)
+                and row.get("status") == "active"
+            ]
+            if signed_generations:
+                raise ValueError(
+                    "authority_head_incomplete: signed continuation exists without its active Hub head"
+                )
+            return {
+                "authority_root_id": authority_root_id,
+                "continuation_id": None,
+                "authority_epoch_id": f"EPOCH-{authority_root_id[5:]}-0",
+                "work_order_id": work_order_id,
+                "generation": 0,
+                "window_binding_id": work_order.get("server_window_binding_id"),
+                "actor_binding_id": work_order.get("server_actor_binding_id"),
+                "session_fingerprint": work_order.get(
+                    "transport_session_fingerprint"
+                ),
+                "role": work_order.get("server_actor_role"),
+                "operation": work_order.get("operation"),
+                "mode": work_order.get("mode"),
+                "authorization": work_order.get("authorization"),
+                "authority_contract_sha256": contract_sha256,
+                "plan_sha256": None,
+                "status": "active",
+            }
+        head = matching_heads[0]
+        if not isinstance(head, dict):
+            raise ValueError("authority_head_invalid: active head is not an object")
+        continuation_id = str(head.get("continuation_id") or "")
+        try:
+            record = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="authority_continuations",
+                record_id=continuation_id,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "authority_head_invalid: signed continuation record is unavailable"
+            ) from exc
+        if (
+            not self.store.project_record_is_signed(record)
+            or record.get("status") != "active"
+            or record.get("authority_root_id") != authority_root_id
+            or record.get("work_order_id") != work_order_id
+            or record.get("authority_contract_sha256") != contract_sha256
+            or record.get("active_binding") != head
+        ):
+            raise ValueError(
+                "authority_head_invalid: continuation signature or contract differs"
+            )
+        records = self.store.list_project_records_strict(
+            namespace, project_id, kind="authority_continuations"
+        )
+        generations = [
+            int(row.get("generation") or -1)
+            for row in records
+            if isinstance(row, dict)
+            and row.get("authority_root_id") == authority_root_id
+            and self.store.project_record_is_signed(row)
+            and row.get("status") == "active"
+        ]
+        if generations and int(head.get("generation") or -1) != max(generations):
+            raise ValueError(
+                "authority_head_rollback: Hub does not reference the newest signed generation"
+            )
+        return copy.deepcopy(head)
+
+    def _verified_authority_binding_at_generation(
+        self,
+        namespace: str,
+        project_id: str,
+        work_order: dict[str, Any],
+        generation: int,
+        *,
+        hub: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Resolve one historical physical binding from the signed chain.
+
+        Certificates and re-audit routes outlive the window that issued them.
+        Their physical binding must therefore be checked against the exact
+        signed continuation generation, rather than either the immutable
+        generation-zero work order or the current active head alone.
+        """
+
+        if (
+            isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation < 0
+        ):
+            raise ValueError("audit_authority_generation_invalid")
+        current_hub = hub or self.store.load_hub(namespace, project_id)
+        work_order_id = str(work_order.get("work_order_id") or "")
+        canonical_work_order = _find_work_order(current_hub, work_order_id)
+        authority_root_id = self._authority_root_id(project_id, work_order_id)
+        contract_sha256 = sha256_bytes(
+            _stable_json_bytes(
+                self._work_order_authority_contract(canonical_work_order)
+            )
+        )
+        current = self._active_authority_binding(
+            namespace,
+            project_id,
+            canonical_work_order,
+            hub=current_hub,
+        )
+        current_generation = current.get("generation")
+        if (
+            isinstance(current_generation, bool)
+            or not isinstance(current_generation, int)
+            or generation > current_generation
+        ):
+            raise ValueError("audit_authority_generation_invalid")
+
+        generation_zero = {
+            "continuation_id": None,
+            "authority_epoch_id": f"EPOCH-{authority_root_id[5:]}-0",
+            "authority_root_id": authority_root_id,
+            "work_order_id": work_order_id,
+            "generation": 0,
+            "window_binding_id": canonical_work_order.get(
+                "server_window_binding_id"
+            ),
+            "actor_binding_id": canonical_work_order.get(
+                "server_actor_binding_id"
+            ),
+            "session_fingerprint": canonical_work_order.get(
+                "transport_session_fingerprint"
+            ),
+            "role": canonical_work_order.get("server_actor_role"),
+            "operation": canonical_work_order.get("operation"),
+            "mode": canonical_work_order.get("mode"),
+            "authorization": canonical_work_order.get("authorization"),
+            "authority_contract_sha256": contract_sha256,
+            "plan_sha256": None,
+            "status": "active",
+        }
+        records = [
+            row
+            for row in self.store.list_project_records_strict(
+                namespace,
+                project_id,
+                kind="authority_continuations",
+            )
+            if row.get("authority_root_id") == authority_root_id
+        ]
+        by_generation: dict[int, dict[str, Any]] = {}
+        previous_continuation_id: str | None = None
+        expected_binding_fields = set(generation_zero)
+        authority_epoch_ids: set[str] = set()
+        plan_sha256s: set[str] = set()
+        for expected_generation in range(1, current_generation + 1):
+            matches = [
+                row
+                for row in records
+                if row.get("generation") == expected_generation
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    "audit_authority_lineage_invalid: generation gap or duplicate"
+                )
+            record = matches[0]
+            binding = record.get("active_binding")
+            if (
+                not self.store.project_record_is_signed(record)
+                or not isinstance(binding, dict)
+                or set(binding) != expected_binding_fields
+                or record.get("project_id") != project_id
+                or record.get("work_order_id") != work_order_id
+                or record.get("authority_root_id") != authority_root_id
+                or record.get("previous_generation")
+                != expected_generation - 1
+                or record.get("previous_continuation_id")
+                != previous_continuation_id
+                or not isinstance(
+                    record.get("work_order_snapshot_sha256"), str
+                )
+                or re.fullmatch(
+                    r"[0-9a-f]{64}",
+                    str(record.get("work_order_snapshot_sha256") or ""),
+                )
+                is None
+                or record.get("expected_work_order_snapshot_sha256")
+                != record.get("work_order_snapshot_sha256")
+                or record.get("authority_contract_sha256")
+                != contract_sha256
+                or record.get("status") != "active"
+                or isinstance(record.get("generation"), bool)
+                or isinstance(binding.get("generation"), bool)
+                or any(
+                    record.get(field) != binding.get(field)
+                    for field in expected_binding_fields
+                )
+                or binding.get("generation") != expected_generation
+                or binding.get("work_order_id") != work_order_id
+                or binding.get("authority_root_id") != authority_root_id
+                or binding.get("role")
+                != canonical_work_order.get("server_actor_role")
+                or binding.get("operation")
+                != canonical_work_order.get("operation")
+                or binding.get("mode") != canonical_work_order.get("mode")
+                or binding.get("authorization")
+                != canonical_work_order.get("authorization")
+                or binding.get("authority_contract_sha256")
+                != contract_sha256
+                or binding.get("continuation_id")
+                != record.get("continuation_id")
+                or binding.get("authority_epoch_id")
+                != record.get("authority_epoch_id")
+                or binding.get("plan_sha256")
+                != record.get("plan_sha256")
+                or binding.get("status") != "active"
+            ):
+                raise ValueError("audit_authority_lineage_invalid")
+            epoch_id = str(binding.get("authority_epoch_id") or "")
+            plan_sha256 = str(binding.get("plan_sha256") or "")
+            if (
+                not epoch_id
+                or epoch_id in authority_epoch_ids
+                or not plan_sha256
+                or plan_sha256 in plan_sha256s
+            ):
+                raise ValueError(
+                    "audit_authority_lineage_invalid: epoch or plan reused"
+                )
+            authority_epoch_ids.add(epoch_id)
+            plan_sha256s.add(plan_sha256)
+            previous_continuation_id = str(record["continuation_id"])
+            by_generation[expected_generation] = copy.deepcopy(binding)
+        if len(records) != current_generation:
+            raise ValueError(
+                "audit_authority_lineage_invalid: unexpected generation record"
+            )
+        expected_current = (
+            generation_zero
+            if current_generation == 0
+            else by_generation[current_generation]
+        )
+        if current != expected_current:
+            raise ValueError(
+                "audit_authority_lineage_invalid: active head differs"
+            )
+        return copy.deepcopy(
+            generation_zero if generation == 0 else by_generation[generation]
+        )
+
+    def _verified_audit_certificate_authority(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        certificate: dict[str, Any],
+        audit_work_order: dict[str, Any],
+        hub: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Verify a certificate's issuance snapshot against signed lineage."""
+
+        authority_fields = {
+            "audit_authority_root_id": "authority_root_id",
+            "audit_authority_epoch_id": "authority_epoch_id",
+            "audit_authority_generation": "generation",
+            "audit_authority_continuation_id": "continuation_id",
+            "audit_window_binding_id": "window_binding_id",
+            "audit_actor_binding_id": "actor_binding_id",
+            "audit_session_fingerprint": "session_fingerprint",
+        }
+        lineage_fields = tuple(authority_fields)[:4]
+        present_lineage_fields = [
+            field for field in lineage_fields if field in certificate
+        ]
+        if present_lineage_fields and len(present_lineage_fields) != len(
+            lineage_fields
+        ):
+            raise ValueError(
+                "audit_certificate_authority_invalid: partial authority snapshot"
+            )
+        if present_lineage_fields:
+            generation = certificate.get("audit_authority_generation")
+            if (
+                isinstance(generation, bool)
+                or not isinstance(generation, int)
+                or generation < 0
+            ):
+                raise ValueError(
+                    "audit_certificate_authority_invalid: generation"
+                )
+        else:
+            # Compatibility is deliberately limited to the complete legacy
+            # shape, which could only represent the immutable generation-zero
+            # work-order binding.  Partial/newer unsigned claims fail closed.
+            generation = 0
+            if "audit_window_binding_id" in certificate:
+                raise ValueError(
+                    "audit_certificate_authority_invalid: partial authority snapshot"
+                )
+        binding = self._verified_authority_binding_at_generation(
+            namespace,
+            project_id,
+            audit_work_order,
+            generation,
+            hub=hub,
+        )
+        fields_to_compare = (
+            authority_fields
+            if present_lineage_fields
+            else {
+                "audit_actor_binding_id": "actor_binding_id",
+                "audit_session_fingerprint": "session_fingerprint",
+            }
+        )
+        mismatched = [
+            certificate_field
+            for certificate_field, binding_field in fields_to_compare.items()
+            if certificate.get(certificate_field)
+            != binding.get(binding_field)
+        ]
+        if mismatched:
+            raise ValueError(
+                "audit_certificate_authority_invalid: "
+                + ",".join(mismatched)
+            )
+        return binding
+
+    def _verified_reaudit_route_authority(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        route: dict[str, Any],
+        audit_work_order: dict[str, Any],
+        hub: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Verify the audit authority that minted one signed re-audit route."""
+
+        authority_fields = {
+            "reaudit_audit_authority_root_id": "authority_root_id",
+            "reaudit_audit_authority_epoch_id": "authority_epoch_id",
+            "reaudit_audit_authority_generation": "generation",
+            "reaudit_audit_authority_continuation_id": "continuation_id",
+            "reaudit_audit_window_binding_id": "window_binding_id",
+            "reaudit_audit_actor_binding_id": "actor_binding_id",
+            "reaudit_audit_session_fingerprint": "session_fingerprint",
+        }
+        lineage_fields = tuple(authority_fields)[:4]
+        present = [field for field in lineage_fields if field in route]
+        if present and len(present) != len(lineage_fields):
+            raise ValueError(
+                "reaudit_lineage_invalid: partial route authority snapshot"
+            )
+        if present:
+            generation = route.get("reaudit_audit_authority_generation")
+            if (
+                isinstance(generation, bool)
+                or not isinstance(generation, int)
+                or generation < 0
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: route authority generation"
+                )
+        else:
+            generation = 0
+        binding = self._verified_authority_binding_at_generation(
+            namespace,
+            project_id,
+            audit_work_order,
+            generation,
+            hub=hub,
+        )
+        compare_fields = (
+            authority_fields
+            if present
+            else {
+                "reaudit_audit_window_binding_id": "window_binding_id",
+                "reaudit_audit_actor_binding_id": "actor_binding_id",
+                "reaudit_audit_session_fingerprint": "session_fingerprint",
+            }
+        )
+        if any(
+            route.get(route_field) != binding.get(binding_field)
+            for route_field, binding_field in compare_fields.items()
+        ):
+            raise ValueError(
+                "reaudit_lineage_invalid: route authority differs from signed generation"
+            )
+        return binding
+
     def _assert_work_order_session(
         self,
         namespace: str,
         work_order: dict[str, Any],
         request_session_id: str | None,
-    ) -> None:
-        expected = work_order.get("transport_session_fingerprint")
+    ) -> dict[str, Any]:
+        located = self._project_and_hub_for_work_order(
+            namespace, str(work_order.get("work_order_id") or "")
+        )
+        if located is None:
+            binding = {
+                "generation": 0,
+                "session_fingerprint": work_order.get(
+                    "transport_session_fingerprint"
+                ),
+            }
+        else:
+            project_id, hub = located
+            canonical_work_order = _find_work_order(
+                hub, str(work_order.get("work_order_id") or "")
+            )
+            binding = self._active_authority_binding(
+                namespace, project_id, canonical_work_order, hub=hub
+            )
+        expected = binding.get("session_fingerprint")
         actual = self._session_fingerprint(namespace, request_session_id)
         # Local/direct service callers have no trusted host session envelope.
         # Keep that development/test path compatible while still comparing a
         # session whenever one is supplied.  Cloud authority always requires
         # both sides of the server-minted binding below.
-        if self.settings.deployment_mode != "cloud" and actual is None:
-            return
+        if (
+            self.settings.deployment_mode != "cloud"
+            and actual is None
+            and int(binding.get("generation") or 0) == 0
+        ):
+            return binding
         if self.settings.deployment_mode == "cloud" and (not expected or not actual):
             raise ValueError(
                 "window_session_required: cloud production, audit, and repair authorities require a server-observed MCP session"
@@ -2200,6 +2821,7 @@ class StoryboardService:
             raise ValueError(
                 "window_session_mismatch: tool call is not from the server-bound work-order session"
             )
+        return binding
 
     @staticmethod
     def _assert_work_order_write_ready(work_order: dict[str, Any]) -> None:
@@ -2820,6 +3442,7 @@ class StoryboardService:
         materialization_passes: int = 0,
         cache_reason: str | None = None,
         unmeasured_stages: list[str] | None = None,
+        _persist: bool = True,
     ) -> dict[str, Any]:
         telemetry_id = telemetry_id or _new_id("TEL")
         rounded_stages = {key: round(float(value), 3) for key, value in stages_ms.items()}
@@ -2937,6 +3560,8 @@ class StoryboardService:
             self._validate_schema_record(
                 self._project_schema, "stage_timing_trace", value
             )
+        if not _persist:
+            return value
         return self.store.save_project_record(
             namespace,
             project_id,
@@ -3580,7 +4205,14 @@ class StoryboardService:
             "open_issue_ids": sorted(open_issue_ids),
         }
 
-    def agent_status(self, namespace: str, project_id: str | None = None, full_self_test: bool = False) -> ToolResponse:
+    def agent_status(
+        self,
+        namespace: str,
+        project_id: str | None = None,
+        full_self_test: bool = False,
+        *,
+        request_session_id: str | None = None,
+    ) -> ToolResponse:
         report = r10_bootstrap.verify_bundled(self_test=full_self_test) if full_self_test else self.bootstrap
         projects = self.store.list_projects(namespace)
         data: dict[str, Any] = {
@@ -3671,6 +4303,122 @@ class StoryboardService:
             pending_independent_audit = bool(pending_audit_state["pending"])
             data["independent_audit_pending"] = pending_independent_audit
             data["independent_audit_pending_details"] = pending_audit_state
+            data["role_continuation_supported"] = True
+            data["continuation_supported"] = True
+            data["role_continuation_operations"] = sorted(
+                STORYBOARD_OPERATIONS | {"storyboard_audit"}
+            )
+            current_session_fingerprint = self._session_fingerprint(
+                namespace, request_session_id
+            )
+            resumable_authorities: list[dict[str, Any]] = []
+            current_window_roles: set[str] = set()
+            resumable_states = {
+                "approved",
+                "scope_locked",
+                "proposal_ready",
+                "executing",
+                "validating",
+                "failed_current",
+                "blocked",
+            }
+            for work_order in hub.get("work_orders", []):
+                if not isinstance(work_order, dict):
+                    continue
+                role = str(work_order.get("server_actor_role") or "")
+                if role not in {
+                    "production",
+                    "independent_audit",
+                    "repair",
+                }:
+                    continue
+                try:
+                    binding = self._active_authority_binding(
+                        namespace,
+                        project_id,
+                        work_order,
+                        hub=hub,
+                    )
+                    is_current = bool(
+                        current_session_fingerprint
+                        and binding.get("session_fingerprint")
+                        == current_session_fingerprint
+                    )
+                    if is_current:
+                        current_window_roles.add(role)
+                    state = str(work_order.get("status") or "")
+                    operation = str(work_order.get("operation") or "")
+                    operation_supported = operation in STORYBOARD_OPERATIONS | {
+                        "storyboard_audit"
+                    }
+                    resumable = bool(
+                        state in resumable_states
+                        and not is_current
+                        and operation_supported
+                    )
+                    reason = (
+                        "already_active_in_current_window"
+                        if is_current
+                        else (
+                            "eligible"
+                            if resumable
+                            else (
+                                "operation_not_supported"
+                                if not operation_supported
+                                else f"work_order_state_{state or 'unknown'}"
+                            )
+                        )
+                    )
+                    resumable_authorities.append(
+                        {
+                            "work_order_id": work_order.get("work_order_id"),
+                            "authority_root_id": binding.get(
+                                "authority_root_id"
+                            ),
+                            "role": role,
+                            "operation": work_order.get("operation"),
+                            "work_order_status": state,
+                            "active_generation": binding.get("generation"),
+                            "current_window_status": (
+                                "active" if is_current else "other_window"
+                            ),
+                            "resumable": resumable,
+                            "reason": reason,
+                        }
+                    )
+                except ValueError as exc:
+                    resumable_authorities.append(
+                        {
+                            "work_order_id": work_order.get("work_order_id"),
+                            "role": role,
+                            "operation": work_order.get("operation"),
+                            "work_order_status": work_order.get("status"),
+                            "resumable": False,
+                            "reason": str(exc).split(":", 1)[0],
+                        }
+                    )
+            data["resumable_authorities"] = resumable_authorities
+            data["current_window_status"] = (
+                "active"
+                if current_window_roles
+                else ("unbound" if request_session_id else "session_unavailable")
+            )
+            data["current_window_roles"] = sorted(current_window_roles)
+            data["required_next_role"] = (
+                "independent_audit"
+                if pending_independent_audit
+                else (
+                    "repair"
+                    if (
+                        draft_failure_state["blocked"]
+                        or (
+                            isinstance(quality_block, dict)
+                            and quality_block.get("active")
+                        )
+                    )
+                    else "production"
+                )
+            )
             data["open_issue_pattern_count"] = data["issues"].get(
                 "open_issue_count", 0
             )
@@ -3976,6 +4724,7 @@ class StoryboardService:
             "warnings": warnings,
         }
 
+    @_fence_role_operation
     def mark_performance_stage(
         self,
         namespace: str,
@@ -8584,6 +9333,10 @@ class StoryboardService:
             "claim_lease_seconds",
             "claim_lease_expires_at",
             "claim_lease_expires_epoch_seconds",
+            "claim_authority_contract",
+            "claim_authority_root_id",
+            "claim_authority_generation",
+            "claim_authority_session_fingerprint",
             "claim_history",
             "idempotent_replay",
             "consumption_claim",
@@ -8671,16 +9424,19 @@ class StoryboardService:
                 }
             )
         recovery_work_order = live_recovery_order
+        recovery_authority = self._active_authority_binding(
+            namespace, project_id, recovery_work_order
+        )
         new_after.update(
             {
-                "from_window_binding_id": recovery_work_order.get(
-                    "server_window_binding_id"
+                "from_window_binding_id": recovery_authority.get(
+                    "window_binding_id"
                 ),
-                "from_actor_binding_id": recovery_work_order.get(
-                    "server_actor_binding_id"
+                "from_actor_binding_id": recovery_authority.get(
+                    "actor_binding_id"
                 ),
-                "from_session_fingerprint": recovery_work_order.get(
-                    "transport_session_fingerprint"
+                "from_session_fingerprint": recovery_authority.get(
+                    "session_fingerprint"
                 ),
             }
         )
@@ -9492,6 +10248,7 @@ class StoryboardService:
             "missing_scenes": missing,
         }
 
+    @_fence_role_operation
     def preflight_storyboard_draft(
         self,
         namespace: str,
@@ -10204,6 +10961,1013 @@ class StoryboardService:
             )
         return record
 
+    def _descendant_draft_commit_recovery_context(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        work_order_id: str,
+        draft_preflight_id: str,
+        storyboard: dict[str, Any],
+        canonical_sha256: str,
+        payload_sha256: str,
+        source_artifact_id: str | None,
+        file_name: str,
+    ) -> dict[str, Any]:
+        """Validate a fully published ancestor commit before any tail write."""
+
+        context = (
+            self.store.descendant_draft_preflight_commit_recovery_context(
+                namespace,
+                project_id,
+                draft_preflight_id,
+                payload_sha256=payload_sha256,
+            )
+        )
+        record = context["record"]
+        descriptor = context["descriptor"]
+        completion = descriptor.get("completion")
+        if (
+            record.get("project_id") != project_id
+            or record.get("work_order_id") != work_order_id
+            or record.get("candidate_sha256") != canonical_sha256
+            or descriptor.get("project_id") != project_id
+            or descriptor.get("work_order_id") != work_order_id
+            or descriptor.get("draft_preflight_id")
+            != draft_preflight_id
+            or descriptor.get("canonical_sha256") != canonical_sha256
+            or descriptor.get("source_artifact_id") != source_artifact_id
+            or descriptor.get("file_name") != file_name
+            or not isinstance(completion, dict)
+        ):
+            raise ValueError(
+                "draft_preflight_commit_recovery_binding_conflict"
+            )
+        artifact_id = str(descriptor.get("artifact_id") or "")
+        canonical_artifact_id = str(
+            descriptor.get("canonical_json_artifact_id") or ""
+        )
+        certificate_id = str(descriptor.get("certificate_id") or "")
+        handoff_id = str(descriptor.get("handoff_id") or "")
+        artifact, _artifact_path = self.store.get_artifact(
+            namespace, project_id, artifact_id
+        )
+        canonical_artifact, canonical_path = self.store.get_artifact(
+            namespace, project_id, canonical_artifact_id
+        )
+        try:
+            persisted_storyboard = json.loads(
+                canonical_path.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                "draft_preflight_commit_recovery_canonical_invalid"
+            ) from exc
+        if (
+            not isinstance(persisted_storyboard, dict)
+            or persisted_storyboard != storyboard
+            or canonical_storyboard_sha256(persisted_storyboard)
+            != canonical_sha256
+        ):
+            raise ValueError(
+                "draft_preflight_commit_recovery_canonical_changed"
+            )
+        for artifact_record, expected_type in (
+            (artifact, "storyboard"),
+            (canonical_artifact, "storyboard_json"),
+        ):
+            metadata = artifact_record.get("metadata")
+            if (
+                artifact_record.get("work_order_id") != work_order_id
+                or artifact_record.get("source_artifact_id")
+                != source_artifact_id
+                or artifact_record.get("artifact_type") != expected_type
+                or not isinstance(metadata, dict)
+                or metadata.get("canonical_sha256") != canonical_sha256
+                or metadata.get("draft_preflight_id")
+                != draft_preflight_id
+                or metadata.get("draft_commit_request_sha256")
+                != descriptor.get("request_sha256")
+                or metadata.get("draft_commit_payload_sha256")
+                != payload_sha256
+                or metadata.get("production_certificate_id")
+                != certificate_id
+                or metadata.get("handoff_id") != handoff_id
+                or metadata.get("production_preflight_status")
+                != PRODUCTION_PREFLIGHT_PASS
+                or metadata.get("production_preflight_issue_count") != 0
+                or metadata.get("independent_audit_status")
+                != "PENDING_AUDIT"
+            ):
+                raise ValueError(
+                    "draft_preflight_commit_recovery_artifact_conflict"
+                )
+        if (
+            artifact.get("metadata", {}).get("canonical_json_artifact_id")
+            != canonical_artifact_id
+            or artifact.get("metadata", {}).get(
+                "canonical_json_fingerprint"
+            )
+            != canonical_artifact.get("fingerprint")
+        ):
+            raise ValueError(
+                "draft_preflight_commit_recovery_artifact_pair_conflict"
+            )
+        certificate = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=certificate_id,
+        )
+        handoff = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="handoffs",
+            record_id=handoff_id,
+        )
+        self._validate_schema_record(
+            self._project_schema, "handoff_manifest", handoff
+        )
+        if (
+            certificate.get("certificate_type")
+            != AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            or certificate.get("audit_class")
+            != AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            or certificate.get("work_order_id") != work_order_id
+            or certificate.get("artifact_id") != artifact_id
+            or certificate.get("canonical_artifact_id")
+            != canonical_artifact_id
+            or certificate.get("canonical_sha256") != canonical_sha256
+            or certificate.get("preflight_status")
+            != PRODUCTION_PREFLIGHT_PASS
+            or certificate.get("preflight_issue_count") != 0
+            or certificate.get("independent_audit_status")
+            != "PENDING_AUDIT"
+            or (certificate.get("report") or {}).get("issues")
+            or certificate.get("report_sha256")
+            != sha256_bytes(_stable_json_bytes(certificate.get("report") or {}))
+            or certificate.get("cache_key")
+            != self._cache_key_from_components(
+                certificate.get("cache_components") or {}
+            )
+        ):
+            raise ValueError(
+                "draft_preflight_commit_recovery_certificate_conflict"
+            )
+        fingerprints = self._fingerprint_bundle(
+            persisted_storyboard,
+            artifact,
+            canonical_hash=canonical_sha256,
+            source_fingerprint=str(certificate.get("source_fingerprint") or ""),
+            boundary_hash=str(certificate.get("boundary_hash") or ""),
+        )
+        issuance = record.get("commit_issuance_authority") or {}
+        if (
+            handoff.get("work_order_id") != work_order_id
+            or handoff.get("handoff_type") != "production_to_audit"
+            or handoff.get("from_window_role") != "production"
+            or handoff.get("to_window_role") != "independent_audit"
+            or handoff.get("status") != "prepared"
+            or handoff.get("publication_state") != "committed"
+            or handoff.get("storyboard_artifact_id") != artifact_id
+            or handoff.get("canonical_artifact_id")
+            != canonical_artifact_id
+            or handoff.get("certificate_id") != certificate_id
+            or handoff.get("canonical_sha256") != canonical_sha256
+            or handoff.get("stage_trace_id")
+            != descriptor.get("telemetry", {}).get("telemetry_id")
+            or handoff.get("production_preflight_status")
+            != PRODUCTION_PREFLIGHT_PASS
+            or handoff.get("production_preflight_issue_count") != 0
+            or handoff.get("independent_audit_status")
+            != "PENDING_AUDIT"
+            or handoff.get("fingerprints") != fingerprints
+            or handoff.get("from_authority_root_id")
+            != issuance.get("authority_root_id")
+            or handoff.get("from_authority_epoch_id")
+            != issuance.get("authority_epoch_id")
+            or handoff.get("from_authority_generation")
+            != issuance.get("authority_generation")
+            or handoff.get("from_session_fingerprint")
+            != issuance.get("authority_session_fingerprint")
+        ):
+            raise ValueError(
+                "draft_preflight_commit_recovery_handoff_conflict"
+            )
+        if (
+            descriptor.get("artifact_fingerprint")
+            != artifact.get("fingerprint")
+            or descriptor.get("canonical_json_fingerprint")
+            != canonical_artifact.get("fingerprint")
+            or descriptor.get("artifact_meta_sha256")
+            != self.store.project_state_sha256(artifact)
+            or descriptor.get("canonical_meta_sha256")
+            != self.store.project_state_sha256(canonical_artifact)
+            or descriptor.get("certificate_sha256")
+            != self.store.project_state_sha256(certificate)
+            or descriptor.get("handoff_sha256")
+            != self.store.project_state_sha256(handoff)
+            or descriptor.get("certificate_hmac")
+            != certificate.get("integrity_hmac")
+            or descriptor.get("handoff_hmac")
+            != handoff.get("integrity_hmac")
+        ):
+            raise ValueError(
+                "draft_preflight_commit_recovery_descriptor_conflict"
+            )
+
+        hub = context["hub"]
+        work_order = _find_work_order(hub, work_order_id)
+        deliverables = [
+            row
+            for row in hub.get("deliverables", [])
+            if isinstance(row, dict)
+            and row.get("deliverable_id") == artifact_id
+        ]
+        hub_handoffs = [
+            row
+            for row in hub.get("handoffs", [])
+            if isinstance(row, dict)
+            and row.get("handoff_id") == handoff_id
+        ]
+        if (
+            len(deliverables) != 1
+            or deliverables[0].get("work_order_id") != work_order_id
+            or deliverables[0].get("fingerprint")
+            != artifact.get("fingerprint")
+            or deliverables[0].get("status") != "draft"
+            or deliverables[0].get("publication_state") != "committed"
+            or len(hub_handoffs) != 1
+            or not self._hub_handoff_matches_signed_record(
+                hub_handoffs[0], handoff
+            )
+            or work_order.get("status") != "validating"
+            or work_order.get("awaiting_independent_audit") is not True
+            or (work_order.get("production_preflight") or {}).get("status")
+            != PRODUCTION_PREFLIGHT_PASS
+            or (work_order.get("production_preflight") or {}).get(
+                "final_verdict"
+            )
+            is not False
+            or hub.get("project_state", {}).get("current_stage")
+            != "validating"
+        ):
+            raise ValueError(
+                "draft_preflight_commit_recovery_hub_conflict"
+            )
+        ledger = self.store.load_ledger(namespace, project_id)
+        matching_events = [
+            row
+            for row in ledger.get("events", [])
+            if isinstance(row, dict)
+            and row.get("audit_class")
+            == AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            and row.get("audit_cache_key") == certificate.get("cache_key")
+            and row.get("audit_cycle_id") == f"AUD-{work_order_id}"
+        ]
+        if (
+            len(matching_events) != 1
+            or matching_events[0].get("result") != "pass"
+            or matching_events[0].get("file_fingerprint")
+            != artifact.get("fingerprint")
+            or matching_events[0].get("issues")
+        ):
+            raise ValueError(
+                "draft_preflight_commit_recovery_ledger_conflict"
+            )
+        context.update(
+            {
+                "artifact": artifact,
+                "canonical_artifact": canonical_artifact,
+                "certificate": certificate,
+                "handoff": handoff,
+                "storyboard": persisted_storyboard,
+                "fingerprints": fingerprints,
+                "ledger": ledger,
+                "expected_state_sha256": {
+                    "preflight": self.store.project_state_sha256(record),
+                    "hub": self.store.project_state_sha256(hub),
+                    "ledger": self.store.project_state_sha256(ledger),
+                    "artifact_meta": self.store.project_state_sha256(artifact),
+                    "canonical_meta": self.store.project_state_sha256(
+                        canonical_artifact
+                    ),
+                    "certificate": self.store.project_state_sha256(certificate),
+                    "handoff": self.store.project_state_sha256(handoff),
+                },
+            }
+        )
+        return context
+
+    def _complete_descendant_draft_commit_recovery(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        work_order_id: str,
+        draft_preflight_id: str,
+        payload_sha256: str,
+        context: dict[str, Any],
+        started_ns: int,
+    ) -> ToolResponse:
+        descriptor = context["descriptor"]
+        telemetry_blueprint = descriptor["telemetry"]
+        telemetry = self._save_telemetry(
+            namespace,
+            project_id,
+            operation=str(telemetry_blueprint["operation"]),
+            started_ns=started_ns,
+            stages_ms=copy.deepcopy(telemetry_blueprint["stages_ms"]),
+            artifact_id=str(descriptor["artifact_id"]),
+            telemetry_id=str(telemetry_blueprint["telemetry_id"]),
+            window_role=str(telemetry_blueprint["window_role"]),
+            task_type=str(telemetry_blueprint["task_type"]),
+            input_fingerprints=copy.deepcopy(
+                telemetry_blueprint["input_fingerprints"]
+            ),
+            shot_count=int(telemetry_blueprint["shot_count"]),
+            batch_count=0,
+            affected_shot_count=int(
+                telemetry_blueprint["affected_shot_count"]
+            ),
+            preserved_semantic_count=int(
+                telemetry_blueprint["preserved_semantic_count"]
+            ),
+            input_payload_bytes=int(
+                telemetry_blueprint["input_payload_bytes"]
+            ),
+            output_payload_bytes=int(
+                telemetry_blueprint["output_payload_bytes"]
+            ),
+            materialization_passes=1,
+            cache_reason=str(telemetry_blueprint["cache_reason"]),
+            _persist=False,
+        )
+        completion = copy.deepcopy(descriptor["completion"])
+        completion.update(
+            {
+                "consumed_at": utc_stamp(),
+                "handoff": self._handoff_summary(context["handoff"]),
+                "certificate": self._certificate_summary(
+                    context["certificate"]
+                ),
+            }
+        )
+        finalized = (
+            self.store.complete_descendant_draft_preflight_commit_recovery(
+                namespace,
+                project_id,
+                draft_preflight_id,
+                payload_sha256=payload_sha256,
+                expected_state_sha256=context["expected_state_sha256"],
+                telemetry_value=telemetry,
+                consumed_by_commit=completion,
+            )
+        )
+        completed_record = finalized["record"]
+        persisted_telemetry = finalized["telemetry"]
+        artifact = context["artifact"]
+        return ToolResponse(
+            status=str(completion["status"]),
+            summary=str(completion["summary"]),
+            project_id=project_id,
+            work_order_id=work_order_id,
+            artifact_id=str(artifact["artifact_id"]),
+            download_url=self.store.signed_download_url(
+                namespace,
+                project_id,
+                str(artifact["artifact_id"]),
+                str(artifact["file_name"]),
+            ),
+            trace_id=str(persisted_telemetry["telemetry_id"]),
+            data={
+                "artifact": artifact,
+                "canonical_json_artifact_id": descriptor[
+                    "canonical_json_artifact_id"
+                ],
+                "canonical_sha256": descriptor["canonical_sha256"],
+                "handoff": self._handoff_summary(context["handoff"]),
+                "handoff_artifact_id": descriptor["handoff_id"],
+                "certificate": self._certificate_summary(
+                    context["certificate"]
+                ),
+                "telemetry_id": persisted_telemetry["telemetry_id"],
+                "telemetry": persisted_telemetry,
+                "draft_preflight": {
+                    "draft_preflight_id": draft_preflight_id,
+                    "candidate_sha256": descriptor["canonical_sha256"],
+                    "scene_coverage_manifest_sha256": completed_record.get(
+                        "scene_coverage_manifest_sha256"
+                    ),
+                    "quality": completed_record.get("quality"),
+                },
+                "authority_continuation_recovery": True,
+                "idempotent_replay": False,
+                "next_action": "independent_audit",
+            },
+        )
+
+    def _role_continuation_plan(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        hub: dict[str, Any],
+        work_order: dict[str, Any],
+        request_session_id: str | None,
+        request_text: str,
+    ) -> dict[str, Any]:
+        if not request_session_id:
+            raise ValueError(
+                "window_session_required: role continuation requires a trusted host session"
+            )
+        if self.settings.deployment_mode != "cloud":
+            raise ValueError(
+                "role_continuation_cloud_only: local and stdio sessions cannot rotate authority"
+            )
+        role = str(work_order.get("server_actor_role") or "")
+        if role not in {"production", "independent_audit", "repair"}:
+            raise ValueError("role_continuation_role_invalid")
+        if work_order.get("operation") not in STORYBOARD_OPERATIONS | {
+            "storyboard_audit"
+        }:
+            raise ValueError(
+                "role_continuation_operation_invalid: only storyboard production, audit, and repair authorities are resumable"
+            )
+        status = str(work_order.get("status") or "")
+        resumable_states = {
+            "approved",
+            "scope_locked",
+            "proposal_ready",
+            "executing",
+            "validating",
+            "failed_current",
+            "blocked",
+        }
+        pending_reaudit_recovery = False
+        if (
+            status == "passed"
+            and role == "independent_audit"
+            and work_order.get("operation") == "storyboard_audit"
+        ):
+            pending_routes = []
+            for route in self.store.list_project_records(
+                namespace, project_id, kind="handoffs"
+            ):
+                if (
+                    isinstance(route, dict)
+                    and route.get("reaudit_kind")
+                    == "independent_audit_successor"
+                    and route.get("claim_authority_work_order_id")
+                    == work_order.get("work_order_id")
+                    and route.get("status") == "prepared"
+                ):
+                    if not self.store.project_record_is_signed(route):
+                        raise ValueError(
+                            "role_continuation_reaudit_route_invalid: pending route is unsigned"
+                        )
+                    self._validate_schema_record(
+                        self._project_schema, "handoff_manifest", route
+                    )
+                    pending_routes.append(route)
+            if len(pending_routes) != 1:
+                raise ValueError(
+                    "role_continuation_state_invalid: passed audit requires exactly one signed pending re-audit successor"
+                )
+            pending_reaudit_recovery = True
+        elif status not in resumable_states:
+            raise ValueError(
+                f"role_continuation_state_invalid: cannot continue from {status or 'unknown'}"
+            )
+        if work_order.get("authorization") in {"pending", None, ""}:
+            raise ValueError(
+                "role_continuation_authorization_required: pending authority cannot be continued"
+            )
+        if work_order.get("operation") in STORYBOARD_OPERATIONS | {
+            "storyboard_audit"
+        }:
+            self._assert_storyboard_authority(work_order, role)
+        if role == "repair":
+            packages = self.store.list_project_records_strict(
+                namespace, project_id, kind="repair_packages"
+            )
+            now = datetime.now(timezone.utc)
+            authorized_package = False
+            for package in packages:
+                if (
+                    not isinstance(package, dict)
+                    or package.get("status")
+                    not in {"issued", "consuming", "consumed"}
+                ):
+                    continue
+                if package.get("status") == "consumed":
+                    if (
+                        package.get("consumed_by_work_order_id")
+                        != work_order.get("work_order_id")
+                    ):
+                        continue
+                    self._consumed_repair_successor_descriptor(
+                        namespace,
+                        project_id,
+                        work_order=work_order,
+                        package=package,
+                    )
+                    authorized_package = True
+                    break
+                if (
+                    package.get("status") == "consuming"
+                    and package.get("consumed_by_work_order_id")
+                    != work_order.get("work_order_id")
+                ):
+                    continue
+                if package.get("status") == "consuming":
+                    try:
+                        claim_expires = float(
+                            package.get(
+                                "claim_lease_expires_epoch_seconds"
+                            )
+                            or 0
+                        )
+                    except (TypeError, ValueError):
+                        claim_expires = 0
+                    if claim_expires <= 0:
+                        raise ValueError(
+                            "repair_package_claim_incomplete: consuming package has no bounded lease"
+                        )
+                    if claim_expires > time.time():
+                        raise ValueError(
+                            "role_continuation_claim_in_progress: repair package claim is still owned by this authority"
+                        )
+                    if not self._claim_is_current_authority_ancestor(
+                        namespace,
+                        project_id,
+                        work_order=work_order,
+                        claim=package,
+                    ):
+                        raise ValueError(
+                            "repair_package_claim_revoked: expired claim is not in the active authority lineage"
+                        )
+                try:
+                    expires = datetime.fromisoformat(
+                        str(package.get("expires_at") or "").replace(
+                            "Z", "+00:00"
+                        )
+                    )
+                    if expires.tzinfo is None:
+                        expires = expires.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+                if expires > now:
+                    authorized_package = True
+                    break
+            if not authorized_package:
+                raise ValueError(
+                    "repair_package_required: repair continuation requires a current signed failed-audit package"
+                )
+
+        current = self._active_authority_binding(
+            namespace, project_id, work_order, hub=hub
+        )
+        self.store.assert_authority_continuation_quiescent(
+            namespace,
+            project_id,
+            str(current["authority_root_id"]),
+            str(work_order["work_order_id"]),
+        )
+        new_session_fingerprint = self._session_fingerprint(
+            namespace, request_session_id
+        )
+        if current.get("session_fingerprint") == new_session_fingerprint:
+            raise ValueError(
+                "role_continuation_same_session: authority already belongs to this window"
+            )
+        try:
+            self.store.assert_session_role_available(
+                namespace,
+                project_id,
+                session_fingerprint=new_session_fingerprint,
+                role=role,
+            )
+        except ValueError as exc:
+            if "session_role_separation_required" not in str(exc):
+                raise
+            raise ValueError(
+                "role_continuation_separation_required: target session has "
+                "another project role history"
+            ) from exc
+        conflicting_roles: set[str] = set()
+        for row in hub.get("work_orders", []):
+            if (
+                isinstance(row, dict)
+                and row.get("transport_session_fingerprint")
+                == new_session_fingerprint
+                and row.get("server_actor_role") != role
+            ):
+                conflicting_roles.add(str(row.get("server_actor_role") or ""))
+        for record in self.store.list_project_records(
+            namespace, project_id, kind="authority_continuations"
+        ):
+            binding = record.get("active_binding") if isinstance(record, dict) else None
+            if (
+                isinstance(binding, dict)
+                and self.store.project_record_is_signed(record)
+                and binding.get("session_fingerprint")
+                == new_session_fingerprint
+                and record.get("role") != role
+            ):
+                conflicting_roles.add(str(record.get("role") or ""))
+        if conflicting_roles:
+            raise ValueError(
+                "role_continuation_separation_required: target session has another project role history"
+            )
+
+        runtime_certificate = self._require_runtime_test_certificate(
+            namespace, project_id
+        )
+        contract = self._work_order_authority_contract(work_order)
+        contract_sha256 = sha256_bytes(_stable_json_bytes(contract))
+        work_order_snapshot_sha256 = self.store.project_state_sha256(work_order)
+        previous_generation = int(current.get("generation") or 0)
+        generation = previous_generation + 1
+        pre_state = {
+            "project_id": project_id,
+            "work_order_snapshot_sha256": work_order_snapshot_sha256,
+            "current_continuation_id": current.get("continuation_id"),
+            "current_generation": previous_generation,
+            "current_binding_sha256": sha256_bytes(
+                _stable_json_bytes(current)
+            ),
+            "authority_contract_sha256": contract_sha256,
+        }
+        pre_state_sha256 = sha256_bytes(_stable_json_bytes(pre_state))
+        request_text_sha256 = sha256_bytes(
+            request_text.strip().encode("utf-8")
+        )
+        binding_seed = sha256_bytes(
+            _stable_json_bytes(
+                {
+                    "namespace_subject_sha256": sha256_bytes(
+                        namespace.encode("utf-8")
+                    ),
+                    "project_id": project_id,
+                    "authority_root_id": current["authority_root_id"],
+                    "generation": generation,
+                    "new_session_fingerprint": new_session_fingerprint,
+                    "authority_contract_sha256": contract_sha256,
+                    "pre_state_sha256": pre_state_sha256,
+                    "runtime_test_certificate_id": runtime_certificate.get(
+                        "certificate_id"
+                    ),
+                    "request_text_sha256": request_text_sha256,
+                }
+            )
+        )
+        plan = {
+            "spec": "window-role-continuation-v0511",
+            "project_id": project_id,
+            "work_order_id": str(work_order["work_order_id"]),
+            "authority_root_id": current["authority_root_id"],
+            "role": role,
+            "operation": str(work_order.get("operation") or ""),
+            "mode": str(work_order.get("mode") or ""),
+            "authorization": str(work_order.get("authorization") or ""),
+            "continuation_recovery_kind": (
+                "pending_reaudit_successor"
+                if pending_reaudit_recovery
+                else "in_progress_work_order"
+            ),
+            "authority_contract_sha256": contract_sha256,
+            "work_order_snapshot_sha256": work_order_snapshot_sha256,
+            "pre_state_sha256": pre_state_sha256,
+            "previous_continuation_id": current.get("continuation_id"),
+            "previous_generation": previous_generation,
+            "generation": generation,
+            "new_window_binding_id": f"WIN-{binding_seed[:20]}",
+            "new_actor_binding_id": f"ACT-{binding_seed[20:40]}",
+            "new_session_fingerprint": new_session_fingerprint,
+            "runtime_test_certificate_id": runtime_certificate.get(
+                "certificate_id"
+            ),
+            "runtime_test_certificate_key": runtime_certificate.get(
+                "certificate_key"
+            ),
+            "request_text_sha256": request_text_sha256,
+            "confirmation_required": ROLE_CONTINUATION_CONFIRMATION,
+        }
+        plan_sha256 = sha256_bytes(_stable_json_bytes(plan))
+        plan.update(
+            {
+                "plan_sha256": plan_sha256,
+                "continuation_id": f"CNT-{plan_sha256[:24]}",
+                "authority_epoch_id": f"EPOCH-{plan_sha256[24:48]}",
+            }
+        )
+        return plan
+
+    def _continue_role_authority(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        action: str,
+        resume_work_order_id: str | None,
+        expected_plan_sha256: str | None,
+        confirmation: str | None,
+        operation: str,
+        mode: str,
+        authorization: str,
+        request_text: str,
+        targets: list[str],
+        authoritative_source: str,
+        latest_version: str,
+        target_boundary: str,
+        must_keep: list[str],
+        must_remove: list[str],
+        protected_scope: list[str],
+        expected_outputs: list[str],
+        request_session_id: str | None,
+    ) -> ToolResponse:
+        if not resume_work_order_id:
+            raise ValueError(
+                "role_continuation_work_order_required: resume_work_order_id is required"
+            )
+        hub = self.store.load_hub(namespace, project_id)
+        work_order = _find_work_order(hub, resume_work_order_id)
+        requested_source_lock = {
+            "authoritative_source": authoritative_source.strip()
+            or "用户当前输入",
+            "latest_version": latest_version.strip() or "current",
+            "target_boundary": target_boundary.strip() or "全项目",
+            "must_keep": must_keep,
+            "must_remove": must_remove,
+        }
+        exact_checks = {
+            "operation": operation == work_order.get("operation"),
+            "mode": mode == work_order.get("mode"),
+            "authorization": authorization
+            == work_order.get("authorization"),
+            "targets": targets == work_order.get("targets"),
+            "source_lock": requested_source_lock
+            == work_order.get("source_lock"),
+            "protected_scope": protected_scope
+            == work_order.get("protected_scope"),
+            "expected_outputs": expected_outputs
+            == work_order.get("expected_outputs"),
+        }
+        failed = [key for key, value in exact_checks.items() if not value]
+        if failed:
+            raise ValueError(
+                "role_continuation_scope_mismatch: " + ",".join(failed)
+            )
+
+        if action == "execute_role_continuation":
+            if not expected_plan_sha256:
+                raise ValueError(
+                    "role_continuation_plan_required: expected_plan_sha256 is required"
+                )
+            if confirmation != ROLE_CONTINUATION_CONFIRMATION:
+                raise ValueError(
+                    "role_continuation_confirmation_required: exact confirmation literal is required"
+                )
+            existing = next(
+                (
+                    row
+                    for row in self.store.list_project_records(
+                        namespace,
+                        project_id,
+                        kind="authority_continuations",
+                    )
+                    if isinstance(row, dict)
+                    and row.get("plan_sha256") == expected_plan_sha256
+                    and row.get("work_order_id") == resume_work_order_id
+                ),
+                None,
+            )
+            current_session_fingerprint = self._session_fingerprint(
+                namespace, request_session_id
+            )
+            if existing is not None:
+                active_binding = existing.get("active_binding")
+                if (
+                    not self.store.project_record_is_signed(existing)
+                    or existing.get("status") != "active"
+                    or not isinstance(active_binding, dict)
+                    or active_binding.get("session_fingerprint")
+                    != current_session_fingerprint
+                ):
+                    raise ValueError(
+                        "role_continuation_replay_conflict: continuation belongs to another session or state"
+                    )
+                raw_heads = hub.get("active_authority_bindings", [])
+                if not isinstance(raw_heads, list):
+                    raise ValueError(
+                        "authority_head_invalid: active authority heads must be an array"
+                    )
+                matching_heads = [
+                    row
+                    for row in raw_heads
+                    if isinstance(row, dict)
+                    and row.get("authority_root_id")
+                    == existing.get("authority_root_id")
+                ]
+                if not matching_heads:
+                    # The signed record is deliberately durable before its
+                    # Hub projection.  An exact same-session retry completes
+                    # only that already-signed generation.
+                    existing = self.store.commit_authority_continuation(
+                        namespace,
+                        project_id,
+                        record=existing,
+                        expected_work_order_snapshot_sha256=str(
+                            existing.get("work_order_snapshot_sha256") or ""
+                        ),
+                    )
+                    hub = self.store.load_hub(namespace, project_id)
+                    matching_heads = [
+                        row
+                        for row in hub.get("active_authority_bindings", [])
+                        if isinstance(row, dict)
+                        and row.get("authority_root_id")
+                        == existing.get("authority_root_id")
+                    ]
+                if (
+                    len(matching_heads) != 1
+                    or matching_heads[0].get("continuation_id")
+                    != existing.get("continuation_id")
+                ):
+                    raise ValueError(
+                        "role_continuation_superseded: continuation is no longer active"
+                    )
+                return ToolResponse(
+                    status="continued",
+                    summary=(
+                        f"窗口角色权限已接续｜{existing.get('role')}｜"
+                        f"代次{existing.get('generation')}｜幂等复验"
+                    ),
+                    project_id=project_id,
+                    work_order_id=resume_work_order_id,
+                    trace_id=str(existing.get("continuation_id") or ""),
+                    data={
+                        "action": action,
+                        "continuation_id": existing.get("continuation_id"),
+                        "authority_epoch_id": existing.get(
+                            "authority_epoch_id"
+                        ),
+                        "authority_root_id": existing.get(
+                            "authority_root_id"
+                        ),
+                        "generation": existing.get("generation"),
+                        "previous_generation": existing.get(
+                            "previous_generation"
+                        ),
+                        "previous_status": "revoked",
+                        "plan_sha256": existing.get("plan_sha256"),
+                        "role": existing.get("role"),
+                        "idempotent_replay": True,
+                        "session_binding_status": "bound",
+                    },
+                )
+
+        plan = self._role_continuation_plan(
+            namespace,
+            project_id,
+            hub=hub,
+            work_order=work_order,
+            request_session_id=request_session_id,
+            request_text=request_text,
+        )
+        if action == "plan_role_continuation":
+            if expected_plan_sha256 or confirmation:
+                raise ValueError(
+                    "role_continuation_plan_parameters_invalid: plan does not accept execute confirmation"
+                )
+            return ToolResponse(
+                status="planned",
+                summary=(
+                    f"窗口角色接续预演通过｜{plan['role']}｜"
+                    f"代次{plan['previous_generation']}→{plan['generation']}"
+                ),
+                project_id=project_id,
+                work_order_id=resume_work_order_id,
+                data={
+                    "action": action,
+                    "resume_work_order_id": resume_work_order_id,
+                    "plan_sha256": plan["plan_sha256"],
+                    "confirmation_required": ROLE_CONTINUATION_CONFIRMATION,
+                    "authority_root_id": plan["authority_root_id"],
+                    "role": plan["role"],
+                    "operation": plan["operation"],
+                    "mode": plan["mode"],
+                    "authorization": plan["authorization"],
+                    "authority_contract_sha256": plan[
+                        "authority_contract_sha256"
+                    ],
+                    "pre_state_sha256": plan["pre_state_sha256"],
+                    "current_generation": plan["previous_generation"],
+                    "next_generation": plan["generation"],
+                    "new_binding_status": "server_minted_for_current_session",
+                    "side_effects": "none",
+                },
+            )
+        if action != "execute_role_continuation":
+            raise ValueError("role_continuation_action_invalid")
+        if confirmation != ROLE_CONTINUATION_CONFIRMATION:
+            raise ValueError(
+                "role_continuation_confirmation_required: exact confirmation literal is required"
+            )
+        if expected_plan_sha256 != plan["plan_sha256"]:
+            raise ValueError(
+                "role_continuation_plan_mismatch: authority head, scope, runtime, or target session changed"
+            )
+        active_binding = {
+            "continuation_id": plan["continuation_id"],
+            "authority_epoch_id": plan["authority_epoch_id"],
+            "authority_root_id": plan["authority_root_id"],
+            "work_order_id": resume_work_order_id,
+            "generation": plan["generation"],
+            "window_binding_id": plan["new_window_binding_id"],
+            "actor_binding_id": plan["new_actor_binding_id"],
+            "session_fingerprint": plan["new_session_fingerprint"],
+            "role": plan["role"],
+            "operation": plan["operation"],
+            "mode": plan["mode"],
+            "authorization": plan["authorization"],
+            "authority_contract_sha256": plan[
+                "authority_contract_sha256"
+            ],
+            "plan_sha256": plan["plan_sha256"],
+            "status": "active",
+        }
+        continuation_record = {
+            "continuation_id": plan["continuation_id"],
+            "authority_epoch_id": plan["authority_epoch_id"],
+            "authority_root_id": plan["authority_root_id"],
+            "work_order_id": resume_work_order_id,
+            "role": plan["role"],
+            "operation": plan["operation"],
+            "mode": plan["mode"],
+            "authorization": plan["authorization"],
+            "authority_contract_sha256": plan[
+                "authority_contract_sha256"
+            ],
+            "work_order_snapshot_sha256": plan[
+                "work_order_snapshot_sha256"
+            ],
+            "pre_state_sha256": plan["pre_state_sha256"],
+            "previous_continuation_id": plan[
+                "previous_continuation_id"
+            ],
+            "previous_generation": plan["previous_generation"],
+            "generation": plan["generation"],
+            "plan_sha256": plan["plan_sha256"],
+            "runtime_test_certificate_id": plan[
+                "runtime_test_certificate_id"
+            ],
+            "runtime_test_certificate_key": plan[
+                "runtime_test_certificate_key"
+            ],
+            "request_text_sha256": plan["request_text_sha256"],
+            "confirmation": ROLE_CONTINUATION_CONFIRMATION,
+            "active_binding": active_binding,
+            "status": "active",
+            "created_at": utc_stamp(),
+        }
+        committed = self.store.commit_authority_continuation(
+            namespace,
+            project_id,
+            record=continuation_record,
+            expected_work_order_snapshot_sha256=plan[
+                "work_order_snapshot_sha256"
+            ],
+        )
+        return ToolResponse(
+            status="continued",
+            summary=(
+                f"窗口角色权限已接续｜{plan['role']}｜"
+                f"代次{plan['previous_generation']}→{plan['generation']}｜旧窗口已撤销"
+            ),
+            project_id=project_id,
+            work_order_id=resume_work_order_id,
+            trace_id=plan["continuation_id"],
+            data={
+                "action": action,
+                "continuation_id": committed.get("continuation_id"),
+                "authority_epoch_id": committed.get("authority_epoch_id"),
+                "authority_root_id": committed.get("authority_root_id"),
+                "generation": committed.get("generation"),
+                "previous_generation": committed.get(
+                    "previous_generation"
+                ),
+                "previous_status": "revoked",
+                "plan_sha256": committed.get("plan_sha256"),
+                "role": committed.get("role"),
+                "idempotent_replay": bool(
+                    committed.get("idempotent_replay")
+                ),
+                "session_binding_status": "bound",
+            },
+        )
+
     def begin_task(
         self,
         namespace: str,
@@ -10223,8 +11987,45 @@ class StoryboardService:
         expected_outputs: list[str],
         window_key: str,
         request_session_id: str | None = None,
+        action: str = "create",
+        resume_work_order_id: str | None = None,
+        expected_plan_sha256: str | None = None,
+        confirmation: str | None = None,
     ) -> ToolResponse:
         self._require_runtime()
+        if action != "create":
+            return self._continue_role_authority(
+                namespace,
+                project_id,
+                action=action,
+                resume_work_order_id=resume_work_order_id,
+                expected_plan_sha256=expected_plan_sha256,
+                confirmation=confirmation,
+                operation=operation,
+                mode=mode,
+                authorization=authorization,
+                request_text=request_text,
+                targets=targets,
+                authoritative_source=authoritative_source,
+                latest_version=latest_version,
+                target_boundary=target_boundary,
+                must_keep=must_keep,
+                must_remove=must_remove,
+                protected_scope=protected_scope,
+                expected_outputs=expected_outputs,
+                request_session_id=request_session_id,
+            )
+        if any(
+            value is not None
+            for value in (
+                resume_work_order_id,
+                expected_plan_sha256,
+                confirmation,
+            )
+        ):
+            raise ValueError(
+                "role_continuation_parameters_invalid: continuation fields require a continuation action"
+            )
         authority_bearing = (
             mode in {"audit_only", "audit_and_repair"}
             or (mode == "execute" and authorization == "explicit_execute")
@@ -10277,6 +12078,15 @@ class StoryboardService:
             ),
         }
         with self.store.mutate_project(namespace, project_id) as (hub, ledger):
+            self.store._assert_session_role_history_unlocked(
+                self.store.project_dir(namespace, project_id),
+                project_id=project_id,
+                hub=hub,
+                session_fingerprint=request.get(
+                    "transport_session_fingerprint"
+                ),
+                role=str(request.get("server_actor_role") or ""),
+            )
             state_errors = self._project_state_errors(
                 namespace, project_id, hub, ledger
             )
@@ -10635,6 +12445,7 @@ class StoryboardService:
         elif work_order["status"] != "executing":
             raise ValueError(f"work order cannot execute from {work_order['status']}")
 
+    @_fence_role_operation
     def plan_change(
         self,
         namespace: str,
@@ -11474,6 +13285,7 @@ class StoryboardService:
         production_work_order_id: str | None = None,
         audit_actor_binding_id: str | None = None,
         audit_session_fingerprint: str | None = None,
+        audit_authority_binding: dict[str, Any] | None = None,
         result_override: str | None = None,
         certificate_id: str | None = None,
     ) -> dict[str, Any]:
@@ -11529,6 +13341,19 @@ class StoryboardService:
                 }
             )
         if audit_class == AUDIT_CLASS_INDEPENDENT:
+            if not isinstance(audit_authority_binding, dict):
+                raise ValueError(
+                    "independent_audit_binding_incomplete: signed audit authority is required"
+                )
+            if (
+                audit_actor_binding_id
+                != audit_authority_binding.get("actor_binding_id")
+                or audit_session_fingerprint
+                != audit_authority_binding.get("session_fingerprint")
+            ):
+                raise ValueError(
+                    "independent_audit_binding_incomplete: physical authority differs"
+                )
             certificate.update(
                 {
                     "result": result,
@@ -11624,6 +13449,21 @@ class StoryboardService:
                     "quality_thresholds": thresholds,
                     "audit_actor_binding_id": audit_actor_binding_id,
                     "audit_session_fingerprint": audit_session_fingerprint,
+                    "audit_window_binding_id": audit_authority_binding.get(
+                        "window_binding_id"
+                    ),
+                    "audit_authority_root_id": audit_authority_binding.get(
+                        "authority_root_id"
+                    ),
+                    "audit_authority_epoch_id": audit_authority_binding.get(
+                        "authority_epoch_id"
+                    ),
+                    "audit_authority_generation": audit_authority_binding.get(
+                        "generation"
+                    ),
+                    "audit_authority_continuation_id": (
+                        audit_authority_binding.get("continuation_id")
+                    ),
                     "semantic_audit_contract": SEMANTIC_AUDIT_CONTRACT_VERSION,
                     "semantic_audit_sha256": semantic_submission_hash,
                     "reviewed_shot_count": int(
@@ -11716,6 +13556,17 @@ class StoryboardService:
             raise ValueError("independent_audit_overlay_certificate_class_invalid")
         self._validate_schema_record(
             self._ledger_schema, "independent_audit_certificate", certificate
+        )
+        hub = self.store.load_hub(namespace, project_id)
+        audit_work_order = _find_work_order(
+            hub, str(certificate.get("work_order_id") or "")
+        )
+        self._verified_audit_certificate_authority(
+            namespace,
+            project_id,
+            certificate=certificate,
+            audit_work_order=audit_work_order,
+            hub=hub,
         )
         if str(certificate.get("artifact_id") or "") != artifact_id:
             raise ValueError("independent_audit_overlay_artifact_mismatch")
@@ -12073,6 +13924,9 @@ class StoryboardService:
             )
         root = root_matches[0]
         audit_work_order_id = str(audit_work_order.get("work_order_id") or "")
+        self._active_authority_binding(
+            namespace, project_id, audit_work_order, hub=hub
+        )
         if (
             not self.store.project_record_is_signed(root)
             or root.get("reaudit_kind")
@@ -12117,6 +13971,13 @@ class StoryboardService:
             event_trace_id = str(
                 successor.get("reaudit_event_trace_id") or ""
             )
+            self._verified_reaudit_route_authority(
+                namespace,
+                project_id,
+                route=successor,
+                audit_work_order=audit_work_order,
+                hub=hub,
+            )
             if (
                 successor.get("reaudit_kind")
                 != "independent_audit_successor"
@@ -12125,12 +13986,6 @@ class StoryboardService:
                 not in {"prepared", "consuming", "consumed"}
                 or successor.get("claim_authority_work_order_id")
                 != audit_work_order_id
-                or successor.get("reaudit_audit_window_binding_id")
-                != audit_work_order.get("server_window_binding_id")
-                or successor.get("reaudit_audit_actor_binding_id")
-                != audit_work_order.get("server_actor_binding_id")
-                or successor.get("reaudit_audit_session_fingerprint")
-                != audit_work_order.get("transport_session_fingerprint")
                 or successor.get("fingerprints") != fingerprints
                 or self._reaudit_immutable_identity(successor) != root_identity
                 or successor.get("production_stage_trace_id")
@@ -12758,6 +14613,12 @@ class StoryboardService:
                 "target_model_contract"
             ],
         }
+        self._verified_audit_certificate_authority(
+            namespace,
+            project_id,
+            certificate=certificate,
+            audit_work_order=audit_work_order,
+        )
         report = certificate.get("report")
         if (
             not self.store.project_record_is_signed(certificate)
@@ -12772,10 +14633,6 @@ class StoryboardService:
             or certificate.get("production_stage_trace_id")
             != latest_handoff.get("production_stage_trace_id")
             or certificate.get("fingerprints") != expected_fingerprints
-            or certificate.get("audit_actor_binding_id")
-            != audit_work_order.get("server_actor_binding_id")
-            or certificate.get("audit_session_fingerprint")
-            != audit_work_order.get("transport_session_fingerprint")
             or certificate.get("semantic_audit_sha256")
             != submission_sha256
             or not isinstance(report, dict)
@@ -13047,11 +14904,16 @@ class StoryboardService:
             "claim_lease_seconds",
             "claim_lease_expires_at",
             "claim_lease_expires_epoch_seconds",
+            "claim_authority_contract",
+            "claim_authority_root_id",
+            "claim_authority_generation",
+            "claim_authority_session_fingerprint",
         }
         consumption_fields = {
             "consumed_by_work_order_id",
             "audit_certificate_id",
             "consumed_at",
+            "consumption_claim",
         }
         return_status = return_handoff.get("status")
         if return_status == "prepared":
@@ -13123,6 +14985,7 @@ class StoryboardService:
             return True, None, None
         expected_package, expected_handoff = (
             self._deterministic_repair_package_and_handoff(
+                namespace,
                 project_id,
                 storyboard=storyboard,
                 certificate=certificate,
@@ -13181,6 +15044,9 @@ class StoryboardService:
             "successor_artifact_id",
             "successor_canonical_sha256",
             "repair_to_audit_handoff_id",
+            "claim_generation",
+            "claim_history",
+            "consumption_claim",
         }
         package_allowed_fields = (
             set(expected_package)
@@ -13188,7 +15054,12 @@ class StoryboardService:
             | package_mutable_fields
         )
         package_status = repair_package.get("status")
-        package_transition_fields = package_mutable_fields - {"status"}
+        package_transition_fields = {
+            "consumed_by_work_order_id",
+            "successor_artifact_id",
+            "successor_canonical_sha256",
+            "repair_to_audit_handoff_id",
+        }
         present_transition_fields = {
             key for key in package_transition_fields if key in repair_package
         }
@@ -13202,6 +15073,11 @@ class StoryboardService:
             and all(
                 repair_package.get(key)
                 for key in package_transition_fields
+            )
+            and isinstance(repair_package.get("consumption_claim"), dict)
+            and repair_package.get("claim_generation")
+            == repair_package.get("consumption_claim", {}).get(
+                "claim_generation"
             )
         )
         if (
@@ -13528,6 +15404,8 @@ class StoryboardService:
 
     def _validate_exact_reaudit_certificate_binding(
         self,
+        namespace: str,
+        project_id: str,
         *,
         certificate: dict[str, Any],
         event: dict[str, Any],
@@ -13571,6 +15449,12 @@ class StoryboardService:
             raise ValueError(
                 "reaudit_recovery_invalid: certificate authority is unsigned or incomplete"
             )
+        certificate_authority = self._verified_audit_certificate_authority(
+            namespace,
+            project_id,
+            certificate=certificate,
+            audit_work_order=audit_work_order,
+        )
         semantic_sha256 = sha256_bytes(
             _stable_json_bytes(semantic_submission)
         )
@@ -13656,11 +15540,11 @@ class StoryboardService:
             "quality_thresholds": evidence_matrix.get(
                 "quality_thresholds"
             ),
-            "audit_actor_binding_id": audit_work_order.get(
-                "server_actor_binding_id"
+            "audit_actor_binding_id": certificate_authority.get(
+                "actor_binding_id"
             ),
-            "audit_session_fingerprint": audit_work_order.get(
-                "transport_session_fingerprint"
+            "audit_session_fingerprint": certificate_authority.get(
+                "session_fingerprint"
             ),
             "semantic_audit_contract": (
                 SEMANTIC_AUDIT_CONTRACT_VERSION
@@ -13784,6 +15668,35 @@ class StoryboardService:
                 "independent_audit_certificate",
                 certificate,
             )
+            certificate_authority = (
+                self._verified_audit_certificate_authority(
+                    namespace,
+                    project_id,
+                    certificate=certificate,
+                    audit_work_order=audit_work_order,
+                )
+            )
+            authority_continuation_hmac = ""
+            if certificate_authority.get("continuation_id"):
+                continuation = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="authority_continuations",
+                    record_id=str(
+                        certificate_authority["continuation_id"]
+                    ),
+                )
+                if (
+                    not self.store.project_record_is_signed(continuation)
+                    or continuation.get("active_binding")
+                    != certificate_authority
+                ):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: certificate continuation authority differs"
+                    )
+                authority_continuation_hmac = str(
+                    continuation.get("integrity_hmac") or ""
+                )
             event_id = str(certificate.get("event_id") or "")
             matching_events = [
                 row
@@ -13909,6 +15822,8 @@ class StoryboardService:
                 ),
             )
             self._validate_exact_reaudit_certificate_binding(
+                namespace,
+                project_id,
                 certificate=certificate,
                 event=event,
                 handoff=route,
@@ -13934,6 +15849,29 @@ class StoryboardService:
                     "event_sha256": event_sha256,
                     "legacy_event_sha_missing": (
                         not certificate_has_event_sha
+                    ),
+                    "authority_root_id": str(
+                        certificate_authority.get("authority_root_id") or ""
+                    ),
+                    "authority_epoch_id": str(
+                        certificate_authority.get("authority_epoch_id") or ""
+                    ),
+                    "authority_generation": int(
+                        certificate_authority.get("generation") or 0
+                    ),
+                    "authority_continuation_id": (
+                        certificate_authority.get("continuation_id")
+                    ),
+                    "authority_continuation_hmac": (
+                        authority_continuation_hmac
+                    ),
+                    "authority_contract_sha256": (
+                        str(
+                            certificate_authority.get(
+                                "authority_contract_sha256"
+                            )
+                            or ""
+                        )
                     ),
                 }
             )
@@ -14009,6 +15947,8 @@ class StoryboardService:
             return None, event
         certificate = certificates[0]
         self._validate_exact_reaudit_certificate_binding(
+            namespace,
+            project_id,
             certificate=certificate,
             event=event,
             handoff=pending_handoff,
@@ -14086,6 +16026,8 @@ class StoryboardService:
             certificate=certificate,
         )
         self._validate_exact_reaudit_certificate_binding(
+            namespace,
+            project_id,
             certificate=certificate,
             event=event,
             handoff=pending_handoff,
@@ -14132,6 +16074,15 @@ class StoryboardService:
             raise ValueError(
                 "reaudit_lineage_invalid: successor parent changed before issue"
             )
+        current_audit_binding = self._active_authority_binding(
+            namespace, project_id, audit_work_order
+        )
+        audit_binding = self._verified_authority_binding_at_generation(
+            namespace,
+            project_id,
+            audit_work_order,
+            int(current_audit_binding.get("generation") or 0),
+        )
 
         def parent_authority(handoff_id: str) -> dict[str, Any]:
             matches = [
@@ -14319,8 +16270,13 @@ class StoryboardService:
             "claim_lease_seconds",
             "claim_lease_expires_at",
             "claim_lease_expires_epoch_seconds",
+            "claim_authority_contract",
+            "claim_authority_root_id",
+            "claim_authority_generation",
+            "claim_authority_session_fingerprint",
             "consumed_by_work_order_id",
             "consumed_at",
+            "consumption_claim",
             "audit_certificate_id",
             "audit_certificate_ids",
             "reaudit_count",
@@ -14358,14 +16314,26 @@ class StoryboardService:
                 "claim_authority_work_order_id": str(
                     audit_work_order["work_order_id"]
                 ),
-                "reaudit_audit_window_binding_id": audit_work_order.get(
-                    "server_window_binding_id"
+                "reaudit_audit_window_binding_id": audit_binding.get(
+                    "window_binding_id"
                 ),
-                "reaudit_audit_actor_binding_id": audit_work_order.get(
-                    "server_actor_binding_id"
+                "reaudit_audit_actor_binding_id": audit_binding.get(
+                    "actor_binding_id"
                 ),
-                "reaudit_audit_session_fingerprint": audit_work_order.get(
-                    "transport_session_fingerprint"
+                "reaudit_audit_session_fingerprint": audit_binding.get(
+                    "session_fingerprint"
+                ),
+                "reaudit_audit_authority_root_id": audit_binding.get(
+                    "authority_root_id"
+                ),
+                "reaudit_audit_authority_epoch_id": audit_binding.get(
+                    "authority_epoch_id"
+                ),
+                "reaudit_audit_authority_generation": audit_binding.get(
+                    "generation"
+                ),
+                "reaudit_audit_authority_continuation_id": audit_binding.get(
+                    "continuation_id"
                 ),
                 "server_minted_lineage": True,
             }
@@ -14431,6 +16399,9 @@ class StoryboardService:
         if not isinstance(boundary, dict):
             boundary = {}
         role = str(work_order.get("server_actor_role") or "production")
+        authority_binding = self._active_authority_binding(
+            namespace, project_id, work_order
+        )
         handoff_type = "repair_to_audit" if role == "repair" else "production_to_audit"
         fingerprints = self._fingerprint_bundle(
             storyboard,
@@ -14533,9 +16504,24 @@ class StoryboardService:
             "checked_shot_count": certificate["checked_shot_count"],
             "facts_reusable": True,
             "conclusion_reusable_for_independent_audit": False,
-            "from_window_binding_id": work_order.get("server_window_binding_id"),
-            "from_actor_binding_id": work_order.get("server_actor_binding_id"),
-            "from_session_fingerprint": work_order.get("transport_session_fingerprint"),
+            "from_window_binding_id": authority_binding.get(
+                "window_binding_id"
+            ),
+            "from_actor_binding_id": authority_binding.get(
+                "actor_binding_id"
+            ),
+            "from_session_fingerprint": authority_binding.get(
+                "session_fingerprint"
+            ),
+            "from_authority_root_id": authority_binding.get(
+                "authority_root_id"
+            ),
+            "from_authority_epoch_id": authority_binding.get(
+                "authority_epoch_id"
+            ),
+            "from_authority_generation": authority_binding.get(
+                "generation"
+            ),
         }
         if successor_transaction_id:
             handoff.update(
@@ -14567,6 +16553,24 @@ class StoryboardService:
                     "return_to_audit_actor_binding_id": repair_package.get("audit_actor_binding_id"),
                     "return_to_audit_session_fingerprint": repair_package.get(
                         "audit_session_fingerprint"
+                    ),
+                    "return_to_audit_authority_root_id": (
+                        repair_package.get("audit_authority_root_id")
+                        or self._authority_root_id(
+                            project_id,
+                            str(repair_package.get("audit_work_order_id") or ""),
+                        )
+                    ),
+                    "return_to_audit_authority_epoch_id": (
+                        repair_package.get("audit_authority_epoch_id")
+                    ),
+                    "return_to_audit_authority_generation": (
+                        repair_package.get("audit_authority_generation")
+                    ),
+                    "return_to_audit_authority_continuation_id": (
+                        repair_package.get(
+                            "audit_authority_continuation_id"
+                        )
                     ),
                 }
             )
@@ -14638,116 +16642,17 @@ class StoryboardService:
         normal serialization boundary.
         """
 
-        if state not in {"committed", "aborted"}:
-            raise ValueError("invalid successor candidate publication state")
-        timestamp = utc_stamp()
-        artifact_updates: dict[str, Any] = {
-            "publication_state": state,
-            "successor_transaction_id": transaction_id,
-        }
-        if state == "committed":
-            artifact_updates["published_at"] = timestamp
-            artifact_updates.pop("publication_abort_reason", None)
-        else:
-            artifact_updates["publication_aborted_at"] = timestamp
-            artifact_updates["publication_abort_reason"] = str(
-                reason or "successor transaction aborted"
-            )[:512]
-
-        updated_artifacts: dict[str, dict[str, Any]] = {}
-        for candidate_id in dict.fromkeys(
-            [str(artifact_id or ""), str(canonical_artifact_id or "")]
-        ):
-            if not candidate_id:
-                continue
-            updated_artifacts[candidate_id] = self.store.update_artifact_metadata(
-                namespace,
-                project_id,
-                candidate_id,
-                artifact_updates,
-            )
-
-        handoff = self.store.get_project_record(
+        return self.store.set_successor_candidate_publication(
             namespace,
             project_id,
-            kind="handoffs",
-            record_id=handoff_id,
+            work_order_id=work_order_id,
+            artifact_id=artifact_id,
+            canonical_artifact_id=canonical_artifact_id,
+            handoff_id=handoff_id,
+            transaction_id=transaction_id,
+            state=state,
+            reason=reason,
         )
-        bound_transaction = str(handoff.get("successor_transaction_id") or "")
-        if bound_transaction and bound_transaction != transaction_id:
-            raise ValueError(
-                "successor_transaction_conflict: handoff belongs to another transaction"
-            )
-        handoff = copy.deepcopy(handoff)
-        handoff["publication_state"] = state
-        handoff["successor_transaction_id"] = transaction_id
-        if state == "committed":
-            handoff["published_at"] = timestamp
-        else:
-            handoff["status"] = "rejected"
-            handoff["rejected_at"] = timestamp
-            handoff["rejection_reason"] = str(
-                reason or "successor transaction aborted"
-            )[:512]
-            handoff.pop("claimed_by_work_order_id", None)
-            handoff.pop("claim_epoch_seconds", None)
-        handoff = self.store.save_project_record(
-            namespace,
-            project_id,
-            kind="handoffs",
-            record_id=handoff_id,
-            value=handoff,
-        )
-
-        with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
-            for index, row in enumerate(hub.setdefault("handoffs", [])):
-                if str(row.get("handoff_id") or "") == handoff_id:
-                    hub["handoffs"][index] = self._handoff_record_projection(
-                        handoff
-                    )
-            deliverable = next(
-                (
-                    row
-                    for row in hub.setdefault("deliverables", [])
-                    if str(row.get("deliverable_id") or "") == artifact_id
-                ),
-                None,
-            )
-            if deliverable is not None:
-                deliverable["publication_state"] = state
-                if state == "committed":
-                    # CAS publication only makes the successor visible to the
-                    # independent auditor.  It is not validation authority and
-                    # must not publish a latest/validated storyboard itself.
-                    deliverable["status"] = "draft"
-                    latest = hub["project_state"]["latest_artifacts"].get(
-                        "storyboard"
-                    )
-                    if isinstance(latest, dict) and str(
-                        latest.get("deliverable_id") or ""
-                    ) == artifact_id:
-                        hub["project_state"]["latest_artifacts"].pop(
-                            "storyboard", None
-                        )
-                else:
-                    deliverable["status"] = "draft"
-                    latest = hub["project_state"]["latest_artifacts"].get(
-                        "storyboard"
-                    )
-                    if isinstance(latest, dict) and str(
-                        latest.get("deliverable_id") or ""
-                    ) == artifact_id:
-                        hub["project_state"]["latest_artifacts"].pop(
-                            "storyboard", None
-                        )
-            work_order = _find_work_order(hub, work_order_id)
-            work_order["awaiting_independent_audit"] = state == "committed"
-            if state == "aborted" and work_order.get("status") == "validating":
-                project_agent.transition_work_order(
-                    hub, work_order_id, "failed_current"
-                )
-                hub["project_state"]["current_stage"] = "failed_current"
-        return {"artifacts": updated_artifacts, "handoff": handoff}
 
     def _matching_handoff(
         self,
@@ -14974,26 +16879,84 @@ class StoryboardService:
         return work_order
 
     def _assert_audit_separation(
-        self, audit_work_order: dict[str, Any], handoff: dict[str, Any]
+        self,
+        namespace: str,
+        project_id: str,
+        audit_work_order: dict[str, Any],
+        handoff: dict[str, Any],
     ) -> None:
+        audit_binding = self._active_authority_binding(
+            namespace, project_id, audit_work_order
+        )
         if audit_work_order.get("work_order_id") == handoff.get("work_order_id"):
             raise ValueError("independent_audit_separation_required: work orders must differ")
-        if audit_work_order.get("server_window_binding_id") == handoff.get("from_window_binding_id"):
+        if audit_binding.get("window_binding_id") == handoff.get("from_window_binding_id"):
             raise ValueError("independent_audit_separation_required: window bindings must differ")
-        if audit_work_order.get("server_actor_binding_id") == handoff.get("from_actor_binding_id"):
+        if audit_binding.get("actor_binding_id") == handoff.get("from_actor_binding_id"):
             raise ValueError("independent_audit_separation_required: actor bindings must differ")
         producer_session = handoff.get("from_session_fingerprint")
-        auditor_session = audit_work_order.get("transport_session_fingerprint")
+        auditor_session = audit_binding.get("session_fingerprint")
         if producer_session and auditor_session and producer_session == auditor_session:
             raise ValueError(
                 "independent_audit_separation_required: production and audit transport sessions must differ"
             )
         if handoff.get("handoff_type") == "repair_to_audit":
+            expected_work_order_id = handoff.get(
+                "return_to_audit_work_order_id"
+            )
+            if audit_work_order.get("work_order_id") != expected_work_order_id:
+                raise ValueError(
+                    "repair_return_audit_mismatch: repaired artifact must return to the original independent audit authority"
+                )
+            return_lineage_fields = (
+                "return_to_audit_authority_root_id",
+                "return_to_audit_authority_epoch_id",
+                "return_to_audit_authority_generation",
+                "return_to_audit_authority_continuation_id",
+            )
+            present_return_lineage = [
+                field for field in return_lineage_fields if field in handoff
+            ]
+            if len(present_return_lineage) == len(return_lineage_fields):
+                return_generation = handoff.get(
+                    "return_to_audit_authority_generation"
+                )
+                if (
+                    isinstance(return_generation, bool)
+                    or not isinstance(return_generation, int)
+                    or return_generation < 0
+                ):
+                    raise ValueError(
+                        "repair_return_audit_mismatch: authority generation is invalid"
+                    )
+            elif present_return_lineage == [
+                "return_to_audit_authority_root_id"
+            ]:
+                # The pre-continuation shape carried only the deterministic
+                # authority root and can represent generation zero only.
+                return_generation = 0
+            elif present_return_lineage:
+                raise ValueError(
+                    "repair_return_audit_mismatch: authority snapshot is partial"
+                )
+            else:
+                return_generation = 0
+            return_binding = self._verified_authority_binding_at_generation(
+                namespace,
+                project_id,
+                audit_work_order,
+                return_generation,
+            )
             expected = {
-                "work_order_id": handoff.get("return_to_audit_work_order_id"),
-                "server_window_binding_id": handoff.get("return_to_audit_window_binding_id"),
-                "server_actor_binding_id": handoff.get("return_to_audit_actor_binding_id"),
-                "transport_session_fingerprint": handoff.get("return_to_audit_session_fingerprint"),
+                "window_binding_id": handoff.get(
+                    "return_to_audit_window_binding_id"
+                ),
+                "actor_binding_id": handoff.get(
+                    "return_to_audit_actor_binding_id"
+                ),
+                "session_fingerprint": handoff.get(
+                    "return_to_audit_session_fingerprint"
+                ),
             }
             for field, value in expected.items():
                 # Local/stdio transport has no authenticated request session to bind.
@@ -15001,15 +16964,47 @@ class StoryboardService:
                 # fingerprint, while the original audit work order correctly keeps
                 # its transport fingerprint empty.  Cloud mode must remain exact.
                 if (
-                    field == "transport_session_fingerprint"
+                    field == "session_fingerprint"
                     and self.settings.deployment_mode != "cloud"
-                    and audit_work_order.get(field) is None
+                    and audit_binding.get(field) is None
                 ):
                     continue
-                if value is not None and audit_work_order.get(field) != value:
+                if value is not None and return_binding.get(field) != value:
                     raise ValueError(
-                        "repair_return_audit_mismatch: repaired artifact must return to the original independent audit authority"
+                        "repair_return_audit_mismatch: repaired artifact must return to the signed historical audit authority"
                     )
+            if present_return_lineage:
+                lineage_expected = {
+                    "return_to_audit_authority_root_id": "authority_root_id",
+                    "return_to_audit_authority_epoch_id": "authority_epoch_id",
+                    "return_to_audit_authority_generation": "generation",
+                    "return_to_audit_authority_continuation_id": "continuation_id",
+                }
+                compared = (
+                    lineage_expected
+                    if len(present_return_lineage)
+                    == len(return_lineage_fields)
+                    else {
+                        "return_to_audit_authority_root_id": "authority_root_id"
+                    }
+                )
+                if any(
+                    handoff.get(handoff_field)
+                    != return_binding.get(binding_field)
+                    for handoff_field, binding_field in compared.items()
+                ):
+                    raise ValueError(
+                        "repair_return_audit_mismatch: return authority is not in the signed lineage"
+                    )
+            if (
+                audit_binding.get("authority_root_id")
+                != return_binding.get("authority_root_id")
+                or int(audit_binding.get("generation") or 0)
+                < int(return_binding.get("generation") or 0)
+            ):
+                raise ValueError(
+                    "repair_return_audit_mismatch: current audit authority is not a descendant of the return authority"
+                )
 
     def _persist_audit_intake(
         self,
@@ -15281,6 +17276,7 @@ class StoryboardService:
 
     def _deterministic_repair_package_and_handoff(
         self,
+        namespace: str,
         project_id: str,
         *,
         storyboard: dict[str, Any],
@@ -15317,6 +17313,12 @@ class StoryboardService:
             microsecond=0
         ).isoformat().replace("+00:00", "Z")
         fingerprints = copy.deepcopy(production_handoff["fingerprints"])
+        audit_binding = self._verified_audit_certificate_authority(
+            namespace,
+            project_id,
+            certificate=certificate,
+            audit_work_order=audit_work_order,
+        )
         protected = production_handoff.get("scope", {}).get("protected_scope", [])
         production_session = production_handoff.get("from_session_fingerprint") or sha256_bytes(
             (
@@ -15324,10 +17326,10 @@ class StoryboardService:
                 + str(production_handoff.get("from_window_binding_id") or "missing")
             ).encode("utf-8")
         )
-        audit_session = audit_work_order.get("transport_session_fingerprint") or sha256_bytes(
+        audit_session = audit_binding.get("session_fingerprint") or sha256_bytes(
             (
                 "local-server-bound-audit:"
-                + str(audit_work_order.get("server_window_binding_id") or "missing")
+                + str(audit_binding.get("window_binding_id") or "missing")
             ).encode("utf-8")
         )
         package = {
@@ -15341,9 +17343,19 @@ class StoryboardService:
             "production_actor_binding_id": production_handoff.get("from_actor_binding_id"),
             "production_session_fingerprint": production_session,
             "audit_work_order_id": audit_work_order["work_order_id"],
-            "audit_window_binding_id": audit_work_order.get("server_window_binding_id"),
-            "audit_actor_binding_id": audit_work_order.get("server_actor_binding_id"),
+            "audit_window_binding_id": audit_binding.get("window_binding_id"),
+            "audit_actor_binding_id": audit_binding.get("actor_binding_id"),
             "audit_session_fingerprint": audit_session,
+            "audit_authority_root_id": audit_binding.get(
+                "authority_root_id"
+            ),
+            "audit_authority_epoch_id": audit_binding.get(
+                "authority_epoch_id"
+            ),
+            "audit_authority_generation": audit_binding.get("generation"),
+            "audit_authority_continuation_id": audit_binding.get(
+                "continuation_id"
+            ),
             "created_at": issued_at,
             "expires_at": expires_at,
             "status": "issued",
@@ -15382,6 +17394,10 @@ class StoryboardService:
             "claim_lease_seconds",
             "claim_lease_expires_at",
             "claim_lease_expires_epoch_seconds",
+            "claim_authority_contract",
+            "claim_authority_root_id",
+            "claim_authority_generation",
+            "claim_authority_session_fingerprint",
             "claim_history",
             "idempotent_replay",
             "consumed_by_work_order_id",
@@ -15398,6 +17414,10 @@ class StoryboardService:
             "reaudit_audit_window_binding_id",
             "reaudit_audit_actor_binding_id",
             "reaudit_audit_session_fingerprint",
+            "reaudit_audit_authority_root_id",
+            "reaudit_audit_authority_epoch_id",
+            "reaudit_audit_authority_generation",
+            "reaudit_audit_authority_continuation_id",
             "previous_audit_certificate_id",
             "previous_audit_certificate_hmac",
             "previous_audit_event_sha256",
@@ -15425,9 +17445,24 @@ class StoryboardService:
                     "claim_type": "audit_issue_baseline",
                     "preflight_findings": copy.deepcopy(certificate["report"]["issues"]),
                 },
-                "from_window_binding_id": audit_work_order.get("server_window_binding_id"),
-                "from_actor_binding_id": audit_work_order.get("server_actor_binding_id"),
-                "from_session_fingerprint": audit_work_order.get("transport_session_fingerprint"),
+                "from_window_binding_id": audit_binding.get(
+                    "window_binding_id"
+                ),
+                "from_actor_binding_id": audit_binding.get(
+                    "actor_binding_id"
+                ),
+                "from_session_fingerprint": audit_binding.get(
+                    "session_fingerprint"
+                ),
+                "from_authority_root_id": audit_binding.get(
+                    "authority_root_id"
+                ),
+                "from_authority_epoch_id": audit_binding.get(
+                    "authority_epoch_id"
+                ),
+                "from_authority_generation": audit_binding.get(
+                    "generation"
+                ),
                 "source_audit_handoff_id": production_handoff["handoff_id"],
                 "source_audit_event_trace_id": certificate[
                     "stage_trace_id"
@@ -15455,6 +17490,7 @@ class StoryboardService:
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         package, repair_handoff = (
             self._deterministic_repair_package_and_handoff(
+                namespace,
                 project_id,
                 storyboard=storyboard,
                 certificate=certificate,
@@ -15772,11 +17808,540 @@ class StoryboardService:
 
         return str(exc) == f"unknown {kind} record_id: {record_id}"
 
+    def _claim_is_current_authority_ancestor(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        work_order: dict[str, Any],
+        claim: dict[str, Any],
+    ) -> bool:
+        """Return whether one signed claim belongs to this authority chain."""
+
+        work_order_id = str(work_order.get("work_order_id") or "")
+        root_id = self._authority_root_id(project_id, work_order_id)
+        current = self._active_authority_binding(
+            namespace, project_id, work_order
+        )
+        generation = claim.get("claim_authority_generation")
+        if (
+            claim.get("claim_authority_contract")
+            != "window-role-authority-claim-v1"
+            or claim.get("claim_authority_root_id") != root_id
+            or isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation < 0
+            or current.get("authority_root_id") != root_id
+            or not isinstance(current.get("generation"), int)
+            or generation > int(current["generation"])
+        ):
+            return False
+        try:
+            claimed_binding = self._verified_authority_binding_at_generation(
+                namespace,
+                project_id,
+                work_order,
+                generation,
+            )
+        except ValueError:
+            return False
+        return bool(
+            claimed_binding.get("authority_root_id") == root_id
+            and claimed_binding.get("work_order_id") == work_order_id
+            and claimed_binding.get("generation") == generation
+            and claim.get("claim_authority_session_fingerprint")
+            == claimed_binding.get("session_fingerprint")
+        )
+
+    def _consumed_repair_successor_descriptor(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        work_order: dict[str, Any],
+        package: dict[str, Any],
+        expected_kind: str | None = None,
+        expected_scope_hash: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate the exact WAL left after package consume and before CAS.
+
+        A consumed repair package is normally terminal.  It becomes
+        recoverable only when every durable projection names the same still-
+        incomplete successor transaction and candidate.  This helper is
+        deliberately read-only; the operation-fenced recovery below performs
+        the forward/compensation writes.
+        """
+
+        work_order_id = str(work_order.get("work_order_id") or "")
+        package_id = str(package.get("repair_package_id") or "")
+        if (
+            not package_id
+            or not self.store.project_record_is_signed(package)
+            or package.get("record_id") != package_id
+            or package.get("project_id") != project_id
+        ):
+            raise ValueError(
+                "repair_successor_recovery_invalid: repair package is unsigned or has a different primary identity"
+            )
+        self._validate_schema_record(
+            self._project_schema, "immutable_repair_package", package
+        )
+        consumption = package.get("consumption_claim")
+        if (
+            package.get("status") != "consumed"
+            or package.get("consumed_by_work_order_id") != work_order_id
+            or not isinstance(consumption, dict)
+            or consumption.get("consumed_by_work_order_id")
+            != work_order_id
+            or package.get("claim_generation")
+            != consumption.get("claim_generation")
+            or not self._claim_is_current_authority_ancestor(
+                namespace,
+                project_id,
+                work_order=work_order,
+                claim=consumption,
+            )
+        ):
+            raise ValueError(
+                "repair_successor_recovery_invalid: consumed claim authority differs"
+            )
+
+        base_id = str(package.get("base_artifact_id") or "")
+        successor_id = str(package.get("successor_artifact_id") or "")
+        successor_hash = str(
+            package.get("successor_canonical_sha256") or ""
+        )
+        handoff_id = str(
+            package.get("repair_to_audit_handoff_id") or ""
+        )
+        if not all(
+            (package_id, base_id, successor_id, successor_hash, handoff_id)
+        ):
+            raise ValueError(
+                "repair_successor_recovery_invalid: consumed package identity is incomplete"
+            )
+
+        source_certificate_id = str(
+            package.get("audit_certificate_id") or ""
+        )
+        source_certificate = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=source_certificate_id,
+        )
+        if not self.store.project_record_is_signed(source_certificate):
+            raise ValueError(
+                "repair_successor_recovery_invalid: source audit certificate is unsigned"
+            )
+        self._validate_schema_record(
+            self._ledger_schema,
+            "independent_audit_certificate",
+            source_certificate,
+        )
+        if (
+            source_certificate.get("certificate_id")
+            != source_certificate_id
+            or source_certificate.get("audit_class")
+            != AUDIT_CLASS_INDEPENDENT
+            or source_certificate.get("result") != "fail_current"
+            or source_certificate.get("event_id")
+            != package.get("audit_event_id")
+            or source_certificate.get("artifact_id") != base_id
+            or source_certificate.get("canonical_sha256")
+            != package.get("base_canonical_sha256")
+            or source_certificate.get("report_sha256")
+            != sha256_bytes(
+                _stable_json_bytes(source_certificate.get("report") or {})
+            )
+        ):
+            raise ValueError(
+                "repair_successor_recovery_invalid: source audit certificate differs from package"
+            )
+
+        base, _base_path = self.store.get_artifact(
+            namespace, project_id, base_id
+        )
+        base_metadata = base.get("metadata")
+        transaction = (
+            base_metadata.get("successor_transaction")
+            if isinstance(base_metadata, dict)
+            else None
+        )
+        transaction_id = self.store._successor_transaction_id(transaction)
+        transaction_state = (
+            str(transaction.get("state") or "")
+            if isinstance(transaction, dict)
+            else ""
+        )
+        successor_kind = (
+            str(transaction.get("successor_kind") or "")
+            if isinstance(transaction, dict)
+            else ""
+        )
+        scope_hash = (
+            str(transaction.get("scope_hash") or "")
+            if isinstance(transaction, dict)
+            else ""
+        )
+        if (
+            transaction_state not in {"prepared", "aborted", "committed"}
+            or successor_kind not in {"patch", "repair"}
+            or not transaction_id
+            or not scope_hash
+            or transaction.get("base_artifact_id") != base_id
+            or transaction.get("expected_canonical_hash")
+            != package.get("base_canonical_sha256")
+            or (
+                expected_kind is not None
+                and successor_kind != expected_kind
+            )
+            or (
+                expected_scope_hash is not None
+                and scope_hash != expected_scope_hash
+            )
+        ):
+            raise ValueError(
+                "repair_successor_recovery_invalid: base transaction differs"
+            )
+
+        successor, _successor_path = self.store.get_artifact(
+            namespace,
+            project_id,
+            successor_id,
+            include_uncommitted=True,
+        )
+        handoff = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="handoffs",
+            record_id=handoff_id,
+        )
+        if not self.store.project_record_is_signed(handoff):
+            raise ValueError(
+                "repair_successor_recovery_invalid: successor handoff is unsigned"
+            )
+        self._validate_schema_record(
+            self._project_schema, "handoff_manifest", handoff
+        )
+        canonical_id = str(handoff.get("canonical_artifact_id") or "")
+        canonical, _canonical_path = self.store.get_artifact(
+            namespace,
+            project_id,
+            canonical_id,
+            include_uncommitted=True,
+        )
+        output_certificate_id = str(handoff.get("certificate_id") or "")
+        output_certificate = self.store.get_project_record(
+            namespace,
+            project_id,
+            kind="certificates",
+            record_id=output_certificate_id,
+        )
+        if not self.store.project_record_is_signed(output_certificate):
+            raise ValueError(
+                "repair_successor_recovery_invalid: successor production certificate is unsigned"
+            )
+        if (
+            output_certificate.get("certificate_id")
+            != output_certificate_id
+            or output_certificate.get("certificate_type")
+            != AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            or output_certificate.get("audit_class")
+            != AUDIT_CLASS_PRODUCTION_PREFLIGHT
+            or output_certificate.get("work_order_id") != work_order_id
+            or output_certificate.get("artifact_id") != successor_id
+            or output_certificate.get("canonical_artifact_id")
+            != canonical_id
+            or output_certificate.get("canonical_sha256")
+            != successor_hash
+            or output_certificate.get("preflight_status")
+            != PRODUCTION_PREFLIGHT_PASS
+            or isinstance(
+                output_certificate.get("preflight_issue_count"), bool
+            )
+            or not isinstance(
+                output_certificate.get("preflight_issue_count"), int
+            )
+            or output_certificate.get("preflight_issue_count") != 0
+            or output_certificate.get("report_sha256")
+            != sha256_bytes(
+                _stable_json_bytes(output_certificate.get("report") or {})
+            )
+        ):
+            raise ValueError(
+                "repair_successor_recovery_invalid: successor production certificate differs"
+            )
+        candidates = (successor, canonical)
+        allowed_publication = {
+            "prepared": {"pending"},
+            "aborted": {"pending", "aborted", "rejected"},
+            "committed": {"pending", "committed"},
+        }[transaction_state]
+        for candidate in candidates:
+            metadata = candidate.get("metadata")
+            if (
+                candidate.get("project_id") != project_id
+                or candidate.get("work_order_id") != work_order_id
+                or candidate.get("source_artifact_id") != base_id
+                or not isinstance(metadata, dict)
+                or metadata.get("successor_transaction_id")
+                != transaction_id
+                or metadata.get("successor_base_artifact_id") != base_id
+                or metadata.get("successor_kind") != successor_kind
+                or metadata.get("successor_scope_hash") != scope_hash
+                or self.store.artifact_publication_state(candidate)
+                not in allowed_publication
+            ):
+                raise ValueError(
+                    "repair_successor_recovery_invalid: candidate descriptor differs"
+                )
+        if (
+            successor.get("artifact_id") != successor_id
+            or successor.get("metadata", {}).get("canonical_sha256")
+            != successor_hash
+            or handoff.get("handoff_type") != "repair_to_audit"
+            or handoff.get("work_order_id") != work_order_id
+            or handoff.get("immutable_repair_package_id") != package_id
+            or handoff.get("storyboard_artifact_id") != successor_id
+            or handoff.get("canonical_artifact_id") != canonical_id
+            or handoff.get("canonical_sha256") != successor_hash
+            or handoff.get("successor_transaction_id") != transaction_id
+            or handoff.get("successor_base_artifact_id") != base_id
+            or handoff.get("successor_kind") != successor_kind
+            or handoff.get("successor_scope_hash") != scope_hash
+            or handoff.get("publication_state")
+            not in allowed_publication
+            or not (
+                handoff.get("status") == "prepared"
+                or (
+                    transaction_state == "aborted"
+                    and handoff.get("status") == "rejected"
+                    and handoff.get("publication_state") == "aborted"
+                )
+            )
+            or any(
+                handoff.get(field)
+                for field in (
+                    "claimed_by_work_order_id",
+                    "claim_token",
+                    "consumed_by_work_order_id",
+                    "consumption_claim",
+                    "audit_certificate_id",
+                )
+            )
+        ):
+            raise ValueError(
+                "repair_successor_recovery_invalid: package, artifact, or handoff differs"
+            )
+        if transaction_state == "committed" and (
+            base_metadata.get("successor_artifact_id") != successor_id
+            or transaction.get("successor_artifact_id") != successor_id
+            or base_metadata.get("successor_canonical_hash")
+            != successor_hash
+            or transaction.get("successor_canonical_hash")
+            != successor_hash
+        ):
+            raise ValueError(
+                "repair_successor_recovery_invalid: committed base pointer differs"
+            )
+
+        hub = self.store.load_hub(namespace, project_id)
+        hub_matches = [
+            row
+            for row in hub.get("handoffs", [])
+            if isinstance(row, dict)
+            and row.get("handoff_id") == handoff_id
+        ]
+        if len(hub_matches) != 1 or any(
+            hub_matches[0].get(key) != handoff.get(key)
+            for key in (
+                "work_order_id",
+                "storyboard_artifact_id",
+                "canonical_artifact_id",
+                "successor_transaction_id",
+                "successor_base_artifact_id",
+                "successor_kind",
+                "successor_scope_hash",
+            )
+        ):
+            raise ValueError(
+                "repair_successor_recovery_invalid: Hub candidate projection differs"
+            )
+        return {
+            "base": base,
+            "base_artifact_id": base_id,
+            "transaction": transaction,
+            "transaction_id": transaction_id,
+            "transaction_state": transaction_state,
+            "successor_kind": successor_kind,
+            "scope_hash": scope_hash,
+            "successor": successor,
+            "successor_artifact_id": successor_id,
+            "successor_canonical_sha256": successor_hash,
+            "canonical": canonical,
+            "canonical_artifact_id": canonical_id,
+            "handoff": handoff,
+            "handoff_id": handoff_id,
+            "source_certificate": source_certificate,
+            "output_certificate": output_certificate,
+            "consumption_claim": consumption,
+        }
+
+    def _recover_consumed_repair_successor(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        work_order: dict[str, Any],
+        package: dict[str, Any],
+        expected_kind: str,
+        expected_scope_hash: str,
+    ) -> ToolResponse | None:
+        descriptor = self._consumed_repair_successor_descriptor(
+            namespace,
+            project_id,
+            work_order=work_order,
+            package=package,
+            expected_kind=expected_kind,
+            expected_scope_hash=expected_scope_hash,
+        )
+        state = str(descriptor["transaction_state"])
+        if state == "aborted":
+            # An aborted base transaction is an explicit negative CAS result.
+            # Never resurrect it, even when its candidate is still pending:
+            # reject the exact unclaimed candidate pair, release only the
+            # package's signed fixed identity, and require a fresh repair work
+            # order (and therefore a fresh Ledger audit cycle).
+            self._set_successor_candidate_publication(
+                namespace,
+                project_id,
+                work_order_id=str(work_order["work_order_id"]),
+                artifact_id=str(descriptor["successor_artifact_id"]),
+                canonical_artifact_id=str(
+                    descriptor["canonical_artifact_id"]
+                ),
+                handoff_id=str(descriptor["handoff_id"]),
+                transaction_id=str(descriptor["transaction_id"]),
+                state="aborted",
+                reason="recover aborted consumed repair successor",
+            )
+            claim = descriptor["consumption_claim"]
+            restored = self.store.rollback_consumed_repair_package(
+                namespace,
+                project_id,
+                str(package["repair_package_id"]),
+                work_order_id=str(work_order["work_order_id"]),
+                claim_token=str(claim.get("claim_token") or ""),
+                claim_generation=int(claim.get("claim_generation") or 0),
+                base_artifact_id=str(descriptor["base_artifact_id"]),
+                transaction_id=str(descriptor["transaction_id"]),
+                expected_successor_artifact_id=str(
+                    descriptor["successor_artifact_id"]
+                ),
+                expected_successor_canonical_sha256=str(
+                    descriptor["successor_canonical_sha256"]
+                ),
+                repair_to_audit_handoff_id=str(descriptor["handoff_id"]),
+            )
+            self._sync_repair_package_in_hub(
+                namespace, project_id, restored
+            )
+            raise ValueError(
+                "repair_successor_recovery_compensated: rejected candidate was released; start a new repair work order"
+            )
+
+        transaction = descriptor["transaction"]
+        if state == "prepared":
+            # Reusing the exact transaction id renews an expired successor
+            # lease but cannot change kind, base, raw hash, or scope.
+            self.store.prepare_storyboard_successor(
+                namespace,
+                project_id,
+                str(descriptor["base_artifact_id"]),
+                expected_canonical_hash=str(
+                    transaction["expected_canonical_hash"]
+                ),
+                expected_raw_fingerprint=transaction.get(
+                    "expected_raw_fingerprint"
+                ),
+                transaction_id=str(descriptor["transaction_id"]),
+                successor_kind=expected_kind,
+                scope_hash=expected_scope_hash,
+            )
+            self.store.commit_storyboard_successor(
+                namespace,
+                project_id,
+                str(descriptor["base_artifact_id"]),
+                transaction_id=str(descriptor["transaction_id"]),
+                successor_artifact_id=str(
+                    descriptor["successor_artifact_id"]
+                ),
+                successor_canonical_hash=str(
+                    descriptor["successor_canonical_sha256"]
+                ),
+            )
+        publication = self._set_successor_candidate_publication(
+            namespace,
+            project_id,
+            work_order_id=str(work_order["work_order_id"]),
+            artifact_id=str(descriptor["successor_artifact_id"]),
+            canonical_artifact_id=str(
+                descriptor["canonical_artifact_id"]
+            ),
+            handoff_id=str(descriptor["handoff_id"]),
+            transaction_id=str(descriptor["transaction_id"]),
+            state="committed",
+        )
+        self._sync_repair_package_in_hub(namespace, project_id, package)
+        artifact = publication["artifacts"][
+            str(descriptor["successor_artifact_id"])
+        ]
+        handoff = publication["handoff"]
+        certificate = descriptor["output_certificate"]
+        return ToolResponse(
+            status=PRODUCTION_PREFLIGHT_PASS,
+            summary=(
+                "修复事务已精确续作｜全表生产预检通过｜待独立终审"
+            ),
+            project_id=project_id,
+            work_order_id=str(work_order["work_order_id"]),
+            artifact_id=str(descriptor["successor_artifact_id"]),
+            download_url=self.store.signed_download_url(
+                namespace,
+                project_id,
+                str(descriptor["successor_artifact_id"]),
+                str(artifact["file_name"]),
+            ),
+            trace_id=str(handoff.get("stage_trace_id") or ""),
+            data={
+                "artifact": artifact,
+                "canonical_json_artifact_id": descriptor[
+                    "canonical_artifact_id"
+                ],
+                "canonical_sha256": descriptor[
+                    "successor_canonical_sha256"
+                ],
+                "handoff": self._handoff_summary(handoff),
+                "handoff_artifact_id": descriptor["handoff_id"],
+                "certificate": self._certificate_summary(certificate),
+                "report": copy.deepcopy(certificate.get("report") or {}),
+                "repair_package_id": package.get("repair_package_id"),
+                "repair_package": copy.deepcopy(package),
+                "repair_transaction_id": descriptor["transaction_id"],
+                "repair_transaction_state": "committed",
+                "recovered_consumed_successor": True,
+                "idempotent_replay": state == "committed",
+                "next_action": "independent_audit",
+            },
+        )
+
     def _repair_package_for_patch(
         self,
         namespace: str,
         project_id: str,
         *,
+        work_order: dict[str, Any],
         certificate: dict[str, Any],
         storyboard: dict[str, Any],
         base_artifact_id: str,
@@ -15803,8 +18368,58 @@ class StoryboardService:
         self._validate_schema_record(
             self._project_schema, "immutable_repair_package", package
         )
-        if package.get("status") != "issued":
+        package_status = str(package.get("status") or "")
+        if package_status == "consuming":
+            try:
+                lease_expires = float(
+                    package.get("claim_lease_expires_epoch_seconds") or 0
+                )
+            except (TypeError, ValueError):
+                lease_expires = 0
+            if (
+                package.get("consumed_by_work_order_id")
+                != work_order.get("work_order_id")
+                or lease_expires <= 0
+                or lease_expires > time.time()
+                or not self._claim_is_current_authority_ancestor(
+                    namespace,
+                    project_id,
+                    work_order=work_order,
+                    claim=package,
+                )
+            ):
+                raise ValueError(
+                    "repair_package_unavailable: package has no recoverable expired claim"
+                )
+        elif package_status == "consumed":
+            if package.get("consumed_by_work_order_id") != work_order.get(
+                "work_order_id"
+            ):
+                raise ValueError(
+                    "repair_package_unavailable: package is already consumed"
+                )
+            self._consumed_repair_successor_descriptor(
+                namespace,
+                project_id,
+                work_order=work_order,
+                package=package,
+            )
+        elif package_status != "issued":
             raise ValueError("repair_package_unavailable: package is not issued")
+        elif any(
+            isinstance(item, dict)
+            and item.get("state")
+            == "rolled_back_after_successor_cas_failure"
+            and item.get("consumed_by_work_order_id")
+            == work_order.get("work_order_id")
+            for item in package.get("claim_history", [])
+        ):
+            # Exact compensation has already rejected a production candidate
+            # for this work order.  Retrying under the same work order would
+            # append a second candidate to its Ledger audit cycle.
+            raise ValueError(
+                "repair_successor_recovery_compensated: start a new repair work order"
+            )
         try:
             expires_at = datetime.fromisoformat(
                 str(package["expires_at"]).replace("Z", "+00:00")
@@ -15813,7 +18428,10 @@ class StoryboardService:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("repair_package_invalid: expiry is malformed") from exc
-        if expires_at <= datetime.now(timezone.utc):
+        if (
+            package_status != "consumed"
+            and expires_at <= datetime.now(timezone.utc)
+        ):
             raise ValueError("repair_package_expired: immutable package has expired")
         if (
             package.get("base_artifact_id") != base_artifact_id
@@ -15891,17 +18509,22 @@ class StoryboardService:
             else:
                 rows.append(copy.deepcopy(package))
 
-    @staticmethod
     def _assert_repair_separation(
+        self,
+        namespace: str,
+        project_id: str,
         work_order: dict[str, Any],
         package: dict[str, Any],
         audit_handoff: dict[str, Any],
     ) -> None:
         if work_order.get("work_order_id") == package.get("audit_work_order_id"):
             raise ValueError("repair_window_separation_required: repair and audit work orders must differ")
-        repair_window = work_order.get("server_window_binding_id")
-        repair_actor = work_order.get("server_actor_binding_id")
-        repair_session = work_order.get("transport_session_fingerprint")
+        repair_binding = self._active_authority_binding(
+            namespace, project_id, work_order
+        )
+        repair_window = repair_binding.get("window_binding_id")
+        repair_actor = repair_binding.get("actor_binding_id")
+        repair_session = repair_binding.get("session_fingerprint")
         for label, window, actor, session in (
             (
                 "production",
@@ -16113,6 +18736,7 @@ class StoryboardService:
         package, audit_handoff = self._repair_package_for_patch(
             namespace,
             project_id,
+            work_order=work_order,
             certificate=certificate,
             storyboard=base_storyboard,
             base_artifact_id=source_artifact_id,
@@ -16201,7 +18825,9 @@ class StoryboardService:
             raise ValueError(
                 "repair_package_binding_mismatch: audit transport session differs"
             )
-        self._assert_repair_separation(work_order, package, audit_handoff)
+        self._assert_repair_separation(
+            namespace, project_id, work_order, package, audit_handoff
+        )
         return {
             "package": package,
             "certificate": certificate,
@@ -16270,6 +18896,13 @@ class StoryboardService:
         *,
         original_package: dict[str, Any],
         work_order_id: str,
+        expected_claim_token: str,
+        expected_claim_generation: int,
+        base_artifact_id: str,
+        transaction_id: str,
+        expected_successor_artifact_id: str | None = None,
+        expected_successor_canonical_sha256: str | None = None,
+        repair_to_audit_handoff_id: str | None = None,
     ) -> dict[str, Any]:
         """Release a claim, including compensation after a pre-CAS consume."""
 
@@ -16284,11 +18917,20 @@ class StoryboardService:
             current.get("status") == "consuming"
             and current.get("consumed_by_work_order_id") == work_order_id
         ):
+            if (
+                current.get("claim_token") != expected_claim_token
+                or current.get("claim_generation")
+                != expected_claim_generation
+            ):
+                raise ValueError(
+                    "repair_package_claim_conflict: failed repair no longer owns the current claim"
+                )
             restored = self.store.finish_repair_package(
                 namespace,
                 project_id,
                 package_id,
                 work_order_id=work_order_id,
+                claim_token=expected_claim_token,
                 successor_artifact_id=None,
                 successor_canonical_sha256=None,
             )
@@ -16296,24 +18938,46 @@ class StoryboardService:
             current.get("status") == "consumed"
             and current.get("consumed_by_work_order_id") == work_order_id
         ):
-            # The package is consumed immediately before the final base CAS.
-            # If that CAS fails, restore the exact signed issued package so no
-            # successful successor pointer or spent authorization remains.
-            restored = copy.deepcopy(original_package)
-            restored["status"] = "issued"
-            for key in (
-                "consumed_by_work_order_id",
-                "successor_artifact_id",
-                "successor_canonical_sha256",
-                "repair_to_audit_handoff_id",
+            if not all(
+                (
+                    expected_successor_artifact_id,
+                    expected_successor_canonical_sha256,
+                    repair_to_audit_handoff_id,
+                )
             ):
-                restored.pop(key, None)
-            restored = self.store.save_project_record(
+                raise ValueError(
+                    "repair_package_rollback_identity_invalid: fixed successor identity is required"
+                )
+            consumption = current.get("consumption_claim")
+            if (
+                not isinstance(consumption, dict)
+                or consumption.get("claim_token") != expected_claim_token
+                or consumption.get("claim_generation")
+                != expected_claim_generation
+                or current.get("claim_generation")
+                != expected_claim_generation
+            ):
+                raise ValueError(
+                    "repair_package_claim_conflict: consumed package is not owned by the fixed claim"
+                )
+            restored = self.store.rollback_consumed_repair_package(
                 namespace,
                 project_id,
-                kind="repair_packages",
-                record_id=package_id,
-                value=restored,
+                package_id,
+                work_order_id=work_order_id,
+                claim_token=expected_claim_token,
+                claim_generation=expected_claim_generation,
+                base_artifact_id=base_artifact_id,
+                transaction_id=transaction_id,
+                expected_successor_artifact_id=str(
+                    expected_successor_artifact_id
+                ),
+                expected_successor_canonical_sha256=str(
+                    expected_successor_canonical_sha256
+                ),
+                repair_to_audit_handoff_id=str(
+                    repair_to_audit_handoff_id
+                ),
             )
         elif current.get("status") == "issued":
             restored = current
@@ -16373,22 +19037,51 @@ class StoryboardService:
                 }
             )
         )
+        if authorization["package"].get("status") == "consumed":
+            recovered = self._recover_consumed_repair_successor(
+                namespace,
+                project_id,
+                work_order=work_order,
+                package=authorization["package"],
+                expected_kind="repair",
+                expected_scope_hash=scope_hash,
+            )
+            if recovered is not None:
+                recovered.data.update(
+                    {
+                        "full_production_validation": True,
+                        "final_full_validation": True,
+                        "structural_repair": True,
+                        "base_artifact_id": source_artifact_id,
+                        "base_canonical_sha256": base_canonical_hash,
+                        "base_raw_fingerprint": base_raw_fingerprint,
+                        "repair_scope_hash": scope_hash,
+                        "audit_certificate_id": authorization[
+                            "certificate"
+                        ].get("certificate_id"),
+                        "audit_to_repair_handoff": self._handoff_summary(
+                            authorization["audit_handoff"]
+                        ),
+                        "return_to_audit_work_order_id": authorization[
+                            "package"
+                        ].get("audit_work_order_id"),
+                    }
+                )
+                return recovered
+            authorization["package"] = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="repair_packages",
+                record_id=repair_package_id,
+            )
         transaction_id = _new_id("REPAIR")
         package_claimed = False
         transaction_prepared = False
+        response: ToolResponse | None = None
+        candidate_ids: tuple[str, str, str] | None = None
 
         def rollback(reason: str) -> None:
             cleanup_errors: list[str] = []
-            try:
-                self._mark_repair_handoffs_rejected(
-                    namespace,
-                    project_id,
-                    repair_package_id=repair_package_id,
-                    work_order_id=work_order_id,
-                    reason=reason,
-                )
-            except Exception as exc:  # pragma: no cover - catastrophic I/O only
-                cleanup_errors.append(f"handoff:{exc}")
             if transaction_prepared:
                 try:
                     self.store.abort_storyboard_successor(
@@ -16400,6 +19093,21 @@ class StoryboardService:
                     )
                 except Exception as exc:
                     cleanup_errors.append(f"transaction:{exc}")
+            if candidate_ids is not None:
+                try:
+                    self._set_successor_candidate_publication(
+                        namespace,
+                        project_id,
+                        work_order_id=work_order_id,
+                        artifact_id=candidate_ids[0],
+                        canonical_artifact_id=candidate_ids[1],
+                        handoff_id=candidate_ids[2],
+                        transaction_id=transaction_id,
+                        state="aborted",
+                        reason=reason,
+                    )
+                except Exception as exc:
+                    cleanup_errors.append(f"candidate:{exc}")
             if package_claimed:
                 try:
                     self._restore_repair_package_after_failed_commit(
@@ -16407,6 +19115,25 @@ class StoryboardService:
                         project_id,
                         original_package=authorization["package"],
                         work_order_id=work_order_id,
+                        expected_claim_token=str(
+                            claimed_package.get("claim_token") or ""
+                        ),
+                        expected_claim_generation=int(
+                            claimed_package.get("claim_generation") or 0
+                        ),
+                        base_artifact_id=str(source_artifact_id),
+                        transaction_id=transaction_id,
+                        expected_successor_artifact_id=(
+                            candidate_ids[0] if candidate_ids else None
+                        ),
+                        expected_successor_canonical_sha256=(
+                            str(response.data.get("canonical_sha256") or "")
+                            if response is not None
+                            else None
+                        ),
+                        repair_to_audit_handoff_id=(
+                            candidate_ids[2] if candidate_ids else None
+                        ),
                     )
                 except Exception as exc:
                     cleanup_errors.append(f"package:{exc}")
@@ -16448,7 +19175,21 @@ class StoryboardService:
                 repair_package_id=repair_package_id,
                 source_link_mode="repair",
                 _repair_transaction_managed=True,
+                _successor_transaction_id=transaction_id,
+                _successor_kind="repair",
+                _successor_base_artifact_id=str(source_artifact_id),
+                _successor_scope_hash=scope_hash,
             )
+            if response.artifact_id:
+                candidate_ids = (
+                    str(response.artifact_id),
+                    str(response.data.get("canonical_json_artifact_id") or ""),
+                    str(response.data.get("handoff_artifact_id") or ""),
+                )
+                if not all(candidate_ids):
+                    raise RuntimeError(
+                        "repair successor publication descriptor is incomplete"
+                    )
         except Exception as exc:
             try:
                 rollback(f"full repair commit raised {type(exc).__name__}")
@@ -16533,33 +19274,78 @@ class StoryboardService:
                     "repair_transaction_id": transaction_id,
                 },
             )
-            consumed_package = self.store.finish_repair_package(
-                namespace,
-                project_id,
-                repair_package_id,
-                work_order_id=work_order_id,
-                successor_artifact_id=str(response.artifact_id),
-                successor_canonical_sha256=new_canonical_hash,
-                repair_to_audit_handoff_id=handoff_id,
-            )
-            self._sync_repair_package_in_hub(
-                namespace, project_id, consumed_package
-            )
-            self.store.commit_storyboard_successor(
-                namespace,
-                project_id,
-                str(source_artifact_id),
-                transaction_id=transaction_id,
-                successor_artifact_id=str(response.artifact_id),
-                successor_canonical_hash=new_canonical_hash,
-            )
+            def finalize_exact_successor() -> dict[str, Any]:
+                exact_package = self.store.finish_repair_package(
+                    namespace,
+                    project_id,
+                    repair_package_id,
+                    work_order_id=work_order_id,
+                    claim_token=str(claimed_package.get("claim_token") or ""),
+                    successor_artifact_id=str(response.artifact_id),
+                    successor_canonical_sha256=new_canonical_hash,
+                    repair_to_audit_handoff_id=handoff_id,
+                )
+                self._sync_repair_package_in_hub(
+                    namespace, project_id, exact_package
+                )
+                self.store.commit_storyboard_successor(
+                    namespace,
+                    project_id,
+                    str(source_artifact_id),
+                    transaction_id=transaction_id,
+                    successor_artifact_id=str(response.artifact_id),
+                    successor_canonical_hash=new_canonical_hash,
+                )
+                return exact_package
+
+            try:
+                consumed_package = finalize_exact_successor()
+            except Exception as first_finalize_error:
+                # Reconcile a lost response after either the signed package
+                # write or the base successor CAS.  Both storage operations
+                # accept only byte-exact replay; changed bindings fail closed.
+                try:
+                    consumed_package = finalize_exact_successor()
+                except Exception as replay_error:
+                    if hasattr(replay_error, "add_note"):
+                        replay_error.add_note(
+                            "initial repair finalization error: "
+                            + str(first_finalize_error)[:512]
+                        )
+                    raise
             transaction_prepared = False
+            package_claimed = False
         except Exception as exc:
             try:
                 rollback(f"full repair finalization raised {type(exc).__name__}")
             except Exception as cleanup_exc:
                 raise cleanup_exc from exc
             raise
+
+        assert candidate_ids is not None
+        try:
+            publication = self._set_successor_candidate_publication(
+                namespace,
+                project_id,
+                work_order_id=work_order_id,
+                artifact_id=candidate_ids[0],
+                canonical_artifact_id=candidate_ids[1],
+                handoff_id=candidate_ids[2],
+                transaction_id=transaction_id,
+                state="committed",
+            )
+            response.data["artifact"] = publication["artifacts"][
+                candidate_ids[0]
+            ]
+            response.data["handoff"] = self._handoff_summary(
+                publication["handoff"]
+            )
+        except Exception as projection_exc:
+            # The committed base transaction is the publication authority;
+            # projections are retryable and must not resurrect the package.
+            response.data["publication_projection_warning"] = str(
+                projection_exc
+            )[:512]
 
         response.data.update(
             {
@@ -16588,6 +19374,7 @@ class StoryboardService:
         response.summary = "完整结构修复已提交｜全表生产预检通过｜已单次消费修复包｜返回原独立审计"
         return response
 
+    @_fence_role_operation
     @_release_consumption_claims_on_error
     def commit_storyboard(
         self,
@@ -16677,6 +19464,72 @@ class StoryboardService:
             namespace, work_order_snapshot, request_session_id
         )
         recovering_draft_commit = False
+        draft_commit_payload_sha256: str | None = None
+        recovering_repair_commit = False
+        if expected_role == "repair" and repair_package_id:
+            try:
+                recovery_package = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="repair_packages",
+                    record_id=str(repair_package_id),
+                )
+            except ValueError as exc:
+                if not self._is_unknown_project_record_error(
+                    exc,
+                    kind="repair_packages",
+                    record_id=str(repair_package_id),
+                ):
+                    raise
+            else:
+                if not self.store.project_record_is_signed(
+                    recovery_package
+                ):
+                    raise ValueError(
+                        "repair_package_binding_mismatch: package is unsigned or tampered"
+                    )
+                if recovery_package.get("status") == "consumed":
+                    if recovery_package.get(
+                        "consumed_by_work_order_id"
+                    ) != work_order_snapshot.get("work_order_id"):
+                        raise ValueError(
+                            "repair_package_unavailable: package is already consumed"
+                        )
+                    # A validating repair work order may only cross the write
+                    # gate after the complete consumed-successor WAL has been
+                    # verified.  Propagate descriptor errors here rather than
+                    # masking tamper as a generic work-order status failure.
+                    self._consumed_repair_successor_descriptor(
+                        namespace,
+                        project_id,
+                        work_order=work_order_snapshot,
+                        package=recovery_package,
+                    )
+                    recovering_repair_commit = True
+                elif recovery_package.get("status") == "consuming":
+                    try:
+                        recovery_expiry = float(
+                            recovery_package.get(
+                                "claim_lease_expires_epoch_seconds"
+                            )
+                            or 0
+                        )
+                    except (TypeError, ValueError):
+                        recovery_expiry = 0
+                    recovering_repair_commit = bool(
+                        recovery_package.get(
+                            "consumed_by_work_order_id"
+                        )
+                        == work_order_id
+                        and recovery_expiry > 0
+                        and recovery_expiry <= time.time()
+                        and self._claim_is_current_authority_ancestor(
+                            namespace,
+                            project_id,
+                            work_order=work_order_snapshot,
+                            claim=recovery_package,
+                        )
+                    )
         if str(work_order_snapshot.get("status") or "") not in WRITE_READY_WORK_ORDER_STATUSES:
             if draft_preflight_id:
                 replay_record = self.store.get_project_record(
@@ -16685,19 +19538,60 @@ class StoryboardService:
                     kind="draft_preflights",
                     record_id=draft_preflight_id,
                 )
+                recovery_storyboard, _recovery_identity = (
+                    _prepare_compact_storyboard_for_commit(storyboard)
+                )
+                _assert_r10_spc1_output_contract(recovery_storyboard)
+                recovery_hash = canonical_storyboard_sha256(
+                    recovery_storyboard
+                )
+                draft_commit_payload_sha256 = _draft_commit_payload_sha256(
+                    project_id=project_id,
+                    work_order_id=work_order_id,
+                    draft_preflight_id=str(draft_preflight_id),
+                    canonical_sha256=recovery_hash,
+                    source_artifact_id=source_artifact_id,
+                    file_name=file_name,
+                )
                 consumed = replay_record.get("consumed_by_commit")
                 if isinstance(consumed, dict):
-                    replay_storyboard, _replay_identity = (
-                        _prepare_compact_storyboard_for_commit(storyboard)
+                    active_binding = self._active_authority_binding(
+                        namespace,
+                        project_id,
+                        work_order_snapshot,
+                        hub=hub_snapshot,
                     )
-                    replay_hash = canonical_storyboard_sha256(replay_storyboard)
+                    request_fingerprint = self._session_fingerprint(
+                        namespace, request_session_id
+                    )
+                    original_session_replay = (
+                        replay_record.get("session_fingerprint")
+                        == request_fingerprint
+                    )
+                    recovered_session_replay = (
+                        consumed.get("recovery_authority_contract")
+                        == "draft-commit-descendant-recovery-v0511"
+                        and consumed.get("completion_authority_root_id")
+                        == active_binding.get("authority_root_id")
+                        and consumed.get("completion_authority_generation")
+                        == active_binding.get("generation")
+                        and consumed.get(
+                            "completion_authority_session_fingerprint"
+                        )
+                        == request_fingerprint
+                        and consumed.get("commit_payload_sha256")
+                        == draft_commit_payload_sha256
+                    )
                     if (
                         replay_record.get("project_id") != project_id
                         or replay_record.get("work_order_id") != work_order_id
-                        or replay_record.get("candidate_sha256") != replay_hash
-                        or replay_record.get("session_fingerprint")
-                        != self._session_fingerprint(namespace, request_session_id)
-                        or consumed.get("canonical_sha256") != replay_hash
+                        or replay_record.get("candidate_sha256")
+                        != recovery_hash
+                        or not (
+                            original_session_replay
+                            or recovered_session_replay
+                        )
+                        or consumed.get("canonical_sha256") != recovery_hash
                         or consumed.get("source_artifact_id") != source_artifact_id
                         or consumed.get("file_name") != file_name
                     ):
@@ -16725,24 +19619,23 @@ class StoryboardService:
                             "canonical_json_artifact_id": consumed.get(
                                 "canonical_json_artifact_id"
                             ),
-                            "canonical_sha256": replay_hash,
+                            "canonical_sha256": recovery_hash,
                             "handoff": copy.deepcopy(consumed.get("handoff")),
                             "certificate": copy.deepcopy(
                                 consumed.get("certificate")
                             ),
                             "draft_preflight": {
                                 "draft_preflight_id": draft_preflight_id,
-                                "candidate_sha256": replay_hash,
+                                "candidate_sha256": recovery_hash,
                                 "quality": replay_record.get("quality"),
                             },
                             "idempotent_replay": True,
+                            "authority_continuation_recovery": bool(
+                                recovered_session_replay
+                            ),
                             "next_action": "independent_audit",
                         },
                     )
-                recovery_storyboard, _recovery_identity = (
-                    _prepare_compact_storyboard_for_commit(storyboard)
-                )
-                recovery_hash = canonical_storyboard_sha256(recovery_storyboard)
                 recovery_request_sha256 = sha256_bytes(
                     _stable_json_bytes(
                         {
@@ -16763,9 +19656,35 @@ class StoryboardService:
                     == recovery_request_sha256
                     and isinstance(replay_record.get("commit_progress"), dict)
                 )
-            if not recovering_draft_commit:
+                if (
+                    not recovering_draft_commit
+                    and expected_role == "production"
+                ):
+                    recovery_context = (
+                        self._descendant_draft_commit_recovery_context(
+                            namespace,
+                            project_id,
+                            work_order_id=work_order_id,
+                            draft_preflight_id=str(draft_preflight_id),
+                            storyboard=recovery_storyboard,
+                            canonical_sha256=recovery_hash,
+                            payload_sha256=draft_commit_payload_sha256,
+                            source_artifact_id=source_artifact_id,
+                            file_name=file_name,
+                        )
+                    )
+                    return self._complete_descendant_draft_commit_recovery(
+                        namespace,
+                        project_id,
+                        work_order_id=work_order_id,
+                        draft_preflight_id=str(draft_preflight_id),
+                        payload_sha256=draft_commit_payload_sha256,
+                        context=recovery_context,
+                        started_ns=started_ns,
+                    )
+            if not (recovering_draft_commit or recovering_repair_commit):
                 self._assert_work_order_write_ready(work_order_snapshot)
-        if not recovering_draft_commit:
+        if not (recovering_draft_commit or recovering_repair_commit):
             self._assert_work_order_write_ready(work_order_snapshot)
         if expected_role == "repair" and not _repair_transaction_managed:
             return self._commit_storyboard_full_repair(
@@ -17020,6 +19939,14 @@ class StoryboardService:
         commit_request_sha256: str | None = None
         draft_commit_ids: dict[str, str] = {}
         if bound_draft_preflight is not None:
+            draft_commit_payload_sha256 = _draft_commit_payload_sha256(
+                project_id=project_id,
+                work_order_id=work_order_id,
+                draft_preflight_id=str(draft_preflight_id),
+                canonical_sha256=canonical_hash,
+                source_artifact_id=source_artifact_id,
+                file_name=file_name,
+            )
             commit_request_sha256 = sha256_bytes(
                 _stable_json_bytes(
                     {
@@ -17109,16 +20036,19 @@ class StoryboardService:
         # The next operation is the first persistent artifact side effect.
         if bound_draft_preflight is not None:
             assert commit_request_sha256 is not None
+            assert draft_commit_payload_sha256 is not None
             claim_result = self.store.claim_draft_preflight_commit(
                 namespace,
                 project_id,
                 str(draft_preflight_id),
                 request_sha256=commit_request_sha256,
+                payload_sha256=draft_commit_payload_sha256,
             )
             if claim_result["claim_status"] == "in_progress":
                 raise ValueError("draft_preflight_commit_in_progress")
             if claim_result["claim_status"] == "consumed":
                 raise ValueError("draft_preflight_already_consumed")
+            bound_draft_preflight = copy.deepcopy(claim_result["record"])
             draft_commit_claim_token = str(claim_result["claim_token"])
             _ACTIVE_CONSUMPTION_CLAIMS.set(
                 (
@@ -17174,6 +20104,7 @@ class StoryboardService:
                 "stable_batch_uid_count": len(identity_manifest.get("batch_uids", [])),
                 "draft_preflight_id": draft_preflight_id,
                 "draft_commit_request_sha256": commit_request_sha256,
+                "draft_commit_payload_sha256": draft_commit_payload_sha256,
                 "scene_coverage_manifest_sha256": (
                     bound_draft_preflight.get("scene_coverage_manifest_sha256")
                     if bound_draft_preflight is not None
@@ -17230,6 +20161,7 @@ class StoryboardService:
                 "stable_batch_uid_count": len(identity_manifest.get("batch_uids", [])),
                 "draft_preflight_id": draft_preflight_id,
                 "draft_commit_request_sha256": commit_request_sha256,
+                "draft_commit_payload_sha256": draft_commit_payload_sha256,
                 "scene_coverage_manifest_sha256": (
                     bound_draft_preflight.get("scene_coverage_manifest_sha256")
                     if bound_draft_preflight is not None
@@ -17343,6 +20275,138 @@ class StoryboardService:
                 "handoff_id": handoff["handoff_id"],
             },
         )
+        if bound_draft_preflight is not None and draft_commit_claim_token:
+            assert draft_commit_payload_sha256 is not None
+            recovery_summary = (
+                f"生成完成｜{report.get('shot_count', 0)}镜｜总时长{storyboard.get('total_duration', 0)}s"
+                "｜生产预检通过｜待独立审计"
+            )
+            telemetry_blueprint = {
+                "telemetry_id": stage_trace_id,
+                "operation": telemetry_operation,
+                "window_role": str(
+                    work_order_snapshot.get("server_actor_role")
+                    or "production"
+                ),
+                "task_type": (
+                    "repair"
+                    if work_order_snapshot.get("server_actor_role")
+                    == "repair"
+                    else "production_preflight"
+                ),
+                "input_fingerprints": copy.deepcopy(
+                    handoff["fingerprints"]
+                ),
+                "shot_count": len(storyboard.get("shots", [])),
+                "input_payload_bytes": (
+                    int(
+                        (telemetry_metrics or {}).get(
+                            "input_payload_bytes", 0
+                        )
+                    )
+                    or submitted_payload_bytes
+                ),
+                "output_payload_bytes": max(
+                    len(workbook_bytes)
+                    + len(_stable_json_bytes(storyboard)),
+                    int(
+                        (telemetry_metrics or {}).get(
+                            "output_payload_bytes", 0
+                        )
+                    ),
+                ),
+                "affected_shot_count": int(
+                    (telemetry_metrics or {}).get(
+                        "affected_shot_count", 0
+                    )
+                ),
+                "preserved_semantic_count": int(
+                    (telemetry_metrics or {}).get(
+                        "preserved_semantic_count", 0
+                    )
+                ),
+                "cache_reason": str(
+                    (telemetry_metrics or {}).get("cache_reason")
+                    or "compact canonical validation; no duplicate prompt or Seedance batch generation"
+                ),
+                "stages_ms": {
+                    **dict(telemetry_prestages_ms or {}),
+                    "materialize": (
+                        materialized_ns - materialize_started_ns
+                    )
+                    / 1_000_000,
+                    "validate": (validated_ns - materialized_ns)
+                    / 1_000_000,
+                    "serialize_and_persist": (
+                        persisted_ns - validated_ns
+                    )
+                    / 1_000_000,
+                    # The durable ledger write has not started.  Recovery
+                    # records it as an unmeasured zero-length boundary rather
+                    # than inventing timing after a process death.
+                    "ledger": 0.0,
+                },
+            }
+            completion_blueprint = {
+                "artifact_id": xlsx_record["artifact_id"],
+                "canonical_json_artifact_id": json_record["artifact_id"],
+                "canonical_sha256": canonical_hash,
+                "source_artifact_id": source_artifact_id,
+                "file_name": file_name,
+                "status": PRODUCTION_PREFLIGHT_PASS,
+                "summary": recovery_summary,
+                "trace_id": stage_trace_id,
+                "scene_coverage_manifest_sha256": (
+                    bound_draft_preflight.get(
+                        "scene_coverage_manifest_sha256"
+                    )
+                ),
+            }
+            recovery_descriptor = {
+                "contract": "draft-commit-descendant-recovery-v0511",
+                "project_id": project_id,
+                "work_order_id": work_order_id,
+                "draft_preflight_id": str(draft_preflight_id),
+                "payload_sha256": draft_commit_payload_sha256,
+                "request_sha256": commit_request_sha256,
+                "issuance_authority_sha256": bound_draft_preflight.get(
+                    "commit_issuance_authority_sha256"
+                ),
+                "canonical_sha256": canonical_hash,
+                "source_artifact_id": source_artifact_id,
+                "file_name": file_name,
+                "artifact_id": xlsx_record["artifact_id"],
+                "artifact_fingerprint": xlsx_record["fingerprint"],
+                "artifact_meta_sha256": self.store.project_state_sha256(
+                    xlsx_record
+                ),
+                "canonical_json_artifact_id": json_record["artifact_id"],
+                "canonical_json_fingerprint": json_record["fingerprint"],
+                "canonical_meta_sha256": self.store.project_state_sha256(
+                    json_record
+                ),
+                "certificate_id": certificate["certificate_id"],
+                "certificate_hmac": certificate.get("integrity_hmac"),
+                "certificate_sha256": self.store.project_state_sha256(
+                    certificate
+                ),
+                "handoff_id": handoff["handoff_id"],
+                "handoff_hmac": handoff.get("integrity_hmac"),
+                "handoff_sha256": self.store.project_state_sha256(handoff),
+                "telemetry": telemetry_blueprint,
+                "completion": completion_blueprint,
+            }
+            recovery_descriptor["descriptor_sha256"] = (
+                self.store.project_state_sha256(recovery_descriptor)
+            )
+            self.store.update_draft_preflight_commit_progress(
+                namespace,
+                project_id,
+                str(draft_preflight_id),
+                claim_token=draft_commit_claim_token,
+                stage="recovery_ready",
+                progress={"recovery_descriptor": recovery_descriptor},
+            )
         with self.store.mutate_project(namespace, project_id) as (hub, ledger):
             work_order = _find_work_order(hub, work_order_id)
             if work_order.get("status") != "validating":
@@ -17494,6 +20558,40 @@ class StoryboardService:
         stages_ms.setdefault("validate", (validated_ns - materialized_ns) / 1_000_000)
         stages_ms["serialize_and_persist"] = (persisted_ns - validated_ns) / 1_000_000
         stages_ms["ledger"] = (ledger_ns - persisted_ns) / 1_000_000
+        if bound_draft_preflight is not None and draft_commit_claim_token:
+            live_preflight = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="draft_preflights",
+                record_id=str(draft_preflight_id),
+            )
+            live_progress = live_preflight.get("commit_progress")
+            live_descriptor = (
+                copy.deepcopy(live_progress.get("recovery_descriptor"))
+                if isinstance(live_progress, dict)
+                else None
+            )
+            if not isinstance(live_descriptor, dict) or not isinstance(
+                live_descriptor.get("telemetry"), dict
+            ):
+                raise RuntimeError(
+                    "draft_preflight_commit_recovery_descriptor_missing"
+                )
+            live_descriptor["telemetry"]["stages_ms"] = copy.deepcopy(
+                stages_ms
+            )
+            live_descriptor.pop("descriptor_sha256", None)
+            live_descriptor["descriptor_sha256"] = (
+                self.store.project_state_sha256(live_descriptor)
+            )
+            self.store.update_draft_preflight_commit_progress(
+                namespace,
+                project_id,
+                str(draft_preflight_id),
+                claim_token=draft_commit_claim_token,
+                stage="telemetry_ready",
+                progress={"recovery_descriptor": live_descriptor},
+            )
         telemetry = self._save_telemetry(
             namespace,
             project_id,
@@ -17548,6 +20646,10 @@ class StoryboardService:
                 "status": status,
                 "summary": summary,
                 "trace_id": telemetry["telemetry_id"],
+                "commit_payload_sha256": draft_commit_payload_sha256,
+                "issuance_authority_sha256": bound_draft_preflight.get(
+                    "commit_issuance_authority_sha256"
+                ),
                 "scene_coverage_manifest_sha256": bound_draft_preflight.get(
                     "scene_coverage_manifest_sha256"
                 ),
@@ -17599,6 +20701,7 @@ class StoryboardService:
             },
         )
 
+    @_fence_role_operation
     def commit_storyboard_delta(
         self,
         namespace: str,
@@ -17934,6 +21037,17 @@ class StoryboardService:
             transaction_prepared = False
         except Exception as exc:
             cleanup_errors: list[str] = []
+            if transaction_prepared:
+                try:
+                    self.store.abort_storyboard_successor(
+                        namespace,
+                        project_id,
+                        base_artifact_id,
+                        transaction_id=claim_id,
+                        reason=f"delta successor CAS failed: {type(exc).__name__}",
+                    )
+                except Exception as cleanup_exc:
+                    cleanup_errors.append(f"transaction:{cleanup_exc}")
             if candidate_ids is not None:
                 try:
                     self._set_successor_candidate_publication(
@@ -17949,17 +21063,6 @@ class StoryboardService:
                     )
                 except Exception as cleanup_exc:
                     cleanup_errors.append(f"candidate:{cleanup_exc}")
-            if transaction_prepared:
-                try:
-                    self.store.abort_storyboard_successor(
-                        namespace,
-                        project_id,
-                        base_artifact_id,
-                        transaction_id=claim_id,
-                        reason=f"delta successor CAS failed: {type(exc).__name__}",
-                    )
-                except Exception as cleanup_exc:
-                    cleanup_errors.append(f"transaction:{cleanup_exc}")
             for cleanup_error in cleanup_errors:
                 if hasattr(exc, "add_note"):
                     exc.add_note(f"delta rollback warning: {cleanup_error}")
@@ -18086,6 +21189,7 @@ class StoryboardService:
                 return str(item)
         return None
 
+    @_fence_role_operation
     def commit_storyboard_patch(
         self,
         namespace: str,
@@ -18137,7 +21241,7 @@ class StoryboardService:
                 "canonical_hash_conflict: expected canonical hash does not match the base artifact"
             )
         base_metadata = base_record.get("metadata") or {}
-        if any(
+        base_has_committed_successor = any(
             base_metadata.get(key)
             for key in (
                 "successor_artifact_id",
@@ -18145,8 +21249,7 @@ class StoryboardService:
                 "delta_successor_artifact_id",
                 "repair_successor_artifact_id",
             )
-        ):
-            raise ValueError("canonical_hash_conflict: base canonical hash was already consumed")
+        )
 
         try:
             certificate = self.store.get_project_record(
@@ -18233,6 +21336,7 @@ class StoryboardService:
         repair_package, audit_to_repair_handoff = self._repair_package_for_patch(
             namespace,
             project_id,
+            work_order=work_order,
             certificate=certificate,
             storyboard=storyboard,
             base_artifact_id=base_artifact_id,
@@ -18240,7 +21344,11 @@ class StoryboardService:
             current_fingerprints=current_fingerprints,
         )
         self._assert_repair_separation(
-            work_order, repair_package, audit_to_repair_handoff
+            namespace,
+            project_id,
+            work_order,
+            repair_package,
+            audit_to_repair_handoff,
         )
         repair_package_id = str(repair_package["repair_package_id"])
 
@@ -18408,6 +21516,42 @@ class StoryboardService:
                 }
             )
         )
+        if repair_package.get("status") == "consumed":
+            recovered = self._recover_consumed_repair_successor(
+                namespace,
+                project_id,
+                work_order=work_order,
+                package=repair_package,
+                expected_kind="patch",
+                expected_scope_hash=scope_hash,
+            )
+            if recovered is not None:
+                recovered.data.update(
+                    {
+                        "full_production_validation": True,
+                        "final_full_validation": True,
+                        "base_artifact_id": base_artifact_id,
+                        "base_canonical_hash": base_canonical_hash,
+                        "new_canonical_hash": recovered.data.get(
+                            "canonical_sha256"
+                        ),
+                        "audit_certificate_id": audit_certificate_id,
+                        "impact_scope": sorted(impact_ids),
+                        "applied_operations": applied_operations,
+                    }
+                )
+                return recovered
+            repair_package = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="repair_packages",
+                record_id=repair_package_id,
+            )
+            base_has_committed_successor = False
+        elif base_has_committed_successor:
+            raise ValueError(
+                "canonical_hash_conflict: base canonical hash was already consumed"
+            )
         claim_id = _new_id("PATCH")
         package_claimed = False
         transaction_prepared = False
@@ -18416,6 +21560,17 @@ class StoryboardService:
 
         def rollback_patch(reason: str) -> list[str]:
             cleanup_errors: list[str] = []
+            if transaction_prepared:
+                try:
+                    self.store.abort_storyboard_successor(
+                        namespace,
+                        project_id,
+                        base_artifact_id,
+                        transaction_id=claim_id,
+                        reason=reason,
+                    )
+                except Exception as cleanup_exc:
+                    cleanup_errors.append(f"transaction:{cleanup_exc}")
             if candidate_ids is not None:
                 try:
                     self._set_successor_candidate_publication(
@@ -18431,17 +21586,6 @@ class StoryboardService:
                     )
                 except Exception as cleanup_exc:
                     cleanup_errors.append(f"candidate:{cleanup_exc}")
-            if transaction_prepared:
-                try:
-                    self.store.abort_storyboard_successor(
-                        namespace,
-                        project_id,
-                        base_artifact_id,
-                        transaction_id=claim_id,
-                        reason=reason,
-                    )
-                except Exception as cleanup_exc:
-                    cleanup_errors.append(f"transaction:{cleanup_exc}")
             if package_claimed:
                 try:
                     self._restore_repair_package_after_failed_commit(
@@ -18449,6 +21593,25 @@ class StoryboardService:
                         project_id,
                         original_package=repair_package,
                         work_order_id=work_order_id,
+                        expected_claim_token=str(
+                            claimed_package.get("claim_token") or ""
+                        ),
+                        expected_claim_generation=int(
+                            claimed_package.get("claim_generation") or 0
+                        ),
+                        base_artifact_id=base_artifact_id,
+                        transaction_id=claim_id,
+                        expected_successor_artifact_id=(
+                            candidate_ids[0] if candidate_ids else None
+                        ),
+                        expected_successor_canonical_sha256=(
+                            str(response.data.get("canonical_sha256") or "")
+                            if response is not None
+                            else None
+                        ),
+                        repair_to_audit_handoff_id=(
+                            candidate_ids[2] if candidate_ids else None
+                        ),
                     )
                 except Exception as cleanup_exc:
                     cleanup_errors.append(f"package:{cleanup_exc}")
@@ -18534,12 +21697,27 @@ class StoryboardService:
             raise error
 
         if response.status == PRODUCTION_PREFLIGHT_PASS and not report.get("issues"):
-            try:
-                consumed_package = self.store.finish_repair_package(
+            response.data["artifact"] = self.store.update_artifact_metadata(
+                namespace,
+                project_id,
+                str(response.artifact_id),
+                {
+                    "patch_base_artifact_id": base_artifact_id,
+                    "patch_base_canonical_sha256": base_canonical_hash,
+                    "patch_audit_certificate_id": audit_certificate_id,
+                    "patch_repair_package_id": repair_package_id,
+                    "patch_impact_scope": sorted(impact_ids),
+                    "patch_scope_hash": scope_hash,
+                },
+            )
+
+            def finalize_exact_patch_successor() -> dict[str, Any]:
+                exact_package = self.store.finish_repair_package(
                     namespace,
                     project_id,
                     repair_package_id,
                     work_order_id=work_order_id,
+                    claim_token=str(claimed_package.get("claim_token") or ""),
                     successor_artifact_id=str(response.artifact_id),
                     successor_canonical_sha256=new_canonical_hash,
                     repair_to_audit_handoff_id=str(
@@ -18547,7 +21725,7 @@ class StoryboardService:
                     ),
                 )
                 self._sync_repair_package_in_hub(
-                    namespace, project_id, consumed_package
+                    namespace, project_id, exact_package
                 )
                 self.store.commit_storyboard_successor(
                     namespace,
@@ -18557,15 +21735,32 @@ class StoryboardService:
                     successor_artifact_id=str(response.artifact_id),
                     successor_canonical_hash=new_canonical_hash,
                 )
+                return exact_package
+
+            try:
+                consumed_package = finalize_exact_patch_successor()
                 transaction_prepared = False
                 package_claimed = False
-            except Exception as exc:
-                for cleanup_error in rollback_patch(
-                    f"patch successor CAS failed: {type(exc).__name__}"
-                ):
-                    if hasattr(exc, "add_note"):
-                        exc.add_note(f"patch rollback warning: {cleanup_error}")
-                raise
+            except Exception as first_finalize_error:
+                try:
+                    consumed_package = finalize_exact_patch_successor()
+                    transaction_prepared = False
+                    package_claimed = False
+                except Exception as replay_error:
+                    if hasattr(replay_error, "add_note"):
+                        replay_error.add_note(
+                            "initial patch finalization error: "
+                            + str(first_finalize_error)[:512]
+                        )
+                    for cleanup_error in rollback_patch(
+                        "patch successor CAS failed: "
+                        + type(replay_error).__name__
+                    ):
+                        if hasattr(replay_error, "add_note"):
+                            replay_error.add_note(
+                                f"patch rollback warning: {cleanup_error}"
+                            )
+                    raise
 
             try:
                 publication = self._set_successor_candidate_publication(
@@ -18588,32 +21783,25 @@ class StoryboardService:
                 response.data["publication_projection_warning"] = str(
                     projection_exc
                 )[:512]
-            response.data["artifact"] = self.store.update_artifact_metadata(
-                namespace,
-                project_id,
-                str(response.artifact_id),
-                {
-                    "patch_base_artifact_id": base_artifact_id,
-                    "patch_base_canonical_sha256": base_canonical_hash,
-                    "patch_audit_certificate_id": audit_certificate_id,
-                    "patch_repair_package_id": repair_package_id,
-                    "patch_impact_scope": sorted(impact_ids),
-                    "patch_scope_hash": scope_hash,
-                },
-            )
         else:
-            released_package = self._restore_repair_package_after_failed_commit(
-                namespace,
-                project_id,
-                original_package=repair_package,
-                work_order_id=work_order_id,
-            )
-            package_claimed = False
             rollback_errors = rollback_patch(
                 "patch did not pass complete validation"
             )
             if rollback_errors:
-                response.data["publication_rollback_warnings"] = rollback_errors
+                raise RuntimeError(
+                    "patch_rollback_incomplete: " + "; ".join(rollback_errors)
+                )
+            released_package = self.store.get_project_record(
+                namespace,
+                project_id,
+                kind="repair_packages",
+                record_id=repair_package_id,
+            )
+            if released_package.get("status") != "issued":
+                raise RuntimeError(
+                    "patch_rollback_incomplete: repair package was not released"
+                )
+            package_claimed = False
             consumed_package = released_package
             if isinstance(response.data.get("handoff"), dict):
                 response.data["handoff"]["status"] = "rejected"
@@ -18642,6 +21830,7 @@ class StoryboardService:
         )
         return response
 
+    @_fence_role_operation
     @_release_consumption_claims_on_error
     def audit_storyboard(
         self,
@@ -18716,7 +21905,12 @@ class StoryboardService:
                 "audit_cycle_mismatch: audit_cycle_id is server-derived from the signed handoff"
             )
         audit_cycle_id = signed_cycle_id
-        self._assert_audit_separation(audit_work_order, handoff)
+        self._assert_work_order_session(
+            namespace, audit_work_order, request_session_id
+        )
+        self._assert_audit_separation(
+            namespace, project_id, audit_work_order, handoff
+        )
         boundary_hash = self._boundary_hash(storyboard)
         production_components = handoff.get("cache_components", {})
         source_fingerprint = str(
@@ -19470,6 +22664,12 @@ class StoryboardService:
                     event_summary.get("introduced_issue_count", 0)
                 )
         if cached_certificate is None:
+            self._assert_work_order_session(
+                namespace, audit_work_order, request_session_id
+            )
+            audit_binding = self._active_authority_binding(
+                namespace, project_id, audit_work_order
+            )
             certificate = self._persist_audit_certificate(
                 namespace,
                 project_id,
@@ -19493,8 +22693,13 @@ class StoryboardService:
                 ),
                 fingerprints=fingerprints,
                 production_work_order_id=str(handoff["work_order_id"]),
-                audit_actor_binding_id=str(audit_work_order.get("server_actor_binding_id") or ""),
-                audit_session_fingerprint=audit_work_order.get("transport_session_fingerprint"),
+                audit_actor_binding_id=str(
+                    audit_binding.get("actor_binding_id") or ""
+                ),
+                audit_session_fingerprint=audit_binding.get(
+                    "session_fingerprint"
+                ),
+                audit_authority_binding=audit_binding,
                 result_override="blocked" if audit_blocked else None,
                 certificate_id=(
                     "CERT-"
@@ -20099,6 +23304,7 @@ class StoryboardService:
             },
         )
 
+    @_fence_role_operation
     def complete_validation(
         self,
         namespace: str,
@@ -20475,6 +23681,7 @@ class StoryboardService:
             raise ValueError("independent_audit_required: audit trace binding mismatch")
         return certificate
 
+    @_fence_role_operation
     def signoff_task(
         self,
         namespace: str,
