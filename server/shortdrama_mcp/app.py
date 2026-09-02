@@ -516,6 +516,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "project_intake/source_lock/chapter_intake的execute+explicit_execute工单调用；"
             "服务端在下载或落盘前校验工单类型和后台生产执行身份；审计工单仍禁止导入或替换来源。"
             "安全下载、保存原件并提取xlsx/docx/pdf/json/md/txt/csv/mm内容。"
+            "若旧窗口尚未刷新0.5.16的snapshot文件参数，可用library_storage_action把同一file"
+            "仅交给Library快照校验器；该兼容路径不导入、不持久化项目原件。"
         ),
         annotations=_annotations(read_only=False, open_world=True),
         meta=meta("正在导入文件…", "文件已导入", file_params=["file"]),
@@ -527,7 +529,40 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         file: OpenAIFile,
         source_role: Literal["novel", "script", "storyboard", "rule", "reference", "asset"],
         ctx: Context,
+        library_storage_action: Literal[
+            "register_snapshot",
+            "mount_snapshot",
+            "commit_snapshot",
+        ]
+        | None = None,
+        bundle_library_file_id: str | None = None,
+        bundle_file_id: str | None = None,
+        library_path: str | None = None,
+        bundle_sha256: str | None = None,
+        expected_tree_sha256: str | None = None,
+        tree_sha256: str | None = None,
+        expected_generation: int = 0,
+        export_id: str | None = None,
     ) -> ToolResponse:
+        if library_storage_action is not None:
+            if source_role != "asset":
+                raise ValueError(
+                    "library snapshot compatibility requires source_role=asset"
+                )
+            return external_storage.handle_action(
+                request_namespace(settings),
+                storage_action=library_storage_action,
+                project_id=project_id,
+                snapshot=file,
+                bundle_library_file_id=bundle_library_file_id,
+                bundle_file_id=bundle_file_id,
+                library_path=library_path,
+                bundle_sha256=bundle_sha256,
+                expected_tree_sha256=expected_tree_sha256,
+                tree_sha256=tree_sha256,
+                expected_generation=expected_generation,
+                export_id=export_id,
+            )
         return service.import_source_file(
             request_namespace(settings),
             project_id=project_id,
