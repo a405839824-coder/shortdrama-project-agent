@@ -1556,6 +1556,164 @@ class V0511HistoricalPreflightAttestationTests(_V057FixtureOnly):
                     field,
                 )
 
+    async def test_historical_recovery_successor_can_be_reissued_after_runtime_change(
+        self,
+    ) -> None:
+        preflight_plan = self._historical_plan().data[
+            "preflight_evidence_plan"
+        ]
+        self._historical_execute(preflight_plan["plan_sha256"])
+        first_plan = self._exact_recovery_plan().data["recovery_plan"]
+        first_result = self._exact_recovery_execute(
+            first_plan["plan_sha256"]
+        )
+        mapping = next(
+            row
+            for row in first_result.data["mappings"]
+            if row["old_handoff_id"] == self.historical_ids[0]
+        )
+        first_successor_id = str(mapping["new_handoff_id"])
+        first_successor = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=first_successor_id,
+        )
+        self.assertEqual(
+            first_successor["production_preflight_status"],
+            service_module.HISTORICAL_PRODUCTION_PREFLIGHT_PASS,
+        )
+
+        # Keep the first signed recovery journal and all authored artifacts
+        # unchanged while modeling a later orchestration-only deployment.
+        self.service._service_code_fingerprint = "d" * 64
+        self.service._runtime_fingerprint = "c" * 64
+        current_runtime_certificate = (
+            self.service._persist_runtime_certificate(
+                self.namespace,
+                self.project_id,
+                {
+                    "status": "pass",
+                    "version": self.service.bootstrap.get("version"),
+                    "workflow_revision": self.service.bootstrap.get(
+                        "workflow_revision"
+                    ),
+                },
+            )
+        )
+        gap_id = "GAP-test-historical-successor-recovery"
+        with self.service.store.mutate_project(
+            self.namespace, self.project_id
+        ) as (hub, _ledger):
+            service_module.project_agent.record_capability_gap(
+                hub,
+                {
+                    "gap_id": gap_id,
+                    "timestamp": service_module.utc_stamp(),
+                    "request": "recover one sealed historical successor",
+                    "missing_dependency": "successor lineage refresh",
+                    "risk": "runtime drift blocks current audit",
+                    "safe_fallback": "leave it pending",
+                    "proposed_implementation": "verify signed immediate journal and sealed fail profile",
+                    "required_tests": ["lineage", "current fail profile"],
+                },
+            )
+        session_id = "v0511-historical-successor-recovery"
+        order = self.service.begin_task(
+            self.namespace,
+            project_id=self.project_id,
+            operation="rule_improvement",
+            mode="execute",
+            authorization="explicit_execute",
+            request_text="authorized historical successor recovery",
+            targets=[
+                gap_id,
+                first_successor_id,
+                "controlled_phase:handoff_recovery",
+            ],
+            authoritative_source="signed recovery journal and historical attestation",
+            latest_version="next-runtime",
+            target_boundary="one exact historical successor",
+            must_keep=["history", "current failure diagnosis"],
+            must_remove=[],
+            protected_scope=["storyboard", "canonical", "audit history"],
+            expected_outputs=["prepared current-fingerprint successor"],
+            window_key=session_id,
+            request_session_id=session_id,
+        )
+        plan_response = self.service.recover_storyboard_handoff(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=str(order.work_order_id),
+            gap_id=gap_id,
+            handoff_ids=[first_successor_id],
+            action="plan",
+            expected_plan_sha256=None,
+            confirmation=None,
+            request_session_id=session_id,
+            phase="handoff_recovery",
+        )
+        plan = plan_response.data["recovery_plan"]
+        self.assertEqual(
+            plan["runtime_test_certificate_id"],
+            current_runtime_certificate["certificate_id"],
+        )
+        self.assertEqual(
+            plan["items"][0]["preflight_evidence_source"],
+            "controlled_historical_contract_replay",
+        )
+        result = self.service.recover_storyboard_handoff(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=str(order.work_order_id),
+            gap_id=gap_id,
+            handoff_ids=[first_successor_id],
+            action="execute",
+            expected_plan_sha256=plan["plan_sha256"],
+            confirmation=service_module.HANDOFF_RECOVERY_CONFIRMATION,
+            request_session_id=session_id,
+            phase="handoff_recovery",
+        )
+        second_successor = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=str(result.data["mappings"][0]["new_handoff_id"]),
+        )
+        first_after = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=first_successor_id,
+        )
+        self.assertEqual(first_after["status"], "superseded")
+        self.assertEqual(second_successor["status"], "prepared")
+        self.assertEqual(
+            second_successor["production_preflight_status"],
+            service_module.HISTORICAL_PRODUCTION_PREFLIGHT_PASS,
+        )
+        self.assertEqual(
+            second_successor["production_validation_replay"],
+            first_after["production_validation_replay"],
+        )
+        self.assertFalse(second_successor["current_production_pass_claimed"])
+        self.assertTrue(
+            second_successor["requires_full_current_independent_audit"]
+        )
+        replay = self.service.recover_storyboard_handoff(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=str(order.work_order_id),
+            gap_id=gap_id,
+            handoff_ids=[first_successor_id],
+            action="execute",
+            expected_plan_sha256=plan["plan_sha256"],
+            confirmation=service_module.HANDOFF_RECOVERY_CONFIRMATION,
+            request_session_id=session_id,
+            phase="handoff_recovery",
+        )
+        self.assertTrue(replay.data["mappings"][0]["idempotent_replay"])
+
     async def test_eleven_handoffs_recover_then_historical_successor_forces_current_audit(
         self,
     ) -> None:

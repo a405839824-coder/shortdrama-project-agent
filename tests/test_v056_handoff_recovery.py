@@ -375,6 +375,144 @@ class V056HandoffRecoveryTests(unittest.IsolatedAsyncioTestCase):
             2,
         )
 
+    async def test_recovered_successor_can_be_reissued_after_later_runtime_change(
+        self,
+    ) -> None:
+        first_plan = self._plan().data["recovery_plan"]
+        first_result = self._execute(first_plan["plan_sha256"])
+        first_successor_id = str(
+            first_result.data["mappings"][0]["new_handoff_id"]
+        )
+
+        # Model a later orchestration-only deployment. The committed first
+        # recovery journal remains byte-identical while the current complete
+        # runtime fingerprint and required regression certificate change.
+        self.service._service_code_fingerprint = "f" * 64
+        self.service._runtime_fingerprint = "e" * 64
+        second_runtime_certificate = (
+            self.service._persist_runtime_certificate(
+                self.namespace,
+                self.project_id,
+                {
+                    "status": "pass",
+                    "version": self.service.bootstrap.get("version"),
+                    "workflow_revision": self.service.bootstrap.get(
+                        "workflow_revision"
+                    ),
+                },
+            )
+        )
+        second_gap_id = "GAP-test-successor-recovery"
+        with self.service.store.mutate_project(
+            self.namespace, self.project_id
+        ) as (hub, _ledger):
+            service_module.project_agent.record_capability_gap(
+                hub,
+                {
+                    "gap_id": second_gap_id,
+                    "timestamp": service_module.utc_stamp(),
+                    "request": "recover a signed recovery successor",
+                    "missing_dependency": "successor runtime refresh",
+                    "risk": "stale successor blocks independent audit",
+                    "safe_fallback": "keep successor pending",
+                    "proposed_implementation": "verify immediate signed recovery journal",
+                    "required_tests": ["lineage", "atomic reissue"],
+                },
+            )
+        second_session = "v056-successor-recovery"
+        second_order = self.service.begin_task(
+            self.namespace,
+            project_id=self.project_id,
+            operation="rule_improvement",
+            mode="execute",
+            authorization="explicit_execute",
+            request_text="authorized successor handoff recovery",
+            targets=[
+                second_gap_id,
+                first_successor_id,
+                "controlled_phase:handoff_recovery",
+            ],
+            authoritative_source="signed immediate recovery journal",
+            latest_version="next-runtime",
+            target_boundary="one exact prepared successor",
+            must_keep=["history", "content bytes"],
+            must_remove=[],
+            protected_scope=["storyboard", "audit evidence"],
+            expected_outputs=["current prepared successor"],
+            window_key=second_session,
+            request_session_id=second_session,
+        )
+        second_plan_response = self.service.recover_storyboard_handoff(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=str(second_order.work_order_id),
+            gap_id=second_gap_id,
+            handoff_ids=[first_successor_id],
+            action="plan",
+            expected_plan_sha256=None,
+            confirmation=None,
+            request_session_id=second_session,
+        )
+        second_plan = second_plan_response.data["recovery_plan"]
+        self.assertEqual(
+            second_plan["runtime_test_certificate_id"],
+            second_runtime_certificate["certificate_id"],
+        )
+        second_result = self.service.recover_storyboard_handoff(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=str(second_order.work_order_id),
+            gap_id=second_gap_id,
+            handoff_ids=[first_successor_id],
+            action="execute",
+            expected_plan_sha256=second_plan["plan_sha256"],
+            confirmation=service_module.HANDOFF_RECOVERY_CONFIRMATION,
+            request_session_id=second_session,
+        )
+        second_successor_id = str(
+            second_result.data["mappings"][0]["new_handoff_id"]
+        )
+        first_successor = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=first_successor_id,
+        )
+        second_successor = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=second_successor_id,
+        )
+        self.assertEqual(first_successor["status"], "superseded")
+        self.assertEqual(second_successor["status"], "prepared")
+        self.assertEqual(
+            second_successor["supersedes_handoff_id"],
+            first_successor_id,
+        )
+        self.assertEqual(
+            second_successor["storyboard_artifact_id"],
+            first_successor["storyboard_artifact_id"],
+        )
+        self.assertEqual(
+            second_successor["canonical_sha256"],
+            first_successor["canonical_sha256"],
+        )
+        replay = self.service.recover_storyboard_handoff(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=str(second_order.work_order_id),
+            gap_id=second_gap_id,
+            handoff_ids=[first_successor_id],
+            action="execute",
+            expected_plan_sha256=second_plan["plan_sha256"],
+            confirmation=service_module.HANDOFF_RECOVERY_CONFIRMATION,
+            request_session_id=second_session,
+        )
+        self.assertTrue(
+            replay.data["mappings"][0]["idempotent_replay"]
+        )
+
     async def test_execute_requires_exact_confirmation_before_mutation(self) -> None:
         plan = self._plan().data["recovery_plan"]
         with self.assertRaisesRegex(

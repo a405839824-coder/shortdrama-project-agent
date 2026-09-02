@@ -3,7 +3,7 @@
   "runtime_version": "V16.3-148-R10-StableRuntime",
   "workflow_revision": "R10-PG1",
   "compact_master_contract": {
-    "plugin_version": "0.5.14",
+    "plugin_version": "0.5.15",
     "schema_version": "R10.1",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",

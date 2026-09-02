@@ -60,6 +60,8 @@ Use this fixed audit category order:
 
 The Agent computes one stable pattern key from project, error code, normalized field class, and normalized root-cause/issue type. Episode, logical filename, version, event ID, and shot IDs are occurrence locations and must not split one recurring defect into false singletons. Mutable evidence text is never the identity. Preserve every distinct event/scope/location and report both pattern count and occurrence count so a template defect recurring across batches is escalated instead of hidden by location-specific deduplication.
 
+- Plugin 0.5.15 additionally permits a signed recovery successor to be recovered again after a later deployment invalidates only its complete dependency fingerprint. Use a newly registered exact gap and a new exact recovery work order. Verify the immediate committed recovery journal, signed old/new/certificate/trace after-images, Hub projections, recovery authority, immutable content fingerprints and current validator result before plan. Historical successors must retain the exact `HISTCACHE`, frozen PASS/zero report, complete current FAIL identity and non-reusable/full-reaudit flags. Any drift fails before writes; execute remains append-only and idempotent.
+
 ## Prevent defects before formal output
 
 Use this mandatory production sequence: `get_agent_status` → authorized `migrate_project_state` when status requires it → `query_project_issues` → per-scene `preflight_storyboard_draft` → full `preflight_storyboard_draft` → certificate-bound `commit_storyboard` → separate `independent_audit`.

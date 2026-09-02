@@ -1,6 +1,6 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.14",
+  "version": "0.5.15",
   "description": "Chinese short-drama production with window-neutral orchestration, controlled storyboard-handoff recovery, project-state migration, scene/full draft preflight, first-draft quality gates, independent audit, and conditional repair.",
   "author": {
     "name": "Storyboard Project Agent"
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.14取消用户窗口角色限制：同一认证用户的任意窗口可直接生产、独立审计或修正，无需切换窗口或恢复权限；服务端仍为每张工单签发不同authority root/window binding/actor binding，生产预检不能冒充独审，修正必须消费签名修复包并返回原独审authority。0.5.12逐handoff历史报告封存、HISTCACHE隔离、受控补签/恢复与全部不可变历史边界继续有效，公共工具仍精确为19个。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.15延续同一认证用户任意窗口直接生产、独立审计或修正，并允许已签名恢复后继在后续部署导致完整运行时指纹变化时再次受控恢复；必须验证立即前序恢复日志、证书、生产trace、不可变内容指纹和历史当前失败画像。服务端仍为每张工单签发不同authority root/window binding/actor binding，生产预检不能冒充独审，修正必须消费签名修复包并返回原独审authority；公共工具仍精确为19个。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [

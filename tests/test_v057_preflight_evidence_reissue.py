@@ -29,6 +29,7 @@ class V057PreflightEvidenceReissueTests(
     test_execute_requires_exact_confirmation_before_mutation = None
     test_execute_supersedes_preserves_history_and_replays_idempotently = None
     test_interrupted_commit_fails_closed_and_retry_recovers = None
+    test_recovered_successor_can_be_reissued_after_later_runtime_change = None
     test_tool_contract_and_plan_are_controlled_and_read_only = None
 
     async def asyncSetUp(self) -> None:

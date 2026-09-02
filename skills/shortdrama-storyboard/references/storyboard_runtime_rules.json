@@ -60,7 +60,7 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.14",
+    "plugin_version": "0.5.15",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
     "canonical_atomic_field_count": 27,
@@ -718,7 +718,17 @@
             "HND-9029110f35d74270"
           ],
           "action_sequence": ["plan", "execute"],
-          "exact_confirmation": "SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT"
+          "exact_confirmation": "SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT",
+          "successor_rerecovery_since_0.5.15": {
+            "scope": "signed_prepared_pending_audit_recovery_successor_after_later_complete_dependency_fingerprint_change",
+            "authority": "new_registered_exact_gap_plus_new_rule_improvement_execute_explicit_execute_server_production_work_order",
+            "required_lineage": ["immediate_committed_recovery_journal", "exact_old_new_certificate_trace_after_images", "unique_hub_projections", "original_recovery_work_order_authority"],
+            "required_revalidation": ["immutable_content_fingerprints", "workbook_projection", "production_certificate", "production_trace", "current_validator_report"],
+            "historical_successor_requirements": ["exact_histcache", "frozen_pass_zero_report", "complete_current_fail_report_sha_count_histogram", "current_validator_identity", "current_production_pass_claimed_false", "requires_full_current_independent_audit_true"],
+            "mismatch_policy": "fail_closed_before_plan_or_mutation",
+            "output": "append_only_direct_predecessor_superseded_plus_one_prepared_pending_audit_successor",
+            "idempotency": "exact_execute_reuses_same_successor"
+          }
         },
         "transaction": "signed_journal_plus_before_after_cas",
         "historical_hub_projection_read_shapes": ["exact_stripped_signed_record_projection", "exact_full_signed_record"],

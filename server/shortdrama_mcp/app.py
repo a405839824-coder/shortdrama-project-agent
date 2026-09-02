@@ -203,6 +203,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "两阶段均须先action=plan预演，execute回传精确"
             "plan_sha256和对应确认字面量。恢复逐条使用签名日志与CAS，将失效的prepared "
             "production_to_audit handoff原子标记为superseded并按当前完整指纹重新签发；"
+            "已签名恢复后继因后续部署再次失效时，只有其立即前序恢复日志、证书、trace、"
+            "内容指纹和当前验证画像全部一致才可再次恢复；"
             "不删除历史、不改写分镜/canonical/XLSX、不签发独立审计结论，新handoff仍为PENDING_AUDIT。"
         ),
         annotations=_annotations(
