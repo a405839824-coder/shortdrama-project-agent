@@ -1205,34 +1205,29 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             source_artifact_id=None,
             request_session_id="transport-session-shared",
         )
-        audit = self.service.begin_task(
-            self.namespace,
-            project_id=project_id,
-            operation="storyboard_audit",
-            mode="audit_only",
-            authorization="read_only",
-            request_text="独立审计",
-            targets=[str(committed.artifact_id)],
-            authoritative_source="handoff",
-            latest_version="current",
-            target_boundary="第一集",
-            must_keep=["只读"],
-            must_remove=[],
-            protected_scope=["全部源内容"],
-            expected_outputs=["audit certificate"],
-            window_key="audit-window",
-            request_session_id="transport-session-shared",
-        )
-        with self.assertRaisesRegex(ValueError, "independent_audit_separation_required"):
-            self.service.audit_storyboard(
+        hub_before = self.service.store.load_hub(self.namespace, project_id)
+        with self.assertRaisesRegex(ValueError, "session_role_separation_required"):
+            self.service.begin_task(
                 self.namespace,
                 project_id=project_id,
-                artifact_id=str(committed.artifact_id),
-                audit_cycle_id=None,
-                work_order_id=str(audit.work_order_id),
-                handoff_artifact_id=committed.data["handoff"]["handoff_id"],
+                operation="storyboard_audit",
+                mode="audit_only",
+                authorization="read_only",
+                request_text="独立审计",
+                targets=[str(committed.artifact_id)],
+                authoritative_source="handoff",
+                latest_version="current",
+                target_boundary="第一集",
+                must_keep=["只读"],
+                must_remove=[],
+                protected_scope=["全部源内容"],
+                expected_outputs=["audit certificate"],
+                window_key="audit-window",
                 request_session_id="transport-session-shared",
             )
+        self.assertEqual(
+            self.service.store.load_hub(self.namespace, project_id), hub_before
+        )
 
     async def test_storyboard_patch_blocks_shot_range_protected_scope(self) -> None:
         project_id, work_order_id, committed, audited = await self._prepare_patch_base(
