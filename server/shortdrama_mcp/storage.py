@@ -4,6 +4,7 @@ import base64
 import calendar
 import copy
 import contextlib
+import contextvars
 import hashlib
 import hmac
 import json
@@ -34,6 +35,7 @@ PROJECT_RECORD_KINDS = {
     "repair_packages",
     "draft_preflights",
     "migrations",
+    "authority_continuations",
 }
 SIGNED_ONLY_PROJECT_RECORD_KINDS = PROJECT_RECORD_KINDS - {
     "handoffs",
@@ -49,6 +51,7 @@ PROJECT_RECORD_PRIMARY_ID_KEYS = {
     "repair_packages": "repair_package_id",
     "draft_preflights": "draft_preflight_id",
     "migrations": "migration_id",
+    "authority_continuations": "continuation_id",
 }
 DEFAULT_SUCCESSOR_LEASE_SECONDS = 300
 MAX_SUCCESSOR_LEASE_SECONDS = 86_400
@@ -57,6 +60,8 @@ DEFAULT_DRAFT_PREFLIGHT_COMMIT_LEASE_SECONDS = 300
 DEFAULT_HANDOFF_CLAIM_LEASE_SECONDS = 300
 MAX_CONSUMPTION_LEASE_SECONDS = 3_600
 MAX_CONSUMPTION_CLAIM_HISTORY = 16
+DEFAULT_AUTHORITY_OPERATION_LEASE_SECONDS = 300
+MAX_AUTHORITY_OPERATION_LEASE_SECONDS = 3_600
 DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
 DOWNLOAD_SPOOL_MEMORY_BYTES = 2 * 1024 * 1024
 DOWNLOAD_COPY_CHUNK_BYTES = 1024 * 1024
@@ -144,6 +149,10 @@ RECOVERY_HANDOFF_AUDIT_MUTABLE_KEYS = frozenset(
         "claim_lease_seconds",
         "claim_lease_expires_at",
         "claim_lease_expires_epoch_seconds",
+        "claim_authority_contract",
+        "claim_authority_root_id",
+        "claim_authority_generation",
+        "claim_authority_session_fingerprint",
         "claim_history",
         "consumed_by_work_order_id",
         "consumed_at",
@@ -155,6 +164,11 @@ RECOVERY_HANDOFF_AUDIT_MUTABLE_KEYS = frozenset(
         "reaudit_count",
         "reaudited_at",
     }
+)
+
+
+_ACTIVE_AUTHORITY_OPERATION: contextvars.ContextVar[dict[str, Any] | None] = (
+    contextvars.ContextVar("shortdrama_active_authority_operation", default=None)
 )
 
 
@@ -671,6 +685,1093 @@ class ProjectStore:
                     "migration_commit_in_progress: finish migration before project writes"
                 )
 
+    @staticmethod
+    def _authority_root_id(project_id: str, work_order_id: str) -> str:
+        return "AUTH-" + sha256_bytes(
+            canonical_json_bytes(
+                {
+                    "project_id": project_id,
+                    "work_order_id": work_order_id,
+                    "contract": "window-role-authority-root-v1",
+                }
+            )
+        )[:24]
+
+    @staticmethod
+    def _authority_operation_lease_id(authority_root_id: str) -> str:
+        return "AOP-" + sha256_bytes(authority_root_id.encode("utf-8"))[:24]
+
+    def _authority_operation_lease_path(
+        self,
+        directory: Path,
+        authority_root_id: str,
+    ) -> Path:
+        lease_id = self._authority_operation_lease_id(authority_root_id)
+        project_scope = sha256_bytes(
+            str(directory.resolve()).encode("utf-8")
+        )[:32]
+        return (
+            self.root
+            / ".authority-operation-leases"
+            / project_scope
+            / f"{lease_id}.json"
+        )
+
+    def _active_authority_binding_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        hub: dict[str, Any],
+        work_order: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve one signed authority head while the project lock is held."""
+
+        work_order_id = safe_id(work_order.get("work_order_id"), "work_order_id")
+        authority_root_id = self._authority_root_id(project_id, work_order_id)
+        raw_heads = hub.get("active_authority_bindings", [])
+        if not isinstance(raw_heads, list):
+            raise ValueError(
+                "authority_continuation_head_conflict: active heads must be an array"
+            )
+        matches = [
+            row
+            for row in raw_heads
+            if isinstance(row, dict)
+            and row.get("authority_root_id") == authority_root_id
+        ]
+        if len(matches) > 1:
+            raise ValueError(
+                "authority_continuation_head_conflict: duplicate authority root"
+            )
+
+        signed_root_records: list[dict[str, Any]] = []
+        for record_path in sorted(
+            (directory / "authority_continuations").glob("*.json")
+        ):
+            record = self.read_json(record_path)
+            if not isinstance(record, dict):
+                raise ValueError("authority_continuation_record_conflict")
+            self._verify_record_integrity(record, record_id=record_path.stem)
+            self._verify_project_record_primary_id(
+                "authority_continuations",
+                record,
+                record_id=record_path.stem,
+            )
+            if (
+                record.get("project_id") != project_id
+                or not self.project_record_is_signed(record)
+            ):
+                raise ValueError("authority_continuation_record_conflict")
+            if record.get("authority_root_id") == authority_root_id:
+                signed_root_records.append(record)
+
+        if not matches:
+            if signed_root_records:
+                raise ValueError(
+                    "authority_head_incomplete: signed continuation is not published"
+                )
+            authority_contract = {
+                "work_order_id": work_order_id,
+                "operation": str(work_order.get("operation") or ""),
+                "mode": str(work_order.get("mode") or ""),
+                "authorization": str(work_order.get("authorization") or ""),
+                "server_actor_role": str(
+                    work_order.get("server_actor_role") or ""
+                ),
+                "targets": copy.deepcopy(work_order.get("targets") or []),
+                "source_lock": copy.deepcopy(
+                    work_order.get("source_lock") or {}
+                ),
+                "protected_scope": copy.deepcopy(
+                    work_order.get("protected_scope") or []
+                ),
+                "expected_outputs": copy.deepcopy(
+                    work_order.get("expected_outputs") or []
+                ),
+            }
+            return {
+                "authority_root_id": authority_root_id,
+                "continuation_id": None,
+                "authority_epoch_id": f"EPOCH-{authority_root_id[5:]}-0",
+                "work_order_id": work_order_id,
+                "generation": 0,
+                "window_binding_id": work_order.get(
+                    "server_window_binding_id"
+                ),
+                "actor_binding_id": work_order.get(
+                    "server_actor_binding_id"
+                ),
+                "session_fingerprint": work_order.get(
+                    "transport_session_fingerprint"
+                ),
+                "role": work_order.get("server_actor_role"),
+                "operation": work_order.get("operation"),
+                "mode": work_order.get("mode"),
+                "authorization": work_order.get("authorization"),
+                "authority_contract_sha256": sha256_bytes(
+                    canonical_json_bytes(authority_contract)
+                ),
+                "plan_sha256": None,
+                "status": "active",
+            }
+
+        head = matches[0]
+        continuation_id = safe_id(
+            head.get("continuation_id"), "continuation_id"
+        )
+        if head.get("work_order_id") != work_order_id:
+            raise ValueError(
+                "authority_continuation_head_conflict: work order differs"
+            )
+        generation = head.get("generation")
+        if (
+            isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation < 1
+        ):
+            raise ValueError("authority_continuation_head_conflict: generation")
+        record_path = (
+            directory / "authority_continuations" / f"{continuation_id}.json"
+        )
+        if not record_path.is_file():
+            raise ValueError(
+                "authority_continuation_head_conflict: signed head is missing"
+            )
+        record = self.read_json(record_path)
+        if not isinstance(record, dict):
+            raise ValueError("authority_continuation_record_conflict")
+        self._verify_record_integrity(record, record_id=continuation_id)
+        self._verify_project_record_primary_id(
+            "authority_continuations", record, record_id=continuation_id
+        )
+        if (
+            not self.project_record_is_signed(record)
+            or record.get("project_id") != project_id
+            or record.get("authority_root_id") != authority_root_id
+            or record.get("work_order_id") != work_order_id
+            or record.get("status") != "active"
+            or record.get("active_binding") != head
+        ):
+            raise ValueError(
+                "authority_head_invalid: signed continuation record differs"
+            )
+        generations = [
+            row.get("generation")
+            for row in signed_root_records
+            if isinstance(row.get("generation"), int)
+            and not isinstance(row.get("generation"), bool)
+        ]
+        if not generations or generation != max(generations):
+            raise ValueError(
+                "authority_head_rollback: active head is not the newest signed generation"
+            )
+        return copy.deepcopy(head)
+
+    def _authority_binding_at_generation_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        hub: dict[str, Any],
+        work_order: dict[str, Any],
+        generation: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Verify and return one binding from a contiguous signed lineage."""
+
+        if (
+            isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation < 0
+        ):
+            raise ValueError("audit_authority_generation_invalid")
+        current = self._active_authority_binding_unlocked(
+            directory,
+            project_id=project_id,
+            hub=hub,
+            work_order=work_order,
+        )
+        current_generation = current.get("generation")
+        if (
+            isinstance(current_generation, bool)
+            or not isinstance(current_generation, int)
+            or generation > current_generation
+        ):
+            raise ValueError("audit_authority_generation_invalid")
+        work_order_id = safe_id(
+            work_order.get("work_order_id"), "work_order_id"
+        )
+        authority_root_id = self._authority_root_id(
+            project_id, work_order_id
+        )
+        authority_contract = {
+            "work_order_id": work_order_id,
+            "operation": str(work_order.get("operation") or ""),
+            "mode": str(work_order.get("mode") or ""),
+            "authorization": str(work_order.get("authorization") or ""),
+            "server_actor_role": str(
+                work_order.get("server_actor_role") or ""
+            ),
+            "targets": copy.deepcopy(work_order.get("targets") or []),
+            "source_lock": copy.deepcopy(work_order.get("source_lock") or {}),
+            "protected_scope": copy.deepcopy(
+                work_order.get("protected_scope") or []
+            ),
+            "expected_outputs": copy.deepcopy(
+                work_order.get("expected_outputs") or []
+            ),
+        }
+        contract_sha256 = sha256_bytes(
+            canonical_json_bytes(authority_contract)
+        )
+        generation_zero = {
+            "continuation_id": None,
+            "authority_epoch_id": f"EPOCH-{authority_root_id[5:]}-0",
+            "authority_root_id": authority_root_id,
+            "work_order_id": work_order_id,
+            "generation": 0,
+            "window_binding_id": work_order.get("server_window_binding_id"),
+            "actor_binding_id": work_order.get("server_actor_binding_id"),
+            "session_fingerprint": work_order.get(
+                "transport_session_fingerprint"
+            ),
+            "role": work_order.get("server_actor_role"),
+            "operation": work_order.get("operation"),
+            "mode": work_order.get("mode"),
+            "authorization": work_order.get("authorization"),
+            "authority_contract_sha256": contract_sha256,
+            "plan_sha256": None,
+            "status": "active",
+        }
+        records: list[dict[str, Any]] = []
+        for record_path in sorted(
+            (directory / "authority_continuations").glob("*.json")
+        ):
+            record = self.read_json(record_path)
+            if not isinstance(record, dict):
+                raise ValueError("audit_authority_lineage_invalid")
+            self._verify_record_integrity(record, record_id=record_path.stem)
+            self._verify_project_record_primary_id(
+                "authority_continuations",
+                record,
+                record_id=record_path.stem,
+            )
+            if (
+                record.get("project_id") != project_id
+                or not self.project_record_is_signed(record)
+            ):
+                raise ValueError("audit_authority_lineage_invalid")
+            if record.get("authority_root_id") == authority_root_id:
+                records.append(record)
+        by_generation: dict[int, dict[str, Any]] = {}
+        previous_continuation_id: str | None = None
+        expected_binding_fields = set(generation_zero)
+        authority_epoch_ids: set[str] = set()
+        plan_sha256s: set[str] = set()
+        for expected_generation in range(1, current_generation + 1):
+            matches = [
+                record
+                for record in records
+                if record.get("generation") == expected_generation
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    "audit_authority_lineage_invalid: generation gap or duplicate"
+                )
+            record = matches[0]
+            binding = record.get("active_binding")
+            if (
+                not isinstance(binding, dict)
+                or set(binding) != expected_binding_fields
+                or record.get("work_order_id") != work_order_id
+                or record.get("previous_generation")
+                != expected_generation - 1
+                or record.get("previous_continuation_id")
+                != previous_continuation_id
+                or not isinstance(
+                    record.get("work_order_snapshot_sha256"), str
+                )
+                or re.fullmatch(
+                    r"[0-9a-f]{64}",
+                    str(record.get("work_order_snapshot_sha256") or ""),
+                )
+                is None
+                or record.get("expected_work_order_snapshot_sha256")
+                != record.get("work_order_snapshot_sha256")
+                or record.get("authority_contract_sha256")
+                != contract_sha256
+                or record.get("status") != "active"
+                or isinstance(record.get("generation"), bool)
+                or isinstance(binding.get("generation"), bool)
+                or any(
+                    record.get(field) != binding.get(field)
+                    for field in expected_binding_fields
+                )
+                or binding.get("generation") != expected_generation
+                or binding.get("authority_root_id") != authority_root_id
+                or binding.get("work_order_id") != work_order_id
+                or binding.get("role") != work_order.get("server_actor_role")
+                or binding.get("operation") != work_order.get("operation")
+                or binding.get("mode") != work_order.get("mode")
+                or binding.get("authorization")
+                != work_order.get("authorization")
+                or binding.get("authority_contract_sha256")
+                != contract_sha256
+                or binding.get("continuation_id")
+                != record.get("continuation_id")
+                or binding.get("authority_epoch_id")
+                != record.get("authority_epoch_id")
+                or binding.get("plan_sha256")
+                != record.get("plan_sha256")
+                or binding.get("status") != "active"
+            ):
+                raise ValueError("audit_authority_lineage_invalid")
+            epoch_id = str(binding.get("authority_epoch_id") or "")
+            plan_sha256 = str(binding.get("plan_sha256") or "")
+            if (
+                not epoch_id
+                or epoch_id in authority_epoch_ids
+                or not plan_sha256
+                or plan_sha256 in plan_sha256s
+            ):
+                raise ValueError(
+                    "audit_authority_lineage_invalid: epoch or plan reused"
+                )
+            authority_epoch_ids.add(epoch_id)
+            plan_sha256s.add(plan_sha256)
+            previous_continuation_id = str(record["continuation_id"])
+            by_generation[expected_generation] = copy.deepcopy(binding)
+        if len(records) != current_generation:
+            raise ValueError(
+                "audit_authority_lineage_invalid: unexpected generation record"
+            )
+        expected_current = (
+            generation_zero
+            if current_generation == 0
+            else by_generation[current_generation]
+        )
+        if current != expected_current:
+            raise ValueError(
+                "audit_authority_lineage_invalid: active head differs"
+            )
+        return (
+            copy.deepcopy(
+                generation_zero
+                if generation == 0
+                else by_generation[generation]
+            ),
+            copy.deepcopy(current),
+        )
+
+    def _work_order_authority_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        work_order_id: str,
+        expected_role: str,
+        error_code: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Resolve one work order and its current authority under project lock."""
+
+        clean_work_order_id = safe_id(work_order_id, "work_order_id")
+        hub_path = directory / "hub.json"
+        if not hub_path.is_file():
+            raise ValueError(error_code)
+        hub = self.read_json(hub_path)
+        work_orders = hub.get("work_orders") if isinstance(hub, dict) else None
+        matches = [
+            row
+            for row in (work_orders if isinstance(work_orders, list) else [])
+            if isinstance(row, dict)
+            and row.get("work_order_id") == clean_work_order_id
+        ]
+        if (
+            len(matches) != 1
+            or matches[0].get("server_actor_role") != expected_role
+        ):
+            raise ValueError(error_code)
+        active = self._active_authority_binding_unlocked(
+            directory,
+            project_id=project_id,
+            hub=hub,
+            work_order=matches[0],
+        )
+        return matches[0], active
+
+    @staticmethod
+    def _claim_authority_fields(
+        authority: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "claim_authority_contract": "window-role-authority-claim-v1",
+            "claim_authority_root_id": authority.get("authority_root_id"),
+            "claim_authority_generation": authority.get("generation"),
+            "claim_authority_session_fingerprint": authority.get(
+                "session_fingerprint"
+            ),
+        }
+
+    def _assert_claim_authority_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        record: dict[str, Any],
+        work_order_id: str,
+        expected_role: str,
+        error_code: str,
+    ) -> None:
+        """Fence a durable claim to its live window generation and lease."""
+
+        work_order, active = self._work_order_authority_unlocked(
+            directory,
+            project_id=project_id,
+            work_order_id=work_order_id,
+            expected_role=expected_role,
+            error_code=error_code,
+        )
+        claimed_root = record.get(
+            "claim_authority_root_id"
+        ) or self._authority_root_id(project_id, work_order_id)
+        claimed_generation = record.get("claim_authority_generation", 0)
+        claimed_session = record.get(
+            "claim_authority_session_fingerprint",
+            work_order.get("transport_session_fingerprint"),
+        )
+        try:
+            lease_expires = float(
+                record.get("claim_lease_expires_epoch_seconds") or 0
+            )
+        except (TypeError, ValueError):
+            lease_expires = 0
+        if (
+            active.get("authority_root_id") != claimed_root
+            or active.get("generation") != claimed_generation
+            or active.get("session_fingerprint") != claimed_session
+            or lease_expires <= time.time()
+        ):
+            raise ValueError(error_code)
+
+    def _assert_claim_authority_ancestor_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        record: dict[str, Any],
+        work_order: dict[str, Any],
+        active: dict[str, Any],
+        error_code: str,
+        require_operation_fence: bool = True,
+    ) -> None:
+        """Verify that an expired claim belongs to this authority lineage.
+
+        A continuation may take over an expired durable claim, but it must not
+        turn a merely matching work-order id into authority.  The old claim's
+        root, generation and session must resolve to one signed generation of
+        the same logical authority.  Crossing generations additionally
+        requires the caller to hold the current authority-operation lease;
+        this keeps a stale pre-continuation request from using the recovery
+        path directly after its window has been revoked.
+        """
+
+        work_order_id = str(work_order.get("work_order_id") or "")
+        authority_root_id = self._authority_root_id(
+            project_id, work_order_id
+        )
+        claimed_generation = record.get("claim_authority_generation")
+        if (
+            record.get("claim_authority_contract")
+            != "window-role-authority-claim-v1"
+            or record.get("claim_authority_root_id") != authority_root_id
+            or isinstance(claimed_generation, bool)
+            or not isinstance(claimed_generation, int)
+            or claimed_generation < 0
+            or active.get("authority_root_id") != authority_root_id
+            or not isinstance(active.get("generation"), int)
+            or claimed_generation > int(active["generation"])
+        ):
+            raise ValueError(error_code)
+
+        hub_path = directory / "hub.json"
+        if not hub_path.is_file():
+            raise ValueError(error_code)
+        try:
+            claimed_binding, verified_current = (
+                self._authority_binding_at_generation_unlocked(
+                    directory,
+                    project_id=project_id,
+                    hub=self.read_json(hub_path),
+                    work_order=work_order,
+                    generation=claimed_generation,
+                )
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError(error_code) from exc
+        if verified_current != active:
+            raise ValueError(error_code)
+        expected_session = claimed_binding.get("session_fingerprint")
+        if (
+            record.get("claim_authority_session_fingerprint")
+            != expected_session
+        ):
+            raise ValueError(error_code)
+
+        if (
+            require_operation_fence
+            and claimed_generation < int(active["generation"])
+        ):
+            operation = _ACTIVE_AUTHORITY_OPERATION.get()
+            if (
+                not isinstance(operation, dict)
+                or operation.get("project_id") != project_id
+                or operation.get("work_order_id") != work_order_id
+                or operation.get("authority_root_id")
+                != authority_root_id
+                or operation.get("authority_generation")
+                != active.get("generation")
+                or operation.get("session_fingerprint")
+                != active.get("session_fingerprint")
+            ):
+                raise ValueError(error_code)
+
+    def _assert_session_role_history_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        hub: dict[str, Any],
+        session_fingerprint: str | None,
+        role: str,
+    ) -> None:
+        """Reject one transport session ever crossing project role domains."""
+
+        if not session_fingerprint:
+            return
+        if role not in {"production", "independent_audit", "repair"}:
+            raise ValueError("session_role_history_invalid: unsupported role")
+        conflicting_roles: set[str] = set()
+        work_orders = hub.get("work_orders") if isinstance(hub, dict) else None
+        for work_order in (
+            work_orders if isinstance(work_orders, list) else []
+        ):
+            if (
+                isinstance(work_order, dict)
+                and work_order.get("transport_session_fingerprint")
+                == session_fingerprint
+                and work_order.get("server_actor_role") != role
+            ):
+                conflicting_roles.add(
+                    str(work_order.get("server_actor_role") or "unknown")
+                )
+
+        raw_heads = hub.get("active_authority_bindings", [])
+        if not isinstance(raw_heads, list):
+            raise ValueError(
+                "authority_continuation_head_conflict: active heads must be an array"
+            )
+        for head in raw_heads:
+            if (
+                isinstance(head, dict)
+                and head.get("session_fingerprint") == session_fingerprint
+                and head.get("role") != role
+            ):
+                conflicting_roles.add(str(head.get("role") or "unknown"))
+
+        for record_path in sorted(
+            (directory / "authority_continuations").glob("*.json")
+        ):
+            record = self.read_json(record_path)
+            if not isinstance(record, dict):
+                raise ValueError("authority_continuation_record_conflict")
+            self._verify_record_integrity(record, record_id=record_path.stem)
+            self._verify_project_record_primary_id(
+                "authority_continuations",
+                record,
+                record_id=record_path.stem,
+            )
+            if (
+                record.get("project_id") != project_id
+                or not self.project_record_is_signed(record)
+            ):
+                raise ValueError("authority_continuation_record_conflict")
+            record_role = str(record.get("role") or "")
+            bindings = [record.get("active_binding")]
+            previous_binding = record.get("previous_binding")
+            if isinstance(previous_binding, dict):
+                bindings.append(previous_binding)
+            if any(
+                isinstance(binding, dict)
+                and binding.get("session_fingerprint")
+                == session_fingerprint
+                for binding in bindings
+            ) and record_role != role:
+                conflicting_roles.add(record_role or "unknown")
+        if conflicting_roles:
+            raise ValueError(
+                "session_role_separation_required: session has another project role history"
+            )
+
+    def assert_session_role_available(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        session_fingerprint: str | None,
+        role: str,
+    ) -> None:
+        """Read-only locked wrapper for role-continuation planning."""
+
+        directory = self.project_dir(namespace, project_id)
+        with self.lock(f"{namespace}-{project_id}"):
+            hub_path = directory / "hub.json"
+            if not hub_path.is_file():
+                raise ValueError(f"unknown project_id: {project_id}")
+            hub = self.read_json(hub_path)
+            self._assert_session_role_history_unlocked(
+                directory,
+                project_id=project_id,
+                hub=hub,
+                session_fingerprint=session_fingerprint,
+                role=role,
+            )
+
+    def _read_authority_operation_lease_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        authority_root_id: str,
+    ) -> dict[str, Any] | None:
+        lease_path = self._authority_operation_lease_path(
+            directory, authority_root_id
+        )
+        if not lease_path.is_file():
+            return None
+        lease = self.read_json(lease_path)
+        lease_id = lease_path.stem
+        if not isinstance(lease, dict):
+            raise ValueError("authority_operation_lease_tampered")
+        self._verify_record_integrity(lease, record_id=lease_id)
+        # Authority-operation leases were introduced by the continuation
+        # contract and therefore have no legitimate unsigned legacy form.
+        # Accepting an unsigned replacement here would let a later write wash
+        # it into a freshly signed lease.
+        if not self.project_record_is_signed(lease):
+            raise ValueError("authority_operation_lease_tampered")
+        if (
+            lease.get("lease_id") != lease_id
+            or lease.get("record_id") != lease_id
+            or lease.get("project_id") != project_id
+            or lease.get("authority_root_id") != authority_root_id
+            or lease.get("status") != "active"
+        ):
+            raise ValueError("authority_operation_lease_tampered")
+        return lease
+
+    def _assert_authority_operation_context_unlocked(
+        self,
+        directory: Path,
+        *,
+        namespace: str,
+        project_id: str,
+        operation: dict[str, Any],
+    ) -> None:
+        if (
+            operation.get("store_root") != str(self.root)
+            or operation.get("namespace") != namespace
+            or operation.get("project_id") != project_id
+        ):
+            raise ValueError("authority_operation_scope_conflict")
+        authority_root_id = safe_id(
+            operation.get("authority_root_id"), "authority_root_id"
+        )
+        lease = self._read_authority_operation_lease_unlocked(
+            directory,
+            project_id=project_id,
+            authority_root_id=authority_root_id,
+        )
+        holders = lease.get("holders") if isinstance(lease, dict) else None
+        holder_tokens = {
+            str(row.get("claim_token") or "")
+            for row in (holders if isinstance(holders, list) else [])
+            if isinstance(row, dict)
+        }
+        if isinstance(lease, dict) and not holder_tokens and lease.get(
+            "claim_token"
+        ):
+            holder_tokens.add(str(lease.get("claim_token")))
+        if (
+            lease is None
+            or operation.get("claim_token") not in holder_tokens
+            or lease.get("work_order_id") != operation.get("work_order_id")
+            or lease.get("authority_generation")
+            != operation.get("authority_generation")
+            or lease.get("session_fingerprint")
+            != operation.get("session_fingerprint")
+        ):
+            raise ValueError("authority_operation_fence_revoked")
+
+        hub_path = directory / "hub.json"
+        if not hub_path.is_file():
+            raise ValueError(f"unknown project_id: {project_id}")
+        hub = self.read_json(hub_path)
+        work_orders = hub.get("work_orders") if isinstance(hub, dict) else None
+        matches = [
+            row
+            for row in (work_orders if isinstance(work_orders, list) else [])
+            if isinstance(row, dict)
+            and row.get("work_order_id") == operation.get("work_order_id")
+        ]
+        if len(matches) != 1:
+            raise ValueError("authority_operation_fence_revoked")
+        active = self._active_authority_binding_unlocked(
+            directory,
+            project_id=project_id,
+            hub=hub,
+            work_order=matches[0],
+        )
+        if (
+            active.get("authority_root_id") != authority_root_id
+            or active.get("generation") != operation.get("authority_generation")
+            or active.get("session_fingerprint")
+            != operation.get("session_fingerprint")
+        ):
+            raise ValueError("authority_operation_fence_revoked")
+
+        now = time.time()
+        lease_seconds = int(lease.get("claim_lease_seconds") or 0)
+        if not 1 <= lease_seconds <= MAX_AUTHORITY_OPERATION_LEASE_SECONDS:
+            raise ValueError("authority_operation_lease_tampered")
+        lease["claim_lease_expires_epoch_seconds"] = now + lease_seconds
+        lease["claim_lease_expires_at"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + lease_seconds)
+        )
+        lease["last_renewed_at"] = utc_stamp()
+        lease["integrity_hmac"] = self._record_integrity_hmac(lease)
+        self.atomic_write_json(
+            self._authority_operation_lease_path(directory, authority_root_id),
+            lease,
+        )
+
+    def claim_authority_operation(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        work_order_id: str,
+        expected_authority_root_id: str,
+        expected_authority_generation: int,
+        expected_session_fingerprint: str | None,
+        lease_seconds: int = DEFAULT_AUTHORITY_OPERATION_LEASE_SECONDS,
+    ) -> dict[str, Any]:
+        """Acquire a short-lived, signed fence for one role-bound operation."""
+
+        safe_id(work_order_id, "work_order_id")
+        safe_id(expected_authority_root_id, "authority_root_id")
+        if (
+            isinstance(expected_authority_generation, bool)
+            or not isinstance(expected_authority_generation, int)
+            or expected_authority_generation < 0
+        ):
+            raise ValueError("authority_operation_generation_invalid")
+        if (
+            isinstance(lease_seconds, bool)
+            or not isinstance(lease_seconds, int)
+            or not 1 <= lease_seconds <= MAX_AUTHORITY_OPERATION_LEASE_SECONDS
+        ):
+            raise ValueError("authority_operation_lease_invalid")
+        directory = self.project_dir(namespace, project_id)
+        with self.project_write_lock(namespace, project_id):
+            hub_path = directory / "hub.json"
+            if not hub_path.is_file():
+                raise ValueError(f"unknown project_id: {project_id}")
+            hub = self.read_json(hub_path)
+            work_orders = hub.get("work_orders") if isinstance(hub, dict) else None
+            matches = [
+                row
+                for row in (work_orders if isinstance(work_orders, list) else [])
+                if isinstance(row, dict)
+                and row.get("work_order_id") == work_order_id
+            ]
+            if len(matches) != 1:
+                raise ValueError("authority_operation_work_order_invalid")
+            active = self._active_authority_binding_unlocked(
+                directory,
+                project_id=project_id,
+                hub=hub,
+                work_order=matches[0],
+            )
+            if (
+                active.get("authority_root_id")
+                != expected_authority_root_id
+                or active.get("generation")
+                != expected_authority_generation
+                or active.get("session_fingerprint")
+                != expected_session_fingerprint
+            ):
+                raise ValueError("authority_operation_fence_stale")
+
+            existing = self._read_authority_operation_lease_unlocked(
+                directory,
+                project_id=project_id,
+                authority_root_id=expected_authority_root_id,
+            )
+            now = time.time()
+            lease_id = self._authority_operation_lease_id(
+                expected_authority_root_id
+            )
+            claim_token = secrets.token_hex(24)
+            if existing is not None and float(
+                existing.get("claim_lease_expires_epoch_seconds") or 0
+            ) > now:
+                if (
+                    existing.get("work_order_id") != work_order_id
+                    or existing.get("authority_generation")
+                    != expected_authority_generation
+                    or existing.get("session_fingerprint")
+                    != expected_session_fingerprint
+                ):
+                    raise ValueError("authority_operation_in_progress")
+                raise ValueError("authority_operation_in_progress")
+            else:
+                lease = {
+                    "lease_id": lease_id,
+                    "record_id": lease_id,
+                    "project_id": project_id,
+                    "authority_root_id": expected_authority_root_id,
+                    "work_order_id": work_order_id,
+                    "authority_generation": expected_authority_generation,
+                    "session_fingerprint": expected_session_fingerprint,
+                    "claim_token": claim_token,
+                    "holders": [
+                        {"claim_token": claim_token, "joined_at": utc_stamp()}
+                    ],
+                    "claim_epoch_seconds": now,
+                    "claim_lease_seconds": lease_seconds,
+                    "claim_lease_expires_at": time.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + lease_seconds)
+                    ),
+                    "claim_lease_expires_epoch_seconds": now + lease_seconds,
+                    "status": "active",
+                    "created_at": utc_stamp(),
+                }
+            lease["integrity_hmac"] = self._record_integrity_hmac(lease)
+            self.atomic_write_json(
+                self._authority_operation_lease_path(
+                    directory, expected_authority_root_id
+                ),
+                lease,
+            )
+            return {
+                **copy.deepcopy(lease),
+                "claim_token": claim_token,
+                "namespace": namespace,
+                "store_root": str(self.root),
+            }
+
+    def release_authority_operation(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        authority_root_id: str,
+        claim_token: str,
+    ) -> None:
+        directory = self.project_dir(namespace, project_id)
+        with self.project_write_lock(namespace, project_id):
+            lease = self._read_authority_operation_lease_unlocked(
+                directory,
+                project_id=project_id,
+                authority_root_id=authority_root_id,
+            )
+            if lease is None:
+                return
+            holders = lease.get("holders")
+            if not isinstance(holders, list):
+                holders = [
+                    {
+                        "claim_token": lease.get("claim_token"),
+                        "joined_at": lease.get("created_at"),
+                    }
+                ]
+            remaining = [
+                row
+                for row in holders
+                if isinstance(row, dict)
+                and row.get("claim_token") != claim_token
+            ]
+            if len(remaining) == len(holders):
+                raise ValueError("authority_operation_claim_owner_mismatch")
+            lease_path = self._authority_operation_lease_path(
+                directory, authority_root_id
+            )
+            if not remaining:
+                lease_path.unlink()
+            else:
+                lease["holders"] = remaining
+                lease["claim_token"] = remaining[0]["claim_token"]
+                lease["last_released_at"] = utc_stamp()
+                lease["integrity_hmac"] = self._record_integrity_hmac(lease)
+                self.atomic_write_json(lease_path, lease)
+
+    @contextlib.contextmanager
+    def bind_authority_operation(
+        self, operation: dict[str, Any]
+    ) -> Iterator[None]:
+        token = _ACTIVE_AUTHORITY_OPERATION.set(copy.deepcopy(operation))
+        try:
+            yield
+        finally:
+            _ACTIVE_AUTHORITY_OPERATION.reset(token)
+
+    def current_authority_operation(self) -> dict[str, Any] | None:
+        operation = _ACTIVE_AUTHORITY_OPERATION.get()
+        return copy.deepcopy(operation) if isinstance(operation, dict) else None
+
+    def assert_authority_continuation_quiescent(
+        self,
+        namespace: str,
+        project_id: str,
+        authority_root_id: str,
+        work_order_id: str,
+    ) -> None:
+        """Read-only check used by continuation planning."""
+
+        directory = self.project_dir(namespace, project_id)
+        with self.lock(f"{namespace}-{project_id}"):
+            lease = self._read_authority_operation_lease_unlocked(
+                directory,
+                project_id=project_id,
+                authority_root_id=authority_root_id,
+            )
+            if lease is not None and float(
+                lease.get("claim_lease_expires_epoch_seconds") or 0
+            ) > time.time():
+                raise ValueError(
+                    "role_continuation_operation_in_progress: wait for the current role operation or its lease expiry"
+                )
+            self._assert_no_live_authority_claims_unlocked(
+                directory,
+                project_id=project_id,
+                work_order_id=work_order_id,
+            )
+
+    def _assert_no_live_authority_claims_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        work_order_id: str,
+    ) -> None:
+        """Reject rotation while the current role owns a live durable claim."""
+
+        now = time.time()
+        for handoff_path in sorted((directory / "handoffs").glob("*.json")):
+            handoff = self.read_json(handoff_path)
+            if not isinstance(handoff, dict):
+                raise ValueError("handoff_state_conflict: signed handoff is invalid")
+            self._verify_record_integrity(
+                handoff, record_id=handoff_path.stem
+            )
+            if (
+                handoff.get("status") != "consuming"
+                or handoff.get("claimed_by_work_order_id") != work_order_id
+            ):
+                continue
+            try:
+                expires = float(
+                    handoff.get("claim_lease_expires_epoch_seconds") or 0
+                )
+            except (TypeError, ValueError):
+                expires = 0
+            if expires <= 0 or expires > now:
+                raise ValueError(
+                    "role_continuation_claim_in_progress: handoff claim is still owned by this authority"
+                )
+
+        for package_path in sorted(
+            (directory / "repair_packages").glob("*.json")
+        ):
+            package = self.read_json(package_path)
+            if not isinstance(package, dict):
+                raise ValueError(
+                    "repair_package_claim_conflict: signed package is invalid"
+                )
+            self._verify_record_integrity(
+                package, record_id=package_path.stem
+            )
+            if (
+                package.get("status") != "consuming"
+                or package.get("consumed_by_work_order_id") != work_order_id
+            ):
+                continue
+            try:
+                expires = float(
+                    package.get("claim_lease_expires_epoch_seconds") or 0
+                )
+            except (TypeError, ValueError):
+                expires = 0
+            if expires <= 0 or expires > now:
+                raise ValueError(
+                    "role_continuation_claim_in_progress: repair package claim is still owned by this authority"
+                )
+
+        for preflight_path in sorted(
+            (directory / "draft_preflights").glob("*.json")
+        ):
+            preflight = self.read_json(preflight_path)
+            if not isinstance(preflight, dict):
+                raise ValueError("draft_preflight_commit_claim_conflict")
+            self._verify_record_integrity(
+                preflight, record_id=preflight_path.stem
+            )
+            claim = preflight.get("commit_claim")
+            if (
+                preflight.get("work_order_id") != work_order_id
+                or not isinstance(claim, dict)
+                or claim.get("state") == "completed"
+            ):
+                continue
+            try:
+                expires = float(claim.get("lease_expires_epoch_seconds") or 0)
+            except (TypeError, ValueError):
+                expires = 0
+            if expires <= 0 or expires > now:
+                raise ValueError(
+                    "role_continuation_claim_in_progress: draft commit claim is still owned by this authority"
+                )
+
+    def _assert_authority_continuation_quiescent_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        authority_root_id: str,
+        work_order_id: str,
+    ) -> None:
+        lease = self._read_authority_operation_lease_unlocked(
+            directory,
+            project_id=project_id,
+            authority_root_id=authority_root_id,
+        )
+        self._assert_no_live_authority_claims_unlocked(
+            directory,
+            project_id=project_id,
+            work_order_id=work_order_id,
+        )
+        if lease is not None:
+            if float(
+                lease.get("claim_lease_expires_epoch_seconds") or 0
+            ) > time.time():
+                raise ValueError(
+                    "role_continuation_operation_in_progress: active role operation is fenced"
+                )
+            # Keep an expired lease byte-identical until a new authority
+            # operation atomically replaces it.  Continuation rejection paths
+            # must remain zero-write even when another durable claim appears
+            # between plan and execute.
+
     @contextlib.contextmanager
     def project_write_lock(
         self,
@@ -688,6 +1789,14 @@ class ProjectStore:
                 project_id=project_id,
                 permitted_migration_id=permit_migration_id,
             )
+            active_operation = _ACTIVE_AUTHORITY_OPERATION.get()
+            if isinstance(active_operation, dict):
+                self._assert_authority_operation_context_unlocked(
+                    directory,
+                    namespace=namespace,
+                    project_id=project_id,
+                    operation=active_operation,
+                )
             yield
 
     @staticmethod
@@ -1976,6 +3085,7 @@ class ProjectStore:
         draft_preflight_id: str,
         *,
         request_sha256: str,
+        payload_sha256: str | None = None,
         lease_seconds: int = DEFAULT_DRAFT_PREFLIGHT_COMMIT_LEASE_SECONDS,
     ) -> dict[str, Any]:
         """Atomically reserve one passed draft certificate for one commit.
@@ -1990,6 +3100,11 @@ class ProjectStore:
             r"[0-9a-f]{64}", request_sha256
         ):
             raise ValueError("invalid draft_preflight commit request_sha256")
+        if payload_sha256 is not None and (
+            not isinstance(payload_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", payload_sha256)
+        ):
+            raise ValueError("invalid draft_preflight commit payload_sha256")
         try:
             lease_seconds = int(lease_seconds)
         except (TypeError, ValueError) as exc:
@@ -2014,12 +3129,17 @@ class ProjectStore:
             bound_request = record.get("commit_request_sha256")
             if bound_request not in {None, request_sha256}:
                 raise ValueError("draft_preflight_commit_claim_conflict")
+            bound_payload = record.get("commit_payload_sha256")
+            if bound_payload not in {None, payload_sha256}:
+                raise ValueError("draft_preflight_commit_payload_conflict")
             if record.get("consumed_by_commit"):
                 return {"claim_status": "consumed", "record": record}
             claim = record.get("commit_claim")
             if isinstance(claim, dict):
                 if claim.get("request_sha256") != request_sha256:
                     raise ValueError("draft_preflight_commit_claim_conflict")
+                if claim.get("payload_sha256") != payload_sha256:
+                    raise ValueError("draft_preflight_commit_payload_conflict")
                 try:
                     lease_expires_epoch = float(
                         claim.get("lease_expires_epoch_seconds") or 0
@@ -2052,10 +3172,58 @@ class ProjectStore:
                 generation = int(record.get("commit_claim_generation") or 0) + 1
             except (TypeError, ValueError):
                 generation = 1
+            work_order_id = safe_id(
+                record.get("work_order_id"), "work_order_id"
+            )
+            hub = self.read_json(self.project_dir(namespace, project_id) / "hub.json")
+            work_orders = hub.get("work_orders") if isinstance(hub, dict) else None
+            work_order_matches = [
+                row
+                for row in (work_orders if isinstance(work_orders, list) else [])
+                if isinstance(row, dict)
+                and row.get("work_order_id") == work_order_id
+            ]
+            if len(work_order_matches) != 1:
+                raise ValueError("draft_preflight_commit_authority_invalid")
+            authority = self._active_authority_binding_unlocked(
+                self.project_dir(namespace, project_id),
+                project_id=project_id,
+                hub=hub,
+                work_order=work_order_matches[0],
+            )
+            if record.get("session_fingerprint") != authority.get(
+                "session_fingerprint"
+            ):
+                raise ValueError(
+                    "draft_preflight_commit_claim_revoked: preflight belongs to another window generation"
+                )
+            issuance_authority = {
+                "contract": "draft-commit-issuance-authority-v0511",
+                "authority_root_id": authority.get("authority_root_id"),
+                "authority_epoch_id": authority.get("authority_epoch_id"),
+                "authority_generation": authority.get("generation"),
+                "authority_continuation_id": authority.get(
+                    "continuation_id"
+                ),
+                "authority_session_fingerprint": authority.get(
+                    "session_fingerprint"
+                ),
+                "work_order_id": work_order_id,
+            }
+            issuance_authority_sha256 = self.project_state_sha256(
+                issuance_authority
+            )
             record["commit_claim"] = {
                 "claim_token": token,
                 "request_sha256": request_sha256,
+                "payload_sha256": payload_sha256,
+                "issuance_authority_sha256": issuance_authority_sha256,
                 "generation": generation,
+                "authority_root_id": authority.get("authority_root_id"),
+                "authority_generation": authority.get("generation"),
+                "authority_session_fingerprint": authority.get(
+                    "session_fingerprint"
+                ),
                 "state": "claimed",
                 "claimed_at": utc_stamp(),
                 "claim_epoch_seconds": now,
@@ -2066,6 +3234,11 @@ class ProjectStore:
                 "lease_expires_epoch_seconds": now + lease_seconds,
             }
             record["commit_request_sha256"] = request_sha256
+            record["commit_payload_sha256"] = payload_sha256
+            record["commit_issuance_authority"] = issuance_authority
+            record[
+                "commit_issuance_authority_sha256"
+            ] = issuance_authority_sha256
             record["commit_claim_generation"] = generation
             record["integrity_hmac"] = self._record_integrity_hmac(record)
             self.atomic_write_json(path, record)
@@ -2075,6 +3248,232 @@ class ProjectStore:
                 "claim_generation": generation,
                 "record": record,
             }
+
+    def _assert_draft_preflight_claim_authority_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        record: dict[str, Any],
+        claim: dict[str, Any],
+    ) -> None:
+        work_order_id = safe_id(record.get("work_order_id"), "work_order_id")
+        hub = self.read_json(directory / "hub.json")
+        work_orders = hub.get("work_orders") if isinstance(hub, dict) else None
+        matches = [
+            row
+            for row in (work_orders if isinstance(work_orders, list) else [])
+            if isinstance(row, dict)
+            and row.get("work_order_id") == work_order_id
+        ]
+        if len(matches) != 1:
+            raise ValueError("draft_preflight_commit_claim_revoked")
+        active = self._active_authority_binding_unlocked(
+            directory,
+            project_id=project_id,
+            hub=hub,
+            work_order=matches[0],
+        )
+        claimed_root = claim.get("authority_root_id") or self._authority_root_id(
+            project_id, work_order_id
+        )
+        claimed_generation = claim.get("authority_generation", 0)
+        claimed_session = claim.get(
+            "authority_session_fingerprint",
+            record.get("session_fingerprint"),
+        )
+        if (
+            active.get("authority_root_id") != claimed_root
+            or active.get("generation") != claimed_generation
+            or active.get("session_fingerprint") != claimed_session
+        ):
+            raise ValueError(
+                "draft_preflight_commit_claim_revoked: claim belongs to an inactive window generation"
+            )
+
+    def _descendant_draft_preflight_recovery_context_unlocked(
+        self,
+        directory: Path,
+        *,
+        project_id: str,
+        draft_preflight_id: str,
+        payload_sha256: str,
+    ) -> dict[str, Any]:
+        """Authorize a read-only takeover of one published commit tail.
+
+        This is intentionally narrower than reclaiming a draft certificate.
+        The original claim must be expired, must have reached the signed
+        recovery-ready journal stage, and must belong to a strict ancestor of
+        the caller's currently fenced authority generation.
+        """
+
+        clean_id = safe_id(draft_preflight_id, "draft_preflight_id")
+        if not re.fullmatch(r"[0-9a-f]{64}", str(payload_sha256 or "")):
+            raise ValueError("draft_preflight_commit_recovery_payload_invalid")
+        path = directory / "draft_preflights" / f"{clean_id}.json"
+        if not path.is_file():
+            raise ValueError(f"unknown draft_preflight_id: {clean_id}")
+        record = self.read_json(path)
+        self._verify_record_integrity(record, record_id=clean_id)
+        if not self.project_record_is_signed(record):
+            raise ValueError("draft_preflight_signature_required")
+        if record.get("consumed_by_commit"):
+            raise ValueError("draft_preflight_already_consumed")
+        if record.get("commit_payload_sha256") != payload_sha256:
+            raise ValueError("draft_preflight_commit_recovery_payload_conflict")
+        claim = record.get("commit_claim")
+        progress = record.get("commit_progress")
+        descriptor = (
+            progress.get("recovery_descriptor")
+            if isinstance(progress, dict)
+            else None
+        )
+        issuance = record.get("commit_issuance_authority")
+        if (
+            not isinstance(claim, dict)
+            or claim.get("state") != "claimed"
+            or claim.get("payload_sha256") != payload_sha256
+            or not isinstance(progress, dict)
+            or not isinstance(descriptor, dict)
+            or not isinstance(issuance, dict)
+        ):
+            raise ValueError("draft_preflight_commit_recovery_not_ready")
+        descriptor_sha256 = descriptor.get("descriptor_sha256")
+        descriptor_body = {
+            key: copy.deepcopy(value)
+            for key, value in descriptor.items()
+            if key != "descriptor_sha256"
+        }
+        if (
+            descriptor.get("contract")
+            != "draft-commit-descendant-recovery-v0511"
+            or descriptor_sha256 != self.project_state_sha256(descriptor_body)
+            or descriptor.get("payload_sha256") != payload_sha256
+            or descriptor.get("request_sha256")
+            != record.get("commit_request_sha256")
+            or progress.get("payload_sha256") != payload_sha256
+            or progress.get("request_sha256")
+            != record.get("commit_request_sha256")
+            or claim.get("request_sha256")
+            != record.get("commit_request_sha256")
+        ):
+            raise ValueError("draft_preflight_commit_recovery_journal_conflict")
+        issuance_sha256 = self.project_state_sha256(issuance)
+        if (
+            issuance.get("contract")
+            != "draft-commit-issuance-authority-v0511"
+            or record.get("commit_issuance_authority_sha256")
+            != issuance_sha256
+            or claim.get("issuance_authority_sha256") != issuance_sha256
+            or progress.get("issuance_authority_sha256") != issuance_sha256
+            or descriptor.get("issuance_authority_sha256")
+            != issuance_sha256
+        ):
+            raise ValueError("draft_preflight_commit_recovery_authority_conflict")
+
+        work_order_id = safe_id(record.get("work_order_id"), "work_order_id")
+        hub = self.read_json(directory / "hub.json")
+        work_orders = hub.get("work_orders") if isinstance(hub, dict) else None
+        matches = [
+            row
+            for row in (work_orders if isinstance(work_orders, list) else [])
+            if isinstance(row, dict)
+            and row.get("work_order_id") == work_order_id
+        ]
+        if len(matches) != 1:
+            raise ValueError("draft_preflight_commit_recovery_authority_invalid")
+        work_order = matches[0]
+        active = self._active_authority_binding_unlocked(
+            directory,
+            project_id=project_id,
+            hub=hub,
+            work_order=work_order,
+        )
+        claimed_generation = claim.get("authority_generation")
+        if (
+            isinstance(claimed_generation, bool)
+            or not isinstance(claimed_generation, int)
+            or claimed_generation < 0
+            or not isinstance(active.get("generation"), int)
+            or int(active["generation"]) <= claimed_generation
+        ):
+            raise ValueError("draft_preflight_commit_recovery_descendant_required")
+        ancestor, current = self._authority_binding_at_generation_unlocked(
+            directory,
+            project_id=project_id,
+            hub=hub,
+            work_order=work_order,
+            generation=claimed_generation,
+        )
+        expected_issuance = {
+            "contract": "draft-commit-issuance-authority-v0511",
+            "authority_root_id": ancestor.get("authority_root_id"),
+            "authority_epoch_id": ancestor.get("authority_epoch_id"),
+            "authority_generation": ancestor.get("generation"),
+            "authority_continuation_id": ancestor.get("continuation_id"),
+            "authority_session_fingerprint": ancestor.get(
+                "session_fingerprint"
+            ),
+            "work_order_id": work_order_id,
+        }
+        try:
+            lease_expires = float(claim.get("lease_expires_epoch_seconds") or 0)
+        except (TypeError, ValueError):
+            lease_expires = 0
+        if (
+            issuance != expected_issuance
+            or claim.get("authority_root_id")
+            != ancestor.get("authority_root_id")
+            or claim.get("authority_generation")
+            != ancestor.get("generation")
+            or claim.get("authority_session_fingerprint")
+            != ancestor.get("session_fingerprint")
+            or current != active
+            or lease_expires <= 0
+            or lease_expires > time.time()
+        ):
+            raise ValueError("draft_preflight_commit_recovery_authority_revoked")
+        operation = _ACTIVE_AUTHORITY_OPERATION.get()
+        if (
+            not isinstance(operation, dict)
+            or operation.get("project_id") != project_id
+            or operation.get("work_order_id") != work_order_id
+            or operation.get("authority_root_id")
+            != active.get("authority_root_id")
+            or operation.get("authority_generation")
+            != active.get("generation")
+            or operation.get("session_fingerprint")
+            != active.get("session_fingerprint")
+        ):
+            raise ValueError("draft_preflight_commit_recovery_operation_required")
+        return {
+            "record": copy.deepcopy(record),
+            "claim": copy.deepcopy(claim),
+            "progress": copy.deepcopy(progress),
+            "descriptor": copy.deepcopy(descriptor),
+            "hub": copy.deepcopy(hub),
+            "work_order": copy.deepcopy(work_order),
+            "active_authority": copy.deepcopy(active),
+        }
+
+    def descendant_draft_preflight_commit_recovery_context(
+        self,
+        namespace: str,
+        project_id: str,
+        draft_preflight_id: str,
+        *,
+        payload_sha256: str,
+    ) -> dict[str, Any]:
+        """Return a signed, zero-write recovery context for service checks."""
+
+        directory = self.project_dir(namespace, project_id)
+        with self.lock(f"{namespace}-{project_id}"):
+            return self._descendant_draft_preflight_recovery_context_unlocked(
+                directory,
+                project_id=project_id,
+                draft_preflight_id=draft_preflight_id,
+                payload_sha256=payload_sha256,
+            )
 
     def release_draft_preflight_commit(
         self,
@@ -2103,6 +3502,12 @@ class ProjectStore:
             claim = record.get("commit_claim")
             if not isinstance(claim, dict) or claim.get("claim_token") != claim_token:
                 raise ValueError("draft_preflight_commit_claim_owner_mismatch")
+            self._assert_draft_preflight_claim_authority_unlocked(
+                self.project_dir(namespace, project_id),
+                project_id=project_id,
+                record=record,
+                claim=claim,
+            )
             released = dict(claim)
             released["state"] = "released"
             released["released_at"] = utc_stamp()
@@ -2148,6 +3553,12 @@ class ProjectStore:
             claim = record.get("commit_claim")
             if not isinstance(claim, dict) or claim.get("claim_token") != claim_token:
                 raise ValueError("draft_preflight_commit_claim_owner_mismatch")
+            self._assert_draft_preflight_claim_authority_unlocked(
+                self.project_dir(namespace, project_id),
+                project_id=project_id,
+                record=record,
+                claim=claim,
+            )
             journal = record.setdefault("commit_progress", {})
             if not isinstance(journal, dict):
                 journal = {}
@@ -2156,6 +3567,10 @@ class ProjectStore:
             journal.update(
                 {
                     "request_sha256": claim.get("request_sha256"),
+                    "payload_sha256": claim.get("payload_sha256"),
+                    "issuance_authority_sha256": claim.get(
+                        "issuance_authority_sha256"
+                    ),
                     "claim_generation": claim.get("generation"),
                     "stage": stage,
                     "updated_at": utc_stamp(),
@@ -2192,6 +3607,12 @@ class ProjectStore:
             claim = record.get("commit_claim")
             if not isinstance(claim, dict) or claim.get("claim_token") != claim_token:
                 raise ValueError("draft_preflight_commit_claim_owner_mismatch")
+            self._assert_draft_preflight_claim_authority_unlocked(
+                self.project_dir(namespace, project_id),
+                project_id=project_id,
+                record=record,
+                claim=claim,
+            )
             record["consumed_by_commit"] = dict(consumed_by_commit)
             record["commit_claim"]["state"] = "completed"
             record["commit_claim"]["completed_at"] = utc_stamp()
@@ -2210,6 +3631,346 @@ class ProjectStore:
             record["integrity_hmac"] = self._record_integrity_hmac(record)
             self.atomic_write_json(path, record)
             return record
+
+    def complete_descendant_draft_preflight_commit_recovery(
+        self,
+        namespace: str,
+        project_id: str,
+        draft_preflight_id: str,
+        *,
+        payload_sha256: str,
+        expected_state_sha256: dict[str, str],
+        telemetry_value: dict[str, Any],
+        consumed_by_commit: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Finish only the missing tail of an ancestor's published commit.
+
+        All immutable publication records and both Hub/Ledger snapshots are
+        compare-and-set under the project lock before the first write.  The
+        write order (telemetry, Hub projection, signed preflight completion)
+        is restart-safe: any prefix can be replayed only when byte-identical.
+        """
+
+        required_hashes = {
+            "preflight",
+            "hub",
+            "ledger",
+            "artifact_meta",
+            "canonical_meta",
+            "certificate",
+            "handoff",
+        }
+        if (
+            not isinstance(expected_state_sha256, dict)
+            or set(expected_state_sha256) != required_hashes
+            or any(
+                not isinstance(value, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", value)
+                for value in expected_state_sha256.values()
+            )
+        ):
+            raise ValueError("draft_preflight_commit_recovery_state_invalid")
+        directory = self.project_dir(namespace, project_id)
+        clean_id = safe_id(draft_preflight_id, "draft_preflight_id")
+        with self.project_write_lock(namespace, project_id):
+            context = self._descendant_draft_preflight_recovery_context_unlocked(
+                directory,
+                project_id=project_id,
+                draft_preflight_id=clean_id,
+                payload_sha256=payload_sha256,
+            )
+            record = context["record"]
+            descriptor = context["descriptor"]
+            hub = context["hub"]
+            ledger = self.read_json(directory / "ledger.json")
+            artifact_id = safe_id(
+                descriptor.get("artifact_id"), "artifact_id"
+            )
+            canonical_artifact_id = safe_id(
+                descriptor.get("canonical_json_artifact_id"),
+                "canonical_artifact_id",
+            )
+            certificate_id = safe_id(
+                descriptor.get("certificate_id"), "certificate_id"
+            )
+            handoff_id = safe_id(
+                descriptor.get("handoff_id"), "handoff_id"
+            )
+            artifact_meta_path = (
+                directory / "artifacts" / f"{artifact_id}.meta.json"
+            )
+            canonical_meta_path = (
+                directory
+                / "artifacts"
+                / f"{canonical_artifact_id}.meta.json"
+            )
+            certificate_path = (
+                directory / "certificates" / f"{certificate_id}.json"
+            )
+            handoff_path = directory / "handoffs" / f"{handoff_id}.json"
+            for path in (
+                artifact_meta_path,
+                canonical_meta_path,
+                certificate_path,
+                handoff_path,
+            ):
+                if not path.is_file():
+                    raise ValueError(
+                        "draft_preflight_commit_recovery_publication_missing"
+                    )
+            artifact_meta = self.read_json(artifact_meta_path)
+            canonical_meta = self.read_json(canonical_meta_path)
+            certificate = self.read_json(certificate_path)
+            handoff = self.read_json(handoff_path)
+            current_hashes = {
+                "preflight": self.project_state_sha256(record),
+                "hub": self.project_state_sha256(hub),
+                "ledger": self.project_state_sha256(ledger),
+                "artifact_meta": self.project_state_sha256(artifact_meta),
+                "canonical_meta": self.project_state_sha256(canonical_meta),
+                "certificate": self.project_state_sha256(certificate),
+                "handoff": self.project_state_sha256(handoff),
+            }
+            if current_hashes != expected_state_sha256:
+                raise ValueError(
+                    "draft_preflight_commit_recovery_state_changed"
+                )
+            self._verify_record_integrity(
+                certificate, record_id=certificate_id
+            )
+            self._verify_record_integrity(handoff, record_id=handoff_id)
+            if (
+                not self.project_record_is_signed(certificate)
+                or not self.project_record_is_signed(handoff)
+            ):
+                raise ValueError(
+                    "draft_preflight_commit_recovery_signature_required"
+                )
+            for artifact_meta_record in (artifact_meta, canonical_meta):
+                relative_path = str(
+                    artifact_meta_record.get("relative_path") or ""
+                )
+                payload_path = (directory / relative_path).resolve()
+                if (
+                    directory.resolve() not in payload_path.parents
+                    or not payload_path.is_file()
+                    or sha256_bytes(payload_path.read_bytes())
+                    != artifact_meta_record.get("fingerprint")
+                ):
+                    raise ValueError(
+                        "draft_preflight_commit_recovery_artifact_changed"
+                    )
+
+            telemetry_blueprint = descriptor.get("telemetry")
+            if not isinstance(telemetry_blueprint, dict):
+                raise ValueError(
+                    "draft_preflight_commit_recovery_telemetry_invalid"
+                )
+            telemetry_id = safe_id(
+                telemetry_blueprint.get("telemetry_id"), "telemetry_id"
+            )
+            immutable_telemetry = {
+                "telemetry_id": telemetry_id,
+                "trace_id": telemetry_id,
+                "operation": telemetry_blueprint.get("operation"),
+                "artifact_id": artifact_id,
+                "window_role": telemetry_blueprint.get("window_role"),
+                "task_type": telemetry_blueprint.get("task_type"),
+                "input_fingerprints": telemetry_blueprint.get(
+                    "input_fingerprints"
+                ),
+                "input_payload_bytes": telemetry_blueprint.get(
+                    "input_payload_bytes"
+                ),
+                "output_payload_bytes": telemetry_blueprint.get(
+                    "output_payload_bytes"
+                ),
+                "affected_shot_count": telemetry_blueprint.get(
+                    "affected_shot_count"
+                ),
+                "preserved_semantic_count": telemetry_blueprint.get(
+                    "preserved_semantic_count"
+                ),
+                "materialization_passes": 1,
+            }
+            stage_name_map = {
+                "validate": "validation",
+                "machine_validation": "validation",
+                "serialize_and_persist": "export_projection",
+                "canonical_load": "canonicalization",
+                "base_load": "delta_base_load",
+                "scope_verify": "delta_scope_check",
+                "delta_merge": "delta_merge",
+                "materialize": "canonicalization",
+                "ledger": "ledger_handoff",
+            }
+            raw_stages_ms = telemetry_blueprint.get("stages_ms")
+            if not isinstance(raw_stages_ms, dict) or not raw_stages_ms:
+                raise ValueError(
+                    "draft_preflight_commit_recovery_telemetry_invalid"
+                )
+            try:
+                expected_stages_ms = {
+                    str(key): round(float(value), 3)
+                    for key, value in raw_stages_ms.items()
+                }
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "draft_preflight_commit_recovery_telemetry_invalid"
+                ) from exc
+            expected_stage_rows = [
+                {
+                    "stage": stage_name_map.get(key, "validation"),
+                    "duration_ms": max(0, int(round(duration))),
+                    "shot_count": int(telemetry_blueprint.get("shot_count") or 0),
+                    "batch_count": 0,
+                    "cache_status": "miss",
+                    "cache_reason": telemetry_blueprint.get("cache_reason"),
+                    "error_status": "none",
+                }
+                for key, duration in expected_stages_ms.items()
+            ]
+            telemetry_path = directory / "telemetry" / f"{telemetry_id}.json"
+            if telemetry_path.is_file():
+                telemetry = self.read_json(telemetry_path)
+                self._verify_record_integrity(
+                    telemetry, record_id=telemetry_id
+                )
+                if not self.project_record_is_signed(telemetry):
+                    raise ValueError(
+                        "draft_preflight_commit_recovery_telemetry_unsigned"
+                    )
+            else:
+                telemetry = dict(telemetry_value)
+                if (
+                    telemetry.get("telemetry_id") != telemetry_id
+                    or telemetry.get("trace_id") != telemetry_id
+                    or telemetry.get("artifact_id") != artifact_id
+                ):
+                    raise ValueError(
+                        "draft_preflight_commit_recovery_telemetry_conflict"
+                    )
+                telemetry["record_id"] = telemetry_id
+                telemetry["project_id"] = project_id
+                telemetry.setdefault("created_at", utc_stamp())
+                telemetry["integrity_hmac"] = self._record_integrity_hmac(
+                    telemetry
+                )
+            if any(
+                telemetry.get(key) != value
+                for key, value in immutable_telemetry.items()
+            ) or telemetry.get("stages_ms") != expected_stages_ms:
+                raise ValueError(
+                    "draft_preflight_commit_recovery_telemetry_conflict"
+                )
+            actual_stage_rows = telemetry.get("stages")
+            if (
+                not isinstance(actual_stage_rows, list)
+                or len(actual_stage_rows) != len(expected_stage_rows)
+                or any(
+                    any(actual.get(key) != value for key, value in expected.items())
+                    for actual, expected in zip(
+                        actual_stage_rows, expected_stage_rows
+                    )
+                    if isinstance(actual, dict)
+                )
+                or any(not isinstance(row, dict) for row in actual_stage_rows)
+                or telemetry.get("cache_hit") is not False
+                or telemetry.get("measurement_scope") != "server_only"
+                or telemetry.get("legacy_generation_calls") != 0
+                or telemetry.get("seedance_batches_generated") != 0
+                or telemetry.get("model_authored_derived_chars") != 0
+            ):
+                raise ValueError(
+                    "draft_preflight_commit_recovery_telemetry_conflict"
+                )
+            if not telemetry_path.is_file():
+                self.atomic_write_json(telemetry_path, telemetry)
+
+            performance_traces = hub.setdefault("performance_traces", [])
+            if not isinstance(performance_traces, list):
+                raise ValueError(
+                    "draft_preflight_commit_recovery_hub_conflict"
+                )
+            trace_matches = [
+                row
+                for row in performance_traces
+                if isinstance(row, dict)
+                and row.get("telemetry_id") == telemetry_id
+            ]
+            if len(trace_matches) > 1 or (
+                trace_matches and trace_matches[0] != telemetry
+            ):
+                raise ValueError(
+                    "draft_preflight_commit_recovery_hub_conflict"
+                )
+            if not trace_matches:
+                performance_traces.append(copy.deepcopy(telemetry))
+                self.atomic_write_json(directory / "hub.json", hub)
+
+            active = context["active_authority"]
+            completion = dict(consumed_by_commit)
+            expected_completion = descriptor.get("completion")
+            if (
+                not isinstance(expected_completion, dict)
+                or any(
+                    completion.get(key) != value
+                    for key, value in expected_completion.items()
+                )
+                or completion.get("trace_id") != telemetry_id
+                or completion.get("artifact_id") != artifact_id
+                or completion.get("canonical_json_artifact_id")
+                != canonical_artifact_id
+            ):
+                raise ValueError(
+                    "draft_preflight_commit_recovery_completion_conflict"
+                )
+            completion.update(
+                {
+                    "commit_payload_sha256": payload_sha256,
+                    "recovery_authority_contract": (
+                        "draft-commit-descendant-recovery-v0511"
+                    ),
+                    "completion_authority_root_id": active.get(
+                        "authority_root_id"
+                    ),
+                    "completion_authority_generation": active.get(
+                        "generation"
+                    ),
+                    "completion_authority_session_fingerprint": active.get(
+                        "session_fingerprint"
+                    ),
+                    "issuance_authority_sha256": record.get(
+                        "commit_issuance_authority_sha256"
+                    ),
+                }
+            )
+            record["consumed_by_commit"] = completion
+            record["commit_claim"]["state"] = "completed"
+            record["commit_claim"]["completed_at"] = utc_stamp()
+            progress = record.setdefault("commit_progress", {})
+            progress.update(
+                {
+                    "stage": "completed",
+                    "updated_at": utc_stamp(),
+                    "artifact_id": artifact_id,
+                    "canonical_json_artifact_id": canonical_artifact_id,
+                    "telemetry_id": telemetry_id,
+                    "completed_by_authority_generation": active.get(
+                        "generation"
+                    ),
+                }
+            )
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(
+                directory / "draft_preflights" / f"{clean_id}.json",
+                record,
+            )
+            return {
+                "record": copy.deepcopy(record),
+                "telemetry": copy.deepcopy(telemetry),
+                "active_authority": copy.deepcopy(active),
+            }
 
     @contextlib.contextmanager
     def mutate_project(self, namespace: str, project_id: str) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
@@ -2736,6 +4497,707 @@ class ProjectStore:
             result.append(value)
         result.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
         return result
+
+    def commit_authority_continuation(
+        self,
+        namespace: str,
+        project_id: str,
+        record: dict[str, Any],
+        expected_work_order_snapshot_sha256: str,
+    ) -> dict[str, Any]:
+        """Append one signed authority generation and publish its active head.
+
+        The work order remains the immutable logical authority.  A continuation
+        only rotates its physical window, actor, and transport-session binding.
+        The signed record is intentionally durable before the Hub projection:
+        if the second replace is interrupted, the exact request can finish the
+        same generation, while a different plan for that generation fails
+        closed.
+        """
+
+        if not isinstance(record, dict):
+            raise ValueError("authority_continuation_invalid: record must be an object")
+        if not isinstance(expected_work_order_snapshot_sha256, str) or re.fullmatch(
+            r"[0-9a-f]{64}", expected_work_order_snapshot_sha256
+        ) is None:
+            raise ValueError(
+                "authority_continuation_invalid: expected work-order snapshot sha256"
+            )
+
+        candidate = copy.deepcopy(record)
+        clean_id = safe_id(candidate.get("continuation_id"), "continuation_id")
+        authority_root_id = safe_id(
+            candidate.get("authority_root_id"), "authority_root_id"
+        )
+        work_order_id = safe_id(candidate.get("work_order_id"), "work_order_id")
+        active_binding = candidate.get("active_binding")
+        if not isinstance(active_binding, dict):
+            raise ValueError(
+                "authority_continuation_invalid: active_binding must be an object"
+            )
+
+        binding_fields = (
+            "continuation_id",
+            "authority_epoch_id",
+            "authority_root_id",
+            "work_order_id",
+            "generation",
+            "window_binding_id",
+            "actor_binding_id",
+            "session_fingerprint",
+            "role",
+            "operation",
+            "mode",
+            "authorization",
+            "authority_contract_sha256",
+            "plan_sha256",
+            "status",
+        )
+        if set(active_binding) != set(binding_fields):
+            raise ValueError(
+                "authority_continuation_invalid: active_binding fields differ"
+            )
+        if active_binding.get("continuation_id") != clean_id:
+            raise ValueError(
+                "authority_continuation_invalid: continuation identity differs"
+            )
+        safe_id(active_binding.get("authority_epoch_id"), "authority_epoch_id")
+        if active_binding.get("authority_root_id") != authority_root_id:
+            raise ValueError(
+                "authority_continuation_invalid: authority root differs"
+            )
+        if active_binding.get("work_order_id") != work_order_id:
+            raise ValueError(
+                "authority_continuation_invalid: work order differs"
+            )
+        generation = active_binding.get("generation")
+        if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+            raise ValueError("authority_continuation_invalid: generation")
+        if candidate.get("generation", generation) != generation:
+            raise ValueError("authority_continuation_invalid: generation differs")
+        previous_generation = candidate.get("previous_generation")
+        if (
+            isinstance(previous_generation, bool)
+            or not isinstance(previous_generation, int)
+            or previous_generation != generation - 1
+        ):
+            raise ValueError(
+                "authority_continuation_lineage_invalid: previous generation differs"
+            )
+        previous_continuation_id = candidate.get("previous_continuation_id")
+        if generation == 1:
+            if previous_generation != 0 or previous_continuation_id is not None:
+                raise ValueError(
+                    "authority_continuation_lineage_invalid: generation one must descend from generation zero"
+                )
+        else:
+            previous_continuation_id = safe_id(
+                previous_continuation_id, "previous_continuation_id"
+            )
+
+        window_binding_id = safe_id(
+            active_binding.get("window_binding_id"), "window_binding_id"
+        )
+        actor_binding_id = safe_id(
+            active_binding.get("actor_binding_id"), "actor_binding_id"
+        )
+
+        def require_sha256(value: Any, field: str) -> str:
+            if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise ValueError(f"authority_continuation_invalid: {field}")
+            return value
+
+        session_fingerprint = require_sha256(
+            active_binding.get("session_fingerprint"), "session_fingerprint"
+        )
+        authority_contract_sha256 = require_sha256(
+            active_binding.get("authority_contract_sha256"),
+            "authority_contract_sha256",
+        )
+        plan_sha256 = require_sha256(
+            active_binding.get("plan_sha256"), "plan_sha256"
+        )
+        for field in ("role", "operation", "mode", "authorization"):
+            value = active_binding.get(field)
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"authority_continuation_invalid: {field}")
+        if active_binding.get("role") not in {
+            "production",
+            "independent_audit",
+            "repair",
+        }:
+            raise ValueError("authority_continuation_invalid: role")
+        if active_binding.get("status") != "active":
+            raise ValueError("authority_continuation_invalid: status")
+
+        # Duplicate the active binding's safe public fields at record top level.
+        # This makes the signed record self-indexing without allowing either
+        # representation to drift from the Hub head projection.
+        for field in binding_fields:
+            if field in candidate and candidate.get(field) != active_binding[field]:
+                raise ValueError(
+                    f"authority_continuation_invalid: {field} differs"
+                )
+            candidate[field] = copy.deepcopy(active_binding[field])
+        if candidate.get("record_id", clean_id) != clean_id:
+            raise ValueError(
+                f"project_record_identity_mismatch: {clean_id}"
+            )
+        if candidate.get("project_id", project_id) != project_id:
+            raise ValueError(
+                "authority_continuation_invalid: project identity differs"
+            )
+        if candidate.get(
+            "expected_work_order_snapshot_sha256",
+            expected_work_order_snapshot_sha256,
+        ) != expected_work_order_snapshot_sha256:
+            raise ValueError(
+                "authority_continuation_invalid: work-order snapshot differs"
+            )
+        if (
+            candidate.get("work_order_snapshot_sha256")
+            != expected_work_order_snapshot_sha256
+        ):
+            raise ValueError(
+                "authority_continuation_invalid: signed work-order snapshot differs"
+            )
+        candidate["record_id"] = clean_id
+        candidate["project_id"] = project_id
+        candidate["authority_root_id"] = authority_root_id
+        candidate["work_order_id"] = work_order_id
+        candidate["active_binding"] = copy.deepcopy(active_binding)
+        candidate[
+            "expected_work_order_snapshot_sha256"
+        ] = expected_work_order_snapshot_sha256
+        candidate.pop("integrity_hmac", None)
+        candidate.pop("idempotent_replay", None)
+        candidate.pop("resumed_from_signed_record", None)
+
+        directory = self.project_dir(namespace, project_id)
+        hub_path = directory / "hub.json"
+        record_path = directory / "authority_continuations" / f"{clean_id}.json"
+        with self.project_write_lock(namespace, project_id):
+            if not hub_path.is_file():
+                raise ValueError(f"unknown project_id: {project_id}")
+            hub = self.read_json(hub_path)
+            if not isinstance(hub, dict) or hub.get("project_id") != project_id:
+                raise ValueError(
+                    "authority_continuation_invalid: project Hub identity differs"
+                )
+            work_orders = hub.get("work_orders")
+            if not isinstance(work_orders, list):
+                raise ValueError(
+                    "authority_continuation_invalid: work_orders must be an array"
+                )
+            self._assert_session_role_history_unlocked(
+                directory,
+                project_id=project_id,
+                hub=hub,
+                session_fingerprint=session_fingerprint,
+                role=str(active_binding["role"]),
+            )
+            work_order_matches = [
+                row
+                for row in work_orders
+                if isinstance(row, dict)
+                and row.get("work_order_id") == work_order_id
+            ]
+            if len(work_order_matches) != 1:
+                raise ValueError(
+                    "authority_continuation_invalid: work order is missing or ambiguous"
+                )
+            work_order = work_order_matches[0]
+            if (
+                self.project_state_sha256(work_order)
+                != expected_work_order_snapshot_sha256
+            ):
+                raise ValueError("authority_continuation_work_order_stale")
+
+            expected_root_id = "AUTH-" + sha256_bytes(
+                canonical_json_bytes(
+                    {
+                        "project_id": project_id,
+                        "work_order_id": work_order_id,
+                        "contract": "window-role-authority-root-v1",
+                    }
+                )
+            )[:24]
+            if authority_root_id != expected_root_id:
+                raise ValueError(
+                    "authority_continuation_invalid: authority root differs"
+                )
+            self._assert_authority_continuation_quiescent_unlocked(
+                directory,
+                project_id=project_id,
+                authority_root_id=authority_root_id,
+                work_order_id=work_order_id,
+            )
+            authority_contract = {
+                "work_order_id": work_order_id,
+                "operation": str(work_order.get("operation") or ""),
+                "mode": str(work_order.get("mode") or ""),
+                "authorization": str(work_order.get("authorization") or ""),
+                "server_actor_role": str(
+                    work_order.get("server_actor_role") or ""
+                ),
+                "targets": copy.deepcopy(work_order.get("targets") or []),
+                "source_lock": copy.deepcopy(work_order.get("source_lock") or {}),
+                "protected_scope": copy.deepcopy(
+                    work_order.get("protected_scope") or []
+                ),
+                "expected_outputs": copy.deepcopy(
+                    work_order.get("expected_outputs") or []
+                ),
+            }
+            if authority_contract_sha256 != sha256_bytes(
+                canonical_json_bytes(authority_contract)
+            ):
+                raise ValueError(
+                    "authority_continuation_invalid: authority contract differs"
+                )
+            work_order_binding = {
+                "role": work_order.get("server_actor_role"),
+                "operation": work_order.get("operation"),
+                "mode": work_order.get("mode"),
+                "authorization": work_order.get("authorization"),
+            }
+            if any(
+                active_binding[field] != work_order_binding[field]
+                for field in work_order_binding
+            ):
+                raise ValueError(
+                    "authority_continuation_invalid: work-order authority differs"
+                )
+
+            if "active_authority_bindings" not in hub:
+                heads: list[dict[str, Any]] = []
+            else:
+                raw_heads = hub.get("active_authority_bindings")
+                if not isinstance(raw_heads, list):
+                    raise ValueError(
+                        "authority_continuation_head_conflict: active heads must be an array"
+                    )
+                heads = copy.deepcopy(raw_heads)
+            seen_roots: set[str] = set()
+            target_indexes: list[int] = []
+            for index, head in enumerate(heads):
+                if not isinstance(head, dict):
+                    raise ValueError(
+                        "authority_continuation_head_conflict: active head is not an object"
+                    )
+                head_root = safe_id(
+                    head.get("authority_root_id"), "authority_root_id"
+                )
+                if head_root in seen_roots:
+                    raise ValueError(
+                        "authority_continuation_head_conflict: duplicate authority root"
+                    )
+                seen_roots.add(head_root)
+                if head_root == authority_root_id:
+                    target_indexes.append(index)
+            if len(target_indexes) > 1:
+                raise ValueError(
+                    "authority_continuation_head_conflict: duplicate authority root"
+                )
+
+            current_head = (
+                heads[target_indexes[0]] if target_indexes else None
+            )
+            current_generation = 0
+            current_continuation_id: str | None = None
+            prior_physical_binding = {
+                "window_binding_id": work_order.get("server_window_binding_id"),
+                "actor_binding_id": work_order.get("server_actor_binding_id"),
+                "session_fingerprint": work_order.get(
+                    "transport_session_fingerprint"
+                ),
+            }
+            if current_head is not None:
+                expected_head_fields = set(binding_fields)
+                if set(current_head) != expected_head_fields:
+                    raise ValueError(
+                        "authority_continuation_head_conflict: active head fields differ"
+                    )
+                if current_head.get("work_order_id") != work_order_id:
+                    raise ValueError(
+                        "authority_continuation_head_conflict: work order differs"
+                    )
+                current_continuation_id = safe_id(
+                    current_head.get("continuation_id"), "continuation_id"
+                )
+                current_generation = current_head.get("generation")
+                if (
+                    isinstance(current_generation, bool)
+                    or not isinstance(current_generation, int)
+                    or current_generation < 1
+                ):
+                    raise ValueError(
+                        "authority_continuation_head_conflict: generation"
+                    )
+                current_record_path = (
+                    directory
+                    / "authority_continuations"
+                    / f"{current_continuation_id}.json"
+                )
+                if not current_record_path.is_file():
+                    raise ValueError(
+                        "authority_continuation_head_conflict: signed head is missing"
+                    )
+                current_record = self.read_json(current_record_path)
+                if (
+                    not isinstance(current_record, dict)
+                    or current_record.get("project_id") != project_id
+                ):
+                    raise ValueError(
+                        "authority_continuation_head_conflict: signed head is invalid"
+                    )
+                self._verify_record_integrity(
+                    current_record, record_id=current_continuation_id
+                )
+                self._verify_project_record_primary_id(
+                    "authority_continuations",
+                    current_record,
+                    record_id=current_continuation_id,
+                )
+                if (
+                    not self.project_record_is_signed(current_record)
+                    or current_record.get("authority_root_id")
+                    != authority_root_id
+                    or current_record.get("work_order_id") != work_order_id
+                    or current_record.get("active_binding")
+                    != {
+                        field: current_head[field]
+                        for field in binding_fields
+                    }
+                ):
+                    raise ValueError(
+                        "authority_continuation_head_conflict: signed head differs"
+                    )
+                prior_physical_binding = {
+                    field: current_head[field]
+                    for field in (
+                        "window_binding_id",
+                        "actor_binding_id",
+                        "session_fingerprint",
+                    )
+                }
+
+            head_projection = {
+                **copy.deepcopy(active_binding),
+            }
+            head_already_committed = current_head == head_projection
+            if head_already_committed:
+                if generation != current_generation:
+                    raise ValueError(
+                        "authority_continuation_head_conflict: generation differs"
+                    )
+                if current_continuation_id != clean_id:
+                    raise ValueError(
+                        "authority_continuation_lineage_invalid: active continuation differs"
+                    )
+            elif generation <= current_generation:
+                raise ValueError(
+                    "authority_continuation_plan_conflict: authority generation conflicts with another plan"
+                )
+            elif generation != current_generation + 1:
+                raise ValueError(
+                    "authority_continuation_head_conflict: stale generation"
+                )
+            elif (
+                previous_generation != current_generation
+                or previous_continuation_id != current_continuation_id
+            ):
+                raise ValueError(
+                    "authority_continuation_lineage_invalid: candidate does not descend from active head"
+                )
+            if not head_already_committed:
+                for field, next_value in (
+                    ("window_binding_id", window_binding_id),
+                    ("actor_binding_id", actor_binding_id),
+                    ("session_fingerprint", session_fingerprint),
+                ):
+                    if prior_physical_binding.get(field) == next_value:
+                        raise ValueError(
+                            f"authority_continuation_binding_conflict: {field} was not rotated"
+                        )
+
+            # The plan is also fenced against an already-issued continuation
+            # record, not only the unsigned Hub projection.  This is what makes
+            # a signed-record/Hub half-write recoverable without admitting a
+            # competing plan for the same generation.
+            existing_record: dict[str, Any] | None = None
+            if record_path.is_file():
+                existing_record = self.read_json(record_path)
+                if (
+                    not isinstance(existing_record, dict)
+                    or existing_record.get("project_id") != project_id
+                ):
+                    raise ValueError("authority_continuation_record_conflict")
+                self._verify_record_integrity(
+                    existing_record, record_id=clean_id
+                )
+                self._verify_project_record_primary_id(
+                    "authority_continuations",
+                    existing_record,
+                    record_id=clean_id,
+                )
+                if not self.project_record_is_signed(existing_record):
+                    raise ValueError("authority_continuation_signature_required")
+                candidate["created_at"] = existing_record.get("created_at")
+            candidate.setdefault("created_at", utc_stamp())
+            if not isinstance(candidate.get("created_at"), str) or not candidate.get(
+                "created_at"
+            ):
+                raise ValueError("authority_continuation_invalid: created_at")
+            candidate["integrity_hmac"] = self._record_integrity_hmac(candidate)
+            if existing_record is not None and existing_record != candidate:
+                if existing_record.get("plan_sha256") != plan_sha256:
+                    raise ValueError(
+                        "authority_continuation_plan_conflict: authority generation conflicts with another plan"
+                    )
+                raise ValueError("authority_continuation_record_conflict")
+
+            continuation_records = self.list_project_records_strict(
+                namespace,
+                project_id,
+                kind="authority_continuations",
+            )
+            root_records_by_generation: dict[int, dict[str, Any]] = {}
+            for prior_record in continuation_records:
+                prior_binding = prior_record.get("active_binding")
+                if not isinstance(prior_binding, dict):
+                    raise ValueError("authority_continuation_record_conflict")
+                if (
+                    prior_record.get("authority_root_id") == authority_root_id
+                ):
+                    prior_generation = prior_record.get("generation")
+                    if (
+                        isinstance(prior_generation, bool)
+                        or not isinstance(prior_generation, int)
+                        or prior_generation < 1
+                    ):
+                        raise ValueError("authority_continuation_record_conflict")
+                    if prior_generation in root_records_by_generation:
+                        raise ValueError(
+                            "authority_continuation_lineage_invalid: duplicate generation"
+                        )
+                    root_records_by_generation[prior_generation] = prior_record
+                    if prior_generation == generation and prior_record != candidate:
+                        raise ValueError(
+                            "authority_continuation_plan_conflict: authority generation conflicts with another plan"
+                        )
+                    if (
+                        prior_record.get("plan_sha256") == plan_sha256
+                        and prior_record != candidate
+                    ):
+                        raise ValueError(
+                            "authority_continuation_plan_conflict: authority generation conflicts with another plan"
+                        )
+                if (
+                    prior_binding.get("authority_epoch_id")
+                    == active_binding["authority_epoch_id"]
+                    and prior_record != candidate
+                ):
+                    raise ValueError("authority_continuation_record_conflict")
+                if (
+                    prior_binding.get("session_fingerprint")
+                    == session_fingerprint
+                    and prior_binding.get("role") != active_binding["role"]
+                ):
+                    raise ValueError(
+                        "authority_continuation_binding_conflict: session has cross-role history"
+                    )
+            if any(
+                isinstance(row, dict)
+                and row.get("transport_session_fingerprint")
+                == session_fingerprint
+                and row.get("server_actor_role") != active_binding["role"]
+                for row in work_orders
+            ):
+                raise ValueError(
+                    "authority_continuation_binding_conflict: session has cross-role history"
+                )
+
+            # Strictly enumerate the signed lineage that is supposed to exist
+            # at this lock epoch.  The only record permitted one generation
+            # ahead of the Hub head is the exact signed candidate from an
+            # interrupted record-first/Hub-second commit.
+            expected_existing_generation = (
+                generation if existing_record is not None else current_generation
+            )
+            expected_generations = set(
+                range(1, expected_existing_generation + 1)
+            )
+            if set(root_records_by_generation) != expected_generations:
+                raise ValueError(
+                    "authority_continuation_lineage_invalid: generation gap or unexpected signed record"
+                )
+
+            expected_previous_id: str | None = None
+            for expected_generation in range(
+                1, expected_existing_generation + 1
+            ):
+                prior_record = root_records_by_generation[
+                    expected_generation
+                ]
+                prior_binding = prior_record.get("active_binding")
+                prior_id = prior_record.get("continuation_id")
+                binding_ids_valid = all(
+                    isinstance(prior_binding.get(field), str)
+                    and SAFE_ID_RE.fullmatch(prior_binding[field]) is not None
+                    for field in (
+                        "continuation_id",
+                        "authority_epoch_id",
+                        "authority_root_id",
+                        "work_order_id",
+                        "window_binding_id",
+                        "actor_binding_id",
+                    )
+                )
+                binding_hashes_valid = all(
+                    isinstance(prior_binding.get(field), str)
+                    and re.fullmatch(
+                        r"[0-9a-f]{64}", prior_binding[field]
+                    )
+                    is not None
+                    for field in (
+                        "session_fingerprint",
+                        "authority_contract_sha256",
+                        "plan_sha256",
+                    )
+                )
+                lineage_matches = (
+                    isinstance(prior_binding, dict)
+                    and set(prior_binding) == set(binding_fields)
+                    and binding_ids_valid
+                    and binding_hashes_valid
+                    and prior_record.get("project_id") == project_id
+                    and prior_record.get("record_id") == prior_id
+                    and prior_record.get("authority_root_id")
+                    == authority_root_id
+                    and prior_record.get("work_order_id") == work_order_id
+                    and prior_record.get("generation")
+                    == expected_generation
+                    and prior_record.get("previous_generation")
+                    == expected_generation - 1
+                    and prior_record.get("previous_continuation_id")
+                    == expected_previous_id
+                    and isinstance(
+                        prior_record.get("work_order_snapshot_sha256"), str
+                    )
+                    and re.fullmatch(
+                        r"[0-9a-f]{64}",
+                        prior_record["work_order_snapshot_sha256"],
+                    )
+                    is not None
+                    and prior_record.get("work_order_snapshot_sha256")
+                    == prior_record.get(
+                        "expected_work_order_snapshot_sha256"
+                    )
+                    and prior_record.get("authority_contract_sha256")
+                    == authority_contract_sha256
+                    and prior_record.get("status") == "active"
+                    and all(
+                        prior_record.get(field) == prior_binding.get(field)
+                        for field in binding_fields
+                    )
+                    and prior_binding.get("continuation_id") == prior_id
+                    and prior_binding.get("authority_root_id")
+                    == authority_root_id
+                    and prior_binding.get("work_order_id") == work_order_id
+                    and prior_binding.get("generation")
+                    == expected_generation
+                    and prior_binding.get("role")
+                    == work_order_binding["role"]
+                    and prior_binding.get("operation")
+                    == work_order_binding["operation"]
+                    and prior_binding.get("mode")
+                    == work_order_binding["mode"]
+                    and prior_binding.get("authorization")
+                    == work_order_binding["authorization"]
+                    and prior_binding.get("authority_contract_sha256")
+                    == authority_contract_sha256
+                    and prior_binding.get("status") == "active"
+                )
+                if not lineage_matches:
+                    raise ValueError(
+                        "authority_continuation_lineage_invalid: signed generation differs"
+                    )
+                expected_previous_id = str(prior_id)
+
+            if current_generation > 0:
+                current_chain_record = root_records_by_generation.get(
+                    current_generation
+                )
+                if (
+                    not isinstance(current_chain_record, dict)
+                    or current_chain_record.get("continuation_id")
+                    != current_continuation_id
+                    or current_chain_record.get("active_binding")
+                    != current_head
+                ):
+                    raise ValueError(
+                        "authority_continuation_lineage_invalid: active head differs from signed chain"
+                    )
+
+            expected_candidate_previous_id = (
+                None
+                if generation == 1
+                else root_records_by_generation[generation - 1].get(
+                    "continuation_id"
+                )
+            )
+            if (
+                previous_generation != generation - 1
+                or previous_continuation_id
+                != expected_candidate_previous_id
+            ):
+                raise ValueError(
+                    "authority_continuation_lineage_invalid: candidate ancestry differs"
+                )
+
+            work_orders_before_sha256 = self.project_state_sha256(work_orders)
+            hub_after = copy.deepcopy(hub)
+            next_heads = copy.deepcopy(heads)
+            if target_indexes:
+                next_heads[target_indexes[0]] = head_projection
+            else:
+                next_heads.append(head_projection)
+            hub_after["active_authority_bindings"] = next_heads
+            if (
+                self.project_state_sha256(hub_after.get("work_orders"))
+                != work_orders_before_sha256
+            ):
+                raise RuntimeError("authority_continuation_work_order_mutation")
+
+            record_existed = existing_record is not None
+            if not record_existed:
+                self.atomic_write_json(record_path, candidate)
+            if not head_already_committed:
+                self.atomic_write_json(hub_path, hub_after)
+
+            final_record = self.read_json(record_path)
+            final_hub = self.read_json(hub_path)
+            final_heads = final_hub.get("active_authority_bindings")
+            final_matches = [
+                row
+                for row in final_heads
+                if isinstance(row, dict)
+                and row.get("authority_root_id") == authority_root_id
+            ] if isinstance(final_heads, list) else []
+            if final_record != candidate or final_matches != [head_projection]:
+                raise RuntimeError("authority_continuation_commit_incomplete")
+            if (
+                self.project_state_sha256(final_hub.get("work_orders"))
+                != work_orders_before_sha256
+            ):
+                raise RuntimeError("authority_continuation_work_order_mutation")
+
+            result = copy.deepcopy(candidate)
+            result["idempotent_replay"] = head_already_committed
+            if record_existed and not head_already_committed:
+                result["resumed_from_signed_record"] = True
+            return result
 
     def _load_handoff_projection_snapshot_unlocked(
         self,
@@ -3896,7 +6358,130 @@ class ProjectStore:
         state = str(handoff.get("publication_state") or "committed")
         transaction_id = str(handoff.get("successor_transaction_id") or "")
         if not transaction_id:
-            return state == "committed"
+            if state != "committed":
+                return False
+            # A cloud draft-preflight commit persists its deterministic
+            # artifact/certificate/handoff set before publishing Hub and
+            # telemetry.  Those records are intentionally not consumable
+            # until the signed draft WAL is completed; this prevents a crash
+            # at recovery_ready (before Hub) from exposing an orphan handoff.
+            try:
+                directory = self.project_dir(namespace, project_id)
+                artifact_id = safe_id(
+                    str(handoff.get("storyboard_artifact_id") or ""),
+                    "artifact_id",
+                )
+                artifact_meta = self.read_json(
+                    directory / "artifacts" / f"{artifact_id}.meta.json"
+                )
+                metadata = artifact_meta.get("metadata")
+                draft_preflight_id = (
+                    metadata.get("draft_preflight_id")
+                    if isinstance(metadata, dict)
+                    else None
+                )
+                if (
+                    not draft_preflight_id
+                    or metadata.get("handoff_id")
+                    != handoff.get("handoff_id")
+                ):
+                    return True
+                clean_preflight_id = safe_id(
+                    str(draft_preflight_id), "draft_preflight_id"
+                )
+                preflight = self.read_json(
+                    directory
+                    / "draft_preflights"
+                    / f"{clean_preflight_id}.json"
+                )
+                self._verify_record_integrity(
+                    preflight, record_id=clean_preflight_id
+                )
+                self._verify_project_record_primary_id(
+                    "draft_preflights",
+                    preflight,
+                    record_id=clean_preflight_id,
+                )
+                consumed = preflight.get("consumed_by_commit")
+                claim = preflight.get("commit_claim")
+                telemetry_id = safe_id(
+                    str(
+                        consumed.get("trace_id")
+                        if isinstance(consumed, dict)
+                        else ""
+                    ),
+                    "telemetry_id",
+                )
+                telemetry = self.read_json(
+                    directory / "telemetry" / f"{telemetry_id}.json"
+                )
+                self._verify_record_integrity(
+                    telemetry, record_id=telemetry_id
+                )
+                hub = self.read_json(directory / "hub.json")
+                handoff_matches = [
+                    row
+                    for row in hub.get("handoffs", [])
+                    if isinstance(row, dict)
+                    and row.get("handoff_id") == handoff.get("handoff_id")
+                ]
+                trace_matches = [
+                    row
+                    for row in hub.get("performance_traces", [])
+                    if isinstance(row, dict)
+                    and row.get("telemetry_id") == telemetry_id
+                ]
+                immutable_projection = lambda value: {
+                    key: copy.deepcopy(item)
+                    for key, item in value.items()
+                    if key not in RECOVERY_HANDOFF_AUDIT_MUTABLE_KEYS
+                }
+                hub_handoff = (
+                    handoff_matches[0]
+                    if len(handoff_matches) == 1
+                    else None
+                )
+                lifecycle_projection_matches = bool(
+                    isinstance(hub_handoff, dict)
+                    and immutable_projection(hub_handoff)
+                    == immutable_projection(
+                        self._hub_record_projection(handoff)
+                    )
+                    and hub_handoff.get("status")
+                    == handoff.get("status")
+                    and (
+                        handoff.get("status") != "consumed"
+                        or hub_handoff.get("audit_certificate_id")
+                        == handoff.get("audit_certificate_id")
+                    )
+                )
+                return bool(
+                    self.project_record_is_signed(preflight)
+                    and self.project_record_is_signed(telemetry)
+                    and isinstance(consumed, dict)
+                    and isinstance(claim, dict)
+                    and claim.get("state") == "completed"
+                    and preflight.get("work_order_id")
+                    == handoff.get("work_order_id")
+                    and consumed.get("artifact_id") == artifact_id
+                    and consumed.get("canonical_json_artifact_id")
+                    == handoff.get("canonical_artifact_id")
+                    and consumed.get("canonical_sha256")
+                    == handoff.get("canonical_sha256")
+                    and (consumed.get("handoff") or {}).get("handoff_id")
+                    == handoff.get("handoff_id")
+                    and (consumed.get("certificate") or {}).get(
+                        "certificate_id"
+                    )
+                    == handoff.get("certificate_id")
+                    and telemetry.get("artifact_id") == artifact_id
+                    and telemetry.get("trace_id")
+                    == handoff.get("stage_trace_id")
+                    and lifecycle_projection_matches
+                    and trace_matches == [telemetry]
+                )
+            except (OSError, TypeError, ValueError):
+                return False
         if state in {"aborted", "rejected"}:
             return False
         return self._successor_descriptor_committed(
@@ -3938,6 +6523,8 @@ class ProjectStore:
                 raise ValueError("handoff_required: signed handoff does not exist")
             record = self.read_json(path)
             self._verify_record_integrity(record, record_id=clean_id)
+            if not self.project_record_is_signed(record):
+                raise ValueError("handoff_signature_required")
             if (
                 record.get("to_window_role") != expected_to_role
                 or record.get("handoff_type") not in expected_types
@@ -3999,6 +6586,16 @@ class ProjectStore:
                     "claim_lease_expires_epoch_seconds": record.get(
                         "claim_lease_expires_epoch_seconds"
                     ),
+                    **{
+                        key: copy.deepcopy(record.get(key))
+                        for key in (
+                            "claim_authority_contract",
+                            "claim_authority_root_id",
+                            "claim_authority_generation",
+                            "claim_authority_session_fingerprint",
+                        )
+                        if key in record
+                    },
                     "state": "lease_expired",
                     "expired_at": utc_stamp(),
                 }
@@ -4015,6 +6612,16 @@ class ProjectStore:
                 generation = int(record.get("claim_generation") or 0) + 1
             except (TypeError, ValueError):
                 generation = 1
+            directory = self.project_dir(namespace, project_id)
+            _consumer_work_order, authority = (
+                self._work_order_authority_unlocked(
+                    directory,
+                    project_id=project_id,
+                    work_order_id=consumer_work_order_id,
+                    expected_role=expected_to_role,
+                    error_code="handoff_claim_authority_invalid",
+                )
+            )
             record["status"] = "consuming"
             record["claim_authority_work_order_id"] = consumer_work_order_id
             record["claimed_by_work_order_id"] = consumer_work_order_id
@@ -4026,6 +6633,7 @@ class ProjectStore:
                 "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + lease_seconds)
             )
             record["claim_lease_expires_epoch_seconds"] = now + lease_seconds
+            record.update(self._claim_authority_fields(authority))
             record["integrity_hmac"] = self._record_integrity_hmac(record)
             self.atomic_write_json(path, record)
             return record
@@ -4047,6 +6655,8 @@ class ProjectStore:
         with self.project_write_lock(namespace, project_id):
             record = self.read_json(path)
             self._verify_record_integrity(record, record_id=clean_id)
+            if not self.project_record_is_signed(record):
+                raise ValueError("handoff_signature_required")
             if record.get("status") == "consumed":
                 return record
             if (
@@ -4055,6 +6665,17 @@ class ProjectStore:
                 or record.get("claim_token") != claim_token
             ):
                 raise ValueError("handoff_state_conflict: handoff claim is not current")
+            self._assert_claim_authority_unlocked(
+                self.project_dir(namespace, project_id),
+                project_id=project_id,
+                record=record,
+                work_order_id=consumer_work_order_id,
+                expected_role="independent_audit",
+                error_code=(
+                    "handoff_claim_revoked: claim belongs to an inactive "
+                    "or expired window generation"
+                ),
+            )
             released = {
                 "claim_token": record.get("claim_token"),
                 "claimed_by_work_order_id": consumer_work_order_id,
@@ -4063,6 +6684,16 @@ class ProjectStore:
                 "claim_lease_expires_epoch_seconds": record.get(
                     "claim_lease_expires_epoch_seconds"
                 ),
+                **{
+                    key: copy.deepcopy(record.get(key))
+                    for key in (
+                        "claim_authority_contract",
+                        "claim_authority_root_id",
+                        "claim_authority_generation",
+                        "claim_authority_session_fingerprint",
+                    )
+                    if key in record
+                },
                 "state": "released",
                 "released_at": utc_stamp(),
                 "release_reason": str(reason or "audit_failed")[:256],
@@ -4081,6 +6712,10 @@ class ProjectStore:
                 "claim_lease_seconds",
                 "claim_lease_expires_at",
                 "claim_lease_expires_epoch_seconds",
+                "claim_authority_contract",
+                "claim_authority_root_id",
+                "claim_authority_generation",
+                "claim_authority_session_fingerprint",
             ):
                 record.pop(key, None)
             record["integrity_hmac"] = self._record_integrity_hmac(record)
@@ -4104,6 +6739,10 @@ class ProjectStore:
             "claim_lease_seconds",
             "claim_lease_expires_at",
             "claim_lease_expires_epoch_seconds",
+            "claim_authority_contract",
+            "claim_authority_root_id",
+            "claim_authority_generation",
+            "claim_authority_session_fingerprint",
         }
         if (
             not isinstance(consumed_by, str)
@@ -4133,7 +6772,7 @@ class ProjectStore:
             )
 
         claim = value.get("consumption_claim")
-        claim_fields = {
+        legacy_claim_fields = {
             "claim_token",
             "claim_generation",
             "claim_epoch_seconds",
@@ -4141,11 +6780,45 @@ class ProjectStore:
             "claim_lease_expires_at",
             "claim_lease_expires_epoch_seconds",
         }
-        if not isinstance(claim, dict) or set(claim) != claim_fields:
+        authority_claim_fields = {
+            "claim_authority_contract",
+            "claim_authority_root_id",
+            "claim_authority_generation",
+            "claim_authority_session_fingerprint",
+        }
+        if not isinstance(claim, dict) or set(claim) not in {
+            frozenset(legacy_claim_fields),
+            frozenset(legacy_claim_fields | authority_claim_fields),
+        }:
             return (
                 "reaudit_claim_binding_invalid: consumed successor claim "
                 "snapshot is incomplete"
             )
+        if authority_claim_fields <= set(claim):
+            authority_generation = claim.get("claim_authority_generation")
+            authority_session = claim.get(
+                "claim_authority_session_fingerprint"
+            )
+            if (
+                claim.get("claim_authority_contract")
+                != "window-role-authority-claim-v1"
+                or not isinstance(claim.get("claim_authority_root_id"), str)
+                or not claim.get("claim_authority_root_id")
+                or not isinstance(authority_generation, int)
+                or isinstance(authority_generation, bool)
+                or authority_generation < 0
+                or (
+                    authority_session is not None
+                    and (
+                        not isinstance(authority_session, str)
+                        or not authority_session
+                    )
+                )
+            ):
+                return (
+                    "reaudit_claim_binding_invalid: consumed successor "
+                    "authority snapshot is invalid"
+                )
         top_generation = value.get("claim_generation")
         claim_generation = claim.get("claim_generation")
         claim_token = claim.get("claim_token")
@@ -4278,6 +6951,16 @@ class ProjectStore:
                         prior_preclaim_sha256
                     ),
                 }
+                for authority_field in (
+                    "claim_authority_contract",
+                    "claim_authority_root_id",
+                    "claim_authority_generation",
+                    "claim_authority_session_fingerprint",
+                ):
+                    if authority_field in prior_claim:
+                        prior_live_fields[authority_field] = copy.deepcopy(
+                            prior_claim.get(authority_field)
+                        )
                 if any(
                     value in {None, ""}
                     for value in prior_live_fields.values()
@@ -4576,6 +7259,72 @@ class ProjectStore:
                     "reaudit_lineage_invalid: audit work-order authority is missing"
                 )
             audit_order = audit_orders[0]
+            route_authority_fields = {
+                "reaudit_audit_authority_root_id": "authority_root_id",
+                "reaudit_audit_authority_epoch_id": "authority_epoch_id",
+                "reaudit_audit_authority_generation": "generation",
+                "reaudit_audit_authority_continuation_id": "continuation_id",
+                "reaudit_audit_window_binding_id": "window_binding_id",
+                "reaudit_audit_actor_binding_id": "actor_binding_id",
+                "reaudit_audit_session_fingerprint": "session_fingerprint",
+            }
+            lineage_fields = tuple(route_authority_fields)[:4]
+            present_lineage_fields = [
+                field for field in lineage_fields if field in successor
+            ]
+            if present_lineage_fields and len(present_lineage_fields) != len(
+                lineage_fields
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: partial route authority snapshot"
+                )
+            if present_lineage_fields:
+                route_generation = successor.get(
+                    "reaudit_audit_authority_generation"
+                )
+                if (
+                    isinstance(route_generation, bool)
+                    or not isinstance(route_generation, int)
+                    or route_generation < 0
+                ):
+                    raise ValueError(
+                        "reaudit_lineage_invalid: route authority generation"
+                    )
+            else:
+                route_generation = 0
+            route_authority, current_audit_authority = (
+                self._authority_binding_at_generation_unlocked(
+                    directory,
+                    project_id=project_id,
+                    hub=hub_before,
+                    work_order=audit_order,
+                    generation=route_generation,
+                )
+            )
+            compared_route_fields = (
+                route_authority_fields
+                if present_lineage_fields
+                else {
+                    "reaudit_audit_window_binding_id": "window_binding_id",
+                    "reaudit_audit_actor_binding_id": "actor_binding_id",
+                    "reaudit_audit_session_fingerprint": "session_fingerprint",
+                }
+            )
+            if any(
+                successor.get(route_field)
+                != route_authority.get(binding_field)
+                for route_field, binding_field in compared_route_fields.items()
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: route authority differs from signed generation"
+                )
+            if (
+                not successor_path.is_file()
+                and route_authority != current_audit_authority
+            ):
+                raise ValueError(
+                    "reaudit_lineage_invalid: new route is not bound to the active audit generation"
+                )
             if (
                 root.get("reaudit_kind")
                 or root.get("status") != "consumed"
@@ -4698,12 +7447,6 @@ class ProjectStore:
                 or successor.get("reaudit_sequence") != expected_sequence
                 or successor.get("claim_authority_work_order_id")
                 != clean_consumer_id
-                or successor.get("reaudit_audit_window_binding_id")
-                != audit_order.get("server_window_binding_id")
-                or successor.get("reaudit_audit_actor_binding_id")
-                != audit_order.get("server_actor_binding_id")
-                or successor.get("reaudit_audit_session_fingerprint")
-                != audit_order.get("transport_session_fingerprint")
                 or successor.get("server_minted_lineage") is not True
                 or successor.get("production_stage_trace_id")
                 != root.get("stage_trace_id")
@@ -5030,6 +7773,9 @@ class ProjectStore:
         ledger = self.read_json(directory / "ledger.json")
         if not isinstance(ledger, dict):
             raise ValueError(error_message)
+        hub = self.read_json(directory / "hub.json")
+        if not isinstance(hub, dict) or hub.get("project_id") is None:
+            raise ValueError(error_message)
         events = ledger.get("events")
         if not isinstance(events, list):
             raise ValueError(error_message)
@@ -5060,6 +7806,101 @@ class ProjectStore:
                 or certificate.get("handoff_id") != handoff_id
             ):
                 raise ValueError(error_message)
+            audit_work_order_id = str(
+                certificate.get("work_order_id") or ""
+            )
+            audit_orders = [
+                row
+                for row in hub.get("work_orders", [])
+                if isinstance(row, dict)
+                and row.get("work_order_id") == audit_work_order_id
+            ]
+            if len(audit_orders) != 1:
+                raise ValueError(error_message)
+            certificate_lineage_fields = (
+                "audit_authority_root_id",
+                "audit_authority_epoch_id",
+                "audit_authority_generation",
+                "audit_authority_continuation_id",
+            )
+            present_certificate_lineage = [
+                field
+                for field in certificate_lineage_fields
+                if field in certificate
+            ]
+            if present_certificate_lineage and len(
+                present_certificate_lineage
+            ) != len(certificate_lineage_fields):
+                raise ValueError(error_message)
+            certificate_generation = (
+                certificate.get("audit_authority_generation")
+                if present_certificate_lineage
+                else 0
+            )
+            if (
+                isinstance(certificate_generation, bool)
+                or not isinstance(certificate_generation, int)
+                or certificate_generation < 0
+            ):
+                raise ValueError(error_message)
+            certificate_authority, _current_authority = (
+                self._authority_binding_at_generation_unlocked(
+                    directory,
+                    project_id=str(hub["project_id"]),
+                    hub=hub,
+                    work_order=audit_orders[0],
+                    generation=certificate_generation,
+                )
+            )
+            certificate_authority_fields = (
+                {
+                    "audit_authority_root_id": "authority_root_id",
+                    "audit_authority_epoch_id": "authority_epoch_id",
+                    "audit_authority_generation": "generation",
+                    "audit_authority_continuation_id": "continuation_id",
+                    "audit_window_binding_id": "window_binding_id",
+                    "audit_actor_binding_id": "actor_binding_id",
+                    "audit_session_fingerprint": "session_fingerprint",
+                }
+                if present_certificate_lineage
+                else {
+                    "audit_actor_binding_id": "actor_binding_id",
+                    "audit_session_fingerprint": "session_fingerprint",
+                }
+            )
+            if any(
+                certificate.get(certificate_field)
+                != certificate_authority.get(binding_field)
+                for certificate_field, binding_field in (
+                    certificate_authority_fields.items()
+                )
+            ):
+                raise ValueError(error_message)
+            authority_continuation_hmac = ""
+            if certificate_authority.get("continuation_id"):
+                continuation_path = (
+                    directory
+                    / "authority_continuations"
+                    / f"{certificate_authority['continuation_id']}.json"
+                )
+                if not continuation_path.is_file():
+                    raise ValueError(error_message)
+                continuation = self.read_json(continuation_path)
+                self._verify_record_integrity(
+                    continuation,
+                    record_id=str(
+                        certificate_authority["continuation_id"]
+                    ),
+                )
+                if (
+                    not self.project_record_is_signed(continuation)
+                    or continuation.get("active_binding")
+                    != certificate_authority
+                ):
+                    raise ValueError(error_message)
+                authority_continuation_hmac = str(
+                    continuation.get("integrity_hmac") or ""
+                )
             event_id = str(certificate.get("event_id") or "")
             matching_events = [
                 event
@@ -5105,6 +7946,27 @@ class ProjectStore:
                     "event_sha256": event_sha256,
                     "legacy_event_sha_missing": (
                         not certificate_has_event_sha
+                    ),
+                    "authority_root_id": str(
+                        certificate_authority.get("authority_root_id") or ""
+                    ),
+                    "authority_epoch_id": str(
+                        certificate_authority.get("authority_epoch_id") or ""
+                    ),
+                    "authority_generation": int(
+                        certificate_authority.get("generation") or 0
+                    ),
+                    "authority_continuation_id": (
+                        certificate_authority.get("continuation_id")
+                    ),
+                    "authority_continuation_hmac": (
+                        authority_continuation_hmac
+                    ),
+                    "authority_contract_sha256": str(
+                        certificate_authority.get(
+                            "authority_contract_sha256"
+                        )
+                        or ""
                     ),
                 }
             )
@@ -6219,6 +9081,8 @@ class ProjectStore:
         with self.project_write_lock(namespace, project_id):
             before = self.read_json(path)
             self._verify_record_integrity(before, record_id=clean_id)
+            if not self.project_record_is_signed(before):
+                raise ValueError("handoff_signature_required")
             lifecycle_error = self._reaudit_successor_lifecycle_error(before)
             if lifecycle_error:
                 raise ValueError(lifecycle_error)
@@ -6297,6 +9161,16 @@ class ProjectStore:
                         "claim_lease_expires_epoch_seconds": before.get(
                             "claim_lease_expires_epoch_seconds"
                         ),
+                        **{
+                            key: copy.deepcopy(before.get(key))
+                            for key in (
+                                "claim_authority_contract",
+                                "claim_authority_root_id",
+                                "claim_authority_generation",
+                                "claim_authority_session_fingerprint",
+                            )
+                            if key in before
+                        },
                         "reaudit_preclaim_projection_sha256": before.get(
                             "reaudit_preclaim_projection_sha256"
                         ),
@@ -6313,6 +9187,10 @@ class ProjectStore:
                     "claim_lease_seconds",
                     "claim_lease_expires_at",
                     "claim_lease_expires_epoch_seconds",
+                    "claim_authority_contract",
+                    "claim_authority_root_id",
+                    "claim_authority_generation",
+                    "claim_authority_session_fingerprint",
                 ):
                     before.pop(key, None)
                 status = "prepared"
@@ -6325,6 +9203,15 @@ class ProjectStore:
                     f"handoff_state_conflict: successor status is {status!r}"
                 )
             now = time.time()
+            _audit_work_order, authority = (
+                self._work_order_authority_unlocked(
+                    directory,
+                    project_id=project_id,
+                    work_order_id=clean_consumer_id,
+                    expected_role="independent_audit",
+                    error_code="reaudit_successor_claim_authority_invalid",
+                )
+            )
             after = copy.deepcopy(before)
             after.update(
                 {
@@ -6345,6 +9232,7 @@ class ProjectStore:
                     ),
                 }
             )
+            after.update(self._claim_authority_fields(authority))
             after["integrity_hmac"] = self._record_integrity_hmac(after)
             hub_after = copy.deepcopy(hub_before)
             hub_after["handoffs"][matches[0]] = self._hub_record_projection(
@@ -6381,6 +9269,8 @@ class ProjectStore:
         with self.project_write_lock(namespace, project_id):
             before = self.read_json(path)
             self._verify_record_integrity(before, record_id=clean_id)
+            if not self.project_record_is_signed(before):
+                raise ValueError("handoff_signature_required")
             lifecycle_error = self._reaudit_successor_lifecycle_error(before)
             if lifecycle_error:
                 raise ValueError(lifecycle_error)
@@ -6397,6 +9287,17 @@ class ProjectStore:
                 raise ValueError(
                     "handoff_state_conflict: successor claim is not current"
                 )
+            self._assert_claim_authority_unlocked(
+                directory,
+                project_id=project_id,
+                record=before,
+                work_order_id=consumer_work_order_id,
+                expected_role="independent_audit",
+                error_code=(
+                    "reaudit_successor_claim_revoked: claim belongs to an "
+                    "inactive or expired window generation"
+                ),
+            )
             hub_before = self.read_json(hub_path)
             matches = [
                 index
@@ -6419,6 +9320,16 @@ class ProjectStore:
                     "claim_token": claim_token,
                     "claimed_by_work_order_id": consumer_work_order_id,
                     "claim_generation": before.get("claim_generation"),
+                    **{
+                        key: copy.deepcopy(before.get(key))
+                        for key in (
+                            "claim_authority_contract",
+                            "claim_authority_root_id",
+                            "claim_authority_generation",
+                            "claim_authority_session_fingerprint",
+                        )
+                        if key in before
+                    },
                     "reaudit_preclaim_projection_sha256": before.get(
                         "reaudit_preclaim_projection_sha256"
                     ),
@@ -6436,6 +9347,10 @@ class ProjectStore:
                 "claim_lease_seconds",
                 "claim_lease_expires_at",
                 "claim_lease_expires_epoch_seconds",
+                "claim_authority_contract",
+                "claim_authority_root_id",
+                "claim_authority_generation",
+                "claim_authority_session_fingerprint",
             ):
                 after.pop(key, None)
             after["reaudit_prerelease_projection_sha256"] = (
@@ -6490,6 +9405,8 @@ class ProjectStore:
                 raise ValueError("handoff_required: signed successor does not exist")
             before = self.read_json(path)
             self._verify_record_integrity(before, record_id=clean_id)
+            if not self.project_record_is_signed(before):
+                raise ValueError("handoff_signature_required")
             if before.get("reaudit_kind") != "independent_audit_successor":
                 raise ValueError("reaudit_lineage_invalid: handoff is not a successor")
             finalization_error = self._reaudit_successor_lifecycle_error(before)
@@ -6589,6 +9506,17 @@ class ProjectStore:
                 raise ValueError(
                     "handoff_state_conflict: successor claim is not current"
                 )
+            self._assert_claim_authority_unlocked(
+                directory,
+                project_id=project_id,
+                record=before,
+                work_order_id=clean_consumer_id,
+                expected_role="independent_audit",
+                error_code=(
+                    "reaudit_successor_claim_revoked: claim belongs to an "
+                    "inactive or expired window generation"
+                ),
+            )
             if (
                 hub_before["handoffs"][hub_matches[0]]
                 != self._hub_record_projection(before)
@@ -6604,6 +9532,10 @@ class ProjectStore:
                     "claim_lease_seconds",
                     "claim_lease_expires_at",
                     "claim_lease_expires_epoch_seconds",
+                    "claim_authority_contract",
+                    "claim_authority_root_id",
+                    "claim_authority_generation",
+                    "claim_authority_session_fingerprint",
                 )
                 if key in before
             }
@@ -6619,6 +9551,10 @@ class ProjectStore:
                 "claim_lease_seconds",
                 "claim_lease_expires_at",
                 "claim_lease_expires_epoch_seconds",
+                "claim_authority_contract",
+                "claim_authority_root_id",
+                "claim_authority_generation",
+                "claim_authority_session_fingerprint",
             ):
                 after.pop(key, None)
             finalization_error = self._reaudit_successor_lifecycle_error(after)
@@ -6762,16 +9698,21 @@ class ProjectStore:
         claim_token: str | None = None,
     ) -> dict[str, Any]:
         clean_id = safe_id(handoff_id, "handoff_id")
+        clean_certificate_id = safe_id(
+            audit_certificate_id, "audit_certificate_id"
+        )
         path = self.project_dir(namespace, project_id) / "handoffs" / f"{clean_id}.json"
         with self.project_write_lock(namespace, project_id):
             if not path.is_file():
                 raise ValueError("handoff_required: signed handoff does not exist")
             record = self.read_json(path)
             self._verify_record_integrity(record, record_id=clean_id)
+            if not self.project_record_is_signed(record):
+                raise ValueError("handoff_signature_required")
             if record.get("status") == "consumed":
                 if (
                     record.get("consumed_by_work_order_id") == consumer_work_order_id
-                    and record.get("audit_certificate_id") == audit_certificate_id
+                    and record.get("audit_certificate_id") == clean_certificate_id
                 ):
                     return record
                 raise ValueError("handoff_state_conflict: handoff finalization differs")
@@ -6782,16 +9723,80 @@ class ProjectStore:
                 or record.get("claim_token") != claim_token
             ):
                 raise ValueError("handoff_state_conflict: handoff claim is not current")
+            self._assert_claim_authority_unlocked(
+                self.project_dir(namespace, project_id),
+                project_id=project_id,
+                record=record,
+                work_order_id=consumer_work_order_id,
+                expected_role="independent_audit",
+                error_code=(
+                    "handoff_claim_revoked: claim belongs to an inactive "
+                    "or expired window generation"
+                ),
+            )
+            certificate_path = (
+                self.project_dir(namespace, project_id)
+                / "certificates"
+                / f"{clean_certificate_id}.json"
+            )
+            if not certificate_path.is_file():
+                raise ValueError(
+                    "handoff_certificate_binding_invalid: certificate is missing"
+                )
+            certificate = self.read_json(certificate_path)
+            self._verify_record_integrity(
+                certificate, record_id=clean_certificate_id
+            )
+            if (
+                not self.project_record_is_signed(certificate)
+                or certificate.get("certificate_id") != clean_certificate_id
+                or certificate.get("audit_class") != "independent_audit"
+                or certificate.get("handoff_id") != clean_id
+                or certificate.get("work_order_id")
+                != consumer_work_order_id
+                or certificate.get("artifact_id")
+                != record.get("storyboard_artifact_id")
+            ):
+                raise ValueError(
+                    "handoff_certificate_binding_invalid: certificate does not belong to this handoff"
+                )
+            claim_snapshot = {
+                key: copy.deepcopy(record.get(key))
+                for key in (
+                    "claim_token",
+                    "claim_generation",
+                    "claim_epoch_seconds",
+                    "claim_lease_seconds",
+                    "claim_lease_expires_at",
+                    "claim_lease_expires_epoch_seconds",
+                    "claim_authority_contract",
+                    "claim_authority_root_id",
+                    "claim_authority_generation",
+                    "claim_authority_session_fingerprint",
+                )
+                if key in record
+            }
+            claim_snapshot["consumed_by_work_order_id"] = (
+                consumer_work_order_id
+            )
             record["status"] = "consumed"
             record["consumed_by_work_order_id"] = consumer_work_order_id
-            record["audit_certificate_id"] = audit_certificate_id
+            record["audit_certificate_id"] = clean_certificate_id
+            record["consumption_claim"] = claim_snapshot
             record["consumed_at"] = utc_stamp()
-            record.pop("claimed_by_work_order_id", None)
-            record.pop("claim_token", None)
-            record.pop("claim_epoch_seconds", None)
-            record.pop("claim_lease_seconds", None)
-            record.pop("claim_lease_expires_at", None)
-            record.pop("claim_lease_expires_epoch_seconds", None)
+            for key in (
+                "claimed_by_work_order_id",
+                "claim_token",
+                "claim_epoch_seconds",
+                "claim_lease_seconds",
+                "claim_lease_expires_at",
+                "claim_lease_expires_epoch_seconds",
+                "claim_authority_contract",
+                "claim_authority_root_id",
+                "claim_authority_generation",
+                "claim_authority_session_fingerprint",
+            ):
+                record.pop(key, None)
             record["integrity_hmac"] = self._record_integrity_hmac(record)
             self.atomic_write_json(path, record)
             return record
@@ -6803,18 +9808,111 @@ class ProjectStore:
         repair_package_id: str,
         *,
         work_order_id: str,
+        lease_seconds: int = DEFAULT_HANDOFF_CLAIM_LEASE_SECONDS,
     ) -> dict[str, Any]:
         clean_id = safe_id(repair_package_id, "repair_package_id")
+        try:
+            lease_seconds = int(lease_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid repair package lease_seconds") from exc
+        if not 1 <= lease_seconds <= MAX_CONSUMPTION_LEASE_SECONDS:
+            raise ValueError(
+                "repair package lease_seconds must be between 1 and "
+                f"{MAX_CONSUMPTION_LEASE_SECONDS}"
+            )
         path = self.project_dir(namespace, project_id) / "repair_packages" / f"{clean_id}.json"
         with self.project_write_lock(namespace, project_id):
             if not path.is_file():
                 raise ValueError("repair_package_required: immutable package does not exist")
             record = self.read_json(path)
             self._verify_record_integrity(record, record_id=clean_id)
-            if record.get("status") != "issued":
+            if not self.project_record_is_signed(record):
+                raise ValueError("repair_package_signature_required")
+            repair_work_order, authority = (
+                self._work_order_authority_unlocked(
+                    self.project_dir(namespace, project_id),
+                    project_id=project_id,
+                    work_order_id=work_order_id,
+                    expected_role="repair",
+                    error_code="repair_package_claim_authority_invalid",
+                )
+            )
+            status = record.get("status")
+            if status == "consuming":
+                if record.get("consumed_by_work_order_id") != work_order_id:
+                    raise ValueError(
+                        "repair_package_claim_conflict: package belongs to another repair authority"
+                    )
+                try:
+                    lease_expires_epoch = float(
+                        record.get("claim_lease_expires_epoch_seconds") or 0
+                    )
+                except (TypeError, ValueError):
+                    lease_expires_epoch = 0
+                if lease_expires_epoch <= 0:
+                    raise ValueError(
+                        "repair_package_claim_incomplete: consuming legacy package has no bounded lease"
+                    )
+                if lease_expires_epoch > time.time():
+                    raise ValueError(
+                        "repair_package_claim_conflict: package is being consumed"
+                    )
+                self._assert_claim_authority_ancestor_unlocked(
+                    self.project_dir(namespace, project_id),
+                    project_id=project_id,
+                    record=record,
+                    work_order=repair_work_order,
+                    active=authority,
+                    error_code=(
+                        "repair_package_claim_revoked: expired claim is not "
+                        "an ancestor of the active repair authority"
+                    ),
+                    require_operation_fence=False,
+                )
+                expired = {
+                    "claim_token": record.get("claim_token"),
+                    "consumed_by_work_order_id": work_order_id,
+                    "claim_generation": record.get("claim_generation"),
+                    "claim_epoch_seconds": record.get("claim_epoch_seconds"),
+                    "claim_lease_expires_epoch_seconds": record.get(
+                        "claim_lease_expires_epoch_seconds"
+                    ),
+                    **{
+                        key: copy.deepcopy(record.get(key))
+                        for key in (
+                            "claim_authority_contract",
+                            "claim_authority_root_id",
+                            "claim_authority_generation",
+                            "claim_authority_session_fingerprint",
+                        )
+                        if key in record
+                    },
+                    "state": "lease_expired",
+                    "expired_at": utc_stamp(),
+                }
+                history = record.setdefault("claim_history", [])
+                if not isinstance(history, list):
+                    raise ValueError("repair_package_claim_history_invalid")
+                history.append(expired)
+                del history[:-MAX_CONSUMPTION_CLAIM_HISTORY]
+            elif status != "issued":
                 raise ValueError("repair_package_unavailable: package is not issued")
+            try:
+                generation = int(record.get("claim_generation") or 0) + 1
+            except (TypeError, ValueError):
+                generation = 1
+            now = time.time()
             record["status"] = "consuming"
             record["consumed_by_work_order_id"] = work_order_id
+            record["claim_token"] = f"RCL-{uuid.uuid4().hex}"
+            record["claim_generation"] = generation
+            record["claim_epoch_seconds"] = now
+            record["claim_lease_seconds"] = lease_seconds
+            record["claim_lease_expires_at"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + lease_seconds)
+            )
+            record["claim_lease_expires_epoch_seconds"] = now + lease_seconds
+            record.update(self._claim_authority_fields(authority))
             record["integrity_hmac"] = self._record_integrity_hmac(record)
             self.atomic_write_json(path, record)
             return record
@@ -6826,6 +9924,7 @@ class ProjectStore:
         repair_package_id: str,
         *,
         work_order_id: str,
+        claim_token: str,
         successor_artifact_id: str | None,
         successor_canonical_sha256: str | None,
         repair_to_audit_handoff_id: str | None = None,
@@ -6837,26 +9936,519 @@ class ProjectStore:
                 raise ValueError("repair_package_required: immutable package does not exist")
             record = self.read_json(path)
             self._verify_record_integrity(record, record_id=clean_id)
+            if not self.project_record_is_signed(record):
+                raise ValueError("repair_package_signature_required")
+            if record.get("status") == "consumed":
+                consumption = record.get("consumption_claim")
+                if (
+                    successor_artifact_id
+                    and successor_canonical_sha256
+                    and repair_to_audit_handoff_id
+                    and record.get("consumed_by_work_order_id") == work_order_id
+                    and isinstance(consumption, dict)
+                    and consumption.get("claim_token") == claim_token
+                    and consumption.get("consumed_by_work_order_id")
+                    == work_order_id
+                    and record.get("claim_generation")
+                    == consumption.get("claim_generation")
+                    and record.get("successor_artifact_id")
+                    == successor_artifact_id
+                    and record.get("successor_canonical_sha256")
+                    == successor_canonical_sha256
+                    and record.get("repair_to_audit_handoff_id")
+                    == repair_to_audit_handoff_id
+                ):
+                    # A caller may retry after the signed package write became
+                    # durable but its response was lost.  Exact replay is a
+                    # read-only success; any changed binding remains closed.
+                    return record
+                raise ValueError("repair_package_claim_conflict")
             if (
                 record.get("status") != "consuming"
                 or record.get("consumed_by_work_order_id") != work_order_id
+                or not claim_token
+                or record.get("claim_token") != claim_token
             ):
                 raise ValueError("repair_package_claim_conflict")
+            self._assert_claim_authority_unlocked(
+                self.project_dir(namespace, project_id),
+                project_id=project_id,
+                record=record,
+                work_order_id=work_order_id,
+                expected_role="repair",
+                error_code=(
+                    "repair_package_claim_revoked: claim belongs to an "
+                    "inactive or expired window generation"
+                ),
+            )
+            claim_snapshot = {
+                "claim_token": record.get("claim_token"),
+                "claim_generation": record.get("claim_generation"),
+                "claim_epoch_seconds": record.get("claim_epoch_seconds"),
+                "claim_lease_seconds": record.get("claim_lease_seconds"),
+                "claim_lease_expires_at": record.get(
+                    "claim_lease_expires_at"
+                ),
+                "claim_lease_expires_epoch_seconds": record.get(
+                    "claim_lease_expires_epoch_seconds"
+                ),
+                **{
+                    key: copy.deepcopy(record.get(key))
+                    for key in (
+                        "claim_authority_contract",
+                        "claim_authority_root_id",
+                        "claim_authority_generation",
+                        "claim_authority_session_fingerprint",
+                    )
+                    if key in record
+                },
+                "consumed_by_work_order_id": work_order_id,
+            }
             if successor_artifact_id and successor_canonical_sha256:
                 if not repair_to_audit_handoff_id:
                     raise ValueError(
                         "repair_package_binding_incomplete: repair_to_audit handoff is required"
                     )
+                clean_successor_id = safe_id(
+                    successor_artifact_id, "successor_artifact_id"
+                )
+                clean_handoff_id = safe_id(
+                    repair_to_audit_handoff_id,
+                    "repair_to_audit_handoff_id",
+                )
+                if not isinstance(successor_canonical_sha256, str) or not re.fullmatch(
+                    r"[0-9a-f]{64}", successor_canonical_sha256
+                ):
+                    raise ValueError(
+                        "repair_package_binding_incomplete: successor canonical hash is invalid"
+                    )
+                directory = self.project_dir(namespace, project_id)
+                successor_path = (
+                    directory
+                    / "artifacts"
+                    / f"{clean_successor_id}.meta.json"
+                )
+                handoff_path = (
+                    directory / "handoffs" / f"{clean_handoff_id}.json"
+                )
+                if not successor_path.is_file() or not handoff_path.is_file():
+                    raise ValueError(
+                        "repair_package_binding_incomplete: successor or repair_to_audit handoff is missing"
+                    )
+                successor = self.read_json(successor_path)
+                successor_metadata = successor.get("metadata")
+                payload_path = (
+                    directory / str(successor.get("relative_path") or "")
+                ).resolve()
+                if (
+                    successor.get("artifact_id") != clean_successor_id
+                    or successor.get("project_id") != project_id
+                    or successor.get("work_order_id") != work_order_id
+                    or not isinstance(successor_metadata, dict)
+                    or successor_metadata.get("canonical_sha256")
+                    != successor_canonical_sha256
+                    or directory.resolve() not in payload_path.parents
+                    or not payload_path.is_file()
+                    or sha256_bytes(payload_path.read_bytes())
+                    != successor.get("fingerprint")
+                ):
+                    raise ValueError(
+                        "repair_package_binding_incomplete: successor artifact differs"
+                    )
+                repair_handoff = self.read_json(handoff_path)
+                self._verify_record_integrity(
+                    repair_handoff, record_id=clean_handoff_id
+                )
+                if (
+                    not self.project_record_is_signed(repair_handoff)
+                    or repair_handoff.get("handoff_id") != clean_handoff_id
+                    or repair_handoff.get("handoff_type")
+                    != "repair_to_audit"
+                    or repair_handoff.get("work_order_id") != work_order_id
+                    or repair_handoff.get("immutable_repair_package_id")
+                    != clean_id
+                    or repair_handoff.get("storyboard_artifact_id")
+                    != clean_successor_id
+                    or repair_handoff.get("canonical_sha256")
+                    != successor_canonical_sha256
+                    or repair_handoff.get("status")
+                    not in {"prepared", "consuming", "consumed"}
+                ):
+                    raise ValueError(
+                        "repair_package_binding_incomplete: signed repair_to_audit handoff differs"
+                    )
                 record["status"] = "consumed"
-                record["successor_artifact_id"] = successor_artifact_id
+                record["successor_artifact_id"] = clean_successor_id
                 record["successor_canonical_sha256"] = successor_canonical_sha256
-                record["repair_to_audit_handoff_id"] = repair_to_audit_handoff_id
+                record["repair_to_audit_handoff_id"] = clean_handoff_id
+                record["consumption_claim"] = claim_snapshot
             else:
+                released = {**claim_snapshot, "state": "released", "released_at": utc_stamp()}
+                history = record.setdefault("claim_history", [])
+                if not isinstance(history, list):
+                    raise ValueError("repair_package_claim_history_invalid")
+                history.append(released)
+                del history[:-MAX_CONSUMPTION_CLAIM_HISTORY]
                 record["status"] = "issued"
                 record.pop("consumed_by_work_order_id", None)
                 record.pop("successor_artifact_id", None)
                 record.pop("successor_canonical_sha256", None)
                 record.pop("repair_to_audit_handoff_id", None)
+                record.pop("consumption_claim", None)
+            for field in (
+                "claim_token",
+                "claim_epoch_seconds",
+                "claim_lease_seconds",
+                "claim_lease_expires_at",
+                "claim_lease_expires_epoch_seconds",
+                "claim_authority_contract",
+                "claim_authority_root_id",
+                "claim_authority_generation",
+                "claim_authority_session_fingerprint",
+            ):
+                record.pop(field, None)
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(path, record)
+            return record
+
+    def rollback_consumed_repair_package(
+        self,
+        namespace: str,
+        project_id: str,
+        repair_package_id: str,
+        *,
+        work_order_id: str,
+        claim_token: str,
+        claim_generation: int,
+        base_artifact_id: str,
+        transaction_id: str,
+        expected_successor_artifact_id: str,
+        expected_successor_canonical_sha256: str,
+        repair_to_audit_handoff_id: str,
+    ) -> dict[str, Any]:
+        """Rollback one exact consumed claim only before successor publication.
+
+        A caller may observe an exception after ``commit_storyboard_successor``
+        has durably published the successor.  In that case the repair package is
+        already terminally consumed and must never be made reusable.  Bind the
+        compensation to the caller's immutable transaction identity and inspect
+        the base transaction under the same project lock before changing the
+        package.
+        """
+
+        clean_id = safe_id(repair_package_id, "repair_package_id")
+        clean_base_id = safe_id(base_artifact_id, "base_artifact_id")
+        clean_transaction_id = safe_id(transaction_id, "transaction_id")
+        clean_successor_id = safe_id(
+            expected_successor_artifact_id, "expected_successor_artifact_id"
+        )
+        clean_handoff_id = safe_id(
+            repair_to_audit_handoff_id, "repair_to_audit_handoff_id"
+        )
+        if not expected_successor_canonical_sha256:
+            raise ValueError(
+                "repair_package_rollback_identity_invalid: successor canonical hash is required"
+            )
+        directory = self.project_dir(namespace, project_id)
+        path = (
+            directory
+            / "repair_packages"
+            / f"{clean_id}.json"
+        )
+        base_path = directory / "artifacts" / f"{clean_base_id}.meta.json"
+        successor_path = directory / "artifacts" / f"{clean_successor_id}.meta.json"
+        handoff_path = directory / "handoffs" / f"{clean_handoff_id}.json"
+        with self.project_write_lock(namespace, project_id):
+            if not path.is_file():
+                raise ValueError(
+                    "repair_package_required: immutable package does not exist"
+                )
+            record = self.read_json(path)
+            self._verify_record_integrity(record, record_id=clean_id)
+            if not self.project_record_is_signed(record):
+                raise ValueError("repair_package_signature_required")
+            consumption = record.get("consumption_claim")
+            if (
+                record.get("status") != "consumed"
+                or record.get("consumed_by_work_order_id") != work_order_id
+                or not isinstance(consumption, dict)
+                or consumption.get("claim_token") != claim_token
+                or consumption.get("consumed_by_work_order_id")
+                != work_order_id
+                or record.get("claim_generation") != claim_generation
+                or consumption.get("claim_generation") != claim_generation
+            ):
+                raise ValueError(
+                    "repair_package_claim_conflict: consumed rollback claim is not current"
+                )
+            if (
+                record.get("base_artifact_id") != clean_base_id
+                or record.get("successor_artifact_id") != clean_successor_id
+                or record.get("successor_canonical_sha256")
+                != expected_successor_canonical_sha256
+                or record.get("repair_to_audit_handoff_id") != clean_handoff_id
+            ):
+                raise ValueError(
+                    "repair_package_rollback_identity_mismatch: consumed package differs from the fixed transaction"
+                )
+            if not base_path.is_file():
+                raise ValueError(
+                    "repair_package_rollback_forbidden: base artifact metadata is missing"
+                )
+            base_record = self.read_json(base_path)
+            base_metadata = base_record.get("metadata")
+            if not isinstance(base_metadata, dict):
+                raise ValueError(
+                    "repair_package_rollback_forbidden: base artifact metadata is malformed"
+                )
+            transaction = base_metadata.get("successor_transaction")
+            if (
+                not isinstance(transaction, dict)
+                or self._successor_transaction_id(transaction)
+                != clean_transaction_id
+                or str(transaction.get("base_artifact_id") or clean_base_id)
+                != clean_base_id
+            ):
+                raise ValueError(
+                    "successor_transaction_identity_conflict: rollback transaction is not current"
+                )
+
+            committed_id = self._committed_successor_id(base_metadata)
+            transaction_state = str(transaction.get("state") or "")
+            if transaction_state == "committed":
+                if (
+                    committed_id == clean_successor_id
+                    and transaction.get("successor_artifact_id")
+                    == clean_successor_id
+                    and transaction.get("successor_canonical_hash")
+                    == expected_successor_canonical_sha256
+                    and base_metadata.get("successor_canonical_hash")
+                    == expected_successor_canonical_sha256
+                ):
+                    # Exact committed state is terminal.  Returning the signed
+                    # package unchanged makes compensation retries idempotent
+                    # without resurrecting the one-shot repair authority.
+                    return record
+                raise ValueError(
+                    "repair_package_rollback_forbidden: base has a different committed successor"
+                )
+            if committed_id:
+                raise ValueError(
+                    "repair_package_rollback_forbidden: committed successor pointer exists"
+                )
+            history = base_metadata.get("successor_transaction_history") or []
+            if not isinstance(history, list):
+                raise ValueError(
+                    "successor_transaction_identity_conflict: malformed transaction history"
+                )
+            if any(
+                isinstance(item, dict)
+                and self._successor_transaction_id(item) == clean_transaction_id
+                and item.get("state") == "committed"
+                for item in history
+            ):
+                raise ValueError(
+                    "repair_package_rollback_forbidden: committed successor exists in transaction history"
+                )
+            if transaction_state != "aborted":
+                raise ValueError(
+                    "repair_package_rollback_forbidden: successor transaction must be aborted before package release"
+                )
+            try:
+                self._assert_claim_authority_unlocked(
+                    directory,
+                    project_id=project_id,
+                    record=consumption,
+                    work_order_id=work_order_id,
+                    expected_role="repair",
+                    error_code=(
+                        "repair_package_claim_revoked: rollback belongs to "
+                        "an inactive or expired window generation"
+                    ),
+                )
+            except ValueError as exact_authority_error:
+                # A new physical window may compensate an already-aborted
+                # transaction only when it holds the current operation fence
+                # and the consumed claim is a signed ancestor of that exact
+                # logical repair authority.  The old token/session cannot use
+                # this branch after rotation because it cannot acquire/bind
+                # the current-generation operation lease.
+                try:
+                    repair_work_order, active = (
+                        self._work_order_authority_unlocked(
+                            directory,
+                            project_id=project_id,
+                            work_order_id=work_order_id,
+                            expected_role="repair",
+                            error_code=str(exact_authority_error),
+                        )
+                    )
+                    self._assert_claim_authority_ancestor_unlocked(
+                        directory,
+                        project_id=project_id,
+                        record=consumption,
+                        work_order=repair_work_order,
+                        active=active,
+                        error_code=str(exact_authority_error),
+                    )
+                except ValueError:
+                    raise exact_authority_error
+            if not successor_path.is_file():
+                raise ValueError(
+                    "repair_package_rollback_identity_mismatch: successor artifact metadata is missing"
+                )
+            successor_record = self.read_json(successor_path)
+            successor_metadata = successor_record.get("metadata")
+            if not isinstance(successor_metadata, dict):
+                raise ValueError(
+                    "repair_package_rollback_identity_mismatch: successor artifact metadata is malformed"
+                )
+            candidate_transaction_id = str(
+                successor_metadata.get("successor_transaction_id")
+                or successor_metadata.get("repair_transaction_id")
+                or ""
+            )
+            candidate_package_id = str(
+                successor_metadata.get("repair_package_id")
+                or successor_metadata.get("patch_repair_package_id")
+                or ""
+            )
+            candidate_base_id = str(
+                successor_metadata.get("successor_base_artifact_id")
+                or successor_metadata.get("repair_base_artifact_id")
+                or successor_metadata.get("patch_base_artifact_id")
+                or ""
+            )
+            candidate_scope_hash = str(
+                successor_metadata.get("successor_scope_hash")
+                or successor_metadata.get("repair_scope_hash")
+                or successor_metadata.get("patch_scope_hash")
+                or ""
+            )
+            if (
+                successor_record.get("project_id") != project_id
+                or successor_record.get("source_artifact_id") != clean_base_id
+                or successor_metadata.get("canonical_sha256")
+                != expected_successor_canonical_sha256
+                or candidate_transaction_id != clean_transaction_id
+                or candidate_package_id != clean_id
+                or candidate_base_id != clean_base_id
+                or not candidate_scope_hash
+                or candidate_scope_hash != str(transaction.get("scope_hash") or "")
+            ):
+                raise ValueError(
+                    "repair_package_rollback_identity_mismatch: successor candidate differs from the fixed transaction"
+                )
+            publication_state = self.artifact_publication_state(successor_record)
+            if publication_state not in {"pending", "aborted", "rejected"}:
+                raise ValueError(
+                    "repair_package_rollback_forbidden: successor candidate is already published"
+                )
+            if self._artifact_is_published(directory, successor_record):
+                raise ValueError(
+                    "repair_package_rollback_forbidden: successor candidate has a committed downstream reference"
+                )
+            if not handoff_path.is_file():
+                raise ValueError(
+                    "repair_package_rollback_identity_mismatch: repair_to_audit handoff is missing"
+                )
+            handoff = self.read_json(handoff_path)
+            self._verify_record_integrity(handoff, record_id=clean_handoff_id)
+            if not self.project_record_is_signed(handoff):
+                raise ValueError(
+                    "repair_package_rollback_identity_mismatch: repair_to_audit handoff is unsigned"
+                )
+            forbidden_handoff_fields = (
+                "claimed_by_work_order_id",
+                "claim_token",
+                "consumed_by_work_order_id",
+                "consumed_at",
+                "consumption_claim",
+                "audit_certificate_id",
+                "latest_audit_certificate_id",
+            )
+            if (
+                handoff.get("handoff_type") != "repair_to_audit"
+                or handoff.get("immutable_repair_package_id") != clean_id
+                or handoff.get("work_order_id") != work_order_id
+                or handoff.get("storyboard_artifact_id") != clean_successor_id
+                or handoff.get("canonical_sha256")
+                != expected_successor_canonical_sha256
+                or handoff.get("successor_transaction_id")
+                != clean_transaction_id
+                or handoff.get("successor_base_artifact_id") != clean_base_id
+                or handoff.get("status") != "rejected"
+                or handoff.get("publication_state")
+                not in {"aborted", "rejected"}
+                or any(handoff.get(field) for field in forbidden_handoff_fields)
+            ):
+                raise ValueError(
+                    "repair_package_rollback_forbidden: repair_to_audit handoff has a live or mismatched downstream binding"
+                )
+            hub_path = directory / "hub.json"
+            if not hub_path.is_file():
+                raise ValueError(
+                    "repair_package_rollback_forbidden: Hub projection is missing"
+                )
+            hub = self.read_json(hub_path)
+            hub_handoffs = hub.get("handoffs") if isinstance(hub, dict) else None
+            projections = [
+                row
+                for row in (
+                    hub_handoffs if isinstance(hub_handoffs, list) else []
+                )
+                if isinstance(row, dict)
+                and row.get("handoff_id") == clean_handoff_id
+            ]
+            if len(projections) != 1:
+                raise ValueError(
+                    "repair_package_rollback_forbidden: Hub handoff projection is incomplete"
+                )
+            projection = projections[0]
+            if (
+                projection.get("status") != "rejected"
+                or projection.get("publication_state")
+                not in {"aborted", "rejected"}
+                or any(projection.get(field) for field in forbidden_handoff_fields)
+            ):
+                raise ValueError(
+                    "repair_package_rollback_forbidden: Hub handoff projection has downstream consumption"
+                )
+            certificate_dir = directory / "certificates"
+            for certificate_path in (
+                sorted(certificate_dir.glob("*.json"))
+                if certificate_dir.is_dir()
+                else []
+            ):
+                certificate = self.read_json(certificate_path)
+                if isinstance(certificate, dict) and clean_handoff_id in {
+                    str(certificate.get("handoff_id") or ""),
+                    str(certificate.get("production_handoff_id") or ""),
+                    str(certificate.get("repair_to_audit_handoff_id") or ""),
+                }:
+                    raise ValueError(
+                        "repair_package_rollback_forbidden: independent audit evidence already references the handoff"
+                    )
+            history = record.setdefault("claim_history", [])
+            if not isinstance(history, list):
+                raise ValueError("repair_package_claim_history_invalid")
+            history.append(
+                {
+                    **copy.deepcopy(consumption),
+                    "state": "rolled_back_after_successor_cas_failure",
+                    "rolled_back_at": utc_stamp(),
+                }
+            )
+            del history[:-MAX_CONSUMPTION_CLAIM_HISTORY]
+            record["status"] = "issued"
+            for field in (
+                "consumed_by_work_order_id",
+                "successor_artifact_id",
+                "successor_canonical_sha256",
+                "repair_to_audit_handoff_id",
+                "consumption_claim",
+            ):
+                record.pop(field, None)
             record["integrity_hmac"] = self._record_integrity_hmac(record)
             self.atomic_write_json(path, record)
             return record
@@ -6878,6 +10470,372 @@ class ProjectStore:
             record.setdefault("metadata", {}).update(updates)
             self.atomic_write_json(meta_path, record)
             return record
+
+    def set_successor_candidate_publication(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        work_order_id: str,
+        artifact_id: str,
+        canonical_artifact_id: str,
+        handoff_id: str,
+        transaction_id: str,
+        state: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """CAS all successor publication projections under one project lock.
+
+        The base successor transaction is the publication authority.  Audit
+        may claim the handoff immediately after that CAS, so this finalizer
+        must read the *current* signed handoff while holding the same lock and
+        preserve any legitimate claim/consumption lifecycle fields instead of
+        writing an older service-layer snapshot over them.
+        """
+
+        clean_work_order_id = safe_id(work_order_id, "work_order_id")
+        clean_artifact_id = safe_id(artifact_id, "artifact_id")
+        clean_canonical_id = safe_id(
+            canonical_artifact_id, "canonical_artifact_id"
+        )
+        clean_handoff_id = safe_id(handoff_id, "handoff_id")
+        clean_transaction_id = safe_id(transaction_id, "transaction_id")
+        if state not in {"committed", "aborted"}:
+            raise ValueError("invalid successor candidate publication state")
+
+        directory = self.project_dir(namespace, project_id)
+        candidate_ids = list(
+            dict.fromkeys([clean_artifact_id, clean_canonical_id])
+        )
+        artifact_paths = {
+            candidate_id: directory
+            / "artifacts"
+            / f"{candidate_id}.meta.json"
+            for candidate_id in candidate_ids
+        }
+        handoff_path = directory / "handoffs" / f"{clean_handoff_id}.json"
+        hub_path = directory / "hub.json"
+
+        with self.project_write_lock(namespace, project_id):
+            candidate_records: dict[str, dict[str, Any]] = {}
+            descriptor: tuple[str, str, str] | None = None
+            for candidate_id, candidate_path in artifact_paths.items():
+                if not candidate_path.is_file():
+                    raise ValueError(
+                        "successor publication candidate metadata is missing"
+                    )
+                candidate = self.read_json(candidate_path)
+                metadata = candidate.get("metadata")
+                if (
+                    candidate.get("artifact_id") != candidate_id
+                    or candidate.get("project_id") != project_id
+                    or candidate.get("work_order_id") != clean_work_order_id
+                    or not isinstance(metadata, dict)
+                    or metadata.get("successor_transaction_id")
+                    != clean_transaction_id
+                ):
+                    raise ValueError(
+                        "successor_transaction_conflict: artifact candidate belongs to another transaction"
+                    )
+                payload_path = (directory / str(candidate.get("relative_path") or "")).resolve()
+                if (
+                    directory.resolve() not in payload_path.parents
+                    or not payload_path.is_file()
+                    or sha256_bytes(payload_path.read_bytes())
+                    != candidate.get("fingerprint")
+                ):
+                    raise ValueError(
+                        "artifact_raw_fingerprint_mismatch: successor candidate bytes changed"
+                    )
+                current_state = self.artifact_publication_state(candidate)
+                allowed_states = (
+                    {"pending", "committed"}
+                    if state == "committed"
+                    else {"pending", "aborted", "rejected"}
+                )
+                if current_state not in allowed_states:
+                    raise ValueError(
+                        "successor_publication_state_mismatch: candidate cannot enter requested state"
+                    )
+                current_descriptor = (
+                    str(metadata.get("successor_base_artifact_id") or ""),
+                    str(metadata.get("successor_kind") or ""),
+                    str(metadata.get("successor_scope_hash") or ""),
+                )
+                if not all(current_descriptor):
+                    raise ValueError(
+                        "successor_transaction_conflict: candidate descriptor is incomplete"
+                    )
+                if descriptor is None:
+                    descriptor = current_descriptor
+                elif current_descriptor != descriptor:
+                    raise ValueError(
+                        "successor_transaction_conflict: artifact pair descriptors differ"
+                    )
+                candidate_records[candidate_id] = candidate
+
+            assert descriptor is not None
+            base_artifact_id, successor_kind, scope_hash = descriptor
+            base_artifact_id = safe_id(
+                base_artifact_id, "successor_base_artifact_id"
+            )
+            base_path = directory / "artifacts" / f"{base_artifact_id}.meta.json"
+            if not base_path.is_file():
+                raise ValueError("unknown successor base artifact")
+            base_record = self.read_json(base_path)
+            base_metadata = base_record.get("metadata")
+            base_transaction = (
+                base_metadata.get("successor_transaction")
+                if isinstance(base_metadata, dict)
+                else None
+            )
+            if (
+                not isinstance(base_transaction, dict)
+                or self._successor_transaction_id(base_transaction)
+                != clean_transaction_id
+                or base_transaction.get("successor_kind") != successor_kind
+                or base_transaction.get("scope_hash") != scope_hash
+                or base_transaction.get("state") != state
+            ):
+                raise ValueError(
+                    "successor_transaction_conflict: base transaction is not in the requested terminal state"
+                )
+            if state == "committed" and (
+                base_transaction.get("successor_artifact_id")
+                != clean_artifact_id
+                or base_metadata.get("successor_artifact_id")
+                != clean_artifact_id
+                or base_transaction.get("successor_canonical_hash")
+                != candidate_records[clean_artifact_id]
+                .get("metadata", {})
+                .get("canonical_sha256")
+            ):
+                raise ValueError(
+                    "successor_transaction_conflict: committed base differs from candidate"
+                )
+
+            if not handoff_path.is_file():
+                raise ValueError("successor publication handoff is missing")
+            handoff = self.read_json(handoff_path)
+            self._verify_record_integrity(
+                handoff, record_id=clean_handoff_id
+            )
+            if (
+                not self.project_record_is_signed(handoff)
+                or handoff.get("handoff_id") != clean_handoff_id
+                or handoff.get("work_order_id") != clean_work_order_id
+                or handoff.get("storyboard_artifact_id")
+                != clean_artifact_id
+                or handoff.get("canonical_artifact_id")
+                != clean_canonical_id
+                or handoff.get("successor_transaction_id")
+                != clean_transaction_id
+                or handoff.get("successor_base_artifact_id")
+                != base_artifact_id
+                or handoff.get("successor_kind") != successor_kind
+                or handoff.get("successor_scope_hash") != scope_hash
+            ):
+                raise ValueError(
+                    "successor_transaction_conflict: signed handoff differs from candidate"
+                )
+            if state == "committed" and handoff.get("status") == "rejected":
+                raise ValueError(
+                    "successor_publication_state_mismatch: rejected handoff cannot be published"
+                )
+            live_handoff_fields = (
+                "claimed_by_work_order_id",
+                "claim_token",
+                "consumed_by_work_order_id",
+                "consumption_claim",
+                "audit_certificate_id",
+                "latest_audit_certificate_id",
+            )
+            if state == "aborted" and any(
+                handoff.get(field) for field in live_handoff_fields
+            ):
+                raise ValueError(
+                    "successor_publication_state_mismatch: claimed handoff cannot be aborted"
+                )
+
+            if not hub_path.is_file():
+                raise ValueError("successor publication Hub projection is missing")
+            hub = self.read_json(hub_path)
+            hub_handoffs = hub.get("handoffs") if isinstance(hub, dict) else None
+            projection_matches = [
+                (index, row)
+                for index, row in enumerate(
+                    hub_handoffs if isinstance(hub_handoffs, list) else []
+                )
+                if isinstance(row, dict)
+                and row.get("handoff_id") == clean_handoff_id
+            ]
+            if len(projection_matches) != 1:
+                raise ValueError(
+                    "successor publication Hub handoff projection is incomplete"
+                )
+            projection_index, projection = projection_matches[0]
+            if (
+                projection.get("work_order_id") != clean_work_order_id
+                or projection.get("storyboard_artifact_id")
+                != clean_artifact_id
+                or projection.get("canonical_artifact_id")
+                != clean_canonical_id
+                or projection.get("successor_transaction_id")
+                != clean_transaction_id
+            ):
+                raise ValueError(
+                    "successor publication Hub handoff projection conflicts with signed record"
+                )
+            work_orders = hub.get("work_orders") if isinstance(hub, dict) else None
+            work_order_matches = [
+                row
+                for row in (
+                    work_orders if isinstance(work_orders, list) else []
+                )
+                if isinstance(row, dict)
+                and row.get("work_order_id") == clean_work_order_id
+            ]
+            if len(work_order_matches) != 1:
+                raise ValueError("successor publication work order is missing")
+
+            timestamp: str | None = None
+
+            def change_timestamp() -> str:
+                nonlocal timestamp
+                if timestamp is None:
+                    timestamp = utc_stamp()
+                return timestamp
+
+            for candidate_id, candidate in list(candidate_records.items()):
+                current_state = self.artifact_publication_state(candidate)
+                if current_state == state:
+                    continue
+                updated_candidate = copy.deepcopy(candidate)
+                metadata = updated_candidate.setdefault("metadata", {})
+                metadata["publication_state"] = state
+                metadata["successor_transaction_id"] = clean_transaction_id
+                if state == "committed":
+                    metadata["published_at"] = change_timestamp()
+                    metadata.pop("publication_aborted_at", None)
+                    metadata.pop("publication_abort_reason", None)
+                else:
+                    metadata["publication_aborted_at"] = change_timestamp()
+                    metadata["publication_abort_reason"] = str(
+                        reason or "successor transaction aborted"
+                    )[:512]
+                self.atomic_write_json(
+                    artifact_paths[candidate_id], updated_candidate
+                )
+                candidate_records[candidate_id] = updated_candidate
+
+            handoff_state = str(
+                handoff.get("publication_state") or "committed"
+            )
+            handoff_status = str(handoff.get("status") or "")
+            handoff_needs_update = False
+            if state == "committed":
+                # A claim or consumption can legitimately win immediately
+                # after the base CAS.  Its signed record is immutable from the
+                # publication finalizer's perspective; the base transaction
+                # already makes the pending descriptor consumable.
+                handoff_needs_update = (
+                    handoff_state != "committed"
+                    and handoff_status == "prepared"
+                )
+            else:
+                handoff_needs_update = not (
+                    handoff_state == "aborted"
+                    and handoff_status == "rejected"
+                )
+            if handoff_needs_update:
+                updated_handoff = copy.deepcopy(handoff)
+                updated_handoff["publication_state"] = state
+                updated_handoff["successor_transaction_id"] = (
+                    clean_transaction_id
+                )
+                if state == "committed":
+                    updated_handoff["published_at"] = change_timestamp()
+                    updated_handoff.pop("rejected_at", None)
+                    updated_handoff.pop("rejection_reason", None)
+                else:
+                    updated_handoff["status"] = "rejected"
+                    updated_handoff["rejected_at"] = change_timestamp()
+                    updated_handoff["rejection_reason"] = str(
+                        reason or "successor transaction aborted"
+                    )[:512]
+                updated_handoff["integrity_hmac"] = (
+                    self._record_integrity_hmac(updated_handoff)
+                )
+                self.atomic_write_json(handoff_path, updated_handoff)
+                handoff = updated_handoff
+
+            desired_projection = {
+                key: copy.deepcopy(value)
+                for key, value in handoff.items()
+                if key not in {"record_id", "project_id", "integrity_hmac"}
+            }
+            hub_dirty = projection != desired_projection
+            if hub_dirty:
+                hub_handoffs[projection_index] = desired_projection
+            deliverable = next(
+                (
+                    row
+                    for row in hub.setdefault("deliverables", [])
+                    if isinstance(row, dict)
+                    and row.get("deliverable_id") == clean_artifact_id
+                ),
+                None,
+            )
+            if deliverable is not None:
+                if deliverable.get("publication_state") != state:
+                    deliverable["publication_state"] = state
+                    hub_dirty = True
+                if deliverable.get("status") != "draft":
+                    deliverable["status"] = "draft"
+                    hub_dirty = True
+                latest = hub.setdefault("project_state", {}).setdefault(
+                    "latest_artifacts", {}
+                ).get("storyboard")
+                if isinstance(latest, dict) and latest.get(
+                    "deliverable_id"
+                ) == clean_artifact_id:
+                    hub["project_state"]["latest_artifacts"].pop(
+                        "storyboard", None
+                    )
+                    hub_dirty = True
+            work_order = work_order_matches[0]
+            if handoff.get("status") not in {"consumed", "rejected"}:
+                awaiting_audit = state == "committed"
+                if (
+                    work_order.get("awaiting_independent_audit")
+                    != awaiting_audit
+                ):
+                    work_order["awaiting_independent_audit"] = awaiting_audit
+                    hub_dirty = True
+            if state == "aborted" and work_order.get("status") == "validating":
+                current = str(work_order["status"])
+                work_order["status"] = "failed_current"
+                work_order["updated_at"] = change_timestamp()
+                history = work_order.setdefault("state_history", [])
+                if isinstance(history, list):
+                    history.append(
+                        {
+                            "timestamp": change_timestamp(),
+                            "from": current,
+                            "to": "failed_current",
+                        }
+                    )
+                hub.setdefault("project_state", {})[
+                    "current_stage"
+                ] = "failed_current"
+                hub_dirty = True
+            if hub_dirty:
+                hub["updated_at"] = change_timestamp()
+                self.atomic_write_json(hub_path, hub)
+            return {
+                "artifacts": copy.deepcopy(candidate_records),
+                "handoff": copy.deepcopy(handoff),
+            }
 
     def claim_storyboard_patch(
         self,
