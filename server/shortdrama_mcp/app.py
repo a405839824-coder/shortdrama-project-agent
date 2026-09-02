@@ -104,13 +104,15 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "小说章节转分镜必须先完整读取并建立章节地图、取舍台账、人物认知、对白保护、时长预算和节拍计划，未完成不得生成。"
             "生成内容后必须调用提交工具；commit_storyboard只签发生产预检和handoff，不能冒充独立审计。"
             "已有分镜只改受影响范围时使用commit_storyboard_delta：仅提交稳定shot_uid、精确左右边界和变化镜头；服务端合并未改内容并执行同一完整R10.1生产校验，随后交给独立审计。"
-            "审计窗口必须调用audit_storyboard独立重算；相同canonical、原文件、源文、边界、规则和验证器才可复用。"
+            "审计必须调用audit_storyboard由服务端独立审计身份重算；用户可在当前任意已认证窗口发起，"
+            "相同canonical、原文件、源文、边界、规则和验证器才可复用。"
             "街道、市集、酒楼、城门等公共场景必须写普通人物密度、地点角色、错峰动作和空间层次，并写具体近中远环境声、对白避让和声画来源；有因空场除外。"
             "正式母版单镜必须在空白上下文中完整复现同一组公共人物、环境声生态、空间站位、起始状态和时间阶段。"
             "禁止后台生成或保存独立Seedance批次；正式母版画面内容就是单镜执行真源，GPT关键帧仅在导出时确定性编译。"
             "新写分镜必须遵守R10-SPC-1：EP##-###编号、单集累计重置、每镜恰好三个Seedance 2.5时间阶段，第五列表头为正式分镜母版。"
-            "只有独立审计失败且用户明确授权后，独立repair窗口才可使用签名修复包；非结构字段可用commit_storyboard_patch局部修复，边界、认知、原文、编号和时长变化必须执行绑定修复包的完整重建。"
-            "修复后仍执行完整生产校验并交回原独立审计窗口复核；最多三轮，只有原审计窗口确认零残留、零新增才可称通过。"
+            "只有独立审计失败且用户明确授权后，服务端修正身份才可使用签名修复包；用户可在当前任意已认证窗口发起。"
+            "非结构字段可用commit_storyboard_patch局部修复，边界、认知、原文、编号和时长变化必须执行绑定修复包的完整重建。"
+            "修复后仍执行完整生产校验并交回原独立审计身份复核；最多三轮，只有独立复核确认零残留、零新增才可称通过。"
             "失效prepared生产handoff只能由受控恢复工具先预演后按精确哈希确认；旧记录保留为superseded，新记录仍待独立审计。"
             "正式归档必须同时具备精确版本的独立审计通过证书和signoff_task人工签核。"
             "只有用户要求排查原生ChatGPT耗时时才启用mark_performance_stage；按五个固定阶段记录"
@@ -195,7 +197,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         name="recover_storyboard_handoff",
         title="受控恢复失效分镜交接",
         description=(
-            "仅供production窗口在已登记能力缺口且用户明确授权后使用。phase=preflight_evidence_backfill"
+            "仅供已认证用户在已登记能力缺口且明确授权后使用。phase=preflight_evidence_backfill"
             "可对缺少旧生产预检字段的不可变交接执行当前验证器复验并追加签名证据；"
             "省略phase时只允许从当前会话绑定工单中唯一且精确的controlled_phase令牌推断。"
             "两阶段均须先action=plan预演，execute回传精确"
@@ -355,8 +357,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         title="建立执行工单",
         description=(
             "任何章节解析、策划、生成、改写、增删改、审计修复或生产任务开始时调用；"
-            "默认建立工单。旧角色窗口失效时，可在同角色新窗口先预演、再用相同计划哈希和"
-            "精确确认字面量轮换该工单的物理权限绑定；旧代立即撤销，角色、范围和待审门禁不变。"
+            "默认建立窗口无角色限制的工单：同一已认证用户的任意聊天窗口均可发起或继续"
+            "生产、独立审计和修正。服务端为每张工单签发独立执行身份并保留完整证据链；"
+            "旧的角色接续动作仅供0.5.13及更早历史工单兼容。"
         ),
         annotations=_annotations(read_only=False),
         meta=meta("正在锁定任务范围…", "执行工单已建立"),
@@ -404,7 +407,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             expected_outputs=expected_outputs,
             window_key=window_key,
             request_session_id=_window_session_id(ctx),
-            action=action,
+            action=("create_window_neutral" if action == "create" else action),
             resume_work_order_id=resume_work_order_id,
             expected_plan_sha256=expected_plan_sha256,
             confirmation=confirmation,
@@ -414,9 +417,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         name="import_source_file",
         title="导入项目文件",
         description=(
-            "用户上传小说、剧本、分镜或规则文件后，由production窗口使用"
+            "用户上传小说、剧本、分镜或规则文件后，由任意已认证窗口使用"
             "project_intake/source_lock/chapter_intake的execute+explicit_execute工单调用；"
-            "服务端在下载或落盘前校验工单、角色和会话。audit/read_only窗口禁止导入或替换来源。"
+            "服务端在下载或落盘前校验工单类型和后台生产执行身份；审计工单仍禁止导入或替换来源。"
             "安全下载、保存原件并提取xlsx/docx/pdf/json/md/txt/csv/mm内容。"
         ),
         annotations=_annotations(read_only=False, open_world=True),
@@ -676,9 +679,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         title="提交并生产预检分镜",
         description=(
             "生成、重建或完整修复R10.1 compact分镜后调用；执行全部生产门禁，保存canonical JSON、Excel、"
-            "production_preflight证书和审计交接包。结构性修复必须由repair窗口同时提交审计签发的"
+            "production_preflight证书和审计交接包。结构性修复必须由后台修正身份同时提交审计签发的"
             "repair_package_id和其精确base artifact；服务端单次消费修复包并把成功结果送回原独立"
-            "审计窗口。生产预检不能替代独立审计。canonical只保存27个语义字段；正式母版和GPT"
+            "原独立审计身份。生产预检不能替代独立审计。canonical只保存27个语义字段；正式母版和GPT"
             "关键帧在导出时编译，禁止保存或后台生成独立Seedance批次。"
         ),
         annotations=_annotations(read_only=False),
@@ -878,7 +881,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     @server.tool(
         name="record_capability_gap",
         title="登记缺失能力",
-        description="当前工具、权限或依赖无法真实完成用户请求时调用；必须使用当前窗口绑定的capability_gap方案工单，记录安全替代、实现方案与测试门禁，禁止假装已执行。",
+        description="当前工具或依赖无法真实完成用户请求时调用；必须使用当前项目的capability_gap方案工单，记录安全替代、实现方案与测试门禁，禁止假装已执行。",
         annotations=_annotations(read_only=False),
         meta=meta("正在登记能力缺口…", "能力缺口已记录"),
         structured_output=True,

@@ -1,4 +1,4 @@
-# 分镜项目 Agent 0.5.13
+# 分镜项目 Agent 0.5.14
 
 这是一个“技能 + MCP 执行服务”的完整工具型插件。ChatGPT 负责理解、生成与改写内容，MCP 负责项目状态、文件导入、版本化提交、全表审计、修复回归、跨聊天问题台账和人工签核。没有真实工具调用时，插件规则禁止声称“已经执行”。
 
@@ -7,6 +7,7 @@
 - 本地 MCP：可运行，Streamable HTTP 端点为 `/mcp`
 - 工具：19 个，覆盖项目、工单、状态迁移、受控交接恢复、跨批次问题画像、草稿预检、自动批量文件读取、变更、剧本/方案、全量与增量分镜、独立审计、受控局部修复、验证、能力缺口、签核及按需性能诊断
 - R10 运行时：`R10.1` 紧凑母版 Schema，工作流保持 `R10-PG1`；底层规则运行时标识为 `V16.3-148-R10-StableRuntime`
+- 0.5.14 窗口无角色限制：同一认证用户命名空间中的任意聊天窗口都可直接建立或继续生产、独立审计和修正工单，无需声明窗口角色、寻找旧窗口或执行权限恢复。聊天会话只作为请求来源；服务端仍为每张工单签发不同的authority root、window binding与actor binding，生产预检不能冒充独立审计，修正仍须消费签名修复包并返回原独审authority。待审计、待修正等状态只限制工作流顺序，不限制用户在哪个窗口执行下一动作
 - 小说转分镜：完整章节读取→剧情地图→取舍台账→人物状态/认知→对白保护→时长预算→节拍→100%覆盖审计
 - 公共场景生态：街道、市集、商街、巷道、城门、码头、公共餐饮等场景强制普通人物密度/角色/错峰动作/空间层次，以及具体近中远环境声、对白避让和声画来源；有因空场除外
 - 27 字段 canonical：每镜只保存一次语义事实，模型字段固定为 `镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`。服务端内部 UID/分集/场景身份不属于模型写入字段
@@ -29,8 +30,8 @@
 - 0.5.6 崩溃恢复与台账重放：event-only 半写只在重交 semantic/event/trace/指纹完全一致时确定性补证书，certificate-only 和变体重试失败关闭；旧台账 checkpoint 必须由独立签名 migration journal/CAS 授权，检查点后的 issue/history/location/counter 全部从新增 event 重放
 - 审计状态隔离：生产文件只写`PENDING_AUDIT／待独立审计`且永不就地回填；独立审计签发后创建新的不可变签名 overlay successor，并只在新工件中写入问题计数、trace、canonical 哈希与文件指纹
 - GPT 导出投影：`GPT关键帧生成指令`只在导出时从同一 canonical 确定性生成，不写回 canonical；投影会移除时间段、对白、口型和声音指令
-- 跨聊天：同一用户命名空间 + 同一 `project_id` 共用项目中枢和问题台账；旧窗口不可用时，只有上述五类分镜operation能在同工单、同角色、同范围下受控取得该authority root的新活动epoch。活动head推进后旧epoch逻辑失效，旧上下文会在下一次authority持久化边界被generation fence拒绝，历史签名代际记录保持不可变
-- 窗口架构：生产与独立审计为两个常驻独立 authority；只有审计失败且用户授权修复时才启用第三个 repair authority，修复结果必须返回原审计 authority 复核
+- 跨聊天：同一认证用户命名空间 + 同一 `project_id` 共用项目中枢和问题台账；所有窗口具有相同的用户编排能力，可直接继续同一窗口无角色限制工单。0.5.13及更早的窗口绑定历史工单仍可读取，并保留旧接续事务作为兼容路线
+- 执行架构：生产与独立审计使用不同的服务端 authority root/window binding/actor binding；只有审计失败且用户授权修复时才启用独立 repair authority，修复结果必须返回原审计 authority 复核。这里的“独立”是后台证据身份隔离，不要求用户切换聊天窗口
 - 增量提速：已有分镜的同身份、同数量、对白与人物认知不变的局部执行变化使用 `commit_storyboard_delta`，只传受影响的完整 27 字段镜头及边界；服务端校验稳定 UID、CAS、保护范围，合并未变化镜头后仍执行完整 R10.1 全表生产校验并生成独立审计 handoff。任何对白或说话人变化、心理音轨、插删移、拆并、重编号或上游证据失效，都重建完整受影响场景/分集
 - 停止后台重复生成：canonical 不持久化正式母版、GPT投影、独立 Seedance 文本或批次；导出器只对最终 canonical 执行一次正式母版和GPT投影，不在生产、审计、修复、缓存预热或后台任务中再次扩写语义
 - 真实独立审计：首次或指纹变化后的 `audit_storyboard` 必须提交绑定精确 canonical 的八层 `semantic_audit` 证据；服务端把它与新鲜机器报告合并，不能再由机器零报错自动合成独立语义通过。仅精确独立审计缓存命中可省略
@@ -99,25 +100,25 @@ ChatGPT 不能直接访问普通的 `localhost`。先保持本地服务运行，
 
 安装并启用插件后，普通中文请求即可触发，不需要输入固定口令。建议首句包含项目名；继续旧项目时附上 `project_id` 最稳妥。
 
-按角色使用独立聊天；无需每次同时打开三个：
+任意已认证窗口都可依次发出以下请求，不需要给窗口分配角色：
 
-1. 窗口1（生产）：`使用分镜项目 Agent 创建《项目名》，导入剧本并生成第一集正式分镜；完成生产预检后交给独立审计。`
-2. 窗口2（独立审计）：`继续项目 PROJECT_ID，建立 storyboard_audit / audit_only / read_only 工单，只审计生产版本，不修改。`
-3. 仅当窗口2判定失败且你明确授权修复时，窗口3建立独立 repair 工单并消费签名修复包；修复后把新版本交回原窗口2复审。审计通过时不创建窗口3。
+1. `继续项目 PROJECT_ID，生成并提交第一集正式分镜。`
+2. `继续项目 PROJECT_ID，独立审计待审计版本，只审不改。`
+3. 仅在独审失败且你明确授权后：`继续项目 PROJECT_ID，按签名修复包修正并交回原独审复核。`
 
-每个角色都应先调用 `get_agent_status`。0.5.5 正式生产固定执行：状态检查 → 必要时 `migrate_project_state` → `query_project_issues` 读取活动问题画像 → 每场景 `preflight_storyboard_draft` → 完整 canonical 的全量预检 → 携带签名 `draft_preflight_id` 调用 `commit_storyboard` → 在独立窗口执行 `audit_storyboard`。失败草稿只写入问题台账和质量画像，不创建 artifact、版本、XLSX 或 handoff；生产必须修复失败范围后重新预检。
+每个新任务仍先调用 `get_agent_status`。正式生产固定执行：状态检查 → 必要时 `migrate_project_state` → `query_project_issues` → 每场景预检 → 完整 canonical 全量预检 → 携带签名 `draft_preflight_id` 提交 → 由服务端独立审计身份执行 `audit_storyboard`。这些动作可以在同一个窗口完成，也可在不同窗口接力。失败草稿只写问题台账和质量画像，不创建 artifact、版本、XLSX 或 handoff。
 
-若状态显示`storyboard_create/regenerate/change/audit/repair`之一的未终结工单仍绑定在不可用旧窗口，必须在同角色的新cloud窗口对`begin_project_task`先调用`action=plan_role_continuation`，核对返回的工单、authority root、角色、完整契约哈希、前置状态哈希、当前/下一代和`plan_sha256`；随后以完全相同的请求调用`action=execute_role_continuation`，回传该哈希及`ROTATE_WINDOW_AUTHORITY_REVOKE_PREVIOUS_SESSION`。不得把该路线用于`rule_improvement`或其他工单，也不得一次接续多个工单或角色。若旧角色仍持有活动operation lease或未过期handoff、repair package、draft-preflight commit claim，plan/execute必须零写拒绝；租约自然过期或被原操作释放后再预演。同root正在运行的另一个请求不能通过同参幂等加入，必须等待独占lease结束；另一个authority root不受该lease串行化。缺少完整lease字段的历史`consuming` claim按不安全状态失败关闭，不能由接续工具自动迁移。接续只恢复权限，不清除项目阻塞：上一批仍待独立审计时，生产窗口仍不得开始下一批。
+0.5.14 新工单不再需要`plan_role_continuation/execute_role_continuation`。这两个动作只保留给0.5.13及更早的历史窗口绑定工单；其旧代次、租约、claim与签名记录仍按原兼容契约验证，不被0.5.14迁移或改写。上一批待独立审计时仍暂缓下一批生产，但你可在当前任意窗口直接完成该审计；这是质量流程顺序，不是窗口权限。
 
 接续后的领取也不是凭工单名即可继续：普通handoff、repair package和独立复审successor必须由当前活动root/generation/session取得新鲜、未过期的claim；旧代或过期token不得finish或release。普通handoff完成还必须提交服务器存储中真实签名且与该handoff、审计工单和artifact一致的独立审计证书。候选artifact的延迟发布不得覆盖已经被领取或消费的签名handoff。审计工单已`passed`时，只在恰有一个签名`prepared`复审successor的恢复场景允许受限接续，不得借此重开已完成审计或生成第二条复审路线。
 
-当前项目中此前列出的11条失效`prepared production_to_audit`仍属于“未恢复”历史集合；0.5.11窗口接续的实现、文档或部署本身都不会补签、supersede或重发这些记录。它们仍须在有效新运行时证书下沿两张独立production恢复工单完成专用补签与恢复，且只能交给独立审计窗口消费；production不得代行审计或修复。
+当前项目中此前列出的11条失效`prepared production_to_audit`仍属于“未恢复”历史集合；窗口无角色限制本身不会补签、supersede或重发这些记录。它们仍须在有效新运行时证书下沿两张不同的后台production恢复工单完成专用补签与恢复，再由独立审计authority消费。用户可在当前窗口发起全部动作，但服务端不会让production执行身份签发独审结论或消费修复包。
 
 初稿质量等级与最终发布结论分开：初稿达到总体/直接可用≥98%、单集≥96%、新增局部≤2%，且硬错、重大问题、已知复发、系统性重复均为0，才算达到 A 级生产质量；全量预检仍须无未解决问题才签发可提交证书。独立审计不是替生产清理明显错误，而是对生产可能遗漏的语义问题做第二道防线；最终发布要求八层独立审计100%通过、残留0、新增0、阻塞0。
 
 判断是否真的走完优化流程，要同时看到同一 artifact/canonical 绑定的草稿预检证书、生产 `trace_id` 和独立审计 `trace_id`，以及 handoff 与 audit certificate；缺少任一追踪只能记为 `fast_path_incomplete`。只有文字说明而没有这些标识，等于没有执行。
 
-0.5.12 对后六条真实当前验证报告的逐handoff精确封存修正见 [docs/UPGRADE_0.5.12.md](docs/UPGRADE_0.5.12.md)；0.5.11 首次引入的受控历史生产预检证明与精确11条恢复见 [docs/UPGRADE_0.5.11.md](docs/UPGRADE_0.5.11.md)；0.5.10 的历史工作簿受控复验与补签见 [docs/UPGRADE_0.5.10.md](docs/UPGRADE_0.5.10.md)；0.5.9 的旧工具参数表受控阶段推断见 [docs/UPGRADE_0.5.9.md](docs/UPGRADE_0.5.9.md)；0.5.8 的历史Hub交接投影严格只读兼容见 [docs/UPGRADE_0.5.8.md](docs/UPGRADE_0.5.8.md)；0.5.7 的旧交接生产预检证据受控补签见 [docs/UPGRADE_0.5.7.md](docs/UPGRADE_0.5.7.md)；0.5.6 首次引入的源文权威、独立复审、台账重放与受控交接恢复见 [docs/UPGRADE_0.5.6.md](docs/UPGRADE_0.5.6.md)；0.5.5 的初稿质量门、项目迁移和发布验收见 [docs/UPGRADE_0.5.5.md](docs/UPGRADE_0.5.5.md)；0.5.4 的集成升级历史见 [docs/UPGRADE_0.5.4.md](docs/UPGRADE_0.5.4.md)。十二项模板硬门禁的原始设计见 [docs/UPGRADE_0.5.1.md](docs/UPGRADE_0.5.1.md)，无API性能诊断见 [docs/UPGRADE_0.5.3.md](docs/UPGRADE_0.5.3.md)。
+0.5.14 窗口无角色限制见 [docs/UPGRADE_0.5.14.md](docs/UPGRADE_0.5.14.md)；0.5.12 对后六条真实当前验证报告的逐handoff精确封存修正见 [docs/UPGRADE_0.5.12.md](docs/UPGRADE_0.5.12.md)；0.5.11 首次引入的受控历史生产预检证明与精确11条恢复见 [docs/UPGRADE_0.5.11.md](docs/UPGRADE_0.5.11.md)；0.5.10 的历史工作簿受控复验与补签见 [docs/UPGRADE_0.5.10.md](docs/UPGRADE_0.5.10.md)；0.5.9 的旧工具参数表受控阶段推断见 [docs/UPGRADE_0.5.9.md](docs/UPGRADE_0.5.9.md)；0.5.8 的历史Hub交接投影严格只读兼容见 [docs/UPGRADE_0.5.8.md](docs/UPGRADE_0.5.8.md)；0.5.7 的旧交接生产预检证据受控补签见 [docs/UPGRADE_0.5.7.md](docs/UPGRADE_0.5.7.md)；0.5.6 首次引入的源文权威、独立复审、台账重放与受控交接恢复见 [docs/UPGRADE_0.5.6.md](docs/UPGRADE_0.5.6.md)；0.5.5 的初稿质量门、项目迁移和发布验收见 [docs/UPGRADE_0.5.5.md](docs/UPGRADE_0.5.5.md)；0.5.4 的集成升级历史见 [docs/UPGRADE_0.5.4.md](docs/UPGRADE_0.5.4.md)。十二项模板硬门禁的原始设计见 [docs/UPGRADE_0.5.1.md](docs/UPGRADE_0.5.1.md)，无API性能诊断见 [docs/UPGRADE_0.5.3.md](docs/UPGRADE_0.5.3.md)。
 
 ## 云端 MCP
 

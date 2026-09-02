@@ -60,7 +60,7 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.13",
+    "plugin_version": "0.5.14",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
     "canonical_atomic_field_count": 27,
@@ -358,17 +358,20 @@
     }
   },
   "windowed_execution_policy": {
-    "principle": "生产与独立审计两个窗口常驻；仅审计失败且获修复授权时启用第三个repair窗口；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-12、八层审计或质量阈值。",
+    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-12、八层审计或质量阈值。",
     "activation": {
-      "always_required": ["production", "independent_audit"],
-      "conditional": "repair",
+      "user_window_access": "authenticated_namespace_window_neutral",
+      "window_role_restrictions": false,
+      "user_window_capabilities": ["production", "independent_audit", "repair"],
+      "always_required_server_authorities": ["production", "independent_audit"],
+      "conditional_server_authority": "repair",
       "repair_activation_condition": "independent_audit_fail_and_explicit_repair_authorization",
-      "clean_audit_forbids_repair_window": true
+      "clean_audit_forbids_repair_authority": true
     },
     "window_roles": {
       "production": "生成前读取主动防错画像，逐场和整批运行初稿预检；只有已知问题为0且初稿质量门达标才创建版本，只能签发production_preflight和handoff，不能签发最终审计通过。",
       "independent_audit": "只读源文与产物，负责发现生产端剩余盲点并独立重算质量结论，不能替代生产自检，独占最终pass/fail签发权。",
-      "repair": "仅依据一次性不可变修复包生成新版本，不能签发最终结论，必须返回原independent_audit authority root与审计周期；旧物理窗口不可用时只允许该root的受控活动epoch接续。"
+      "repair": "仅依据一次性不可变修复包生成新版本，不能签发最终结论，必须返回原independent_audit authority root与审计周期；同一认证命名空间的任意窗口可调用该精确root。"
     },
     "exact_role_matrix": [
       {"role": "production", "operations": ["storyboard_create", "storyboard_regenerate", "storyboard_change"], "mode": "execute", "authorization": "explicit_execute"},
@@ -377,15 +380,20 @@
     ],
     "cloud_session_policy": {
       "trusted_transport_session_required": true,
-      "roles_must_be_pairwise_distinct": true,
+      "transport_session_is_request_provenance_not_role_permission": true,
+      "same_authenticated_session_may_request_multiple_roles": true,
+      "server_authority_root_window_binding_and_actor_binding_must_be_pairwise_distinct": true,
       "logical_window_name_is_not_proof": true,
-      "missing_or_reused_session": "block"
+      "missing_session": "block",
+      "reused_session_across_roles": "allow_with_distinct_server_execution_identities"
     },
     "role_continuation": {
       "introduced_in": "0.5.11",
+      "compatibility_scope_since_0.5.14": "legacy_0.5.13_and_earlier_window_bound_work_orders_only",
+      "required_for_new_work_orders": false,
       "public_tool_count": 19,
       "tool": "begin_project_task",
-      "action_enum": ["create", "plan_role_continuation", "execute_role_continuation"],
+      "action_enum": ["plan_role_continuation", "execute_role_continuation"],
       "optional_parameters": ["resume_work_order_id", "expected_plan_sha256", "confirmation"],
       "exact_confirmation": "ROTATE_WINDOW_AUTHORITY_REVOKE_PREVIOUS_SESSION",
       "eligible_operations": ["storyboard_create", "storyboard_regenerate", "storyboard_change", "storyboard_audit", "storyboard_repair"],
@@ -507,10 +515,10 @@
           "omitted_phase_recovery_default": false,
           "ambiguous_or_unknown_phase_target_policy": "fail_closed_before_plan_or_mutation"
         },
-        "authority": "current_window production rule_improvement execute explicit_execute",
+        "authority": "any_authenticated_window_requests_server_minted_production rule_improvement execute explicit_execute",
         "work_order_contract": {
           "distinct_work_order_per_phase": true,
-          "window_binding": "current_production_window_and_session",
+          "window_binding": "window_neutral_request_plus_distinct_server_production_execution_identity",
           "task_type": "rule_improvement",
           "execution_mode": "execute",
           "approval_mode": "explicit_execute",

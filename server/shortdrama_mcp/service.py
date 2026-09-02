@@ -156,6 +156,7 @@ HANDOFF_RECOVERY_CONFIRMATION = "SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT"
 ROLE_CONTINUATION_CONFIRMATION = (
     "ROTATE_WINDOW_AUTHORITY_REVOKE_PREVIOUS_SESSION"
 )
+WINDOW_NEUTRAL_ACCESS_CONTRACT = "authenticated-namespace-window-neutral-v1"
 PREFLIGHT_EVIDENCE_REISSUE_CONFIRMATION = (
     "REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE"
 )
@@ -2306,7 +2307,7 @@ class StoryboardService:
 
     @staticmethod
     def _work_order_authority_contract(work_order: dict[str, Any]) -> dict[str, Any]:
-        return {
+        contract = {
             "work_order_id": str(work_order.get("work_order_id") or ""),
             "operation": str(work_order.get("operation") or ""),
             "mode": str(work_order.get("mode") or ""),
@@ -2321,6 +2322,14 @@ class StoryboardService:
                 work_order.get("expected_outputs") or []
             ),
         }
+        if "window_access_contract" in work_order:
+            contract["window_access_contract"] = str(
+                work_order.get("window_access_contract") or ""
+            )
+            contract["window_access_scope"] = str(
+                work_order.get("window_access_scope") or ""
+            )
+        return contract
 
     def _project_and_hub_for_work_order(
         self, namespace: str, work_order_id: str
@@ -2803,6 +2812,24 @@ class StoryboardService:
             )
         expected = binding.get("session_fingerprint")
         actual = self._session_fingerprint(namespace, request_session_id)
+        if work_order.get("window_access_contract") == WINDOW_NEUTRAL_ACCESS_CONTRACT:
+            # The authenticated namespace is the user-facing access boundary.
+            # A ChatGPT window is request provenance, not a role principal:
+            # any trusted window for the same OAuth subject may operate the
+            # work order.  The server-minted authority root/window/actor
+            # binding remains the execution identity used by claims,
+            # certificates, handoffs and audit separation.
+            if self.settings.deployment_mode == "cloud" and not actual:
+                raise ValueError(
+                    "authenticated_window_required: cloud execution requires "
+                    "a server-observed MCP session"
+                )
+            if self.settings.deployment_mode == "cloud" and not expected:
+                raise ValueError(
+                    "execution_identity_invalid: window-neutral work order is "
+                    "missing its server-minted authority binding"
+                )
+            return binding
         # Local/direct service callers have no trusted host session envelope.
         # Keep that development/test path compatible while still comparing a
         # session whenever one is supplied.  Cloud authority always requires
@@ -4227,6 +4254,14 @@ class StoryboardService:
             "execution_available": report.get("status") == "pass",
             "deployment_mode": self.settings.deployment_mode,
             "auth_mode": self.settings.auth_mode,
+            "window_neutral_orchestration": True,
+            "window_role_restrictions": False,
+            "window_access_scope": "authenticated_namespace",
+            "window_access_capabilities": [
+                "production",
+                "independent_audit",
+                "repair",
+            ],
             "performance_diagnostics": {
                 "available": True,
                 "tool": "mark_performance_stage",
@@ -4305,6 +4340,7 @@ class StoryboardService:
             data["independent_audit_pending_details"] = pending_audit_state
             data["role_continuation_supported"] = True
             data["continuation_supported"] = True
+            data["role_continuation_required"] = False
             data["role_continuation_operations"] = sorted(
                 STORYBOARD_OPERATIONS | {"storyboard_audit"}
             )
@@ -4339,8 +4375,13 @@ class StoryboardService:
                         work_order,
                         hub=hub,
                     )
+                    window_neutral = bool(
+                        work_order.get("window_access_contract")
+                        == WINDOW_NEUTRAL_ACCESS_CONTRACT
+                    )
                     is_current = bool(
-                        current_session_fingerprint
+                        not window_neutral
+                        and current_session_fingerprint
                         and binding.get("session_fingerprint")
                         == current_session_fingerprint
                     )
@@ -4352,12 +4393,15 @@ class StoryboardService:
                         "storyboard_audit"
                     }
                     resumable = bool(
-                        state in resumable_states
+                        not window_neutral
+                        and state in resumable_states
                         and not is_current
                         and operation_supported
                     )
                     reason = (
-                        "already_active_in_current_window"
+                        "window_neutral_no_resume_required"
+                        if window_neutral
+                        else "already_active_in_current_window"
                         if is_current
                         else (
                             "eligible"
@@ -4380,7 +4424,9 @@ class StoryboardService:
                             "work_order_status": state,
                             "active_generation": binding.get("generation"),
                             "current_window_status": (
-                                "active" if is_current else "other_window"
+                                "accessible"
+                                if window_neutral
+                                else ("active" if is_current else "other_window")
                             ),
                             "resumable": resumable,
                             "reason": reason,
@@ -4401,9 +4447,16 @@ class StoryboardService:
             data["current_window_status"] = (
                 "active"
                 if current_window_roles
-                else ("unbound" if request_session_id else "session_unavailable")
+                else (
+                    "window_neutral"
+                    if request_session_id
+                    else "session_unavailable"
+                )
             )
             data["current_window_roles"] = sorted(current_window_roles)
+            data["window_access_status"] = (
+                "ready" if request_session_id else "session_unavailable"
+            )
             data["required_next_role"] = (
                 "independent_audit"
                 if pending_independent_audit
@@ -4419,6 +4472,7 @@ class StoryboardService:
                     else "production"
                 )
             )
+            data["required_next_action"] = data["required_next_role"]
             data["open_issue_pattern_count"] = data["issues"].get(
                 "open_issue_count", 0
             )
@@ -4444,24 +4498,33 @@ class StoryboardService:
                 summary += "｜当前运行时未获有效全量回归证书｜仅允许自检"
             elif isinstance(quality_block, dict) and quality_block.get("active"):
                 response_status = "action_required"
-                data["execution_available"] = False
+                data["execution_available"] = True
                 data["execution_mode"] = "root_cause_repair_only"
+                data["allowed_storyboard_operations"] = ["storyboard_repair"]
                 summary += "｜初版质量门阻断下一批｜需根因修复"
             elif pending_independent_audit:
                 response_status = "action_required"
-                data["execution_available"] = False
-                data["execution_mode"] = "independent_audit_only"
-                summary += "｜上一批待独立审计｜禁止扩大生产"
+                data["execution_available"] = True
+                data["execution_mode"] = "audit_resolution"
+                data["allowed_storyboard_operations"] = ["storyboard_audit"]
+                summary += "｜上一批待独立审计｜可在当前窗口直接审计"
             elif draft_failure_state["blocked"]:
                 response_status = "action_required"
-                data["execution_available"] = False
+                data["execution_available"] = True
                 data["execution_mode"] = "draft_repair_only"
+                data["allowed_storyboard_operations"] = [
+                    "storyboard_repair",
+                    "storyboard_change",
+                ]
                 data["action_required"] = (
                     "correct_failed_draft_scope_or_start_root_cause_repair"
                 )
                 summary += "｜初稿预检失败scope未闭合｜仅允许原工单修正或根因修复"
             else:
                 data["execution_mode"] = "normal"
+                data["allowed_storyboard_operations"] = sorted(
+                    STORYBOARD_OPERATIONS | {"storyboard_audit"}
+                )
                 summary += "｜项目状态VALID｜Agent可执行"
             summary += (
                 f"｜项目{hub.get('project_name')}"
@@ -4798,7 +4861,9 @@ class StoryboardService:
         if role not in PERFORMANCE_DIAGNOSTIC_ROUTES:
             raise ValueError("diagnostic_window_role_invalid")
         self._assert_storyboard_authority(work_order, role)
-        self._assert_work_order_session(namespace, work_order, request_session_id)
+        authority_binding = self._assert_work_order_session(
+            namespace, work_order, request_session_id
+        )
         if route not in PERFORMANCE_DIAGNOSTIC_ROUTES.get(role, set()):
             raise ValueError("diagnostic_route_role_mismatch")
         resolved, unresolved, artifact_summary = self._resolve_performance_diagnostic_links(
@@ -4844,8 +4909,8 @@ class StoryboardService:
                 "status": "running",
                 "work_order_id": work_order_id,
                 "window_role": role,
-                "transport_session_fingerprint": self._session_fingerprint(
-                    namespace, request_session_id
+                "transport_session_fingerprint": authority_binding.get(
+                    "session_fingerprint"
                 ),
                 "measurement_scope": "tool_bracketed_chat",
                 "clock_source": "server_receive_time",
@@ -4900,7 +4965,7 @@ class StoryboardService:
             if record.get("work_order_id") != work_order_id or record.get("window_role") != role:
                 raise ValueError("diagnostic_work_order_binding_mismatch")
             expected_session = record.get("transport_session_fingerprint")
-            actual_session = self._session_fingerprint(namespace, request_session_id)
+            actual_session = authority_binding.get("session_fingerprint")
             if expected_session and expected_session != actual_session:
                 raise ValueError("diagnostic_window_session_mismatch")
             checkpoints = record.get("checkpoints")
@@ -10151,10 +10216,13 @@ class StoryboardService:
         namespace: str,
         work_order: dict[str, Any],
         request_session_id: str | None,
-    ) -> None:
+    ) -> dict[str, Any]:
         self._assert_storyboard_authority(work_order, "production")
-        self._assert_work_order_session(namespace, work_order, request_session_id)
+        binding = self._assert_work_order_session(
+            namespace, work_order, request_session_id
+        )
         self._assert_work_order_write_ready(work_order)
+        return binding
 
     def _scene_preflight_coverage(
         self,
@@ -10164,7 +10232,7 @@ class StoryboardService:
         work_order_id: str,
         candidate: dict[str, Any],
         runtime_test_certificate_id: str,
-        request_session_id: str | None,
+        authority_session_fingerprint: str | None,
         required: bool,
     ) -> dict[str, Any]:
         """Bind every final scene to one signed, exact scene-scope PASS."""
@@ -10173,9 +10241,7 @@ class StoryboardService:
         records = self.store.list_project_records(
             namespace, project_id, kind="draft_preflights"
         )
-        session_fingerprint = self._session_fingerprint(
-            namespace, request_session_id
-        )
+        session_fingerprint = authority_session_fingerprint
         manifest: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
         for group in groups:
@@ -10269,8 +10335,11 @@ class StoryboardService:
             namespace, project_id
         )
         work_order = _find_work_order(hub, work_order_id)
-        self._assert_draft_preflight_authority(
+        authority_binding = self._assert_draft_preflight_authority(
             namespace, work_order, request_session_id
+        )
+        authority_session_fingerprint = authority_binding.get(
+            "session_fingerprint"
         )
         runtime_certificate = self._require_runtime_test_certificate(namespace, project_id)
         profile = storyboard_agent.active_prevention_profile(ledger_snapshot)
@@ -10446,7 +10515,7 @@ class StoryboardService:
                 runtime_test_certificate_id=str(
                     runtime_certificate["certificate_id"]
                 ),
-                request_session_id=request_session_id,
+                authority_session_fingerprint=authority_session_fingerprint,
                 required=bool(
                     hub.get("policy", {}).get(
                         "scene_draft_preflight_required", False
@@ -10515,7 +10584,7 @@ class StoryboardService:
                     "ruleset": self._ruleset_version,
                     "validator": self._validator_version(),
                     "runtime_certificate_id": runtime_certificate["certificate_id"],
-                    "session": self._session_fingerprint(namespace, request_session_id),
+                    "session": authority_session_fingerprint,
                     "source_dialogue_authority_sha256": source_dialogue_authority_sha,
                 }
             )
@@ -10740,9 +10809,7 @@ class StoryboardService:
                     source_dialogue_authority
                 ),
                 "runtime_test_certificate_id": runtime_certificate["certificate_id"],
-                "session_fingerprint": self._session_fingerprint(
-                    namespace, request_session_id
-                ),
+                "session_fingerprint": authority_session_fingerprint,
                 "prevention_profile_input_sha256": profile_sha,
                 "prevention_profile_sha256": post_profile_sha,
                 "report_sha256": sha256_bytes(_stable_json_bytes(report)),
@@ -10870,6 +10937,13 @@ class StoryboardService:
         expected_profile_sha = sha256_bytes(_stable_json_bytes(profile))
         runtime_certificate = self._require_runtime_test_certificate(namespace, project_id)
         hub = self.store.load_hub(namespace, project_id)
+        work_order = _find_work_order(hub, work_order_id)
+        authority_binding = self._assert_work_order_session(
+            namespace, work_order, request_session_id
+        )
+        authority_session_fingerprint = authority_binding.get(
+            "session_fingerprint"
+        )
         source_dialogue_authority, source_dialogue_issues = (
             self._source_dialogue_authority_manifest(
                 namespace,
@@ -10890,7 +10964,7 @@ class StoryboardService:
             work_order_id=work_order_id,
             candidate=candidate,
             runtime_test_certificate_id=str(runtime_certificate["certificate_id"]),
-            request_session_id=request_session_id,
+            authority_session_fingerprint=authority_session_fingerprint,
             required=coverage_required,
         )
         stored_manifest = record.get("scene_coverage_manifest")
@@ -10905,7 +10979,7 @@ class StoryboardService:
             "runtime_certificate": record.get("runtime_test_certificate_id")
             == runtime_certificate.get("certificate_id"),
             "session": record.get("session_fingerprint")
-            == self._session_fingerprint(namespace, request_session_id),
+            == authority_session_fingerprint,
             "prevention_profile": record.get("prevention_profile_sha256")
             == expected_profile_sha,
             "commit_ready": record.get("commit_ready") is True,
@@ -11993,7 +12067,8 @@ class StoryboardService:
         confirmation: str | None = None,
     ) -> ToolResponse:
         self._require_runtime()
-        if action != "create":
+        create_actions = {"create", "create_window_neutral"}
+        if action not in create_actions:
             return self._continue_role_authority(
                 namespace,
                 project_id,
@@ -12015,6 +12090,7 @@ class StoryboardService:
                 expected_outputs=expected_outputs,
                 request_session_id=request_session_id,
             )
+        window_neutral = action == "create_window_neutral"
         if any(
             value is not None
             for value in (
@@ -12077,16 +12153,20 @@ class StoryboardService:
                 namespace, request_session_id
             ),
         }
+        if window_neutral:
+            request["window_access_contract"] = WINDOW_NEUTRAL_ACCESS_CONTRACT
+            request["window_access_scope"] = "authenticated_namespace"
         with self.store.mutate_project(namespace, project_id) as (hub, ledger):
-            self.store._assert_session_role_history_unlocked(
-                self.store.project_dir(namespace, project_id),
-                project_id=project_id,
-                hub=hub,
-                session_fingerprint=request.get(
-                    "transport_session_fingerprint"
-                ),
-                role=str(request.get("server_actor_role") or ""),
-            )
+            if not window_neutral:
+                self.store._assert_session_role_history_unlocked(
+                    self.store.project_dir(namespace, project_id),
+                    project_id=project_id,
+                    hub=hub,
+                    session_fingerprint=request.get(
+                        "transport_session_fingerprint"
+                    ),
+                    role=str(request.get("server_actor_role") or ""),
+                )
             state_errors = self._project_state_errors(
                 namespace, project_id, hub, ledger
             )
@@ -12154,7 +12234,16 @@ class StoryboardService:
                 **result,
                 "server_actor_role": request["server_actor_role"],
                 "session_binding_status": (
-                    "bound" if request["transport_session_fingerprint"] else "unbound"
+                    "window_neutral"
+                    if window_neutral
+                    else (
+                        "bound"
+                        if request["transport_session_fingerprint"]
+                        else "unbound"
+                    )
+                ),
+                "window_access_contract": request.get(
+                    "window_access_contract", "legacy_window_bound"
                 ),
                 "active_prevention_profile": prevention_profile,
             },
@@ -16896,7 +16985,13 @@ class StoryboardService:
             raise ValueError("independent_audit_separation_required: actor bindings must differ")
         producer_session = handoff.get("from_session_fingerprint")
         auditor_session = audit_binding.get("session_fingerprint")
-        if producer_session and auditor_session and producer_session == auditor_session:
+        if (
+            audit_work_order.get("window_access_contract")
+            != WINDOW_NEUTRAL_ACCESS_CONTRACT
+            and producer_session
+            and auditor_session
+            and producer_session == auditor_session
+        ):
             raise ValueError(
                 "independent_audit_separation_required: production and audit transport sessions must differ"
             )

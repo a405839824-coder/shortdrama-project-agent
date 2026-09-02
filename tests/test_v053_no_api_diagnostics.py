@@ -234,7 +234,7 @@ class NoApiPerformanceDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("prompt_text", serialized)
         self.assertNotIn("不得进入诊断记录的分镜正文", serialized)
 
-    async def test_diagnostic_run_is_bound_to_starting_session(self) -> None:
+    async def test_diagnostic_run_is_bound_to_work_order_authority_across_windows(self) -> None:
         started = self.service.mark_performance_stage(
             self.namespace,
             project_id=self.project_id,
@@ -247,16 +247,35 @@ class NoApiPerformanceDiagnosticTests(unittest.IsolatedAsyncioTestCase):
             request_session_id="session-alpha",
         )
         run_id = str(started.data["diagnostic_run_id"])
-        with self.assertRaisesRegex(ValueError, "diagnostic_window_session_mismatch"):
-            self.service.mark_performance_stage(
-                self.namespace,
-                project_id=self.project_id,
-                work_order_id=self.work_order_id,
-                diagnostic_run_id=run_id,
-                action="mark",
-                stage="inputs_ready",
-                request_session_id="session-beta",
-            )
+        continued = self.service.mark_performance_stage(
+            self.namespace,
+            project_id=self.project_id,
+            work_order_id=self.work_order_id,
+            diagnostic_run_id=run_id,
+            action="mark",
+            stage="inputs_ready",
+            request_session_id="session-beta",
+        )
+        self.assertEqual(continued.status, "diagnostic_checkpointed")
+        hub = self.service.store.load_hub(self.namespace, self.project_id)
+        work_order = next(
+            row
+            for row in hub["work_orders"]
+            if row["work_order_id"] == self.work_order_id
+        )
+        binding = self.service._active_authority_binding(
+            self.namespace, self.project_id, work_order, hub=hub
+        )
+        persisted = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="diagnostics",
+            record_id=run_id,
+        )
+        self.assertEqual(
+            persisted["transport_session_fingerprint"],
+            binding["session_fingerprint"],
+        )
 
 
 if __name__ == "__main__":
