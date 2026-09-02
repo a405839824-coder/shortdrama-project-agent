@@ -6,7 +6,6 @@ dist
 __pycache__
 *.pyc
 .pytest_cache
-tests
 docs
 .app.json
 .env*
