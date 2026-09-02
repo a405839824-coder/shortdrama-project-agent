@@ -6576,6 +6576,8 @@ class StoryboardService:
         cls,
         certificate: dict[str, Any],
         handoff: dict[str, Any],
+        *,
+        recovery_successor: bool = False,
     ) -> bool:
         """Reject failed, ambiguous, or misbound legacy preflight evidence."""
 
@@ -6621,13 +6623,18 @@ class StoryboardService:
             "audit_class",
             "cache_key",
         ):
-            handoff_field = (
-                "storyboard_artifact_id"
-                if field == "artifact_id"
-                else field
-            )
-            if certificate.get(field) != handoff.get(handoff_field):
+            if field == "artifact_id":
+                expected = handoff.get("storyboard_artifact_id")
+            elif field == "work_order_id" and recovery_successor:
+                expected = handoff.get("recovery_work_order_id")
+            else:
+                expected = handoff.get(field)
+            if certificate.get(field) != expected:
                 return True
+        if recovery_successor and certificate.get(
+            "production_work_order_id"
+        ) != handoff.get("work_order_id"):
+            return True
         if (
             certificate.get("certificate_type")
             != AUDIT_CLASS_PRODUCTION_PREFLIGHT
@@ -6650,6 +6657,137 @@ class StoryboardService:
             and independent_status != ""
             and independent_status != "PENDING_AUDIT"
         )
+
+    @classmethod
+    def _historical_recovery_certificate_evidence_invalid(
+        cls,
+        certificate: dict[str, Any],
+        handoff: dict[str, Any],
+    ) -> bool:
+        """Validate one non-reusable historical certificate on a successor."""
+
+        report = certificate.get("report")
+        if (
+            not isinstance(report, dict)
+            or not isinstance(report.get("issues"), list)
+            or report.get("issues")
+            or certificate.get("report_sha256")
+            != sha256_bytes(_stable_json_bytes(report))
+            or not cls._valid_historical_preflight_identity(certificate)
+            or not cls._valid_historical_preflight_identity(handoff)
+            or certificate.get("cache_components")
+            != handoff.get("cache_components")
+            or certificate.get("production_validation_replay")
+            != handoff.get("production_validation_replay")
+            or certificate.get("work_order_id")
+            != handoff.get("recovery_work_order_id")
+            or certificate.get("production_work_order_id")
+            != handoff.get("work_order_id")
+        ):
+            return True
+        for field in (
+            "certificate_id",
+            "canonical_artifact_id",
+            "canonical_sha256",
+            "source_fingerprint",
+            "boundary_hash",
+            "ruleset_version",
+            "validator_version",
+            "audit_class",
+            "cache_key",
+            "current_validation_status",
+            "current_validation_issue_count",
+            "current_production_pass_claimed",
+            "current_preflight_cache_reusable",
+            "conclusion_reusable_for_independent_audit",
+            "requires_full_current_independent_audit",
+            "independent_audit_status",
+        ):
+            if certificate.get(field) != handoff.get(field):
+                return True
+        if certificate.get("artifact_id") != handoff.get(
+            "storyboard_artifact_id"
+        ):
+            return True
+        certificate_projection = certificate.get(
+            "workbook_projection_revalidation"
+        )
+        handoff_projection = handoff.get(
+            "workbook_projection_revalidation"
+        )
+        return (
+            certificate_projection is not None
+            or handoff_projection is not None
+        ) and certificate_projection != handoff_projection
+
+    def _verified_recovery_successor(
+        self,
+        namespace: str,
+        project_id: str,
+        *,
+        hub: dict[str, Any],
+        handoff: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Return the signed immediate recovery journal for a prepared successor.
+
+        A successor may be recovered again after a later deployment changes
+        only runtime dependencies. The immediate committed journal seals the
+        predecessor, certificate and production trace, so no mutable label is
+        accepted as recovery provenance.
+        """
+
+        recovery_id = str(handoff.get("recovery_id") or "")
+        if not recovery_id:
+            return None
+        old_handoff_id = str(handoff.get("supersedes_handoff_id") or "")
+        handoff_id = str(handoff.get("handoff_id") or "")
+        if not old_handoff_id or not handoff_id:
+            raise ValueError(
+                f"handoff_recovery_lineage_invalid: {handoff_id or '<unknown>'} "
+                "has incomplete successor identity"
+            )
+        journal = self.store.completed_handoff_recovery(
+            namespace,
+            project_id,
+            recovery_id=recovery_id,
+            old_handoff_id=old_handoff_id,
+            new_handoff_id=handoff_id,
+        )
+        if journal is None:
+            raise ValueError(
+                f"handoff_recovery_lineage_invalid: {handoff_id} recovery is not committed"
+            )
+        journal_new = journal.get("new_after")
+        if not isinstance(journal_new, dict):
+            raise ValueError(
+                f"handoff_recovery_lineage_invalid: {handoff_id} successor after-image is missing"
+            )
+        if (
+            journal.get("work_order_id")
+            != handoff.get("recovery_work_order_id")
+            or journal.get("gap_id") != handoff.get("recovery_gap_id")
+            or journal.get("trace_id") != handoff.get("recovery_trace_id")
+            or handoff.get("recovery_plan_sha256")
+            != journal_new.get("recovery_plan_sha256")
+            or handoff.get("status") != "prepared"
+            or handoff.get("independent_audit_status") != "PENDING_AUDIT"
+        ):
+            raise ValueError(
+                f"handoff_recovery_lineage_invalid: {handoff_id} signed recovery bindings differ"
+            )
+        recovery_order = _find_work_order(
+            hub, str(handoff.get("recovery_work_order_id") or "")
+        )
+        if (
+            recovery_order.get("server_actor_role") != "production"
+            or recovery_order.get("operation") != "rule_improvement"
+            or recovery_order.get("mode") != "execute"
+            or recovery_order.get("authorization") != "explicit_execute"
+        ):
+            raise ValueError(
+                f"handoff_recovery_lineage_invalid: {handoff_id} recovery authority differs"
+            )
+        return journal
 
     def _assert_historical_origin_evidence(
         self,
@@ -6958,9 +7096,20 @@ class StoryboardService:
             raise ValueError(
                 f"handoff_recovery_state_conflict: {handoff_id} is not committed"
             )
-        if not self._valid_cache_identity(
+        recovery_journal = self._verified_recovery_successor(
+            namespace,
+            project_id,
+            hub=hub,
+            handoff=handoff,
+        )
+        production_cache_valid = self._valid_cache_identity(
             handoff, AUDIT_CLASS_PRODUCTION_PREFLIGHT
-        ):
+        )
+        historical_recovery_successor = bool(
+            recovery_journal is not None
+            and self._valid_historical_preflight_identity(handoff)
+        )
+        if not production_cache_valid and not historical_recovery_successor:
             raise ValueError(
                 f"handoff_recovery_identity_invalid: {handoff_id} has an invalid original cache identity"
             )
@@ -7123,21 +7272,29 @@ class StoryboardService:
             kind="certificates",
             record_id=str(handoff.get("certificate_id") or ""),
         )
+        if historical_recovery_successor:
+            certificate_evidence_invalid = (
+                self._historical_recovery_certificate_evidence_invalid(
+                    old_certificate, handoff
+                )
+            )
+        else:
+            certificate_evidence_invalid = (
+                self._legacy_certificate_evidence_invalid(
+                    old_certificate,
+                    handoff,
+                    recovery_successor=recovery_journal is not None,
+                )
+            )
         if (
             not self.store.project_record_is_signed(old_certificate)
-            or old_certificate.get("certificate_type")
-            != AUDIT_CLASS_PRODUCTION_PREFLIGHT
             or old_certificate.get("certificate_id")
             != handoff.get("certificate_id")
-            or old_certificate.get("work_order_id")
-            != handoff.get("work_order_id")
             or old_certificate.get("artifact_id") != artifact_id
             or old_certificate.get("canonical_artifact_id")
             != canonical_artifact_id
             or old_certificate.get("canonical_sha256") != canonical_hash
-            or self._legacy_certificate_evidence_invalid(
-                old_certificate, handoff
-            )
+            or certificate_evidence_invalid
         ):
             raise ValueError(
                 f"handoff_recovery_certificate_invalid: {handoff_id} production preflight certificate is invalid"
@@ -7195,7 +7352,52 @@ class StoryboardService:
             )
         production_validation_replay: dict[str, Any] | None = None
         if current_report.get("issues"):
-            if (
+            if historical_recovery_successor:
+                sealed_replay = copy.deepcopy(
+                    handoff.get("production_validation_replay")
+                )
+                replay_without_proof = copy.deepcopy(sealed_replay)
+                replay_proof = (
+                    replay_without_proof.pop("proof_sha256", None)
+                    if isinstance(replay_without_proof, dict)
+                    else None
+                )
+                if (
+                    not isinstance(sealed_replay, dict)
+                    or replay_proof
+                    != sha256_bytes(
+                        _stable_json_bytes(replay_without_proof)
+                    )
+                    or sealed_replay.get("current_validator_version")
+                    != self._validator_version()
+                    or sealed_replay.get("current_report_sha256")
+                    != sha256_bytes(_stable_json_bytes(current_report))
+                    or sealed_replay.get(
+                        "current_validation_issue_count"
+                    )
+                    != len(current_report.get("issues", []))
+                    or sealed_replay.get(
+                        "current_validation_error_histogram"
+                    )
+                    != self._validation_error_histogram(current_report)
+                    or old_certificate.get(
+                        "production_validation_replay"
+                    )
+                    != sealed_replay
+                ):
+                    raise ValueError(
+                        f"handoff_recovery_lineage_invalid: {handoff_id} "
+                        "historical current-failure profile differs"
+                    )
+                historical_report = old_certificate.get("report")
+                if not isinstance(historical_report, dict):
+                    raise ValueError(
+                        f"handoff_recovery_lineage_invalid: {handoff_id} "
+                        "historical report is missing"
+                    )
+                production_validation_replay = sealed_replay
+                report = historical_report
+            elif (
                 not allow_historical_contract
                 or handoff_id not in CONTROLLED_V053_PREFLIGHT_HANDOFF_IDS
                 or projection_mode
@@ -7205,24 +7407,25 @@ class StoryboardService:
                     f"handoff_recovery_validation_failed: {handoff_id} has "
                     f"{len(current_report.get('issues', []))} current validation issue(s)"
                 )
-            self._assert_historical_origin_evidence(
-                namespace,
-                project_id,
-                handoff_id=handoff_id,
-                handoff=handoff,
-                certificate=old_certificate,
-                storyboard=storyboard,
-            )
-            production_validation_replay, report = (
-                self._historical_production_validation_replay(
+            else:
+                self._assert_historical_origin_evidence(
+                    namespace,
+                    project_id,
                     handoff_id=handoff_id,
                     handoff=handoff,
+                    certificate=old_certificate,
                     storyboard=storyboard,
-                    current_report=current_report,
-                    old_certificate=old_certificate,
-                    old_fingerprints=old_fingerprints,
                 )
-            )
+                production_validation_replay, report = (
+                    self._historical_production_validation_replay(
+                        handoff_id=handoff_id,
+                        handoff=handoff,
+                        storyboard=storyboard,
+                        current_report=current_report,
+                        old_certificate=old_certificate,
+                        old_fingerprints=old_fingerprints,
+                    )
+                )
             if any(
                 artifact_metadata.get(field) not in {None, ""}
                 for field in (
@@ -7245,18 +7448,36 @@ class StoryboardService:
         self._validate_schema_record(
             self._project_schema, "stage_timing_trace", original_trace
         )
+        if recovery_journal is not None:
+            trace_origin_valid = (
+                original_trace.get("operation")
+                == "recover_storyboard_handoff"
+                and original_trace.get("phase") == "handoff_recovery"
+                and original_trace.get("work_order_id")
+                == handoff.get("recovery_work_order_id")
+                and original_trace.get("production_work_order_id")
+                == handoff.get("work_order_id")
+                and original_trace.get("gap_id")
+                == handoff.get("recovery_gap_id")
+                and original_trace.get("plan_sha256")
+                == handoff.get("recovery_plan_sha256")
+            )
+        else:
+            trace_origin_valid = (
+                original_trace.get("operation") == "commit_storyboard"
+                and original_trace.get("work_order_id")
+                in {None, handoff.get("work_order_id")}
+            )
         if (
             not self.store.project_record_is_signed(original_trace)
             or original_trace.get("trace_id") != original_trace_id
             or original_trace.get("telemetry_id") != original_trace_id
-            or original_trace.get("operation") != "commit_storyboard"
+            or not trace_origin_valid
             or original_trace.get("window_role") != "production"
             or original_trace.get("task_type") != "production_preflight"
             or original_trace.get("artifact_id") != artifact_id
             or original_trace.get("input_fingerprints")
             != old_fingerprints
-            or original_trace.get("work_order_id")
-            not in {None, handoff.get("work_order_id")}
         ):
             raise ValueError(
                 f"handoff_recovery_binding_mismatch: {handoff_id} original production trace does not bind the workbook"
@@ -7352,6 +7573,10 @@ class StoryboardService:
             "current_validation_report": current_report,
             "production_validation_replay": (
                 production_validation_replay
+            ),
+            "recovery_successor_journal": recovery_journal,
+            "historical_recovery_successor": (
+                historical_recovery_successor
             ),
             "preflight_evidence_source": (
                 "controlled_historical_contract_replay"
@@ -8253,23 +8478,53 @@ class StoryboardService:
         effective_certificate_id = str(old_certificate["certificate_id"])
         historical_replay = context.get("production_validation_replay")
         if isinstance(historical_replay, dict):
-            if not self._legacy_handoff_preflight_fields_missing(handoff):
-                raise ValueError(
-                    f"handoff_recovery_evidence_invalid: {handoff_id} historical origin must retain the exact missing-field legacy shape"
+            if context.get("historical_recovery_successor") is True:
+                if (
+                    handoff.get("production_preflight_status")
+                    != HISTORICAL_PRODUCTION_PREFLIGHT_PASS
+                    or handoff.get("production_preflight_issue_count") != 0
+                    or handoff.get("current_validation_status")
+                    != CURRENT_VALIDATION_FAIL
+                    or handoff.get("independent_audit_status")
+                    != "PENDING_AUDIT"
+                    or handoff.get("preflight_evidence_source")
+                    != "controlled_historical_contract_replay"
+                ):
+                    raise ValueError(
+                        f"handoff_recovery_evidence_invalid: {handoff_id} "
+                        "historical successor evidence differs"
+                    )
+                raw_evidence_id = handoff.get(
+                    "preflight_evidence_reissue_id"
                 )
-            evidence, evidence_certificate = (
-                self._verified_preflight_evidence_reissue(
-                    namespace,
-                    project_id,
-                    context=context,
-                    runtime_certificate=runtime_certificate,
+                evidence_id = (
+                    str(raw_evidence_id) if raw_evidence_id else None
                 )
-            )
-            evidence_id = str(evidence["preflight_evidence_id"])
-            evidence_source = "controlled_historical_contract_replay"
-            effective_certificate_id = str(
-                evidence_certificate["certificate_id"]
-            )
+                evidence_source = (
+                    "controlled_historical_contract_replay"
+                )
+            else:
+                if not self._legacy_handoff_preflight_fields_missing(
+                    handoff
+                ):
+                    raise ValueError(
+                        f"handoff_recovery_evidence_invalid: {handoff_id} historical origin must retain the exact missing-field legacy shape"
+                    )
+                evidence, evidence_certificate = (
+                    self._verified_preflight_evidence_reissue(
+                        namespace,
+                        project_id,
+                        context=context,
+                        runtime_certificate=runtime_certificate,
+                    )
+                )
+                evidence_id = str(evidence["preflight_evidence_id"])
+                evidence_source = (
+                    "controlled_historical_contract_replay"
+                )
+                effective_certificate_id = str(
+                    evidence_certificate["certificate_id"]
+                )
         elif self._clean_pending_preflight_fields(handoff):
             if (
                 old_certificate.get("preflight_status")

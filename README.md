@@ -1,4 +1,4 @@
-# 分镜项目 Agent 0.5.14
+# 分镜项目 Agent 0.5.15
 
 这是一个“技能 + MCP 执行服务”的完整工具型插件。ChatGPT 负责理解、生成与改写内容，MCP 负责项目状态、文件导入、版本化提交、全表审计、修复回归、跨聊天问题台账和人工签核。没有真实工具调用时，插件规则禁止声称“已经执行”。
 
@@ -7,6 +7,7 @@
 - 本地 MCP：可运行，Streamable HTTP 端点为 `/mcp`
 - 工具：19 个，覆盖项目、工单、状态迁移、受控交接恢复、跨批次问题画像、草稿预检、自动批量文件读取、变更、剧本/方案、全量与增量分镜、独立审计、受控局部修复、验证、能力缺口、签核及按需性能诊断
 - R10 运行时：`R10.1` 紧凑母版 Schema，工作流保持 `R10-PG1`；底层规则运行时标识为 `V16.3-148-R10-StableRuntime`
+- 0.5.15 恢复后继可安全再签发：已由签名CAS恢复产生的`prepared + PENDING_AUDIT`后继，如果后续部署只让完整依赖指纹失效，可在新登记的精确gap与新恢复工单下再次plan→execute。服务端必须验证立即前序恢复日志、旧/新after-image、恢复工单、生产证书、生产trace、不可变内容指纹和当前验证画像；历史证明后继仍保持`historical_contract_pass + current FAIL`，不得转成当前生产PASS或复用独审结论
 - 0.5.14 窗口无角色限制：同一认证用户命名空间中的任意聊天窗口都可直接建立或继续生产、独立审计和修正工单，无需声明窗口角色、寻找旧窗口或执行权限恢复。聊天会话只作为请求来源；服务端仍为每张工单签发不同的authority root、window binding与actor binding，生产预检不能冒充独立审计，修正仍须消费签名修复包并返回原独审authority。待审计、待修正等状态只限制工作流顺序，不限制用户在哪个窗口执行下一动作
 - 小说转分镜：完整章节读取→剧情地图→取舍台账→人物状态/认知→对白保护→时长预算→节拍→100%覆盖审计
 - 公共场景生态：街道、市集、商街、巷道、城门、码头、公共餐饮等场景强制普通人物密度/角色/错峰动作/空间层次，以及具体近中远环境声、对白避让和声画来源；有因空场除外
@@ -108,17 +109,17 @@ ChatGPT 不能直接访问普通的 `localhost`。先保持本地服务运行，
 
 每个新任务仍先调用 `get_agent_status`。正式生产固定执行：状态检查 → 必要时 `migrate_project_state` → `query_project_issues` → 每场景预检 → 完整 canonical 全量预检 → 携带签名 `draft_preflight_id` 提交 → 由服务端独立审计身份执行 `audit_storyboard`。这些动作可以在同一个窗口完成，也可在不同窗口接力。失败草稿只写问题台账和质量画像，不创建 artifact、版本、XLSX 或 handoff。
 
-0.5.14 新工单不再需要`plan_role_continuation/execute_role_continuation`。这两个动作只保留给0.5.13及更早的历史窗口绑定工单；其旧代次、租约、claim与签名记录仍按原兼容契约验证，不被0.5.14迁移或改写。上一批待独立审计时仍暂缓下一批生产，但你可在当前任意窗口直接完成该审计；这是质量流程顺序，不是窗口权限。
+0.5.14及以后新工单不再需要`plan_role_continuation/execute_role_continuation`。这两个动作只保留给0.5.13及更早的历史窗口绑定工单；其旧代次、租约、claim与签名记录仍按原兼容契约验证，不被窗口无角色限制版本迁移或改写。上一批待独立审计时仍暂缓下一批生产，但你可在当前任意窗口直接完成该审计；这是质量流程顺序，不是窗口权限。
 
 接续后的领取也不是凭工单名即可继续：普通handoff、repair package和独立复审successor必须由当前活动root/generation/session取得新鲜、未过期的claim；旧代或过期token不得finish或release。普通handoff完成还必须提交服务器存储中真实签名且与该handoff、审计工单和artifact一致的独立审计证书。候选artifact的延迟发布不得覆盖已经被领取或消费的签名handoff。审计工单已`passed`时，只在恰有一个签名`prepared`复审successor的恢复场景允许受限接续，不得借此重开已完成审计或生成第二条复审路线。
 
-当前项目中此前列出的11条失效`prepared production_to_audit`仍属于“未恢复”历史集合；窗口无角色限制本身不会补签、supersede或重发这些记录。它们仍须在有效新运行时证书下沿两张不同的后台production恢复工单完成专用补签与恢复，再由独立审计authority消费。用户可在当前窗口发起全部动作，但服务端不会让production执行身份签发独审结论或消费修复包。
+窗口无角色限制本身不会补签、supersede或重发失效交接。首次历史补签与精确11条恢复仍按0.5.12契约执行；其签名后继若因后续部署再次失效，0.5.15只允许在新登记的精确gap、新`rule_improvement + execute + explicit_execute`后台production工单和当前全量回归证书下再次恢复。用户可在当前窗口发起全部动作，但服务端不会让production执行身份签发独审结论或消费修复包。
 
 初稿质量等级与最终发布结论分开：初稿达到总体/直接可用≥98%、单集≥96%、新增局部≤2%，且硬错、重大问题、已知复发、系统性重复均为0，才算达到 A 级生产质量；全量预检仍须无未解决问题才签发可提交证书。独立审计不是替生产清理明显错误，而是对生产可能遗漏的语义问题做第二道防线；最终发布要求八层独立审计100%通过、残留0、新增0、阻塞0。
 
 判断是否真的走完优化流程，要同时看到同一 artifact/canonical 绑定的草稿预检证书、生产 `trace_id` 和独立审计 `trace_id`，以及 handoff 与 audit certificate；缺少任一追踪只能记为 `fast_path_incomplete`。只有文字说明而没有这些标识，等于没有执行。
 
-0.5.14 窗口无角色限制见 [docs/UPGRADE_0.5.14.md](docs/UPGRADE_0.5.14.md)；0.5.12 对后六条真实当前验证报告的逐handoff精确封存修正见 [docs/UPGRADE_0.5.12.md](docs/UPGRADE_0.5.12.md)；0.5.11 首次引入的受控历史生产预检证明与精确11条恢复见 [docs/UPGRADE_0.5.11.md](docs/UPGRADE_0.5.11.md)；0.5.10 的历史工作簿受控复验与补签见 [docs/UPGRADE_0.5.10.md](docs/UPGRADE_0.5.10.md)；0.5.9 的旧工具参数表受控阶段推断见 [docs/UPGRADE_0.5.9.md](docs/UPGRADE_0.5.9.md)；0.5.8 的历史Hub交接投影严格只读兼容见 [docs/UPGRADE_0.5.8.md](docs/UPGRADE_0.5.8.md)；0.5.7 的旧交接生产预检证据受控补签见 [docs/UPGRADE_0.5.7.md](docs/UPGRADE_0.5.7.md)；0.5.6 首次引入的源文权威、独立复审、台账重放与受控交接恢复见 [docs/UPGRADE_0.5.6.md](docs/UPGRADE_0.5.6.md)；0.5.5 的初稿质量门、项目迁移和发布验收见 [docs/UPGRADE_0.5.5.md](docs/UPGRADE_0.5.5.md)；0.5.4 的集成升级历史见 [docs/UPGRADE_0.5.4.md](docs/UPGRADE_0.5.4.md)。十二项模板硬门禁的原始设计见 [docs/UPGRADE_0.5.1.md](docs/UPGRADE_0.5.1.md)，无API性能诊断见 [docs/UPGRADE_0.5.3.md](docs/UPGRADE_0.5.3.md)。
+0.5.15 恢复后继再次签发见 [docs/UPGRADE_0.5.15.md](docs/UPGRADE_0.5.15.md)；0.5.14 窗口无角色限制见 [docs/UPGRADE_0.5.14.md](docs/UPGRADE_0.5.14.md)；0.5.12 对后六条真实当前验证报告的逐handoff精确封存修正见 [docs/UPGRADE_0.5.12.md](docs/UPGRADE_0.5.12.md)；0.5.11 首次引入的受控历史生产预检证明与精确11条恢复见 [docs/UPGRADE_0.5.11.md](docs/UPGRADE_0.5.11.md)；0.5.10 的历史工作簿受控复验与补签见 [docs/UPGRADE_0.5.10.md](docs/UPGRADE_0.5.10.md)；0.5.9 的旧工具参数表受控阶段推断见 [docs/UPGRADE_0.5.9.md](docs/UPGRADE_0.5.9.md)；0.5.8 的历史Hub交接投影严格只读兼容见 [docs/UPGRADE_0.5.8.md](docs/UPGRADE_0.5.8.md)；0.5.7 的旧交接生产预检证据受控补签见 [docs/UPGRADE_0.5.7.md](docs/UPGRADE_0.5.7.md)；0.5.6 首次引入的源文权威、独立复审、台账重放与受控交接恢复见 [docs/UPGRADE_0.5.6.md](docs/UPGRADE_0.5.6.md)；0.5.5 的初稿质量门、项目迁移和发布验收见 [docs/UPGRADE_0.5.5.md](docs/UPGRADE_0.5.5.md)；0.5.4 的集成升级历史见 [docs/UPGRADE_0.5.4.md](docs/UPGRADE_0.5.4.md)。十二项模板硬门禁的原始设计见 [docs/UPGRADE_0.5.1.md](docs/UPGRADE_0.5.1.md)，无API性能诊断见 [docs/UPGRADE_0.5.3.md](docs/UPGRADE_0.5.3.md)。
 
 ## 云端 MCP
 
