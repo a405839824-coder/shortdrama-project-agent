@@ -5,9 +5,8 @@ import io
 import tempfile
 import threading
 import time
-import traceback
 import unittest
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -3074,26 +3073,36 @@ class V051ServiceGuardTests(unittest.TestCase):
             self.service.store,
             "claim_reaudit_successor",
             side_effect=fenced_claim,
-        ), ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(retry) for _ in range(2)]
+        ), ThreadPoolExecutor(max_workers=1) as executor:
+            first_future = executor.submit(retry)
             self.assertTrue(first_claimed.wait(timeout=10))
-            done, _pending = wait(
-                futures, timeout=10, return_when=FIRST_COMPLETED
+            claimed_snapshot = self._project_raw_snapshot(
+                fixture["project_id"]
             )
-            self.assertEqual(len(done), 1)
+            with self.assertRaisesRegex(
+                ValueError, "authority_operation_in_progress"
+            ):
+                retry()
+            self.assertEqual(
+                self._project_raw_snapshot(fixture["project_id"]),
+                claimed_snapshot,
+            )
             release_first.set()
-            outcomes: list[Any] = []
-            errors: list[BaseException] = []
-            for future in futures:
-                try:
-                    outcomes.append(future.result(timeout=15))
-                except BaseException as exc:
-                    errors.append(exc)
-        self.assertEqual(len(outcomes), 1)
-        self.assertEqual(outcomes[0].status, "fail_current")
-        self.assertEqual(len(errors), 1)
-        if "successor is being consumed" not in str(errors[0]):
-            self.fail("".join(traceback.format_exception(errors[0])))
+            first = first_future.result(timeout=15)
+        self.assertEqual(first.status, "fail_current")
+        completed_snapshot = self._project_raw_snapshot(
+            fixture["project_id"]
+        )
+        replay = retry()
+        self.assertEqual(replay.status, "fail_current")
+        self.assertTrue(replay.data["cache_hit"])
+        self.assertEqual(
+            replay.data["handoff"]["handoff_id"], successor_id
+        )
+        self.assertEqual(
+            self._project_raw_snapshot(fixture["project_id"]),
+            completed_snapshot,
+        )
         completed = self.service.store.get_project_record(
             self.namespace,
             fixture["project_id"],
@@ -3181,28 +3190,54 @@ class V051ServiceGuardTests(unittest.TestCase):
         ), ThreadPoolExecutor(max_workers=1) as executor:
             stale_future = executor.submit(stale_replay)
             self.assertTrue(entered.wait(timeout=10))
-            latest = self.service.audit_storyboard(
-                self.namespace,
-                project_id=fixture["project_id"],
-                artifact_id=fixture["artifact_id"],
-                audit_cycle_id=None,
-                work_order_id=fixture["audit_id"],
-                handoff_artifact_id=fixture["root_handoff_id"],
-                force_machine_recheck=True,
-                semantic_audit=self._failed_semantic(
-                    fixture["clean_semantic"]
-                ),
-                request_session_id=fixture["audit_session"],
-            )
-            self.assertEqual(latest.status, "fail_current")
-            latest_snapshot = self._authority_snapshot(
+            replay_snapshot = self._authority_snapshot(
                 fixture["project_id"]
             )
-            release.set()
             with self.assertRaisesRegex(
-                ValueError, "reaudit_replay_superseded"
+                ValueError, "authority_operation_in_progress"
             ):
-                stale_future.result(timeout=15)
+                self.service.audit_storyboard(
+                    self.namespace,
+                    project_id=fixture["project_id"],
+                    artifact_id=fixture["artifact_id"],
+                    audit_cycle_id=None,
+                    work_order_id=fixture["audit_id"],
+                    handoff_artifact_id=fixture["root_handoff_id"],
+                    force_machine_recheck=True,
+                    semantic_audit=self._failed_semantic(
+                        fixture["clean_semantic"]
+                    ),
+                    request_session_id=fixture["audit_session"],
+                )
+            self.assertEqual(
+                self._authority_snapshot(fixture["project_id"]),
+                replay_snapshot,
+            )
+            release.set()
+            replayed = stale_future.result(timeout=15)
+            self.assertEqual(replayed.status, "pass")
+        latest = self.service.audit_storyboard(
+            self.namespace,
+            project_id=fixture["project_id"],
+            artifact_id=fixture["artifact_id"],
+            audit_cycle_id=None,
+            work_order_id=fixture["audit_id"],
+            handoff_artifact_id=fixture["root_handoff_id"],
+            force_machine_recheck=True,
+            semantic_audit=self._failed_semantic(
+                fixture["clean_semantic"]
+            ),
+            request_session_id=fixture["audit_session"],
+        )
+        self.assertEqual(latest.status, "fail_current")
+        latest_snapshot = self._authority_snapshot(fixture["project_id"])
+        replayed_latest = stale_replay()
+        self.assertEqual(replayed_latest.status, "fail_current")
+        self.assertTrue(replayed_latest.data["cache_hit"])
+        self.assertEqual(
+            replayed_latest.data["certificate"]["certificate_id"],
+            latest.data["certificate"]["certificate_id"],
+        )
         self.assertEqual(
             self._authority_snapshot(fixture["project_id"]),
             latest_snapshot,
@@ -3267,30 +3302,58 @@ class V051ServiceGuardTests(unittest.TestCase):
         ), ThreadPoolExecutor(max_workers=1) as executor:
             stale_future = executor.submit(replay_root)
             self.assertTrue(entered.wait(timeout=15))
+            paused_raw = self._project_raw_snapshot(
+                fixture["project_id"]
+            )
             try:
-                latest = self.service.audit_storyboard(
-                    self.namespace,
-                    project_id=fixture["project_id"],
-                    artifact_id=fixture["artifact_id"],
-                    audit_cycle_id=None,
-                    work_order_id=fixture["audit_id"],
-                    handoff_artifact_id=fixture["root_handoff_id"],
-                    force_machine_recheck=True,
-                    semantic_audit=self._failed_semantic(
-                        fixture["clean_semantic"]
-                    ),
-                    request_session_id=fixture["audit_session"],
-                )
-                self.assertEqual(latest.status, "fail_current")
-                latest_raw = self._project_raw_snapshot(
-                    fixture["project_id"]
+                with self.assertRaisesRegex(
+                    ValueError, "authority_operation_in_progress"
+                ):
+                    self.service.audit_storyboard(
+                        self.namespace,
+                        project_id=fixture["project_id"],
+                        artifact_id=fixture["artifact_id"],
+                        audit_cycle_id=None,
+                        work_order_id=fixture["audit_id"],
+                        handoff_artifact_id=fixture["root_handoff_id"],
+                        force_machine_recheck=True,
+                        semantic_audit=self._failed_semantic(
+                            fixture["clean_semantic"]
+                        ),
+                        request_session_id=fixture["audit_session"],
+                    )
+                self.assertEqual(
+                    self._project_raw_snapshot(fixture["project_id"]),
+                    paused_raw,
                 )
             finally:
                 release.set()
-            with self.assertRaisesRegex(
-                ValueError, "reaudit_replay_superseded"
-            ):
-                stale_future.result(timeout=20)
+            replayed = stale_future.result(timeout=20)
+            self.assertEqual(replayed.status, "pass")
+            latest = self.service.audit_storyboard(
+                self.namespace,
+                project_id=fixture["project_id"],
+                artifact_id=fixture["artifact_id"],
+                audit_cycle_id=None,
+                work_order_id=fixture["audit_id"],
+                handoff_artifact_id=fixture["root_handoff_id"],
+                force_machine_recheck=True,
+                semantic_audit=self._failed_semantic(
+                    fixture["clean_semantic"]
+                ),
+                request_session_id=fixture["audit_session"],
+            )
+            self.assertEqual(latest.status, "fail_current")
+            latest_raw = self._project_raw_snapshot(
+                fixture["project_id"]
+            )
+            replayed_latest = replay_root()
+            self.assertEqual(replayed_latest.status, "fail_current")
+            self.assertTrue(replayed_latest.data["cache_hit"])
+            self.assertEqual(
+                replayed_latest.data["certificate"]["certificate_id"],
+                latest.data["certificate"]["certificate_id"],
+            )
         self.assertEqual(
             self._project_raw_snapshot(fixture["project_id"]),
             latest_raw,
@@ -4247,33 +4310,69 @@ class V051ServiceGuardTests(unittest.TestCase):
                         recover_old_projection
                     )
                     self.assertTrue(commit_entered.wait(timeout=15))
+                    paused_raw = self._project_raw_snapshot(
+                        fixture["project_id"]
+                    )
                     try:
-                        newer = self.service.audit_storyboard(
-                            self.namespace,
-                            project_id=fixture["project_id"],
-                            artifact_id=fixture["artifact_id"],
-                            audit_cycle_id=None,
-                            work_order_id=fixture["audit_id"],
-                            handoff_artifact_id=fixture[
-                                "root_handoff_id"
-                            ],
-                            force_machine_recheck=True,
-                            semantic_audit=newer_semantic,
-                            request_session_id=fixture[
-                                "audit_session"
-                            ],
-                        )
-                        self.assertEqual(newer.status, "fail_current")
-                        newer_raw = self._project_raw_snapshot(
-                            fixture["project_id"]
+                        with self.assertRaisesRegex(
+                            ValueError,
+                            "authority_operation_in_progress",
+                        ):
+                            self.service.audit_storyboard(
+                                self.namespace,
+                                project_id=fixture["project_id"],
+                                artifact_id=fixture["artifact_id"],
+                                audit_cycle_id=None,
+                                work_order_id=fixture["audit_id"],
+                                handoff_artifact_id=fixture[
+                                    "root_handoff_id"
+                                ],
+                                force_machine_recheck=True,
+                                semantic_audit=newer_semantic,
+                                request_session_id=fixture[
+                                    "audit_session"
+                                ],
+                            )
+                        self.assertEqual(
+                            self._project_raw_snapshot(
+                                fixture["project_id"]
+                            ),
+                            paused_raw,
                         )
                     finally:
                         release_old_commit.set()
-                    with self.assertRaisesRegex(
-                        ValueError,
-                        "repair_route_superseded|reaudit_replay_superseded",
-                    ):
-                        stale_future.result(timeout=20)
+                    recovered = stale_future.result(timeout=20)
+                    self.assertEqual(recovered.status, "fail_current")
+                    self.assertEqual(
+                        recovered.data["certificate"]["certificate_id"],
+                        old_certificate_id,
+                    )
+                newer = self.service.audit_storyboard(
+                    self.namespace,
+                    project_id=fixture["project_id"],
+                    artifact_id=fixture["artifact_id"],
+                    audit_cycle_id=None,
+                    work_order_id=fixture["audit_id"],
+                    handoff_artifact_id=fixture["root_handoff_id"],
+                    force_machine_recheck=True,
+                    semantic_audit=newer_semantic,
+                    request_session_id=fixture["audit_session"],
+                )
+                self.assertEqual(newer.status, "fail_current")
+                self.assertNotEqual(
+                    newer.data["certificate"]["certificate_id"],
+                    old_certificate_id,
+                )
+                newer_raw = self._project_raw_snapshot(
+                    fixture["project_id"]
+                )
+                replayed = recover_old_projection()
+                self.assertEqual(replayed.status, "fail_current")
+                self.assertTrue(replayed.data["cache_hit"])
+                self.assertEqual(
+                    replayed.data["certificate"]["certificate_id"],
+                    newer.data["certificate"]["certificate_id"],
+                )
                 self.assertEqual(
                     self._project_raw_snapshot(fixture["project_id"]),
                     newer_raw,
