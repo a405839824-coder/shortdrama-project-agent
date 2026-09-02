@@ -1718,11 +1718,37 @@ class V057PreflightEvidenceReissueTests(
         )
         self.assertGreater(recovery_trace["wall_duration_ms"], 0)
         self.assertGreater(recovery_trace["stages"][0]["duration_ms"], 0)
+        recovered_handoff = self.service.store.get_project_record(
+            self.namespace,
+            self.project_id,
+            kind="handoffs",
+            record_id=mapping["new_handoff_id"],
+        )
+        audit_session_id = "v057-independent-audit"
+        audit_task = self.service.begin_task(
+            self.namespace,
+            project_id=self.project_id,
+            operation="storyboard_audit",
+            mode="audit_only",
+            authorization="read_only",
+            request_text="v0.5.7 recovered handoff lifecycle audit fixture",
+            targets=[str(recovered_handoff["storyboard_artifact_id"])],
+            authoritative_source="signed recovered production handoff",
+            latest_version="current",
+            target_boundary="EP01",
+            must_keep=["read-only independent audit"],
+            must_remove=[],
+            protected_scope=["storyboard", "canonical", "XLSX"],
+            expected_outputs=["independent_audit_certificate"],
+            window_key=audit_session_id,
+            request_session_id=audit_session_id,
+        )
+        audit_work_order_id = str(audit_task.work_order_id)
         claimed = self.service.store.claim_handoff(
             self.namespace,
             self.project_id,
             mapping["new_handoff_id"],
-            consumer_work_order_id="WO-v057-auditor",
+            consumer_work_order_id=audit_work_order_id,
             expected_to_role="independent_audit",
             expected_types={"production_to_audit"},
         )
@@ -1738,7 +1764,7 @@ class V057PreflightEvidenceReissueTests(
                 self.namespace,
                 self.project_id,
                 mapping["new_handoff_id"],
-                consumer_work_order_id="WO-v057-auditor",
+                consumer_work_order_id=audit_work_order_id,
                 expected_to_role="independent_audit",
                 expected_types={"production_to_audit"},
             )
@@ -1746,7 +1772,7 @@ class V057PreflightEvidenceReissueTests(
             self.namespace,
             self.project_id,
             mapping["new_handoff_id"],
-            consumer_work_order_id="WO-v057-auditor",
+            consumer_work_order_id=audit_work_order_id,
             claim_token=claimed["claim_token"],
             reason="retry fixture",
         )
@@ -1759,12 +1785,31 @@ class V057PreflightEvidenceReissueTests(
             self.namespace,
             self.project_id,
             mapping["new_handoff_id"],
-            consumer_work_order_id="WO-v057-auditor",
+            consumer_work_order_id=audit_work_order_id,
             expected_to_role="independent_audit",
             expected_types={"production_to_audit"},
         )
         self.assertEqual(reclaimed["claim_generation"], 2)
         audit_certificate_id = "AUD-v057-finished"
+        audit_certificate = self.service.store.save_project_record(
+            self.namespace,
+            self.project_id,
+            kind="certificates",
+            record_id=audit_certificate_id,
+            value={
+                "certificate_id": audit_certificate_id,
+                "certificate_type": "independent_audit",
+                "audit_class": "independent_audit",
+                "handoff_id": mapping["new_handoff_id"],
+                "work_order_id": audit_work_order_id,
+                "artifact_id": str(
+                    recovered_handoff["storyboard_artifact_id"]
+                ),
+            },
+        )
+        self.assertTrue(
+            self.service.store.project_record_is_signed(audit_certificate)
+        )
         with self.service.store.mutate_project(
             self.namespace, self.project_id
         ) as (hub, _ledger):
@@ -1779,7 +1824,7 @@ class V057PreflightEvidenceReissueTests(
             self.namespace,
             self.project_id,
             mapping["new_handoff_id"],
-            consumer_work_order_id="WO-v057-auditor",
+            consumer_work_order_id=audit_work_order_id,
             audit_certificate_id=audit_certificate_id,
             claim_token=reclaimed["claim_token"],
         )
@@ -1792,7 +1837,7 @@ class V057PreflightEvidenceReissueTests(
             self.namespace,
             self.project_id,
             mapping["new_handoff_id"],
-            consumer_work_order_id="WO-v057-auditor",
+            consumer_work_order_id=audit_work_order_id,
             expected_to_role="independent_audit",
             expected_types={"production_to_audit"},
         )
