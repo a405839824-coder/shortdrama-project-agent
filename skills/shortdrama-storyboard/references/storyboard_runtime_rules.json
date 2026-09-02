@@ -119,6 +119,20 @@
     "historical_byte_policy": "preserve_exact_bytes_in_library_including_all_eleven_handoff_chains",
     "legacy_persistent_delete_gate": "all_projects_registered_and_readback_verified_and_library_mode_deployed_and_real_mount_roundtrip_passed_and_exact_action_time_user_confirmation"
   },
+  "execution_progress_policy": {
+    "heartbeat_interval_seconds": 300,
+    "heartbeat_fields": [
+      "completed_count_or_stage",
+      "current_step",
+      "last_verified_progress",
+      "next_timeout_at"
+    ],
+    "ordinary_no_progress_timeout_seconds": 600,
+    "full_regression_no_progress_timeout_seconds": 1200,
+    "progress_definition": "new_verifiable_stage_count_hash_byte_or_state_change_not_repeated_waiting_text",
+    "timeout_action": "stop_only_current_task_owned_process_or_session_preserve_checkpoint_and_report_exact_stop_point",
+    "forbid_shared_or_unrelated_process_termination": true
+  },
   "dialogue_policy": {
     "default_cjk_chars_per_second": 2.8,
     "plain_reference_cjk_chars_per_second": 3.5,

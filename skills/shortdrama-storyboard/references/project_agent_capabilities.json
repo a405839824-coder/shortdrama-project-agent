@@ -39,6 +39,15 @@
     "legacy_delete_gate": "all_project_pointers_registered_plus_library_readback_plus_library_mode_deployed_plus_real_mount_roundtrip_plus_exact_action_time_user_confirmation",
     "historical_byte_policy": "preserve_every_record_byte_in_library_snapshot_including_the_eleven_handoff_chains"
   },
+  "execution_progress_policy": {
+    "heartbeat_interval_seconds": 300,
+    "heartbeat_fields": ["completed_count_or_stage", "current_step", "last_verified_progress", "next_timeout_at"],
+    "ordinary_no_progress_timeout_seconds": 600,
+    "full_regression_no_progress_timeout_seconds": 1200,
+    "progress_definition": "new_verifiable_stage_count_hash_byte_or_state_change_not_repeated_waiting_text",
+    "timeout_action": "stop_only_current_task_owned_process_or_session_preserve_checkpoint_and_report_exact_stop_point",
+    "forbid_shared_or_unrelated_process_termination": true
+  },
   "storyboard_window_architecture": {
     "user_window_access": "authenticated_namespace_window_neutral",
     "window_role_restrictions": false,
