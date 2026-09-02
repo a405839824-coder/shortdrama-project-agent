@@ -144,7 +144,7 @@
       "THG-01至THG-12独立重算，含静态GPT、转场去重、状态/道具、时长容量及多行XLSX一致性",
       "handoff和canonical指纹验证",
       "生产结论不得复用；生产审计overlay必须为PENDING_AUDIT且不得预填PASS/0问题",
-      "handoff不得重放，repair返回必须由原审计工单/窗口/会话消费",
+      "handoff不得重放，repair返回必须由原审计工单与authority root消费；同命名空间任意认证窗口可调用该精确root",
     "八层独立重算且不得在审计中再生成镜头、Seedance或导出正文",
     "新签发证书必须使用semantic-audit-v2-compact-master；v1只作历史记录且不得命中缓存或放行",
       "阶段计时"
@@ -225,8 +225,8 @@
       "局部补丁必须绑定独立审计证书、基础canonical/原文件指纹、稳定镜头ID和影响范围",
       "结构/边界/认知/原文/镜头时长编号变化必须重建而非局部补丁",
       "结构/边界/认知/原文/顺序/时长/拓扑问题必须按修复包全量重建完整受影响场或集，repair不得调用production delta",
-      "修复窗口只在审计失败且授权后启动",
-      "修复版必须完成全表生产校验，并返回原独立审计工单/窗口/会话终审"
+      "修复authority只在审计失败且授权后启动；用户窗口不设角色限制",
+      "修复版必须完成全表生产校验，并返回原独立审计工单与authority root终审"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1487,12 +1487,12 @@
     "修复包生命周期回归必须覆盖issued零下游恢复、consuming的claim token+递增generation+bounded lease、租约到期后安全重领、0.5.10 consuming缺完整lease字段失败关闭且不自动迁移、真实consumed闭环、伪consumed零变异拒绝、consuming完成态拒绝、删除已消费包且保留下游证据不得复活，以及storage lock内绕过service预检仍失败关闭；consumed补偿回发还必须固定原claim token+generation与事务身份、base successor transaction已aborted、签名handoff及Hub投影均rejected+aborted且无handoff claim、消费快照、审计证书或其他独审下游，prepared/committed base、不同claim、live/published handoff或审计下游均不得释放",
     "台账重放回归必须覆盖签名migration journal checkpoint、伪authority marker、checkpoint后legacy-* suffix、整条假issue与counter-only篡改",
     "recover_storyboard_handoff必须维持精确19工具集，并覆盖phase=preflight_evidence_backfill的plan→execute、确认字面量REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE、append-only证据，以及旧交接/生产预检证书/分镜/XLSX/canonical/历史审计不变且不签发独立审计结论；phase=handoff_recovery的恢复确认仍为SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT",
-    "补签与恢复必须使用两张不同且绑定当前production窗口的rule_improvement + execute + explicit_execute工单；各工单targets精确等于gap、对应handoff IDs和controlled_phase:preflight_evidence_backfill或controlled_phase:handoff_recovery，缺项、额外项、错误token/窗口或复用同一工单时plan必须scope_mismatch且零写入",
+    "补签与恢复必须使用两张不同且由服务端签发独立production执行身份的rule_improvement + execute + explicit_execute工单；用户可在任意认证窗口请求，各工单targets精确等于gap、对应handoff IDs和controlled_phase:preflight_evidence_backfill或controlled_phase:handoff_recovery，缺项、额外项、错误token/命名空间或复用同一工单时plan必须scope_mismatch且零写入",
     "0.5.8历史Hub交接投影只读兼容必须覆盖exact stripped与exact full signed正例，以及部分信封、额外字段、缺失字段、业务字段或签名信封漂移的零写入失败关闭；兼容读取不迁移历史，未来生产Hub只写stripped投影",
-    "0.5.9省略或null phase兼容必须先校验当前session和精确production工单权限，再只从唯一recognized controlled_phase token推断；缺失、重复、多阶段、未知、大小写/空白漂移、混合或任意额外target均须在plan/execute前零写入失败关闭，且不得默认handoff_recovery",
+    "0.5.9省略或null phase兼容必须先校验认证命名空间和精确production工单authority，再只从唯一recognized controlled_phase token推断；缺失、重复、多阶段、未知、大小写/空白漂移、混合或任意额外target均须在plan/execute前零写入失败关闭，且不得默认handoff_recovery",
     "0.5.10旧交接生产预检补签内部复验必须覆盖精确签名0.5.4/当前投影和冻结0.5.3基线正例，以及表头/单元格/侧车/投影签名/来源/旧handoff-证书-trace-raw-canonical任一漂移的零写入失败关闭；普通extract_xlsx不得因此放宽，不得改写原件或历史",
     "0.5.12历史生产预检证明必须覆盖GAP-1bb91d83751b422f精确有序六条、逐handoff规则画像、冻结报告与原签名报告完全相等，以及每条真实当前FAIL的canonical SHA、完整current-report SHA、shot/error/warning计数、完整error histogram和当前validator composite/完整SHA精确封存；六条画像不得互换，任一画像、provenance、列表、顺序或双报告字段漂移均须零写入失败关闭；HISTCACHE不可复用，GAP-0e5d48969c4c494e精确有序11条恢复后仍强制当前独审",
-    "插件当前发布版本、清单与活跃发布报告统一标记0.5.12；0.5.11首次引入历史生产预检证明但其aspect-only现行资格已由0.5.12勘误替代；0.5.10历史投影复验、0.5.9受控phase推断、0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门、compact_master_version与历史升级文档保留其原始语义"
+    "插件当前发布版本、清单与活跃发布报告统一标记0.5.14；0.5.14用户窗口无角色限制且后台production/audit/repair authority保持分离；0.5.13及更早窗口接续仅作历史兼容；0.5.12历史报告勘误、0.5.10历史投影复验、0.5.9受控phase推断、0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门与历史升级文档保留其原始语义"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1660,10 +1660,12 @@
   },
   {
     "task_package_id": "TP-NEW-WINDOW",
-    "task_name": "新窗口接续",
+    "task_name": "任意窗口继续项目",
     "trigger_user_phrases": [
       "新窗口接续",
-      "继续项目"
+      "继续项目",
+      "当前窗口继续",
+      "不要设置窗口权限"
     ],
     "must_call_modules": [
       "BOOTSTRAP",

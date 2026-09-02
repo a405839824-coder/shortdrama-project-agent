@@ -1,7 +1,7 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.13",
-  "description": "Chinese short-drama production with controlled storyboard-handoff recovery, project-state migration, scene/full draft preflight, cross-batch issue prevention, first-draft quality gates, the R10-SPC-1 strict single-shot contract, independent audit, and conditional repair.",
+  "version": "0.5.14",
+  "description": "Chinese short-drama production with window-neutral orchestration, controlled storyboard-handoff recovery, project-state migration, scene/full draft preflight, first-draft quality gates, independent audit, and conditional repair.",
   "author": {
     "name": "Storyboard Project Agent"
   },
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.12将精确授权的后六条旧交接改为逐handoff封存当前验证画像：逐条锁定canonical、完整current-report SHA、镜头/错误/警告计数、错误直方图和当前validator指纹；任何画像漂移均零写入失败关闭。冻结历史报告仍须精确等于旧签名PASS报告，证明绝不声称current production pass，HISTCACHE不可作为当前预检或独立审计缓存复用，恢复后仍须完整当前独立审计。一般XLSX读取、分镜、对白、canonical、原XLSX、旧证书和历史审计记录均不放宽或改写；0.5.10历史投影复验、0.5.9受控phase推断及既有恢复边界继续有效，公共工具仍精确为19个。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.14取消用户窗口角色限制：同一认证用户的任意窗口可直接生产、独立审计或修正，无需切换窗口或恢复权限；服务端仍为每张工单签发不同authority root/window binding/actor binding，生产预检不能冒充独审，修正必须消费签名修复包并返回原独审authority。0.5.12逐handoff历史报告封存、HISTCACHE隔离、受控补签/恢复与全部不可变历史边界继续有效，公共工具仍精确为19个。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [
@@ -32,8 +32,8 @@
       "创建一个新的短剧项目，并告诉我还缺哪些输入。",
       "先查询项目问题清单和主动防错画像；旧项目先预演并执行状态迁移，再开始生产。",
       "每个场景完成后运行初稿预检，整批full预检签发可提交绑定后才提交正式母版。",
-      "在生产窗口完整读取授权原文，只生成受影响的语义原子并提交生产预检；不要在本窗口审计。",
-      "在独立审计窗口只审计精确生产交接包；首次审计提交八层语义证据，失败后等待我授权独立修复。"
+      "在当前窗口完整读取授权原文，只生成受影响的语义原子并提交生产预检。",
+      "继续在当前窗口对精确生产交接包发起服务端独立审计；首次审计提交八层语义证据，失败后等待我授权修正。"
     ],
     "brandColor": "#1F6F5F"
   }

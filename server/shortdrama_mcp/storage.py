@@ -790,6 +790,13 @@ class ProjectStore:
                     work_order.get("expected_outputs") or []
                 ),
             }
+            if "window_access_contract" in work_order:
+                authority_contract["window_access_contract"] = str(
+                    work_order.get("window_access_contract") or ""
+                )
+                authority_contract["window_access_scope"] = str(
+                    work_order.get("window_access_scope") or ""
+                )
             return {
                 "authority_root_id": authority_root_id,
                 "continuation_id": None,
@@ -921,6 +928,13 @@ class ProjectStore:
                 work_order.get("expected_outputs") or []
             ),
         }
+        if "window_access_contract" in work_order:
+            authority_contract["window_access_contract"] = str(
+                work_order.get("window_access_contract") or ""
+            )
+            authority_contract["window_access_scope"] = str(
+                work_order.get("window_access_scope") or ""
+            )
         contract_sha256 = sha256_bytes(
             canonical_json_bytes(authority_contract)
         )
@@ -4749,6 +4763,13 @@ class ProjectStore:
                     work_order.get("expected_outputs") or []
                 ),
             }
+            if "window_access_contract" in work_order:
+                authority_contract["window_access_contract"] = str(
+                    work_order.get("window_access_contract") or ""
+                )
+                authority_contract["window_access_scope"] = str(
+                    work_order.get("window_access_scope") or ""
+                )
             if authority_contract_sha256 != sha256_bytes(
                 canonical_json_bytes(authority_contract)
             ):
