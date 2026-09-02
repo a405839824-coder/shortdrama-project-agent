@@ -48,7 +48,7 @@
 | 插件/技能结构 | `validate_plugin` PASS；`quick_validate` PASS |
 | JSON、Python 编译与差异检查 | PASS |
 
-完整测试入口：
+完整入口：
 
 ```bash
 ./scripts/run_tests.sh
