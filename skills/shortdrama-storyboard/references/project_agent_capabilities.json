@@ -3,7 +3,7 @@
   "runtime_version": "V16.3-148-R10-StableRuntime",
   "workflow_revision": "R10-PG1",
   "compact_master_contract": {
-    "plugin_version": "0.5.15",
+    "plugin_version": "0.5.16",
     "schema_version": "R10.1",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
@@ -25,6 +25,19 @@
     "background_seedance_generation": false,
     "legacy_policy": "read_only_migration_to_compact_successor",
     "legacy_ledger_replay_checkpoint": "hmac_signed_committed_migration_journal_plus_before_after_ledger_cas"
+  },
+  "content_storage_architecture": {
+    "introduced_in": "0.5.16",
+    "mode": "chatgpt_library_snapshot_with_ephemeral_server_mount",
+    "public_tool_count_change": 0,
+    "public_route": "migrate_project_state.storage_action",
+    "persistent_allowlist": ["runtime_rules", "integrity_and_download_secrets", "signed_library_pointer_registry"],
+    "library_or_ephemeral_only": ["hub", "ledger", "source_files", "plans", "storyboard_xlsx", "canonical_json", "extracted_content", "audit_reports_and_evidence", "handoffs", "handoff_recoveries", "certificates", "traces", "migration_journals"],
+    "mount_verification": "exact_bundle_sha256_plus_complete_project_tree_sha256",
+    "writeback": "export_then_library_save_and_readback_then_monotonic_pointer_commit",
+    "unmount": "only_when_mounted_tree_equals_committed_pointer_tree",
+    "legacy_delete_gate": "all_project_pointers_registered_plus_library_readback_plus_library_mode_deployed_plus_real_mount_roundtrip_plus_exact_action_time_user_confirmation",
+    "historical_byte_policy": "preserve_every_record_byte_in_library_snapshot_including_the_eleven_handoff_chains"
   },
   "storyboard_window_architecture": {
     "user_window_access": "authenticated_namespace_window_neutral",

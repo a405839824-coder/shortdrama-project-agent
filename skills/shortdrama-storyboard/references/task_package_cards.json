@@ -1493,7 +1493,8 @@
     "0.5.10旧交接生产预检补签内部复验必须覆盖精确签名0.5.4/当前投影和冻结0.5.3基线正例，以及表头/单元格/侧车/投影签名/来源/旧handoff-证书-trace-raw-canonical任一漂移的零写入失败关闭；普通extract_xlsx不得因此放宽，不得改写原件或历史",
     "0.5.12历史生产预检证明必须覆盖GAP-1bb91d83751b422f精确有序六条、逐handoff规则画像、冻结报告与原签名报告完全相等，以及每条真实当前FAIL的canonical SHA、完整current-report SHA、shot/error/warning计数、完整error histogram和当前validator composite/完整SHA精确封存；六条画像不得互换，任一画像、provenance、列表、顺序或双报告字段漂移均须零写入失败关闭；HISTCACHE不可复用，GAP-0e5d48969c4c494e精确有序11条恢复后仍强制当前独审",
     "0.5.15恢复后继再次签发必须覆盖普通与历史证明两类prepared successor在后续运行时指纹变化后的plan→execute→幂等重放；严格验证立即前序签名恢复日志、old/new/certificate/trace after-image、Hub投影、恢复工单authority、不可变内容指纹与当前验证画像；历史分支继续锁定HISTCACHE、冻结PASS/0、完整当前FAIL哈希/计数/直方图/validator及非复用标志，任一漂移零写入失败关闭",
-    "插件当前发布版本、清单与活跃发布报告统一标记0.5.15；0.5.14起用户窗口无角色限制且后台production/audit/repair authority保持分离；0.5.13及更早窗口接续仅作历史兼容；0.5.12历史报告勘误、0.5.10历史投影复验、0.5.9受控phase推断、0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门与历史升级文档保留其原始语义"
+    "0.5.16 Library项目快照回归必须覆盖bundle SHA与完整tree SHA双校验、持久卷零项目内容、临时挂载、导出、Library回读后单调代次提交、未同步变化禁止卸载，以及11条交接及其恢复记录在Library中原字节保留；存储动作复用migrate_project_state且公共工具仍精确19个",
+    "插件当前发布版本、清单与活跃发布报告统一标记0.5.16；0.5.15恢复后继再次签发、0.5.14起用户窗口无角色限制及后台production/audit/repair authority分离、0.5.13及更早窗口接续兼容、0.5.12历史报告勘误、0.5.10历史投影复验、0.5.9受控phase推断、0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门与历史升级文档均保留其原始语义"
     ],
     "minimum_input_required": [
       "用户任务范围",
