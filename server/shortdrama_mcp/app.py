@@ -32,6 +32,21 @@ from .service import StoryboardService
 from .telemetry import WorkflowTrace
 
 
+EXECUTION_PROGRESS_POLICY: dict[str, Any] = {
+    "heartbeat_interval_seconds": 300,
+    "heartbeat_required_fields": [
+        "completed_count_or_stage",
+        "current_step",
+        "last_verified_progress",
+        "next_timeout_at",
+    ],
+    "default_no_progress_timeout_seconds": 600,
+    "full_regression_no_progress_timeout_seconds": 1200,
+    "timeout_action": "stop_only_the_owned_process_and_report_exact_checkpoint",
+    "repeated_wait_message_is_not_progress": True,
+}
+
+
 def _annotations(
     *,
     read_only: bool,
@@ -102,6 +117,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         version=__version__,
         instructions=(
             "先调用get_agent_status，再创建或确认项目并调用begin_project_task。"
+            "持续任务至少每300秒报告一次可验证进度；普通任务连续600秒无可验证进展、完整回归"
+            "连续1200秒无可验证进展时，只终止本任务拥有的进程并报告精确停点，不得无限等待或"
+            "把重复等待文字当成进展。"
             "小说章节转分镜必须先完整读取并建立章节地图、取舍台账、人物认知、对白保护、时长预算和节拍计划，未完成不得生成。"
             "生成内容后必须调用提交工具；commit_storyboard只签发生产预检和handoff，不能冒充独立审计。"
             "已有分镜只改受影响范围时使用commit_storyboard_delta：仅提交稳定shot_uid、精确左右边界和变化镜头；服务端合并未改内容并执行同一完整R10.1生产校验，随后交给独立审计。"
@@ -181,6 +199,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                         "required_action": (
                             "register a verified Library snapshot or create a new project"
                         ),
+                        "execution_progress_policy": dict(EXECUTION_PROGRESS_POLICY),
                         "window_neutral_orchestration": True,
                         "window_role_restrictions": False,
                     },
@@ -194,6 +213,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                     "runtime_status": service.bootstrap.get("status"),
                     "content_storage": storage,
                     "required_action": "migrate_project_state.storage_action=mount_snapshot",
+                    "execution_progress_policy": dict(EXECUTION_PROGRESS_POLICY),
                     "window_neutral_orchestration": True,
                     "window_role_restrictions": False,
                 },
@@ -210,6 +230,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             )
         except ValueError:
             response.data["content_storage"] = external_storage.status(namespace)
+        response.data["execution_progress_policy"] = dict(
+            EXECUTION_PROGRESS_POLICY
+        )
         return response
 
     @server.tool(
