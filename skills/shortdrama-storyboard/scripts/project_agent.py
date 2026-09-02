@@ -186,6 +186,7 @@ def new_hub(project_name: str, project_id: str | None = None, timestamp: str | N
             "active_prevention_profile_sha256": None,
         },
         "work_orders": [],
+        "active_authority_bindings": [],
         "change_requests": [],
         "deliverables": [],
         "decision_log": [],
@@ -293,6 +294,7 @@ def migrate_hub_to_current(
             changed.append(f"deliverables[{index}].legacy_read_only")
 
     migrated.setdefault("version_history", [])
+    migrated.setdefault("active_authority_bindings", [])
     if changed:
         now = _timestamp(timestamp)
         record = {

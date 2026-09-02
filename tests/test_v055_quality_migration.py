@@ -1652,7 +1652,7 @@ class V055QualityAndMigrationTests(unittest.TestCase):
                 self.assertTrue(persistence_entered.wait(timeout=5))
                 try:
                     with self.assertRaisesRegex(
-                        ValueError, "draft_preflight_commit_in_progress"
+                        ValueError, "authority_operation_in_progress"
                     ):
                         commit()
                 finally:
