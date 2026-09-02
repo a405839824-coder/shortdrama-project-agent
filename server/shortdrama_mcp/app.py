@@ -148,8 +148,17 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         meta=meta("正在检查 Agent…", "Agent 状态已就绪"),
         structured_output=True,
     )
-    async def get_agent_status(project_id: str | None = None, full_self_test: bool = False) -> ToolResponse:
-        return service.agent_status(request_namespace(settings), project_id, full_self_test)
+    async def get_agent_status(
+        ctx: Context,
+        project_id: str | None = None,
+        full_self_test: bool = False,
+    ) -> ToolResponse:
+        return service.agent_status(
+            request_namespace(settings),
+            project_id,
+            full_self_test,
+            request_session_id=_window_session_id(ctx),
+        )
 
     @server.tool(
         name="migrate_project_state",
@@ -344,7 +353,11 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     @server.tool(
         name="begin_project_task",
         title="建立执行工单",
-        description="任何章节解析、策划、生成、改写、增删改、审计修复或生产任务开始时调用；锁定来源、范围、授权和预期交付。",
+        description=(
+            "任何章节解析、策划、生成、改写、增删改、审计修复或生产任务开始时调用；"
+            "默认建立工单。旧角色窗口失效时，可在同角色新窗口先预演、再用相同计划哈希和"
+            "精确确认字面量轮换该工单的物理权限绑定；旧代立即撤销，角色、范围和待审门禁不变。"
+        ),
         annotations=_annotations(read_only=False),
         meta=meta("正在锁定任务范围…", "执行工单已建立"),
         structured_output=True,
@@ -365,6 +378,14 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         expected_outputs: list[str],
         ctx: Context,
         window_key: str = "chat",
+        action: Literal[
+            "create",
+            "plan_role_continuation",
+            "execute_role_continuation",
+        ] = "create",
+        resume_work_order_id: str | None = None,
+        expected_plan_sha256: str | None = None,
+        confirmation: str | None = None,
     ) -> ToolResponse:
         return service.begin_task(
             request_namespace(settings),
@@ -383,6 +404,10 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             expected_outputs=expected_outputs,
             window_key=window_key,
             request_session_id=_window_session_id(ctx),
+            action=action,
+            resume_work_order_id=resume_work_order_id,
+            expected_plan_sha256=expected_plan_sha256,
+            confirmation=confirmation,
         )
 
     @server.tool(
