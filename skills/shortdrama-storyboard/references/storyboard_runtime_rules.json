@@ -60,7 +60,7 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.12",
+    "plugin_version": "0.5.13",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
     "canonical_atomic_field_count": 27,
@@ -368,7 +368,7 @@
     "window_roles": {
       "production": "生成前读取主动防错画像，逐场和整批运行初稿预检；只有已知问题为0且初稿质量门达标才创建版本，只能签发production_preflight和handoff，不能签发最终审计通过。",
       "independent_audit": "只读源文与产物，负责发现生产端剩余盲点并独立重算质量结论，不能替代生产自检，独占最终pass/fail签发权。",
-      "repair": "仅依据一次性不可变修复包生成新版本，不能签发最终结论，必须返回原independent_audit工单、窗口、会话与审计周期。"
+      "repair": "仅依据一次性不可变修复包生成新版本，不能签发最终结论，必须返回原independent_audit authority root与审计周期；旧物理窗口不可用时只允许该root的受控活动epoch接续。"
     },
     "exact_role_matrix": [
       {"role": "production", "operations": ["storyboard_create", "storyboard_regenerate", "storyboard_change"], "mode": "execute", "authorization": "explicit_execute"},
@@ -380,6 +380,43 @@
       "roles_must_be_pairwise_distinct": true,
       "logical_window_name_is_not_proof": true,
       "missing_or_reused_session": "block"
+    },
+    "role_continuation": {
+      "introduced_in": "0.5.11",
+      "public_tool_count": 19,
+      "tool": "begin_project_task",
+      "action_enum": ["create", "plan_role_continuation", "execute_role_continuation"],
+      "optional_parameters": ["resume_work_order_id", "expected_plan_sha256", "confirmation"],
+      "exact_confirmation": "ROTATE_WINDOW_AUTHORITY_REVOKE_PREVIOUS_SESSION",
+      "eligible_operations": ["storyboard_create", "storyboard_regenerate", "storyboard_change", "storyboard_audit", "storyboard_repair"],
+      "ineligible_operations": ["rule_improvement", "version_management", "all_other_production_classified_operations"],
+      "deployment_policy": "trusted_cloud_transport_session_only",
+      "one_work_order_and_server_derived_role_per_request": true,
+      "plan_policy": "zero_write_exact_work_order_contract_and_snapshot_active_head_target_session_and_runtime_certificate_binding",
+      "plan_has_ttl": false,
+      "plan_hash_non_universal_inputs": ["completed_handoff_claim", "completed_repair_package_claim", "completed_draft_preflight_claim", "completed_handoff", "certificate_not_in_the_bound_runtime_or_work_order_snapshot"],
+      "quiescence_policy": "plan_and_execute_fail_zero_write_while_operation_lease_or_unexpired_or_incomplete_handoff_repair_package_or_draft_preflight_commit_claim_is_live; valid_lease_expiry_allows_rotation",
+      "operation_lease_policy": "strictly_exclusive_per_logical_authority_root; every_same_root_concurrent_request_returns_authority_operation_in_progress_even_for_same_work_order_session_and_payload; no_join_or_shared_holders; different_authority_roots_may_run_in_parallel",
+      "identity_policy": "stable_authority_root_plus_monotonic_physical_window_actor_session_epoch",
+      "execute_policy": "project_lock_work_order_snapshot_runtime_target_session_and_active_head_recheck_plus_CAS_then_append_new_epoch_and_advance_unique_active_head",
+      "previous_generation_policy": "logically_revoked_by_active_head_advance_without_rewriting_immutable_signed_history",
+      "authority_write_fence": "every_authority_write_rechecks_active_generation_at_its_next_persistence_boundary",
+      "authority_field_persistence": "only_new_handoffs_repair_packages_and_other_records_whose_current_schema_explicitly_defines_the_fields_persist_root_epoch_generation; consumption_claims_use_separate_token_generation_lease; certificates_and_traces_are_not_retrofitted",
+      "repair_package_claim_policy": "claim_token_plus_monotonic_claim_generation_plus_bounded_lease; legacy_0.5.10_consuming_without_complete_lease_fails_closed_without_automatic_migration",
+      "authority_consumption_claim_policy": "ordinary_handoff_repair_package_and_independent_reaudit_successor_claims_bind_current_authority_root_generation_server_session_exact_claim_token_monotonic_claim_generation_and_live_bounded_lease; finish_and_release_revalidate_all_bindings_under_project_lock; old_generation_replaced_or_expired_token_expired_lease_or_prior_session_fails_zero_write; expiry_allows_only_fresh_current_epoch_claim",
+      "ordinary_handoff_completion_policy": "requires_real_service_stored_signed_independent_audit_certificate_exactly_bound_to_certificate_id_handoff_audit_work_order_and_artifact; caller_label_production_preflight_unsigned_or_mismatched_certificate_cannot_consume",
+      "delayed_successor_publication_policy": "advance_candidate_artifact_transaction_only; preserve_any_consuming_or_consumed_signed_handoff_and_exact_hub_projection_including_claim_history_token_generation_and_audit_certificate_binding; never_overwrite_with_earlier_prepared_candidate",
+      "passed_audit_continuation_policy": "normally_terminal; permitted_only_when_exactly_one_service_signed_prepared_independent_audit_successor_is_bound_to_the_same_audit_work_order_and_only_to_resume_that_existing_route; zero_multiple_unsigned_nonprepared_or_differently_bound_routes_fail_without_reopening_pass_or_minting_another_successor",
+      "repair_compensation_policy": "return_consumed_package_to_issued_only_for_exact_original_claim_token_and_generation_and_fixed_transaction_identity_when_base_successor_transaction_is_aborted_signed_handoff_and_hub_projection_are_both_rejected_plus_aborted_and_no_handoff_claim_consumption_snapshot_audit_certificate_or_other_independent_audit_downstream_exists; prepared_or_committed_base_different_claim_live_or_published_handoff_or_audit_downstream_forbids_release",
+      "idempotent_replay_policy": "sequential_replay_only_after_the_exclusive_operation_lease_ends_and_while_continuation_is_active_head_or_completing_its_signed_record_to_hub_half_write; never_concurrent_same_root_join; later_head_returns_superseded",
+      "expired_draft_preflight_policy": "claim_expiry_stops_blocking_rotation_but_old_session_bound_preflight_cannot_be_reclaimed; continued_session_must_obtain_new_preflight",
+      "immutable_history": ["work_order_original_binding", "authority_continuation", "handoff", "certificate", "trace", "artifact", "canonical", "xlsx", "audit_history"],
+      "unchanged_fields": ["role", "operation", "mode", "authorization", "ordered_targets", "source_lock", "protected_scope", "expected_outputs", "work_order_status", "project_blockers"],
+      "cross_role_or_conflicting_session_history": "fail_closed",
+      "old_or_inflight_epoch_after_rotation": "fence_at_next_authority_persistence_boundary",
+      "repair_return": "original_independent_audit_authority_root_and_cycle_current_active_epoch_only",
+      "pending_independent_audit": "continues_to_block_new_production",
+      "current_project_legacy_recovery_boundary": "the_previously_identified_eleven_invalid_prepared_production_to_audit_handoffs_remain_unrecovered_until_the_separate_two_work_order_controlled_backfill_and_recovery_succeeds_under_a_current_runtime_certificate; continuation_implementation_documentation_validation_or_deployment_is_not_recovery; production_must_not_audit_or_repair_replacements"
     },
     "audit_types": {
       "production_draft_preflight": {
@@ -702,7 +739,7 @@
         "validly_resigned_certificate_mismatch": "reject_without_authority_or_projection_mutation",
         "certificate_only_policy": "reject_as_impossible_normal_write_order_or_corruption",
         "completion_replay": "same_signed_completion_receipt_is_a_read_only_authority_noop",
-        "repair_package_lifecycle": "issued_requires_zero_downstream_evidence; consuming_is_not_completed_replay; consumed_requires_exact_repair_work_order_successor_artifact_canonical_committed_base_cas_metadata_return_handoff_and_hub_projection",
+        "repair_package_lifecycle": "issued_requires_zero_downstream_evidence; consuming_requires_claim_token_monotonic_generation_and_bounded_lease; legacy_0.5.10_consuming_without_complete_lease_fails_closed_without_migration; consuming_is_not_completed_replay; consumed_requires_exact_repair_work_order_successor_artifact_canonical_committed_base_cas_metadata_return_handoff_and_hub_projection; compensation_to_issued_requires_exact_original_claim_token_and_generation_fixed_transaction_identity_aborted_base_successor_transaction_rejected_plus_aborted_signed_handoff_and_hub_projection_and_zero_handoff_claim_consumption_snapshot_audit_certificate_or_other_independent_audit_downstream; prepared_or_committed_base_different_claim_live_or_published_handoff_or_audit_downstream_forbids_release",
         "projection_transaction": "missing_repair_package_or_hub_projection_recovers_only_inside_the_same_storage_lock_after_zero_downstream_evidence_latest_lineage_exact_certificate_hmac_and_fenced_single_finisher_claim_cas_revalidation; consumed_authorization_cannot_be_deleted_and_resurrected; stale_completed_replay_cannot_write_or_return_obsolete_authority"
       },
       "legacy_ledger_replay_checkpoint": {
