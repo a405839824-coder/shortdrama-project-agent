@@ -169,6 +169,22 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             and not service.store.project_exists(namespace, project_id)
         ):
             storage = external_storage.status(namespace, project_id)
+            if not storage.get("requested_project_registered"):
+                return ToolResponse(
+                    status="storage_pointer_missing",
+                    summary=f"项目没有已登记的ChatGPT Library快照｜{project_id}",
+                    project_id=project_id,
+                    data={
+                        "plugin_version": __version__,
+                        "runtime_status": service.bootstrap.get("status"),
+                        "content_storage": storage,
+                        "required_action": (
+                            "register a verified Library snapshot or create a new project"
+                        ),
+                        "window_neutral_orchestration": True,
+                        "window_role_restrictions": False,
+                    },
+                )
             return ToolResponse(
                 status="mount_required",
                 summary=f"项目内容在ChatGPT Library｜请先临时挂载｜{project_id}",

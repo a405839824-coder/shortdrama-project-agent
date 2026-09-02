@@ -594,8 +594,13 @@ class ExternalProjectStorage:
 
     def status(self, namespace: str, project_id: str | None = None) -> dict[str, Any]:
         records: list[dict[str, Any]] = []
+        requested_project_registered: bool | None = None
         if project_id is not None:
-            records = [self._read_registry(namespace, project_id)]
+            try:
+                records = [self._read_registry(namespace, project_id)]
+                requested_project_registered = True
+            except ValueError:
+                requested_project_registered = False
         else:
             for path in sorted(self._namespace_registry_dir(namespace).glob("SBP-*.json")):
                 with contextlib.suppress(ValueError, OSError, TypeError):
@@ -628,6 +633,7 @@ class ExternalProjectStorage:
             ),
             "pointer_registry_bytes": self._directory_size(self.registry_dir),
             "registered_project_count": len(summaries),
+            "requested_project_registered": requested_project_registered,
             "projects": summaries,
             "server_retention_contract": {
                 "persistent": [
