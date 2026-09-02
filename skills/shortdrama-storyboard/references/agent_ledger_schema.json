@@ -366,8 +366,18 @@
         "event_sha256": {"$ref": "#/$defs/sha256"},
         "handoff_id": {"type": "string", "minLength": 1},
         "work_order_id": {"type": "string", "minLength": 1},
+        "audit_window_binding_id": {"type": "string", "minLength": 1},
         "audit_actor_binding_id": {"type": "string", "minLength": 1},
         "audit_session_fingerprint": {"type": ["string", "null"]},
+        "audit_authority_root_id": {"type": "string", "minLength": 1},
+        "audit_authority_epoch_id": {"type": "string", "minLength": 1},
+        "audit_authority_generation": {"type": "integer", "minimum": 0},
+        "audit_authority_continuation_id": {
+          "anyOf": [
+            {"type": "string", "minLength": 1},
+            {"type": "null"}
+          ]
+        },
         "production_trace_id": {"type": "string", "minLength": 1},
         "audit_trace_id": {"type": "string", "minLength": 1},
         "created_at": {"type": "string", "minLength": 1},
@@ -543,6 +553,36 @@
         "stage_trace_id": {"type": "string", "minLength": 1}
       },
       "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {"required": ["audit_window_binding_id"]},
+              {"required": ["audit_authority_root_id"]},
+              {"required": ["audit_authority_epoch_id"]},
+              {"required": ["audit_authority_generation"]},
+              {"required": ["audit_authority_continuation_id"]}
+            ]
+          },
+          "then": {
+            "required": [
+              "audit_window_binding_id", "audit_actor_binding_id",
+              "audit_session_fingerprint", "audit_authority_root_id",
+              "audit_authority_epoch_id", "audit_authority_generation",
+              "audit_authority_continuation_id"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {"required": ["audit_window_binding_id"]},
+                {"required": ["audit_authority_root_id"]},
+                {"required": ["audit_authority_epoch_id"]},
+                {"required": ["audit_authority_generation"]},
+                {"required": ["audit_authority_continuation_id"]}
+              ]
+            }
+          }
+        },
         {
           "if": {"properties": {"result": {"const": "pass"}}, "required": ["result"]},
           "then": {
