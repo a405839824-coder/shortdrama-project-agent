@@ -119,6 +119,16 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
             label=label,
         )
 
+    def _project_tree_bytes(self) -> dict[str, bytes]:
+        project_dir = self.service.store.project_dir(
+            self.namespace, self.project_id
+        )
+        return {
+            str(path.relative_to(project_dir)): path.read_bytes()
+            for path in sorted(project_dir.rglob("*"))
+            if path.is_file()
+        }
+
     def _commit(
         self,
         work_order_id: str,
@@ -251,18 +261,16 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
             shared,
             "same-session-valid",
         )
-        audit_work_order = self._begin_audit(
-            str(committed.artifact_id), shared, "same-session-audit"
-        )
-        with self.assertRaisesRegex(
-            ValueError, "independent_audit_separation_required"
-        ):
-            self._audit(
-                artifact_id=str(committed.artifact_id),
-                audit_work_order_id=audit_work_order,
-                handoff_id=str(committed.data["handoff"]["handoff_id"]),
-                session_id=shared,
+        before_forbidden_audit = self._project_tree_bytes()
+        with self.assertRaises(ValueError) as forbidden_audit:
+            self._begin_audit(
+                str(committed.artifact_id), shared, "same-session-audit"
             )
+        self.assertEqual(
+            str(forbidden_audit.exception).split(":", 1)[0],
+            "session_role_separation_required",
+        )
+        self.assertEqual(self._project_tree_bytes(), before_forbidden_audit)
 
         # Close the first production-to-audit handoff through a genuinely
         # independent transport before starting the next production chain.
@@ -293,17 +301,16 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
             (audit_session, "repair-reuses-audit"),
         ):
             with self.subTest(reused_session=reused_session):
-                repair_work_order = self._begin_repair(reused_session, label)
-                with self.assertRaisesRegex(
-                    ValueError, "repair_window_separation_required"
-                ):
-                    self._attempt_patch(
-                        repair_work_order_id=repair_work_order,
-                        committed=broken,
-                        audited=audited,
-                        repair_session=reused_session,
-                        label=label,
-                    )
+                before_forbidden_repair = self._project_tree_bytes()
+                with self.assertRaises(ValueError) as forbidden_repair:
+                    self._begin_repair(reused_session, label)
+                self.assertEqual(
+                    str(forbidden_repair.exception).split(":", 1)[0],
+                    "session_role_separation_required",
+                )
+                self.assertEqual(
+                    self._project_tree_bytes(), before_forbidden_repair
+                )
 
     def test_cloud_role_claim_without_transport_session_fails_closed(self) -> None:
         cloud_settings = replace(self.settings, deployment_mode="cloud")
