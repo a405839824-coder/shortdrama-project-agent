@@ -15,6 +15,7 @@ from . import __version__
 from .auth import JwtTokenVerifier, request_namespace, security_schemes
 from .canonical import etag_matches, stable_json_hash
 from .config import Settings
+from .external_storage import ExternalProjectStorage
 from .file_io import DEFAULT_BULK_RESPONSE_CHARS, preview_extracted_bulk
 from .models import (
     ArtifactReadRange,
@@ -104,6 +105,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "小说章节转分镜必须先完整读取并建立章节地图、取舍台账、人物认知、对白保护、时长预算和节拍计划，未完成不得生成。"
             "生成内容后必须调用提交工具；commit_storyboard只签发生产预检和handoff，不能冒充独立审计。"
             "已有分镜只改受影响范围时使用commit_storyboard_delta：仅提交稳定shot_uid、精确左右边界和变化镜头；服务端合并未改内容并执行同一完整R10.1生产校验，随后交给独立审计。"
+            "Library项目快照模式下，get_agent_status会先返回mount_required和签名Library指针；"
+            "调用方必须把该精确Library快照作为migrate_project_state.snapshot临时挂载，完成工作后导出、"
+            "保存并回读校验Library新版本，再提交新指针并卸载；完整项目内容不得写入服务器持久卷。"
             "审计必须调用audit_storyboard由服务端独立审计身份重算；用户可在当前任意已认证窗口发起，"
             "相同canonical、原文件、源文、边界、规则和验证器才可复用。"
             "街道、市集、酒楼、城门等公共场景必须写普通人物密度、地点角色、错峰动作和空间层次，并写具体近中远环境声、对白避让和声画来源；有因空场除外。"
@@ -122,6 +126,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         auth=auth_settings,
     )
     service = StoryboardService(settings)
+    external_storage = ExternalProjectStorage(service, settings)
     schemes = security_schemes(settings)
 
     def meta(invoking: str, invoked: str, *, file_params: list[str] | None = None) -> dict[str, Any]:
@@ -139,6 +144,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         response.data.setdefault("telemetry", trace.as_dict())
         return response
 
+    external_storage.register_routes(server)
+
     @server.tool(
         name="get_agent_status",
         title="检查分镜 Agent 状态",
@@ -155,33 +162,103 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         project_id: str | None = None,
         full_self_test: bool = False,
     ) -> ToolResponse:
-        return service.agent_status(
-            request_namespace(settings),
+        namespace = request_namespace(settings)
+        if (
+            external_storage.mode == "library"
+            and project_id is not None
+            and not service.store.project_exists(namespace, project_id)
+        ):
+            storage = external_storage.status(namespace, project_id)
+            return ToolResponse(
+                status="mount_required",
+                summary=f"项目内容在ChatGPT Library｜请先临时挂载｜{project_id}",
+                project_id=project_id,
+                data={
+                    "plugin_version": __version__,
+                    "runtime_status": service.bootstrap.get("status"),
+                    "content_storage": storage,
+                    "required_action": "migrate_project_state.storage_action=mount_snapshot",
+                    "window_neutral_orchestration": True,
+                    "window_role_restrictions": False,
+                },
+            )
+        response = service.agent_status(
+            namespace,
             project_id,
             full_self_test,
             request_session_id=_window_session_id(ctx),
         )
+        try:
+            response.data["content_storage"] = external_storage.status(
+                namespace, project_id
+            )
+        except ValueError:
+            response.data["content_storage"] = external_storage.status(namespace)
+        return response
 
     @server.tool(
         name="migrate_project_state",
-        title="迁移分镜项目控制状态",
+        title="迁移项目控制状态或内容存储",
         description=(
             "对旧项目Hub与问题台账执行可预演、签名快照、双哈希CAS和幂等恢复的0.5.5迁移。"
-            "只更新控制状态与问题模式索引；绝不改写历史分镜、对白、canonical、XLSX、handoff或审计证书。"
+            "默认只更新控制状态与问题模式索引；绝不改写历史分镜、对白、canonical、XLSX、handoff或审计证书。"
+            "storage_action可检查、登记、临时挂载、导出、提交或卸载ChatGPT Library项目快照；"
+            "所有完整项目内容仅在系统临时目录处理，持久卷只保存签名Library指针。"
         ),
         annotations=_annotations(read_only=False),
-        meta=meta("正在核对项目迁移…", "项目迁移已处理"),
+        meta=meta(
+            "正在核对项目迁移…",
+            "项目迁移已处理",
+            file_params=["snapshot"],
+        ),
         structured_output=True,
     )
     async def migrate_project_state(
         project_id: str,
-        work_order_id: str,
         ctx: Context,
+        work_order_id: str | None = None,
         action: Literal["plan", "execute", "rollback"] = "plan",
         expected_current_version: str | None = None,
         target_version: str = "0.5.5",
         migration_id: str | None = None,
+        storage_action: Literal[
+            "status",
+            "register_snapshot",
+            "mount_snapshot",
+            "export_snapshot",
+            "commit_snapshot",
+            "unmount_snapshot",
+        ]
+        | None = None,
+        snapshot: OpenAIFile | None = None,
+        bundle_library_file_id: str | None = None,
+        bundle_file_id: str | None = None,
+        library_path: str | None = None,
+        bundle_sha256: str | None = None,
+        expected_tree_sha256: str | None = None,
+        tree_sha256: str | None = None,
+        expected_generation: int = 0,
+        export_id: str | None = None,
     ) -> ToolResponse:
+        if storage_action is not None:
+            return external_storage.handle_action(
+                request_namespace(settings),
+                storage_action=storage_action,
+                project_id=project_id,
+                snapshot=snapshot,
+                bundle_library_file_id=bundle_library_file_id,
+                bundle_file_id=bundle_file_id,
+                library_path=library_path,
+                bundle_sha256=bundle_sha256,
+                expected_tree_sha256=expected_tree_sha256,
+                tree_sha256=tree_sha256,
+                expected_generation=expected_generation,
+                export_id=export_id,
+            )
+        if not work_order_id:
+            raise ValueError(
+                "work_order_id is required for control-state migration actions"
+            )
         return service.migrate_project_state(
             request_namespace(settings),
             project_id=project_id,

@@ -60,7 +60,7 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.15",
+    "plugin_version": "0.5.16",
     "output_contract": "R10-SPC-1",
     "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
     "canonical_atomic_field_count": 27,
@@ -89,6 +89,35 @@
     "forbid_seedance_column_or_sheet": true,
     "forbid_background_seedance_generation": true,
     "legacy_policy": "read_only_migration_without_retired_field_writeback"
+  },
+  "content_storage_contract": {
+    "introduced_in": "0.5.16",
+    "public_tool_count": 19,
+    "route": "migrate_project_state.storage_action",
+    "mode": "chatgpt_library_snapshot_with_ephemeral_server_mount",
+    "persistent_allowlist": [
+      "runtime_rules",
+      "integrity_and_download_secrets",
+      "signed_library_pointer_registry"
+    ],
+    "library_or_ephemeral_only": [
+      "project_hub",
+      "issue_ledger",
+      "source_files",
+      "adaptation_plans",
+      "storyboard_xlsx",
+      "canonical_json",
+      "extracted_content",
+      "audit_reports_and_evidence",
+      "handoffs_and_recovery_full_records",
+      "certificates_and_traces",
+      "migration_journals"
+    ],
+    "mount_gate": "exact_bundle_sha256_and_complete_project_tree_sha256",
+    "writeback_gate": "export_then_library_save_and_readback_then_monotonic_pointer_commit",
+    "unmount_gate": "mounted_tree_equals_current_committed_pointer_tree",
+    "historical_byte_policy": "preserve_exact_bytes_in_library_including_all_eleven_handoff_chains",
+    "legacy_persistent_delete_gate": "all_projects_registered_and_readback_verified_and_library_mode_deployed_and_real_mount_roundtrip_passed_and_exact_action_time_user_confirmation"
   },
   "dialogue_policy": {
     "default_cjk_chars_per_second": 2.8,

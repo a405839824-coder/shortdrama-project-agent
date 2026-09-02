@@ -14,6 +14,14 @@ description: "Operate a full-lifecycle Chinese short-drama project Agent with th
 
 The only active version is `V16.3-148-R10-StableRuntime`. Treat R1–R9 rules as history and migrate them through `references/deprecated_rule_map.json`.
 
+## Keep project content in ChatGPT Library in plugin 0.5.16
+
+When `get_agent_status(project_id)` returns `mount_required`, treat its signed `content_storage` pointer as the only locator for that project. Materialize the exact `bundle_library_file_id` from ChatGPT Library and pass it to `migrate_project_state(storage_action="mount_snapshot", snapshot=...)`; the service must verify both the immutable bundle SHA-256 and the full project-directory tree SHA-256 before exposing the project to any production, audit, repair, status, or read route. Never substitute a same-named file, another Library version, a local reconstruction, or remembered chat content.
+
+The Library storage lifecycle is two-phase and fail-closed. For an existing persistent project, save the complete immutable server snapshot to Library, materialize it back, verify its SHA-256, then call `migrate_project_state(storage_action="register_snapshot")`; registration stores only a signed Library file ID/path, bundle hash, tree hash, file count, expanded size, status, and monotonic generation, and deletes nothing. After any mounted project mutation, call `storage_action="export_snapshot"`, save the returned bytes as a new Library file/version, materialize that exact Library result back and compare the returned bundle and tree hashes, then call `storage_action="commit_snapshot"` with the prior generation. Only a committed pointer may authorize `storage_action="unmount_snapshot"`, and unmount must refuse when the mounted tree contains unsynchronized changes.
+
+In `SHORTDRAMA_PROJECT_STORAGE_MODE=library`, original DOCX/PDF/text, adaptation plans, storyboard XLSX, canonical JSON, extracted content, audit reports/evidence, full handoff/recovery records, Hub, ledger, certificates, traces, and migration journals may exist only in ChatGPT Library or the operating-system temporary runtime. The server persistent volume may retain runtime rules, restart-stable integrity/download secrets, and the minimal signed Library pointer registry. Preserve every historical byte inside the Library snapshot, including all 11 legacy handoff chains; do not compact, rewrite, relabel, or delete those records during migration. Deleting the old persistent project directories is a separate destructive step allowed only after every project pointer is registered, Library readback hashes pass, library mode is deployed, the selected project mounts with an identical tree hash, and the user confirms the exact deletion targets at action time.
+
 ## Enforce the 0.5.5 generation-first quality gate
 
 For every new full storyboard or complete scene/episode rebuild in plugin mode, execute this exact order without skipping or reordering:
@@ -51,7 +59,7 @@ Plugin 0.5.15 also permits a signed `prepared + PENDING_AUDIT` recovery successo
 
 For historical Hub projection reads, 0.5.8 accepts only one of two exact JSON shapes: the signed handoff with `record_id`, `project_id`, and `integrity_hmac` removed, or the complete signed handoff including that envelope. Any extra, missing, altered, or mixed field fails closed before mutation. This is read-only compatibility: never migrate or rewrite a historical row merely to normalize its shape. All future production Hub writes use the stripped projection.
 
-## Let any authenticated window orchestrate every role in 0.5.15
+## Let any authenticated window orchestrate every role in 0.5.16
 
 Keep the public tool set at exactly 19. For public MCP calls, `begin_project_task(action="create")` creates a window-neutral work order. Within one authenticated user namespace, any trusted ChatGPT window may create or continue production, independent-audit, and repair work orders; never ask the user to assign a role to a window, find an old window, or restore window permission. The trusted transport session is request provenance and proof of an authenticated window, not the execution role principal. `get_agent_status` must advertise `window_neutral_orchestration=true`, `window_role_restrictions=false`, `window_access_scope=authenticated_namespace`, all three user capabilities, and `role_continuation_required=false` without disclosing session fingerprints or internal tokens.
 
