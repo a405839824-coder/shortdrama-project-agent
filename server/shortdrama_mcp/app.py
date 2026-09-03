@@ -970,6 +970,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "独立审计已存在的分镜文件时调用。首次或指纹变化后的审计必须提交semantic_audit："
             "绑定准确canonical哈希、全表镜头数、N-1相邻镜头组数与有序pair清单SHA-256；"
             "空间连续层必须按canonical顺序逐组提交全部pair:左镜->右镜证据，覆盖率必须100%。"
+            "禁项与声音层必须按canonical顺序提交每个带对白镜的field:镜头编号.音色证据，"
+            "并与THG-15固定音色子模板机器门禁共同闭合。"
             "同时逐一提交恰好八层的结论、摘要、具体证据ID"
             "及语义问题，reviewed_batch_count固定为0且禁止batch证据/目标；第六层审计正式母版"
             "单镜执行完整性，表演层必须检查眼球换焦、眼睑变化、眨眼时点、重音不眨与多人错峰。"

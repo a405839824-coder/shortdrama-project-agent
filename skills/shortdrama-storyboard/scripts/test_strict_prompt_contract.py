@@ -56,7 +56,19 @@ def strict_fixture() -> dict[str, Any]:
         "机位": "正厅门内侧平视50mm，f/3.2，三席同框，焦点优先落在江氏。",
         "运镜方式": "固定镜头，轻微呼吸感，不推不拉；以江氏收回视线并开口为本镜唯一核心动作。",
         "画面内容": "【0.0—0.8秒】江氏眼球先作轻微焦点调整，并从膝上袖口移向邹氏，头部随后轻微跟转；视线落稳前自然短眨一次，重新睁眼后上眼睑略压；许氏晚约0.5秒偏头，三人反应错开。【0.8—3.3秒】江氏保持坐姿，嘴角浮起礼貌浅笑，轻吸气后看着邹氏；江氏说道：“大嫂，没来晚吧？”逗号处短停，“没来晚”轻微加重，问句尾音克制上扬；“没来晚”重音期间不眨眼，口型与对白一致，不看镜头。【3.3—4.0秒】邹氏听完后晚半拍自然轻眨一次，再回看江氏，眼睑恢复正常松紧；许氏不抢反应，三人眨眼错开、不同时闭眼；镜尾江氏视线落在邹氏面部，三人位置清楚。",
-        "音色": "江氏——温和亲近、暗含试探，声线平稳，音量适中。",
+        "音色": (
+            "基础声线：二十余岁青年女声，中音区，声线偏薄而清亮，长期保持温润平稳的质感。\n"
+            "言语行为：带试探意味的问候。\n"
+            "当前表达：表面温和亲近，暗含确认自己是否迟到的试探。\n"
+            "发声方式：\n"
+            "音量：比日常交谈低一档，仅够近处对象听清。\n"
+            "语速与节奏：前半句自然，问句略放慢，不拖长字音。\n"
+            "呼吸：开口前轻吸气，句中不额外抢气。\n"
+            "停顿：在“大嫂”后的逗号处短停。\n"
+            "重音：明确落在原文中的“没来晚”。\n"
+            "尾音：克制上抬。\n"
+            "禁止语气：撒娇、讨好、夸张惊慌。"
+        ),
         "心理音轨": "无。",
         "环境音效": "江氏对白最清晰；近处衣料、呼吸与木椅细响，远处回廊脚步持续接近；开口时环境底声自然避让，不生成额外配乐。",
         "环境动态": "窗纸在开场瞬间轻微向内偏斜，厅门闭合；三人位置与前中后层次清楚，室内不增加无来源人物。",
@@ -120,6 +132,7 @@ def _set_tea_chain_overload(obj: dict[str, Any]) -> None:
     )
     obj["total_duration"] = 2.7
     obj["protected_dialogue"] = []
+    shot["音色"] = "无对白，不适用。"
 
 
 def main() -> int:
@@ -294,6 +307,48 @@ def main() -> int:
         "THG-14",
     )
     run_code_test(
+        "SPC-THG15-ONE-LINE-VOICE-REJECTED",
+        lambda obj: obj["shots"][0].__setitem__(
+            "音色", "江氏温和亲近、暗含试探，声线平稳，音量适中。"
+        ),
+        "E-VOICE-001",
+        "THG-15",
+    )
+    run_code_test(
+        "SPC-THG15-MISSING-VOICE-SUBLABEL",
+        lambda obj: obj["shots"][0].__setitem__(
+            "音色", obj["shots"][0]["音色"].replace("呼吸：开口前轻吸气，句中不额外抢气。\n", "")
+        ),
+        "E-VOICE-001",
+        "THG-15",
+    )
+    run_code_test(
+        "SPC-THG15-EMPHASIS-MUST-MATCH-SOURCE",
+        lambda obj: obj["shots"][0].__setitem__(
+            "音色", obj["shots"][0]["音色"].replace("“没来晚”", "“马上离开”")
+        ),
+        "E-VOICE-001",
+        "THG-15",
+    )
+    run_code_test(
+        "SPC-THG15-NO-GENERIC-NEUTRAL-SUFFIX",
+        lambda obj: obj["shots"][0].__setitem__(
+            "音色",
+            obj["shots"][0]["音色"]
+            + "\n声音中等清晰，语速从容，关键词加重，尾音随句意收住。",
+        ),
+        "E-VOICE-001",
+        "THG-15",
+    )
+    run_code_test(
+        "SPC-THG15-NESTED-LABELS-STAY-OUT-OF-PICTURE",
+        lambda obj: obj["shots"][0].__setitem__(
+            "画面内容", obj["shots"][0]["画面内容"] + "\n音量：适中。"
+        ),
+        "E-VOICE-001",
+        "THG-15",
+    )
+    run_code_test(
         "SPC-BGM-LITERAL-IN-EXECUTION-FIELD",
         lambda obj: obj["shots"][0].__setitem__("生成限制", "9:16竖屏；禁止BGM、字幕与水印。"),
         "E-AUDIO-STAGE-001",
@@ -316,6 +371,7 @@ def main() -> int:
             "环境音效", "环境动态", "光影", "光源来源", "光源方向", "色温倾向", "生成限制",
             "转场类型", "切镜/转场提示词",
         ))
+        and "\n\n音色：\n\n基础声线：" in formal
         and formal.count("9:16竖屏") == 1
         and gpt.count("9:16竖屏") == 1
         and not any(term in gpt for term in prohibited_gpt)
@@ -336,9 +392,9 @@ def main() -> int:
     )
     production_audit = audit_types.get("production_preflight", {})
     independent_audit = audit_types.get("independent_audit", {})
-    thg14_passed = (
+    thg15_passed = (
         [row.get("gate_id") for row in hard_gates]
-        == [f"THG-{index:02d}" for index in range(1, 15)]
+        == [f"THG-{index:02d}" for index in range(1, 16)]
         and runtime_rules.get("compact_master_contract", {}).get(
             "projection_text_normalization"
         ) == "UTF-8_NFC_LF"
@@ -349,8 +405,8 @@ def main() -> int:
         and independent_audit.get("must_recompute_all_quality_conclusions") is True
     )
     results.append({
-        "test_id": "SPC-THG01-14-AUDIT-AUTHORITY-AND-RULE-CERTIFICATE",
-        "passed": thg14_passed,
+        "test_id": "SPC-THG01-15-AUDIT-AUTHORITY-AND-RULE-CERTIFICATE",
+        "passed": thg15_passed,
         "hard_gate_ids": [row.get("gate_id") for row in hard_gates],
         "projection_text_normalization": runtime_rules.get(
             "compact_master_contract", {}

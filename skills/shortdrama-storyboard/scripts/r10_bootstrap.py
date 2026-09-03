@@ -212,6 +212,7 @@ def verify_bundled(self_test: bool) -> dict:
     policy = runtime.get("preventive_gate_policy", {})
     preventive_counts = {
         "ordered_gates": len(runtime.get("gates", {}).get("ordered_preventive_gates", [])),
+        "template_hard_gates": len(runtime.get("gates", {}).get("template_hard_gates", [])),
         "required_evidence_blocks": len(policy.get("required_evidence_blocks", [])),
         "state_vector_fields": len(policy.get("state_vector_fields", [])),
         "performance_chain_fields": len(policy.get("performance_chain_fields", [])),
@@ -220,10 +221,11 @@ def verify_bundled(self_test: bool) -> dict:
     }
     expected_preventive = {
         "ordered_gates": 14,
+        "template_hard_gates": 15,
         "required_evidence_blocks": 11,
         "state_vector_fields": 7,
         "performance_chain_fields": 7,
-        "compact_master_execution_evidence": 11,
+        "compact_master_execution_evidence": 12,
         "audit_layers": 8,
     }
     errors = []

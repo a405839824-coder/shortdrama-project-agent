@@ -199,6 +199,10 @@ DEPRECATED_DISPLAY_LABELS = (
     "标点语气：",
     "心理音轨属性：",
 )
+VOICE_NESTED_LABELS = (
+    "基础声线", "言语行为", "当前表达", "发声方式", "音量", "语速与节奏",
+    "呼吸", "停顿", "重音", "尾音", "禁止语气",
+)
 
 # Retired labels are structural only inside the fields that formerly absorbed
 # those split columns. Evidence and reference fields must remain byte-faithful
@@ -697,6 +701,16 @@ def _without_deprecated_labels(value: Any) -> str:
     return result.strip()
 
 
+def _is_allowed_nested_voice_label(field: str, label: str, value: Any) -> bool:
+    """Distinguish the legal voice subheading from the retired shot field."""
+
+    return bool(
+        field == "音色"
+        and label == "发声方式："
+        and re.search(r"(?m)^\s*发声方式\s*[：:]\s*$", _text(value))
+    )
+
+
 def _legacy_movement_description(source: dict[str, Any]) -> str:
     raw = _text(source.get("运镜方式"))
     base_parts: list[str] = []
@@ -906,10 +920,9 @@ def compile_formal_merged_field(
             f"可见主体：{_text(compact.get('可见主体'))}"
         ),
     ]
-    paragraphs.extend(
-        f"{field}：{_text(compact.get(field))}"
-        for field in FORMAL_MERGED_ATOMIC_FIELDS
-    )
+    for field in FORMAL_MERGED_ATOMIC_FIELDS:
+        value = _text(compact.get(field))
+        paragraphs.append(f"音色：\n\n{value}" if field == "音色" else f"{field}：{value}")
     formal = "\n\n".join(paragraphs)
     _assert_projected_aspect_contract(formal, projection="formal_master")
     if re.search(r"(?<![A-Za-z])BGM(?![A-Za-z])", formal, flags=re.I):
@@ -1079,7 +1092,10 @@ def migrate_legacy_shot(
     )
     voice = _without_deprecated_labels(source.get("发声方式"))
     if voice:
-        picture = _deduplicated_join(picture, f"说话时，{voice}")
+        compact["音色"] = _deduplicated_join(
+            source.get("音色"),
+            f"历史发声参数（待按固定音色子模板修订）：{voice}",
+        )
     punctuation = _without_deprecated_labels(source.get("标点语气"))
     if punctuation:
         picture = _deduplicated_join(picture, f"对白节奏按{punctuation}")
@@ -1152,6 +1168,7 @@ def migrate_legacy_shot(
         if isinstance(compact.get(field), str)
         for label in DEPRECATED_DISPLAY_LABELS
         if label in compact[field]
+        and not _is_allowed_nested_voice_label(field, label, compact[field])
     ]
     if residual_labels:
         raise ValueError(
@@ -1221,7 +1238,9 @@ def migrate_storyboard_to_compact(
                 if not isinstance(value, str):
                     continue
                 for label in DEPRECATED_DISPLAY_LABELS:
-                    if label in value:
+                    if label in value and not _is_allowed_nested_voice_label(
+                        field, label, value
+                    ):
                         forbidden_shots.append(
                             f"shots[{index}].{field}[deprecated-label={label}]"
                         )
