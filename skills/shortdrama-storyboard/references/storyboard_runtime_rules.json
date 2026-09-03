@@ -60,12 +60,12 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.16",
+    "plugin_version": "0.5.17",
     "output_contract": "R10-SPC-1",
-    "semantic_audit_contract_version": "semantic-audit-v2-compact-master",
+    "semantic_audit_contract_version": "semantic-audit-v3-adjacent-continuity",
     "canonical_atomic_field_count": 27,
     "removed_new_write_fields": ["运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气", "心理音轨属性", "生成批次"],
-    "picture_content_single_write": ["可见动作", "表情", "精确对白", "声音强弱", "语速", "呼吸", "停顿", "重音", "尾音", "标点效果", "口型一致", "不看镜头", "听者错峰反应", "镜尾状态", "恰好三个Seedance 2.5单镜时间阶段"],
+    "picture_content_single_write": ["可见动作", "表情", "视线起点与焦点转移", "眼球先动与头部跟随关系", "眼睑松紧", "具体眨眼时点或有理由不眨眼", "精确对白", "声音强弱", "语速", "呼吸", "停顿", "重音期间不眨眼", "尾音", "标点效果", "口型一致", "不看镜头", "听者错峰反应与眨眼错峰", "镜尾视线与状态", "恰好三个Seedance 2.5单镜时间阶段"],
     "standalone_required": ["空间站位描述", "起始状态", "音色", "光影", "光源来源", "光源方向", "色温倾向", "生成限制中的9:16竖屏"],
     "mother_template_columns": ["分镜序号", "时长", "累计时长", "功能类型/场景连续性ID", "正式分镜母版", "GPT关键帧生成指令", "参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句"],
     "single_execution_master": "正式分镜母版",
@@ -144,14 +144,26 @@
   },
   "blink_policy": {
     "only_when_eyes_visible": true,
+    "mandatory_when_face_visible_seconds_at_least": 2.0,
+    "required_timed_chain": ["视线起点", "眼球换焦或位移", "眼球先动且头部随后轻跟或明确不跟", "眼睑松紧变化", "具体眨眼时机或有理由不眨眼", "镜尾视线落点"],
+    "blink_timing_locations": ["开口前", "自然换焦时", "句间换气", "听完台词后的反应段", "情绪回收或镜尾"],
+    "dialogue_emphasis": "关键词、重音、决定性尾音期间不眨眼",
+    "intentional_no_blink": "仅高压对视、震惊、认出、警觉或重音等明确剧情理由；必须同时保留眼球焦点调整、眼睑松紧和自然呼吸",
     "three_to_five_seconds": "0-1次",
     "over_five_to_ten_seconds": "1-2次",
     "shock_or_recognition": "可先停眨1-2秒",
-    "two_people": "不得同步或同频眨眼",
+    "two_people": "逐人写明时机并错峰，不得同步、同时或同频眨眼",
+    "generation_limit_required": ["眼神自然聚焦", "眼球换焦/位移", "眼睑松紧变化", "禁止无依据全程不眨眼", "禁止僵直瞪视或目光僵死", "禁止高频机械眨眼", "多人时禁止同步眨眼"],
+    "static_keyframe": "起始状态只写双眼自然睁开且避开半眨眼/半闭眼瞬间；仅原文或剧情明确时允许闭眼，不写眨眼过程",
+    "stiff_gaze_terms": ["全程凝视", "目光锁死", "目光锁住", "一直盯住", "保持眼神不动", "保持凝视"],
+    "stiff_gaze_exception": "仅同时写入轻微眼球焦点调整和眼睑变化时可用",
     "forbidden": [
       "每镜强制眨眼",
       "4秒2-3次眨眼",
-      "机械等间隔眨眼"
+      "机械等间隔眨眼",
+      "只在生成限制中泛写自然眨眼而不进入画面时间轴",
+      "无依据全程不眨眼",
+      "多人同步眨眼"
     ]
   },
   "gates": {
@@ -183,7 +195,9 @@
       {"gate_id": "THG-09", "name": "道具主要持有人唯一", "error_code": "E-CONTINUITY-001"},
       {"gate_id": "THG-10", "name": "对白动作时长容量", "error_code": "E-BATCH-003"},
       {"gate_id": "THG-11", "name": "canonical投影XLSX反向解析一致", "error_code": "E-INTEGRATION-001"},
-      {"gate_id": "THG-12", "name": "审计状态签发权", "error_code": "E-ARCHIVE-001"}
+      {"gate_id": "THG-12", "name": "审计状态签发权", "error_code": "E-ARCHIVE-001"},
+      {"gate_id": "THG-13", "name": "眼神眼睑眨眼与静帧自然性", "error_code": "E-EXPRESSION-003"},
+      {"gate_id": "THG-14", "name": "相邻镜头N-1逐组连续性证明", "error_code": "E-CONTINUITY-001"}
     ],
     "first_draft_quality_gate": {
       "measurement_unit": "unique_affected_shots",
@@ -224,7 +238,7 @@
       "正式分镜母版唯一且按R10-SPC-1空白上下文可执行",
       "Seedance 2.5恰好3个一位小数方括号时间阶段并闭合单镜时长",
       "GPT关键帧为显式9:16、无时间/对白/声音/运镜/转场的静态白名单投影",
-      "THG-01–THG-12全部通过且多行文本反向解析一致",
+      "THG-01–THG-14全部通过且多行文本反向解析一致",
       "无batches、Seedance列、生成批次表或后台重复生成"
     ],
     "release": [
@@ -247,6 +261,7 @@
       "change_lock",
       "cognition_matrix",
       "scene_state_ledger",
+      "adjacent_continuity_audit",
       "shot_plan",
       "performance_chains",
       "audio_workflow",
@@ -401,7 +416,7 @@
     }
   },
   "windowed_execution_policy": {
-    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-12、八层审计或质量阈值。",
+    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-14、八层审计、相邻镜头N-1逐组证据或质量阈值。",
     "activation": {
       "user_window_access": "authenticated_namespace_window_neutral",
       "window_role_restrictions": false,
@@ -885,7 +900,7 @@
         "scope"
       ],
       "explicit_fresh_audit": "reuse_extraction_and_parsing_only_then_recompute_semantic_verdict",
-      "semantic_audit_contract": "semantic-audit-v2-compact-master",
+      "semantic_audit_contract": "semantic-audit-v3-adjacent-continuity",
       "invalidation": {
         "dialogue_or_story": "beat_source_mapping_protected_dialogue_cognition",
         "action_or_gaze": "current_shot_neighbors_visibility",
@@ -2308,9 +2323,9 @@
       "module": "EXPRESSION",
       "severity": "fail",
       "blocking": true,
-      "trigger_condition": "眨眼频率机械、超限或双人同频",
-      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "repair_action": "按R10自然眨眼规则重写",
+      "trigger_condition": "THG-13：面部清楚且持续约2秒以上却缺视线起点/眼球换焦/头部跟随关系/眼睑变化/具体眨眼决策/镜尾落点，眨眼只写在限制中、重音期误眨、无依据僵直凝视、频率机械超限、多人未错峰，或静态关键帧落在半眨眼",
+      "required_evidence": "镜头编号、面部可见时长、画面时间轴、起始状态、生成限制、逐人眨眼时点与重音区间",
+      "repair_action": "按视线起点→眼球先换焦→头部轻跟/不跟→眼睑变化→具体眨眼或有理由不眨→镜尾视线重写，并补齐静帧与生成禁项",
       "final_status_if_unfixed": "fail_current",
       "version": "V16.3-148-R10-StableRuntime"
     },
@@ -2660,9 +2675,9 @@
       "module": "CONTINUITY",
       "severity": "fail",
       "blocking": true,
-      "trigger_condition": "THG-08与THG-09：起始状态预写本镜动作结果、同场景镜间状态无交代跳变，或同一道具同一时点双持/跳手/交接状态缺失",
-      "required_evidence": "scene_id、相邻shot_id、起止状态、core_action、prop_id及holder/state前后值",
-      "repair_action": "回退起始状态中的本镜结果，统一七项状态向量并重建道具交接起止持有人/状态",
+      "trigger_condition": "THG-08、THG-09与THG-14：起始状态预写本镜结果、道具双持/跳手，或成片顺序N-1任一相邻镜头组缺证据、逆序/重复、七项状态不闭合、跨场/跨集边界无说明、状态哈希或有序pair哈希不一致",
+      "required_evidence": "全部N-1对pair_id、左右shot_id、边界类型、七项状态向量、左end/right start哈希、transition_explanation、覆盖率与ordered_pair_sha256",
+      "repair_action": "回退错误起始状态并按成片顺序重建全部N-1对；逐对闭合七项状态/道具，跨场跨集写明切换，再重算状态与有序pair哈希",
       "final_status_if_unfixed": "fail_current",
       "version": "V16.3-148-R10-StableRuntime"
     },

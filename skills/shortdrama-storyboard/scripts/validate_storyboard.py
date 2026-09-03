@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import re
 import sys
@@ -91,6 +92,36 @@ DETAIL_PATTERNS = {
 INVISIBLE_SHOT_TERMS = ["书页", "书上内容", "POV书", "第一视角看书", "手部特写", "背影", "远景"]
 FACE_TERMS = ["眼睛", "眼神", "目光", "眉", "嘴唇", "嘴角", "瞳孔", "脸颊", "眼眶", "睫毛", "面部", "眨眼"]
 FACE_VISIBLE_TERMS = ["面部可见", "眼睛可见", "侧脸可见", "人物反应", "过肩同框", "OTS同框"]
+EYE_VISIBLE_TERMS = ["面部", "眼睛", "眼神", "眼睑", "眼球", "眼眸", "双眼", "侧脸", "人物反应"]
+EYE_VISIBLE_SHOT_SCALES = ["大特写", "特写", "近景", "中近景", "胸部以上", "腰部以上"]
+STIFF_GAZE_RE = re.compile(r"全程凝视|目光锁死|目光锁住|一直盯住|保持眼神不动|保持凝视")
+EYE_FOCUS_RE = re.compile(r"眼球.{0,12}(?:换焦|位移|焦点调整|微调)|(?:视线|目光).{0,12}(?:换焦|焦点调整|微调)")
+EYELID_CHANGE_RE = re.compile(r"(?:上|下)?眼睑|眼皮|眼睫")
+GAZE_PATH_RE = re.compile(
+    r"(?:眼球|视线|目光|眼神).{0,24}(?:从|由).{0,24}"
+    r"(?:移向|转向|落向|扫向|回到|看向|落在)"
+)
+EYES_LEAD_HEAD_RE = re.compile(
+    r"(?:眼球|视线|目光).{0,20}先.{0,30}头部|"
+    r"头部.{0,16}(?:随后|再|轻微跟|保持不动|不跟随|不转)"
+)
+BLINK_TIMING_RE = re.compile(
+    r"(?:开口|说话|对白|视线落稳|换焦|听完|台词结束|反应|情绪回收|换气|句间|镜尾)"
+    r".{0,18}(?:前|后|时|期间|阶段|反应段).{0,18}(?:自然)?(?:短|轻)?眨|"
+    r"(?:自然)?(?:短|轻)?眨(?:眼)?.{0,18}(?:开口|说话|对白|视线落稳|换焦|听完|台词结束|反应|情绪回收|换气|句间|镜尾)"
+)
+INTENTIONAL_NO_BLINK_RE = re.compile(r"(?:本镜|全镜|本段|台词期间|重音期间|关键词期间)[^。；]{0,28}不眨眼")
+NO_BLINK_REASON_RE = re.compile(r"高压|压迫|震惊|认出|警觉|决定性|关键词|重音|尾音|情绪峰值")
+EMPHASIS_NO_BLINK_RE = re.compile(
+    r"(?:重音|关键词|尾音|[‘“][^’”]{1,12}[’”]).{0,24}不眨眼|"
+    r"不眨眼.{0,24}(?:重音|关键词|尾音|[‘“][^’”]{1,12}[’”])"
+)
+STATIC_OPEN_EYES_RE = re.compile(
+    r"双眼自然睁开.{0,32}(?:不处于|不生成|避开|禁止|无)(?:半眨眼|半闭眼)|"
+    r"(?:不处于|不生成|避开|禁止)(?:半眨眼|半闭眼).{0,32}双眼自然睁开"
+)
+PLOT_CLOSED_EYES_RE = re.compile(r"(?:原文|剧情|表演)(?:明确|要求|需要).{0,20}(?:闭眼|合眼|睡着|昏迷)")
+BOUNDARY_EXPLANATION_RE = re.compile(r"切|转入|转到|换场|场景|地点|时空|翌日|次日|稍后|片刻|另一|新空间|跨集|集间")
 VAGUE_TERMS = ["电影感", "高级感", "氛围感", "自然移动", "高级运镜", "电影感运镜"]
 STATIC_MOTIONS = ["无运镜", "固定镜头", "静态镜头", "固定机位"]
 TIMELINE_RANGE_RE = re.compile(
@@ -475,8 +506,8 @@ def parse_blink_range(text: str) -> tuple[int, int] | None:
     patterns = [
         r"(\d+)\s*(?:-|–|—|~|～|至|到)\s*(\d+)\s*次(?:自然)?眨眼",
         r"(?:自然)?眨眼\s*(\d+)\s*(?:-|–|—|~|～|至|到)\s*(\d+)\s*次",
-        r"(\d+)\s*次(?:自然)?眨眼",
-        r"(?:自然)?眨眼\s*(\d+)\s*次",
+        r"(\d+)\s*次(?:自然)?(?:短|轻)?眨眼",
+        r"(?:自然)?(?:短|轻)?眨眼\s*(\d+)\s*次",
     ]
     for pattern in patterns:
         m = re.search(pattern, text)
@@ -485,7 +516,154 @@ def parse_blink_range(text: str) -> tuple[int, int] | None:
                 return int(m.group(1)), int(m.group(2))
             value = int(m.group(1))
             return value, value
+    chinese_counts = {
+        "零": 0,
+        "一": 1,
+        "两": 2,
+        "二": 2,
+        "三": 3,
+    }
+    match = re.search(
+        r"([零一两二三])\s*次(?:自然)?(?:短|轻)?眨眼|"
+        r"(?:自然)?(?:短|轻)?眨眼\s*([零一两二三])\s*次",
+        text,
+    )
+    if match:
+        value = chinese_counts[match.group(1) or match.group(2)]
+        return value, value
+    if re.search(r"(?:自然)?(?:短|轻)?眨(?:眼)?一次", text):
+        return 1, 1
     return None
+
+
+def _stable_sha256(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _shot_episode_key(shot: dict[str, Any], ordinal: int) -> str:
+    shot_id = str(shot.get("镜头编号") or "")
+    match = EP_SHOT_ID_RE.fullmatch(shot_id)
+    if match:
+        return f"EP{match.group('episode')}"
+    explicit = str(shot.get("episode_id") or "").strip()
+    return explicit or "LEGACY-SINGLE-EPISODE"
+
+
+def _eye_contract_faults(
+    shot: dict[str, Any],
+    *,
+    duration: float,
+    strict: bool,
+) -> list[str]:
+    """Return hard eye-performance faults for one clearly visible face.
+
+    The contract deliberately validates authored, timed behavior rather than
+    accepting a generic "natural gaze" adjective.  A static keyframe receives
+    only an open/closed-eye state; the actual blink remains in 画面内容.
+    """
+
+    shot_type = str(shot.get("镜头类型") or "")
+    visible = str(shot.get("可见主体") or "")
+    picture = str(shot.get("画面内容") or "")
+    limits = str(shot.get("生成限制") or "")
+    start_state = str(shot.get("起始状态") or "")
+    visible_text = f"{shot_type} {visible}"
+    face_visible = (
+        duration >= 2.0
+        and (
+            _has_any(visible_text, EYE_VISIBLE_TERMS)
+            or _has_any(visible_text, EYE_VISIBLE_SHOT_SCALES)
+        )
+        and not (
+            _has_any(visible_text, INVISIBLE_SHOT_TERMS)
+            and not _has_any(visible, FACE_VISIBLE_TERMS)
+        )
+        and not re.search(r"面部(?:不可见|被遮挡)|眼睛(?:不可见|被遮挡)", visible_text)
+    )
+    if not face_visible:
+        return []
+
+    faults: list[str] = []
+    focus_ok = bool(EYE_FOCUS_RE.search(picture))
+    eyelid_ok = bool(EYELID_CHANGE_RE.search(picture))
+    if not GAZE_PATH_RE.search(picture):
+        faults.append("缺‘视线/眼球从起点移向目标’的可观察换焦路径")
+    if not EYES_LEAD_HEAD_RE.search(picture):
+        faults.append("缺眼球先动、头部随后轻跟或明确不跟随的先后关系")
+    if not focus_ok:
+        faults.append("缺轻微眼球换焦、位移或焦点调整")
+    if not eyelid_ok:
+        faults.append("缺上/下眼睑松紧变化")
+
+    timeline_rows = list(STRICT_TIMELINE_STAGE_RE.finditer(picture)) if strict else []
+    end_text = timeline_rows[-1].group("body") if timeline_rows else picture
+    if not re.search(r"视线|目光|眼神|眼球", end_text):
+        faults.append("镜尾阶段未写最终视线落点")
+
+    intentional_no_blink = bool(INTENTIONAL_NO_BLINK_RE.search(picture))
+    positive_blink_text = re.sub(
+        r"(?:本镜|全镜|本段|台词期间|重音期间|关键词期间)?[^。；]{0,12}不眨眼",
+        "",
+        picture,
+    )
+    has_blink = "眨" in positive_blink_text
+    if has_blink and not BLINK_TIMING_RE.search(picture):
+        faults.append("眨眼未绑定开口前、换焦、听后反应、换气或镜尾等具体时机")
+    if has_blink and parse_blink_range(picture) is None:
+        faults.append("眨眼未写明确次数")
+    if not has_blink and not intentional_no_blink:
+        faults.append("缺本镜逐人可执行的眨眼或有理由不眨眼决策")
+    if intentional_no_blink:
+        if not NO_BLINK_REASON_RE.search(picture):
+            faults.append("不眨眼缺高压、震惊、认出、警觉或重音等剧情理由")
+        if not (focus_ok and eyelid_ok and re.search(r"呼吸|气息|吸气|呼气", picture)):
+            faults.append("不眨眼缺眼球焦点、眼睑松紧和自然呼吸替代动态")
+
+    dialogue_rows = extract_dialogues(picture)
+    if dialogue_rows and re.search(r"重音|关键词|尾音|加重", picture) and not EMPHASIS_NO_BLINK_RE.search(picture):
+        faults.append("对白关键词、重音或决定性尾音期间未明确不眨眼")
+
+    multi_people = _is_multi_person_visible(visible)
+    if multi_people:
+        safe_scan = re.sub(
+            r"(?:禁止|不得|避免|不能|不可|不安排)(?:两人|二人|多人|双人)?(?:同步|同时|同频)眨眼",
+            "",
+            picture,
+        )
+        if re.search(r"(?:同步|同时|同频)眨眼", safe_scan):
+            faults.append("多人出现同步、同时或同频眨眼")
+        if not re.search(r"眨眼.{0,24}(?:错开|不同时)|(?:错开|不同时).{0,24}眨眼|先.{0,24}眨.{0,32}后.{0,24}眨|晚半拍.{0,24}眨", picture):
+            faults.append("多人未写眨眼错峰顺序")
+
+    if STIFF_GAZE_RE.search(picture) and not (focus_ok and eyelid_ok):
+        faults.append("使用‘目光锁住/保持凝视’等僵硬措辞却无眼球微调和眼睑变化")
+
+    limit_requirements = [
+        (r"眼神自然聚焦", "生成限制缺‘眼神自然聚焦’"),
+        (r"眼球.{0,12}(?:换焦|位移|焦点调整)", "生成限制缺眼球换焦/位移约束"),
+        (r"眼睑.{0,12}(?:松紧|变化)", "生成限制缺眼睑松紧变化约束"),
+        (r"禁止无依据全程不眨眼", "生成限制缺无依据全程不眨眼禁项"),
+        (r"禁止.{0,12}(?:僵直瞪视|目光僵死)", "生成限制缺僵直瞪视禁项"),
+        (r"禁止.{0,12}高频机械眨眼", "生成限制缺高频机械眨眼禁项"),
+    ]
+    if multi_people:
+        limit_requirements.append(
+            (r"禁止.{0,16}(?:同步|同时|同频)眨眼", "生成限制缺多人同步眨眼禁项")
+        )
+    for pattern, message in limit_requirements:
+        if not re.search(pattern, limits):
+            faults.append(message)
+
+    if strict and not (STATIC_OPEN_EYES_RE.search(start_state) or PLOT_CLOSED_EYES_RE.search(start_state)):
+        faults.append("起始状态未为静态GPT关键帧声明双眼自然睁开且避开半眨眼，亦无原文明确闭眼依据")
+    return faults
 
 
 def _has_any(text: str, terms: list[str]) -> bool:
@@ -925,6 +1103,22 @@ def _visible_character_names(value: Any) -> list[str]:
         if candidate not in names:
             names.append(candidate)
     return names
+
+
+def _is_multi_person_visible(value: Any) -> bool:
+    text = str(value or "")
+    if re.search(r"两人|二人|双人|三人|多人|群像", text):
+        return True
+    non_name_terms = re.compile(
+        r"面部|眼睛|眼神|眼睑|眼球|眼眸|双眼|侧脸|上半身|下半身|全身|"
+        r"双手|手部|肩|颈|背影|轮廓|可见|可辨|道具|前景|中景|后景"
+    )
+    named_parts = [
+        part.strip()
+        for part in re.split(r"[、，,；;和与及+＋]", text)
+        if part.strip() and not non_name_terms.search(part)
+    ]
+    return len(named_parts) > 1
 
 
 def _start_result_faults(start_state: Any, picture_content: Any) -> list[str]:
@@ -1765,32 +1959,162 @@ def _validate_preventive_gates(
                     repair="同一道具同一时点只能有一个持有人，并明确状态；交接必须通过本镜start/end完成。",
                     template_gate_id="THG-09",
                 ))
-    previous: tuple[str, dict[str, Any]] | None = None
-    for shot in shots:
-        shot_id = str(shot.get("镜头编号"))
-        row = state_by_shot.get(shot_id)
-        if row is None:
-            previous = None
-            continue
-        scene_id = str(row.get("scene_id", shot.get("场景连续性ID", "")))
-        if previous and previous[0] == scene_id:
-            previous_row = previous[1]
-            prior_end = previous_row.get("end_state", {})
-            current_start = row.get("start_state", {})
-            mismatches = {field: [prior_end.get(field), current_start.get(field)] for field in state_fields if prior_end.get(field) != current_start.get(field)}
-            prop_mismatch = "手持道具" in mismatches
-            if mismatches and (
-                prop_mismatch
-                or is_none_value(row.get("transition_explanation"))
-            ):
+    expected_pair_rows: list[dict[str, Any]] = []
+    for ordinal in range(max(len(shots) - 1, 0)):
+        left_shot = shots[ordinal]
+        right_shot = shots[ordinal + 1]
+        left_id = str(left_shot.get("镜头编号"))
+        right_id = str(right_shot.get("镜头编号"))
+        pair_id = f"{left_id}->{right_id}"
+        left_row = state_by_shot.get(left_id)
+        right_row = state_by_shot.get(right_id)
+        left_scene = str(
+            (left_row or {}).get("scene_id", left_shot.get("场景连续性ID", ""))
+        )
+        right_scene = str(
+            (right_row or {}).get("scene_id", right_shot.get("场景连续性ID", ""))
+        )
+        left_episode = _shot_episode_key(left_shot, ordinal)
+        right_episode = _shot_episode_key(right_shot, ordinal + 1)
+        boundary_type = (
+            "episode_cut"
+            if left_episode != right_episode
+            else "scene_cut"
+            if left_scene != right_scene
+            else "same_scene"
+        )
+        prior_end = (
+            left_row.get("end_state", {})
+            if isinstance(left_row, dict)
+            else {}
+        )
+        current_start = (
+            right_row.get("start_state", {})
+            if isinstance(right_row, dict)
+            else {}
+        )
+        explanation = (
+            right_row.get("transition_explanation")
+            if isinstance(right_row, dict)
+            else None
+        )
+        mismatches = {
+            field: [prior_end.get(field), current_start.get(field)]
+            for field in state_fields
+            if prior_end.get(field) != current_start.get(field)
+        }
+        pair_status = "closed"
+        if left_row is None or right_row is None:
+            pair_status = "fail_current"
+            issues.append(_issue(
+                catalog,
+                "E-CONTINUITY-001",
+                f"adjacent_pair:{pair_id}",
+                "相邻镜头缺左镜end_state或右镜start_state，无法完成逐组连续性审计。",
+                template_gate_id="THG-14",
+            ))
+        elif boundary_type == "same_scene":
+            if mismatches:
+                pair_status = "fail_current"
                 issues.append(_issue(
                     catalog,
                     "E-CONTINUITY-001",
-                    f"scene:{scene_id}:{previous_row.get('shot_id')}->{shot_id}",
-                    f"首尾状态不闭合：{mismatches}",
-                    template_gate_id="THG-09" if prop_mismatch else None,
+                    f"adjacent_pair:{pair_id}",
+                    f"同场景相邻镜头首尾状态必须逐字段精确闭合，说明不能替代切点状态：{mismatches}",
+                    template_gate_id="THG-14",
                 ))
-        previous = (scene_id, row)
+        else:
+            pair_status = "explained_transition"
+            if is_none_value(explanation) or not BOUNDARY_EXPLANATION_RE.search(
+                str(explanation)
+            ):
+                pair_status = "fail_current"
+                issues.append(_issue(
+                    catalog,
+                    "E-CONTINUITY-001",
+                    f"adjacent_pair:{pair_id}",
+                    f"{boundary_type}边界缺明确的时空/场景切换说明：{explanation!r}",
+                    template_gate_id="THG-14",
+                ))
+        expected_pair_rows.append({
+            "pair_id": pair_id,
+            "left_shot_id": left_id,
+            "right_shot_id": right_id,
+            "boundary_type": boundary_type,
+            "left_end_state_sha256": _stable_sha256(prior_end),
+            "right_start_state_sha256": _stable_sha256(current_start),
+            "reviewed_fields": list(state_fields),
+            "continuity_status": pair_status,
+            "transition_explanation": explanation,
+        })
+
+    pair_ids = [row["pair_id"] for row in expected_pair_rows]
+    expected_pair_hash = _stable_sha256(pair_ids)
+    submitted_pair_audit = evidence.get("adjacent_continuity_audit")
+    pair_audit_faults: list[str] = []
+    if not isinstance(submitted_pair_audit, dict):
+        pair_audit_faults.append("缺adjacent_continuity_audit对象")
+        submitted_pairs: list[Any] = []
+    else:
+        submitted_pairs = submitted_pair_audit.get("pairs")
+        if not isinstance(submitted_pairs, list):
+            pair_audit_faults.append("pairs必须为数组")
+            submitted_pairs = []
+        scalar_expectations = {
+            "contract": "adjacent-pair-continuity-v1",
+            "expected_pair_count": len(expected_pair_rows),
+            "reviewed_pair_count": len(expected_pair_rows),
+            "coverage_percent": 100,
+            "ordered_pair_sha256": expected_pair_hash,
+        }
+        for field, expected_value in scalar_expectations.items():
+            if submitted_pair_audit.get(field) != expected_value:
+                pair_audit_faults.append(
+                    f"{field}={submitted_pair_audit.get(field)!r}，应为{expected_value!r}"
+                )
+    if len(submitted_pairs) != len(expected_pair_rows):
+        pair_audit_faults.append(
+            f"pairs数量={len(submitted_pairs)}，应完整覆盖N-1={len(expected_pair_rows)}"
+        )
+    for ordinal, expected_row in enumerate(expected_pair_rows):
+        if ordinal >= len(submitted_pairs):
+            break
+        submitted_row = submitted_pairs[ordinal]
+        if not isinstance(submitted_row, dict):
+            pair_audit_faults.append(f"pairs[{ordinal}]不是对象")
+            continue
+        differing = {
+            field: [submitted_row.get(field), expected_value]
+            for field, expected_value in expected_row.items()
+            if submitted_row.get(field) != expected_value
+        }
+        if differing:
+            pair_audit_faults.append(
+                f"pairs[{ordinal}] {expected_row['pair_id']}证据不一致：{differing}"
+            )
+    if pair_audit_faults:
+        issues.append(_issue(
+            catalog,
+            "E-CONTINUITY-001",
+            "prevention_evidence.adjacent_continuity_audit",
+            "相邻镜头逐组连续性证明不完整：" + "；".join(pair_audit_faults),
+            repair="按成片顺序重建全部N-1对证据，逐对绑定左镜end_state、右镜start_state、七项字段、边界类型、说明与有序SHA-256。",
+            template_gate_id="THG-14",
+        ))
+    metrics["adjacent_continuity"] = {
+        "contract": "adjacent-pair-continuity-v1",
+        "expected_pair_count": len(expected_pair_rows),
+        "reviewed_pair_count": len(expected_pair_rows),
+        "coverage_percent": 100.0,
+        "ordered_pair_sha256": expected_pair_hash,
+        "pair_ids": pair_ids,
+        "pair_results": expected_pair_rows,
+        "failed_pair_count": sum(
+            row["continuity_status"] == "fail_current"
+            for row in expected_pair_rows
+        ),
+        "proof_verified": not pair_audit_faults,
+    }
 
     plans = evidence.get("shot_plan")
     plan_by_shot = {str(row.get("shot_id")): row for row in plans if isinstance(row, dict)} if isinstance(plans, list) else {}
@@ -2277,18 +2601,40 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         elif core_emotion and len(categories) < 4:
             issues.append(_issue(catalog, "E-EXPRESSION-002", f"{location}.画面内容", f"重要情绪镜只有 {len(categories)} 类细节：{categories}", severity="warning"))
 
-        if "眨眼" in combined_performance:
-            blink_range = parse_blink_range(combined_performance)
-            if "同步眨眼" in combined_performance or "同时眨眼" in combined_performance or "同频眨眼" in combined_performance:
-                issues.append(_issue(catalog, "E-EXPRESSION-003", location, "双人镜头出现同步/同频眨眼。"))
+        eye_faults = _eye_contract_faults(
+            shot,
+            duration=duration,
+            strict=strict_contract,
+        )
+        if eye_faults:
+            issues.append(_issue(
+                catalog,
+                "E-EXPRESSION-003",
+                f"{location}.画面内容/起始状态/生成限制",
+                "眼神、眼睑与眨眼执行链不完整：" + "；".join(eye_faults),
+                repair=(
+                    "在画面时间轴中写视线起点→眼球先换焦→头部随后轻跟/不跟→眼睑变化→"
+                    "具体眨眼时机或有理由不眨眼→镜尾视线；生成限制补齐呆滞、机械与同步禁项，"
+                    "静态关键帧只写自然睁眼或原文明确闭眼。"
+                ),
+                template_gate_id="THG-13",
+            ))
+
+        positive_blink_text = re.sub(
+            r"(?:本镜|全镜|本段|台词期间|重音期间|关键词期间)?[^。；]{0,12}不眨眼",
+            "",
+            combined_performance,
+        )
+        if "眨" in positive_blink_text:
+            blink_range = parse_blink_range(positive_blink_text)
             if blink_range:
                 _, high = blink_range
                 if 3 <= duration <= 5 and high > 1:
-                    issues.append(_issue(catalog, "E-EXPRESSION-003", location, f"{duration}s镜头眨眼上限应为1次，当前写到{high}次。"))
+                    issues.append(_issue(catalog, "E-EXPRESSION-003", location, f"{duration}s镜头眨眼上限应为1次，当前写到{high}次。", template_gate_id="THG-13"))
                 elif 5 < duration <= 10 and high > 2:
-                    issues.append(_issue(catalog, "E-EXPRESSION-003", location, f"{duration}s镜头眨眼上限应为2次，当前写到{high}次。"))
+                    issues.append(_issue(catalog, "E-EXPRESSION-003", location, f"{duration}s镜头眨眼上限应为2次，当前写到{high}次。", template_gate_id="THG-13"))
                 elif duration < 3 and high > 1:
-                    issues.append(_issue(catalog, "E-EXPRESSION-003", location, f"短于3s镜头不应机械安排{high}次眨眼。"))
+                    issues.append(_issue(catalog, "E-EXPRESSION-003", location, f"短于3s镜头不应机械安排{high}次眨眼。", template_gate_id="THG-13"))
 
         camera = str(shot.get("机位", ""))
         if is_none_value(camera) or _has_any(camera, ["随便", "自然机位", "高级机位"]):

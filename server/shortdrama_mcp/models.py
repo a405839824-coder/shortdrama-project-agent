@@ -142,7 +142,7 @@ class SemanticAuditLayerInput(BaseModel):
     layer: SemanticAuditLayerName
     status: Literal["pass", "fail_current"]
     summary: str = Field(min_length=1, max_length=4_000)
-    evidence_ids: list[str] = Field(min_length=1, max_length=256)
+    evidence_ids: list[str] = Field(min_length=1, max_length=4096)
 
     @field_validator("layer", mode="before")
     @classmethod
@@ -244,6 +244,8 @@ class SemanticAuditInput(BaseModel):
 
     canonical_sha256: str = Field(pattern=r"^[A-Fa-f0-9]{64}$")
     reviewed_shot_count: int = Field(ge=0)
+    reviewed_adjacent_pair_count: int = Field(ge=0)
+    adjacent_pair_order_sha256: str = Field(pattern=r"^[A-Fa-f0-9]{64}$")
     # R10.1 has no persisted Seedance batches.  The default keeps old callers
     # readable while making the compact contract natural to submit.
     reviewed_batch_count: Literal[0] = 0

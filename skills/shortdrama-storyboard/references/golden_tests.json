@@ -1331,6 +1331,26 @@
         },
         {
           "op": "set",
+          "path": "shots.0.时长",
+          "value": 1.9
+        },
+        {
+          "op": "set",
+          "path": "shots.0.累计时长",
+          "value": 1.9
+        },
+        {
+          "op": "set",
+          "path": "total_duration",
+          "value": 1.9
+        },
+        {
+          "op": "set",
+          "path": "shots.0.画面内容",
+          "value": "她很伤心"
+        },
+        {
+          "op": "set",
           "path": "shots.0.动作与表演",
           "value": "她很伤心"
         }
@@ -1350,6 +1370,26 @@
           "op": "set",
           "path": "shots.0.功能类型",
           "value": "情绪反应"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.时长",
+          "value": 1.9
+        },
+        {
+          "op": "set",
+          "path": "shots.0.累计时长",
+          "value": 1.9
+        },
+        {
+          "op": "set",
+          "path": "total_duration",
+          "value": 1.9
+        },
+        {
+          "op": "set",
+          "path": "shots.0.画面内容",
+          "value": "嘴角轻压，眼神低垂"
         },
         {
           "op": "set",
@@ -2216,7 +2256,7 @@
         {
           "op": "set",
           "path": "shots.0.画面内容",
-          "value": "0—2秒女主推门；2—4秒女主看向桌上的信。"
+          "value": "0—2秒女主推门，视线从门框移向桌面信件，眼球先完成轻微焦点调整，头部随后轻微跟转；视线落稳前自然短眨一次，重新睁眼后上眼睑轻微放松；2—4秒女主看向桌上的信，镜尾视线落在信件上。"
         }
       ],
       "expected_status": "pass",
@@ -2248,7 +2288,7 @@
         {
           "op": "set",
           "path": "shots.0.画面内容",
-          "value": "起始时女主推门；随后视线转向桌上的信；镜尾手停在门框。"
+          "value": "起始时女主推门，视线从门框移向桌面信件，眼球先完成轻微焦点调整，头部随后轻微跟转；视线落稳前自然短眨一次，重新睁眼后上眼睑轻微放松；随后女主看向桌上的信；镜尾手停在门框，视线落在信件上。"
         }
       ],
       "expected_status": "pass",
@@ -2408,6 +2448,160 @@
       "expected_status": "fail",
       "expected_error_codes": [
         "E-DUPLICATE-GENERATION-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-THG13-EYE-CHAIN-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-EXPRESSION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-THG13-EYE-DECISION-MISSING",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.画面内容",
+          "value": "女主推门后一直看着桌上的信件，镜尾仍看着信件。"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-EXPRESSION-003"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-THG13-STIFF-GAZE-FAIL",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.画面内容",
+          "value": "女主推门后目光锁住桌上的信件并保持凝视；开口前自然短眨一次；镜尾视线落在信件上。"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-EXPRESSION-003"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-THG13-JUSTIFIED-NO-BLINK-PASS",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.画面内容",
+          "value": "女主视线从门框移向桌面信件，眼球先完成轻微焦点调整，头部随后轻微跟转；因认出关键笔迹而高度警觉，本镜不眨眼，上眼睑略微下压，呼吸保持自然；镜尾视线落在信件上。"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-EXPRESSION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-THG13-EYE-LIMITS-MISSING",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.生成限制",
+          "value": "禁止字幕、额外配乐、现代物件与额外角色；保持人物脸和服装一致"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-EXPRESSION-003"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-THG14-ADJACENT-FULL-PASS",
+      "fixture_id": "valid_base",
+      "expand_for_adjacent_audit": true,
+      "mode": "audit",
+      "mutations": [],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-CONTINUITY-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-THG14-ADJACENT-PAIR-MISSING",
+      "fixture_id": "valid_base",
+      "expand_for_adjacent_audit": true,
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "delete",
+          "path": "prevention_evidence.adjacent_continuity_audit.pairs.0"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-CONTINUITY-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-THG14-ADJACENT-HASH-DRIFT",
+      "fixture_id": "valid_base",
+      "expand_for_adjacent_audit": true,
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "prevention_evidence.adjacent_continuity_audit.ordered_pair_sha256",
+          "value": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-CONTINUITY-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-THG14-SCENE-CUT-UNEXPLAINED",
+      "fixture_id": "valid_base",
+      "expand_for_adjacent_audit": true,
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.1.场景连续性ID",
+          "value": "SC02"
+        },
+        {
+          "op": "set",
+          "path": "prevention_evidence.scene_state_ledger.1.scene_id",
+          "value": "SC02"
+        },
+        {
+          "op": "set",
+          "path": "prevention_evidence.scene_state_ledger.1.transition_explanation",
+          "value": ""
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-CONTINUITY-001"
       ],
       "forbidden_error_codes": []
     }

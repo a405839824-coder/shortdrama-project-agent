@@ -578,7 +578,7 @@ PATCH_FORBIDDEN_FIELD_TERMS = (
 
 AUDIT_GATE_IDS = tuple(f"G{index}" for index in range(14))
 AUDIT_LAYER_NAMES = SEMANTIC_AUDIT_LAYER_NAMES
-SEMANTIC_AUDIT_CONTRACT_VERSION = "semantic-audit-v2-compact-master"
+SEMANTIC_AUDIT_CONTRACT_VERSION = "semantic-audit-v3-adjacent-continuity"
 STRICT_OUTPUT_CONTRACT = "R10-SPC-1"
 SEMANTIC_AUDIT_CONTRACT_FINGERPRINT = sha256_bytes(
     SEMANTIC_AUDIT_CONTRACT_VERSION.encode("utf-8")
@@ -2988,8 +2988,9 @@ class StoryboardService:
         """Return the canonical identity of one semantic submission.
 
         SHA-256 hexadecimal is case-insensitive at the artifact boundary, so
-        normalize only that machine identity before hashing. Human evidence,
-        issue identifiers and free text remain byte-for-byte unchanged.
+        normalize the canonical and ordered-pair machine identities before
+        hashing. Human evidence, issue identifiers and free text remain
+        byte-for-byte unchanged.
         """
 
         submission = SemanticAuditInput.model_validate(
@@ -2997,6 +2998,9 @@ class StoryboardService:
         ).model_dump(mode="python")
         submission["canonical_sha256"] = str(
             submission["canonical_sha256"]
+        ).lower()
+        submission["adjacent_pair_order_sha256"] = str(
+            submission["adjacent_pair_order_sha256"]
         ).lower()
         return submission
 
@@ -3040,6 +3044,32 @@ class StoryboardService:
             raise ValueError(
                 "semantic_audit_count_mismatch: reviewed_batch_count does not match the canonical"
             )
+        ordered_shot_refs = [
+            str(row.get("镜头编号") or row.get("shot_uid") or "").strip()
+            for row in shots
+        ]
+        if any(not value for value in ordered_shot_refs):
+            raise ValueError(
+                "semantic_audit_reference_invalid: every canonical shot requires an identity"
+            )
+        expected_pair_ids = [
+            f"{ordered_shot_refs[index]}->{ordered_shot_refs[index + 1]}"
+            for index in range(max(len(ordered_shot_refs) - 1, 0))
+        ]
+        expected_pair_set = set(expected_pair_ids)
+        expected_pair_hash = sha256_bytes(
+            _stable_json_bytes(expected_pair_ids)
+        )
+        if int(submission["reviewed_adjacent_pair_count"]) != len(
+            expected_pair_ids
+        ):
+            raise ValueError(
+                "semantic_audit_adjacent_pair_count_mismatch: reviewed_adjacent_pair_count must equal N-1"
+            )
+        if str(submission["adjacent_pair_order_sha256"]).casefold() != expected_pair_hash.casefold():
+            raise ValueError(
+                "semantic_audit_adjacent_pair_hash_mismatch: adjacent_pair_order_sha256 does not match canonical order"
+            )
 
         layer_rows = submission["layers"]
         layer_by_name = {str(row["layer"]): row for row in layer_rows}
@@ -3066,10 +3096,10 @@ class StoryboardService:
                 raise ValueError(
                     "semantic_audit_evidence_invalid: evidence references must use non-empty kind:id"
                 )
-            if kind not in {"shot", "field", "canonical"}:
+            if kind not in {"shot", "field", "canonical", "pair"}:
                 raise ValueError(
                     "semantic_audit_evidence_invalid: evidence kind must be one of "
-                    "shot, field, or canonical"
+                    "shot, field, canonical, or pair"
                 )
             if kind == "shot" and value not in shot_refs:
                 raise ValueError(
@@ -3086,10 +3116,27 @@ class StoryboardService:
                 raise ValueError(
                     f"semantic_audit_evidence_invalid: canonical evidence does not match the audited artifact: {evidence_id!r}"
                 )
+            if kind == "pair" and value not in expected_pair_set:
+                raise ValueError(
+                    f"semantic_audit_evidence_invalid: pair evidence is not one canonical adjacent pair: {evidence_id!r}"
+                )
 
         for row in layer_rows:
             for evidence_id in row["evidence_ids"]:
                 validate_evidence_id(str(evidence_id))
+
+        spatial_pair_ids = [
+            str(evidence_id).split(":", 1)[1]
+            for evidence_id in layer_by_name["空间连续"]["evidence_ids"]
+            if str(evidence_id).casefold().startswith("pair:")
+        ]
+        if spatial_pair_ids != expected_pair_ids:
+            missing = [value for value in expected_pair_ids if value not in spatial_pair_ids]
+            extra = [value for value in spatial_pair_ids if value not in expected_pair_set]
+            raise ValueError(
+                "semantic_audit_adjacent_pair_coverage_incomplete: 空间连续层必须按canonical顺序逐组提交全部N-1个pair证据；"
+                f"missing={missing}, extra={extra}, submitted_order={spatial_pair_ids}"
+            )
 
         semantic_issues = submission["issues"]
         failed_layers = {
@@ -3158,6 +3205,26 @@ class StoryboardService:
                 )
             for evidence_id in issue_evidence:
                 validate_evidence_id(evidence_id)
+            pair_issue_evidence = sorted(
+                evidence_id
+                for evidence_id in issue_evidence
+                if evidence_id.casefold().startswith("pair:")
+            )
+            if pair_issue_evidence:
+                if len(pair_issue_evidence) != 1:
+                    raise ValueError(
+                        "semantic_audit_adjacent_pair_issue_invalid: one continuity issue must bind exactly one adjacent pair"
+                    )
+                pair_value = pair_issue_evidence[0].split(":", 1)[1]
+                pair_shot_ids = pair_value.split("->")
+                if (
+                    str(issue["layer"]) != "空间连续"
+                    or len(pair_shot_ids) != 2
+                    or canonical_shot_ids != pair_shot_ids
+                ):
+                    raise ValueError(
+                        "semantic_audit_adjacent_pair_issue_invalid: pair issue must target its two canonical shots in left-to-right order"
+                    )
             normalized_semantic_issues.append(
                 {
                     "error_code": str(issue["error_code"]),
@@ -3248,6 +3315,23 @@ class StoryboardService:
                 "evidence_count": len(evidence_ids),
                 "evidence_ids": evidence_ids,
             }
+        machine_adjacent = (
+            report.get("quality_metrics", {}).get("adjacent_continuity")
+            if isinstance(report.get("quality_metrics"), dict)
+            else None
+        )
+        if (
+            not isinstance(machine_adjacent, dict)
+            or int(machine_adjacent.get("expected_pair_count", -1))
+            != len(expected_pair_ids)
+            or list(machine_adjacent.get("pair_ids") or [])
+            != expected_pair_ids
+            or str(machine_adjacent.get("ordered_pair_sha256") or "")
+            != expected_pair_hash
+        ):
+            raise ValueError(
+                "semantic_audit_adjacent_pair_machine_proof_missing: current validator report lacks the exact N-1 pair manifest"
+            )
         clean = (
             not issues
             and conclusion.get("status") == "pass"
@@ -3279,12 +3363,32 @@ class StoryboardService:
                 "unique_affected_shot_count": quality["unique_affected_shot_count"],
                 "residual_issue_count": 0,
                 "introduced_issue_count": 0,
+                "adjacent_pair_coverage_percent": 100,
             },
             "result": "pass" if clean else "fail_current",
             "semantic_audit_contract": SEMANTIC_AUDIT_CONTRACT_VERSION,
             "semantic_audit_sha256": submission_hash,
             "reviewed_shot_count": int(submission["reviewed_shot_count"]),
             "reviewed_batch_count": int(submission["reviewed_batch_count"]),
+            "reviewed_adjacent_pair_count": int(
+                submission["reviewed_adjacent_pair_count"]
+            ),
+            "adjacent_pair_order_sha256": expected_pair_hash,
+            "adjacent_continuity": {
+                "contract": "adjacent-pair-continuity-v1",
+                "expected_pair_count": len(expected_pair_ids),
+                "reviewed_pair_count": len(spatial_pair_ids),
+                "coverage_percent": 100.0,
+                "ordered_pair_sha256": expected_pair_hash,
+                "pair_ids": expected_pair_ids,
+                "production_proof_verified": bool(
+                    machine_adjacent.get("proof_verified")
+                ),
+                "production_failed_pair_count": int(
+                    machine_adjacent.get("failed_pair_count", 0)
+                ),
+                "spatial_layer_status": layer_matrix["空间连续"]["status"],
+            },
         }
         enriched["status"] = "pass" if clean else "fail_current"
         return enriched
@@ -13816,6 +13920,19 @@ class StoryboardService:
                     "reviewed_batch_count": int(
                         semantic_submission.get("reviewed_batch_count", -1)
                     ),
+                    "reviewed_adjacent_pair_count": int(
+                        semantic_submission.get(
+                            "reviewed_adjacent_pair_count", -1
+                        )
+                    ),
+                    "adjacent_pair_order_sha256": str(
+                        semantic_submission.get(
+                            "adjacent_pair_order_sha256", ""
+                        )
+                    ),
+                    "adjacent_continuity": copy.deepcopy(
+                        evidence_matrix.get("adjacent_continuity")
+                    ),
                     "semantic_conclusion": copy.deepcopy(
                         semantic_submission.get("conclusion")
                     ),
@@ -15661,6 +15778,12 @@ class StoryboardService:
             "reviewed_batch_count": certificate.get(
                 "reviewed_batch_count"
             ),
+            "reviewed_adjacent_pair_count": certificate.get(
+                "reviewed_adjacent_pair_count"
+            ),
+            "adjacent_pair_order_sha256": certificate.get(
+                "adjacent_pair_order_sha256"
+            ),
             "semantic_audit_sha256": certificate.get(
                 "semantic_audit_sha256"
             ),
@@ -15899,6 +16022,19 @@ class StoryboardService:
             ),
             "reviewed_batch_count": int(
                 semantic_submission.get("reviewed_batch_count", -1)
+            ),
+            "reviewed_adjacent_pair_count": int(
+                semantic_submission.get(
+                    "reviewed_adjacent_pair_count", -1
+                )
+            ),
+            "adjacent_pair_order_sha256": str(
+                semantic_submission.get(
+                    "adjacent_pair_order_sha256", ""
+                )
+            ),
+            "adjacent_continuity": evidence_matrix.get(
+                "adjacent_continuity"
             ),
             "source_ingestion_mode": (
                 "chapter_to_storyboard"
@@ -23607,6 +23743,12 @@ class StoryboardService:
             "canonical_sha256": canonical_hash,
             "reviewed_shot_count": certificate.get("reviewed_shot_count"),
             "reviewed_batch_count": certificate.get("reviewed_batch_count"),
+            "reviewed_adjacent_pair_count": certificate.get(
+                "reviewed_adjacent_pair_count"
+            ),
+            "adjacent_pair_order_sha256": certificate.get(
+                "adjacent_pair_order_sha256"
+            ),
             "semantic_audit_sha256": certificate.get("semantic_audit_sha256"),
             "production_trace_id": production_trace_id,
             "original_production_trace_id": original_production_trace_id,

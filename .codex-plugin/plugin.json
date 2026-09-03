@@ -1,7 +1,7 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.16",
-  "description": "Chinese short-drama production with window-neutral orchestration, controlled storyboard-handoff recovery, project-state migration, scene/full draft preflight, first-draft quality gates, independent audit, and conditional repair.",
+  "version": "0.5.17",
+  "description": "Chinese short-drama production with timed eye-performance gates, provable N-1 adjacent-shot continuity, independent audit, and controlled repair.",
   "author": {
     "name": "Storyboard Project Agent"
   },
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.16把完整项目内容保存于ChatGPT Library，只在服务器临时目录按签名指针与快照/目录树双哈希挂载；持久卷仅保留规则、重启稳定密钥和最小指针元数据。继续允许同一认证用户在任意窗口直接生产、独立审计或修正，同时由服务端隔离各工单authority；公共工具仍精确为19个。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.17新增可执行眼球换焦、眼睑变化、眨眼/有理由不眨眼与静态关键帧眼态门禁，并对每个canonical强制生成、校验和独立复核精确N-1个有序相邻镜头对；少一对、重复、逆序、哈希漂移或覆盖率不足100%均拒绝签发。完整项目内容继续保存于ChatGPT Library，公共工具仍精确为19个。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [

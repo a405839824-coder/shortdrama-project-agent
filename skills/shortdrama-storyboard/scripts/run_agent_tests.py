@@ -1500,6 +1500,32 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
     inconsistent = copy.deepcopy(certificate)
     inconsistent["semantic_conclusion"]["status"] = "fail_current"
     assert_true(list(validator.iter_errors(inconsistent)), "PASS conclusion must be pass")
+    current = copy.deepcopy(certificate)
+    current["semantic_audit_contract"] = "semantic-audit-v3-adjacent-continuity"
+    current["reviewed_adjacent_pair_count"] = 0
+    current["adjacent_pair_order_sha256"] = digest("empty ordered pair list")
+    current["quality_thresholds"]["adjacent_pair_coverage_percent"] = 100
+    current["adjacent_continuity"] = {
+        "contract": "adjacent-pair-continuity-v1",
+        "expected_pair_count": 0,
+        "reviewed_pair_count": 0,
+        "coverage_percent": 100,
+        "ordered_pair_sha256": digest("empty ordered pair list"),
+        "pair_ids": [],
+        "production_proof_verified": True,
+        "production_failed_pair_count": 0,
+        "spatial_layer_status": "pass",
+    }
+    assert_true(
+        list(validator.iter_errors(current)) == [],
+        "valid v3 PASS certificate must carry the complete adjacent-pair proof",
+    )
+    missing_adjacent = copy.deepcopy(current)
+    missing_adjacent.pop("adjacent_continuity")
+    assert_true(
+        list(validator.iter_errors(missing_adjacent)),
+        "v3 certificate without adjacent proof must fail schema validation",
+    )
 
 
 def test_migrated_legacy_block_has_independent_fail_repair_pass_path() -> None:

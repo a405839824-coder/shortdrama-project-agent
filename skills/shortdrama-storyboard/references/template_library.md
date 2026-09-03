@@ -222,7 +222,7 @@
 ## TPL-R10-28 Final Release Checklist模板
 
 - 触发条件：最终发布
-- 字段顺序：Source Lock｜Beat/Ledger｜27字段模板｜可见性｜画面内容中的对白/表演/发声｜运镜｜四项光线｜单镜母版执行完整性｜THG-01–12｜十列投影与反向解析｜独立审计证书｜统计｜人工签核
+- 字段顺序：Source Lock｜Beat/Ledger｜27字段模板｜可见性｜画面内容中的对白/表演/发声/眼部链｜运镜｜四项光线｜单镜母版执行完整性｜THG-01–14｜N-1相邻镜头逐组证明｜十列投影与反向解析｜独立审计证书｜统计｜人工签核
 - 必填规则：字段必须出现；每条负向样本必须fail并命中目标错误码，对应修复样本必须pass；多行XLSX样本必须执行真实导出与反向解析。
 - 失败标准：任一硬门未过即blocked
 - 输出状态：pass / warning / fail_current / unable_to_check
@@ -323,20 +323,20 @@
 - 失败标准：关键事件/对白映射不足100%、说话人错误、认知或情感提前即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
-## TPL-R10-41 场景状态首尾闭合模板
+## TPL-R10-41 全部相邻镜头逐组连续性证明模板
 
-- 触发条件：同场景存在两个及以上连续镜头
-- 字段顺序：scene_id｜shot_id｜start_state｜end_state｜人物位置｜身体朝向｜视线落点｜prop_id｜holder_start｜holder_end｜prop_state_start｜prop_state_end｜门窗状态｜action_progress_start｜action_progress_end｜光源方向｜transition_explanation
-- 必填规则：七项状态向量均不得留空；上一镜end_state必须等于下一镜start_state；起始动作进度不得已是本镜结果；同一时点每个prop_id只有一个主要持有人，交接须写清起止。
-- 失败标准：瞬移、朝向跳变、起始状态预写本镜结果、道具双持/跳手、门窗变化、动作断裂或光源跳变且无画面交代即fail。
+- 触发条件：所有正式分镜；N个镜头强制生成N-1个canonical顺序相邻组，N=1时生成空pair数组及其确定性哈希
+- 字段顺序：contract｜expected_pair_count｜reviewed_pair_count｜coverage_percent｜ordered_pair_sha256｜pairs[pair_id｜left_shot_id｜right_shot_id｜boundary_type｜left_end_state_sha256｜right_start_state_sha256｜reviewed_fields｜continuity_status｜transition_explanation]
+- 必填规则：`contract=adjacent-pair-continuity-v1`，pair数量恰为N-1且与成片顺序逐项相等；每对检查人物位置、身体朝向、视线落点、手持道具、门窗状态、动作进度、光源方向。同场必须闭合或有可见变化说明；跨场/跨集必须明确切换；同一时点每个prop_id只有一个主要持有人。独立审计空间层再按同序提交完整`pair:left->right`集合、N-1计数和有序pair SHA-256。
+- 失败标准：缺组、重复、逆序、非相邻、覆盖率<100%、状态/道具跳变、跨场跨集无说明、左右状态哈希或有序pair哈希漂移即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
 ## TPL-R10-42 镜头颗粒度与演员表演链模板
 
 - 触发条件：正式拆镜、台词镜和重要情绪镜
 - 字段顺序：shot_id｜core_function｜viewpoint_count｜camera_position｜main_action_stage｜detail_shot_function｜transition_function｜stimulus｜listen_or_observe_reaction｜gaze_path｜micro_expression｜ecological_action｜body_or_breath｜end_state
-- 必填规则：单镜一个核心阶段、一个视角、一个主机位；具名/主要可见人物最多3人，公共场景背景普通人物不计入主要角色数；带台词/重要情绪镜七项表演链完整且符合可见性。
-- 失败标准：多视角、隐形切镜、站桩对白、只动嘴、动作只写结果即fail；无功能特写warning。
+- 必填规则：单镜一个核心阶段、一个视角、一个主机位；具名/主要可见人物最多3人，公共场景背景普通人物不计入主要角色数；带台词/重要情绪镜七项表演链完整且符合可见性。面部清楚且>=2秒时另含视线起点、眼球换焦、眼球先动/头部跟随、眼睑变化、具体眨眼或有理由不眨、镜尾视线；重音不眨，多人错峰，静帧避开半眨眼。
+- 失败标准：多视角、隐形切镜、站桩对白、只动嘴、动作只写结果、僵直凝视、机械/同步眨眼或眼部链缺项即fail；无功能特写warning。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
 ## TPL-R10-43 compact唯一单镜执行母版模板
@@ -344,8 +344,8 @@
 - 触发条件：生成或导出任何正式镜头
 - 原子字段顺序：镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句
 - 对外执行列名：`正式分镜母版`
-- 必填规则：每格首行为`镜头序号：EP##-###（x.xs；累计x.xs）`，之后严格按`strict_prompt_contract.md`空行分段并可脱离历史上下文执行；`生成限制`和正式母版都写`9:16竖屏`；动作/表情/精确对白/发声细节/听者错峰反应/恰好3段时间描写只在`画面内容`写一次；`音色`独立；四项光线必填且色温不含Kelvin/K；单镜一主机位/主运镜/核心阶段；负面音乐限制统一写`禁止额外配乐`，不得出现`BGM`字面量。导出前THG-01–12全部通过。
-- 失败标准：第五列表头恢复“·字段合并”，出现跨镜代指、转场重复、GPT动态词、缺失干净`9:16竖屏`、两条冗长旧9:16短语、`BGM`、时间段非三段闭合、旧独立字段/批次回写、四项光线缺失/歧义、投影/XLSX反向解析不一致、生产阶段预填审计PASS/0问题，或后台预生成Seedance即fail。
+- 必填规则：每格首行为`镜头序号：EP##-###（x.xs；累计x.xs）`，之后严格按`strict_prompt_contract.md`空行分段并可脱离历史上下文执行；`生成限制`和正式母版都写`9:16竖屏`；动作/表情/眼部链/精确对白/发声细节/听者错峰反应/恰好3段时间描写只在`画面内容`写一次；`音色`独立；四项光线必填且色温不含Kelvin/K；单镜一主机位/主运镜/核心阶段；负面音乐限制统一写`禁止额外配乐`，不得出现`BGM`字面量。导出前THG-01–14及N-1相邻组证明全部通过。
+- 失败标准：第五列表头恢复“·字段合并”，出现跨镜代指、转场重复、GPT动态词、缺失干净`9:16竖屏`、两条冗长旧9:16短语、`BGM`、时间段非三段闭合、眼神/眨眼/静帧门禁失败、相邻组证明不全、旧独立字段/批次回写、四项光线缺失/歧义、投影/XLSX反向解析不一致、生产阶段预填审计PASS/0问题，或后台预生成Seedance即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
 ## TPL-R10-44 修正影响与系统升级模板

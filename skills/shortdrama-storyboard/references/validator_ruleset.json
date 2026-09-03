@@ -98,12 +98,12 @@
   {
     "validator_rule_id": "V-R10-009",
     "module": "EXPRESSION",
-    "handler": "check_blink_frequency",
+    "handler": "check_eye_gaze_eyelid_blink_and_static_keyframe_contract",
     "severity": "fail",
     "error_code": "E-EXPRESSION-003",
-    "applies_when": "相关字段/模式触发",
-    "pass_condition": "handler执行且未产生对应错误码",
-    "repair_action": "按R10自然眨眼规则重写",
+    "applies_when": "THG-13：人物面部清楚可见且镜头时长>=2秒，或画面内容出现眼神/眨眼指令",
+    "pass_condition": "时间轴含视线起点、眼球换焦、眼球先动/头部跟随关系、眼睑变化、具体眨眼或有理由不眨、镜尾视线；对白重音期不眨，多人错峰；生成限制和静态关键帧状态完整",
+    "repair_action": "按完整眼部行为链重写画面时间轴、起始静帧和生成禁项",
     "implementation": "scripts/validate_storyboard.py",
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -350,12 +350,12 @@
   {
     "validator_rule_id": "V-R10-PG1-030",
     "module": "CONTINUITY",
-    "handler": "check_scene_state_handoff",
+    "handler": "check_all_adjacent_pair_continuity_proof",
     "severity": "fail",
     "error_code": "E-CONTINUITY-001",
-    "applies_when": "THG-08与THG-09：同场景存在相邻镜头、起始状态或道具交接",
-    "pass_condition": "起始状态未预写本镜结果；上一镜end_state等于下一镜start_state或有可见交代；同一时点每个prop_id只有一个主要持有人且交接起止状态闭合",
-    "repair_action": "回退起始状态中的本镜结果，统一七项状态向量并重建道具持有人/交接过程",
+    "applies_when": "THG-08、THG-09与THG-14：任一正式分镜；镜头数N产生恰好N-1个有序相邻组，含同场、跨场和跨集边界",
+    "pass_condition": "起始状态未预写结果；全部N-1对按canonical顺序唯一覆盖，逐对绑定左end/right start七项向量、边界类型、说明和双方状态SHA-256；同场闭合，跨场/跨集有明确说明；有序pair集合SHA-256一致",
+    "repair_action": "按成片顺序重建全覆盖相邻组证明，闭合七项状态和道具交接，解释跨场跨集切换并重算哈希",
     "implementation": "scripts/validate_storyboard.py",
     "version": "V16.3-148-R10-StableRuntime"
   },

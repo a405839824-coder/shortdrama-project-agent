@@ -91,6 +91,16 @@ EVIDENCE_BLOCKS = {
     "performance_chains",
     "scene_state_ledger",
 }
+DERIVED_GLOBAL_EVIDENCE_BLOCKS = {"adjacent_continuity_audit"}
+STATE_VECTOR_FIELDS = [
+    "人物位置",
+    "身体朝向",
+    "视线落点",
+    "手持道具",
+    "门窗状态",
+    "动作进度",
+    "光源方向",
+]
 EVIDENCE_BINDING_FIELDS = {
     "shot_uid",
     "shot_semantic_sha256",
@@ -113,6 +123,9 @@ ATTRIBUTED_QUOTE_RE = re.compile(
     r"(?:平静地|克制地|轻声|低声|高声|冷声|沉声|缓缓|忽然|随即|再)?"
     r"(?:说|问|答|喊|道|开口|回应|解释|致歉)\s*[：:]?\s*"
     r"(?P<quote>“[^”\n]+”|‘[^’\n]+’|「[^」\n]+」|『[^』\n]+』|\"[^\"\n]+\")"
+)
+BOUNDARY_EXPLANATION_RE = re.compile(
+    r"切|转入|转到|换场|场景|地点|时空|翌日|次日|稍后|片刻|另一|新空间|跨集|集间"
 )
 
 
@@ -194,6 +207,77 @@ def _evidence_content_hash(row: dict[str, Any]) -> str:
     return stable_json_hash(
         {key: value for key, value in row.items() if key not in EVIDENCE_BINDING_FIELDS}
     )
+
+
+def _build_adjacent_continuity_audit(
+    shots: list[dict[str, Any]],
+    scene_state_rows: Any,
+) -> dict[str, Any]:
+    """Deterministically rebuild the complete N-1 continuity proof.
+
+    Delta cannot change shot identity, order, episode, scene, or source meaning.
+    It may change execution state, so the server refreshes hashes and pair
+    bindings from the caller-supplied scene-state rows instead of retaining a
+    stale global proof or asking the model to restate unchanged topology.
+    """
+
+    by_shot = _evidence_index(scene_state_rows, block="scene_state_ledger")
+    pairs: list[dict[str, Any]] = []
+    for ordinal in range(max(len(shots) - 1, 0)):
+        left = shots[ordinal]
+        right = shots[ordinal + 1]
+        left_id = _shot_id(left)
+        right_id = _shot_id(right)
+        left_row = by_shot[left_id]
+        right_row = by_shot[right_id]
+        left_scene = str(left_row.get("scene_id", left.get("场景连续性ID", "")))
+        right_scene = str(right_row.get("scene_id", right.get("场景连续性ID", "")))
+        left_episode = _stable_episode_id({}, left)
+        right_episode = _stable_episode_id({}, right)
+        boundary_type = (
+            "episode_cut"
+            if left_episode != right_episode
+            else "scene_cut"
+            if left_scene != right_scene
+            else "same_scene"
+        )
+        left_end = left_row.get("end_state", {})
+        right_start = right_row.get("start_state", {})
+        transition_explanation = right_row.get("transition_explanation")
+        if boundary_type == "same_scene":
+            continuity_status = (
+                "closed" if left_end == right_start else "fail_current"
+            )
+        else:
+            continuity_status = (
+                "explained_transition"
+                if BOUNDARY_EXPLANATION_RE.search(
+                    str(transition_explanation or "")
+                )
+                else "fail_current"
+            )
+        pairs.append(
+            {
+                "pair_id": f"{left_id}->{right_id}",
+                "left_shot_id": left_id,
+                "right_shot_id": right_id,
+                "boundary_type": boundary_type,
+                "left_end_state_sha256": stable_json_hash(left_end),
+                "right_start_state_sha256": stable_json_hash(right_start),
+                "reviewed_fields": list(STATE_VECTOR_FIELDS),
+                "continuity_status": continuity_status,
+                "transition_explanation": transition_explanation,
+            }
+        )
+    pair_ids = [row["pair_id"] for row in pairs]
+    return {
+        "contract": "adjacent-pair-continuity-v1",
+        "expected_pair_count": len(pairs),
+        "reviewed_pair_count": len(pairs),
+        "coverage_percent": 100,
+        "ordered_pair_sha256": stable_json_hash(pair_ids),
+        "pairs": pairs,
+    }
 
 
 def _stable_episode_id(storyboard: dict[str, Any], shot: dict[str, Any]) -> str:
@@ -298,7 +382,7 @@ def _apply_evidence_updates(
     untouched_hashes_before = {
         key: stable_json_hash(value)
         for key, value in base_evidence.items()
-        if key not in EVIDENCE_BLOCKS
+        if key not in EVIDENCE_BLOCKS | DERIVED_GLOBAL_EVIDENCE_BLOCKS
     }
     updated_counts: dict[str, int] = {}
     for block in sorted(EVIDENCE_BLOCKS):
@@ -351,16 +435,26 @@ def _apply_evidence_updates(
         merged_evidence[block] = updated_rows
         updated_counts[block] = len(supplied_index)
 
+    merged_evidence["adjacent_continuity_audit"] = (
+        _build_adjacent_continuity_audit(
+            merged.get("shots", []),
+            merged_evidence.get("scene_state_ledger"),
+        )
+    )
+
     untouched_hashes_after = {
         key: stable_json_hash(value)
         for key, value in merged_evidence.items()
-        if key not in EVIDENCE_BLOCKS
+        if key not in EVIDENCE_BLOCKS | DERIVED_GLOBAL_EVIDENCE_BLOCKS
     }
     if untouched_hashes_before != untouched_hashes_after:
         raise RuntimeError("delta_evidence_global_changed: immutable evidence blocks changed")
     return {
         "updated_evidence_counts": updated_counts,
         "global_evidence_hashes_verified": True,
+        "adjacent_continuity_audit_sha256": stable_json_hash(
+            merged_evidence["adjacent_continuity_audit"]
+        ),
     }
 
 

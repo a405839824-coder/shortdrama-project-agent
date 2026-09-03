@@ -52,10 +52,10 @@ def strict_fixture() -> dict[str, Any]:
         "镜头类型": "三人中近景，腰部以上",
         "可见主体": "江氏、邹氏、许氏",
         "空间站位描述": "香雅院正厅为同一清晨的私宅礼仪空间；邹氏坐画面中右主位，江氏坐左侧下首椅，许氏坐右侧后位；闭合厅门、木格窗和三席位置关系清楚，仅出现三名有源人物。",
-        "起始状态": "江氏坐左侧下首椅，头部侧向邹氏，目光停在邹氏面部，双手自然叠放膝上；邹氏坐中右主位，肩背挺直；许氏坐右侧后位，视线落在江氏身上；厅门闭合。",
+        "起始状态": "江氏坐左侧下首椅，头部侧向邹氏，目光停在膝上袖口，双手自然叠放膝上；邹氏坐中右主位，肩背挺直；许氏坐右侧后位，视线落在江氏身上；三人双眼自然睁开，不处于半眨眼瞬间；厅门闭合。",
         "机位": "正厅门内侧平视50mm，f/3.2，三席同框，焦点优先落在江氏。",
         "运镜方式": "固定镜头，轻微呼吸感，不推不拉；以江氏收回视线并开口为本镜唯一核心动作。",
-        "画面内容": "【0.0—0.8秒】邹氏眼睫轻抬；江氏目光稳稳落向邹氏，许氏晚约0.5秒偏头，三人反应错开。【0.8—3.3秒】江氏保持坐姿，嘴角浮起礼貌浅笑，轻吸气后看着邹氏；江氏说道：“大嫂，没来晚吧？”逗号处短停，“没来晚”轻微加重，问句尾音克制上扬；口型与对白一致，自然眨眼1次，不看镜头。【3.3—4.0秒】江氏保持浅笑观察邹氏；邹氏只回看她，肩背仍稳；许氏不抢反应，镜尾三人位置和视线清楚。",
+        "画面内容": "【0.0—0.8秒】江氏眼球先作轻微焦点调整，并从膝上袖口移向邹氏，头部随后轻微跟转；视线落稳前自然短眨一次，重新睁眼后上眼睑略压；许氏晚约0.5秒偏头，三人反应错开。【0.8—3.3秒】江氏保持坐姿，嘴角浮起礼貌浅笑，轻吸气后看着邹氏；江氏说道：“大嫂，没来晚吧？”逗号处短停，“没来晚”轻微加重，问句尾音克制上扬；“没来晚”重音期间不眨眼，口型与对白一致，不看镜头。【3.3—4.0秒】邹氏听完后晚半拍自然轻眨一次，再回看江氏，眼睑恢复正常松紧；许氏不抢反应，三人眨眼错开、不同时闭眼；镜尾江氏视线落在邹氏面部，三人位置清楚。",
         "音色": "江氏——温和亲近、暗含试探，声线平稳，音量适中。",
         "心理音轨": "无。",
         "环境音效": "江氏对白最清晰；近处衣料、呼吸与木椅细响，远处回廊脚步持续接近；开口时环境底声自然避让，不生成额外配乐。",
@@ -64,7 +64,7 @@ def strict_fixture() -> dict[str, Any]:
         "光源来源": "右侧闭合木格窗透入的自然晨光，辅以左前浅色墙面的弱反射光。",
         "光源方向": "主光由画面右上向左下斜落，左前反射光弱补面部暗侧，向厅内纵深逐级衰减。",
         "色温倾向": "中性微暖晨光；木色与紫褐、绛红衣料保持低饱和本色。",
-        "生成限制": "9:16竖屏；单镜单一主机位、单一核心动作阶段；禁止字幕、水印、现代物件、人物看镜头、同步转头、复制脸、上下黑边、无来源光、重HDR、塑料皮肤与海报摆拍；禁止额外配乐。",
+        "生成限制": "9:16竖屏；单镜单一主机位、单一核心动作阶段；人物眼神自然聚焦，保留轻微眼球焦点调整和眼睑松紧变化；禁止无依据全程不眨眼；禁止僵直瞪视；禁止高频机械眨眼；禁止多人同步眨眼；禁止字幕、水印、现代物件、人物看镜头、同步转头、复制脸、上下黑边、无来源光、重HDR、塑料皮肤与海报摆拍；禁止额外配乐。",
         "转场类型": "视线与对白落点切。",
         "切镜/转场提示词": "江氏问句落下后继续侧向邹氏，邹氏目光停在她脸上，院外脚步仍在接近；动作与呼吸稳定后切入江氏近景。",
         "参考图锚定": "江氏、邹氏、许氏定妆照锁脸与服装；香雅院正厅场景图锁三席和门窗关系。",
@@ -89,8 +89,12 @@ def _codes(obj: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
 
 def _set_start_result_conflict(obj: dict[str, Any]) -> None:
     shot = obj["shots"][0]
-    shot["起始状态"] = "江氏已接过礼匣并双手持稳，邹氏仍坐主位。"
-    shot["画面内容"] = shot["画面内容"].replace("邹氏眼睫轻抬", "江氏接过礼匣，邹氏眼睫轻抬", 1)
+    shot["起始状态"] = "江氏已接过礼匣并双手持稳，邹氏仍坐主位；三人双眼自然睁开，不处于半眨眼瞬间。"
+    shot["画面内容"] = shot["画面内容"].replace(
+        "【0.0—0.8秒】",
+        "【0.0—0.8秒】江氏接过礼匣；",
+        1,
+    )
 
 
 def _set_prop_dual_holder(obj: dict[str, Any]) -> None:
@@ -271,6 +275,25 @@ def main() -> int:
         "THG-11",
     )
     run_code_test(
+        "SPC-THG13-EYE-PERFORMANCE-CONTRACT",
+        lambda obj: obj["shots"][0].__setitem__(
+            "画面内容",
+            "【0.0—0.8秒】江氏目光锁住邹氏并保持凝视。"
+            "【0.8—3.3秒】江氏说道：\u201c大嫂，没来晚吧？\u201d"
+            "【3.3—4.0秒】镜尾江氏仍看着邹氏。",
+        ),
+        "E-EXPRESSION-003",
+        "THG-13",
+    )
+    run_code_test(
+        "SPC-THG14-ADJACENT-PAIR-PROOF",
+        lambda obj: obj["prevention_evidence"].pop(
+            "adjacent_continuity_audit", None
+        ),
+        "E-CONTINUITY-001",
+        "THG-14",
+    )
+    run_code_test(
         "SPC-BGM-LITERAL-IN-EXECUTION-FIELD",
         lambda obj: obj["shots"][0].__setitem__("生成限制", "9:16竖屏；禁止BGM、字幕与水印。"),
         "E-AUDIO-STAGE-001",
@@ -313,9 +336,9 @@ def main() -> int:
     )
     production_audit = audit_types.get("production_preflight", {})
     independent_audit = audit_types.get("independent_audit", {})
-    thg12_passed = (
+    thg14_passed = (
         [row.get("gate_id") for row in hard_gates]
-        == [f"THG-{index:02d}" for index in range(1, 13)]
+        == [f"THG-{index:02d}" for index in range(1, 15)]
         and runtime_rules.get("compact_master_contract", {}).get(
             "projection_text_normalization"
         ) == "UTF-8_NFC_LF"
@@ -326,8 +349,8 @@ def main() -> int:
         and independent_audit.get("must_recompute_all_quality_conclusions") is True
     )
     results.append({
-        "test_id": "SPC-THG12-AUDIT-AUTHORITY-AND-RULE-CERTIFICATE",
-        "passed": thg12_passed,
+        "test_id": "SPC-THG01-14-AUDIT-AUTHORITY-AND-RULE-CERTIFICATE",
+        "passed": thg14_passed,
         "hard_gate_ids": [row.get("gate_id") for row in hard_gates],
         "projection_text_normalization": runtime_rules.get(
             "compact_master_contract", {}
