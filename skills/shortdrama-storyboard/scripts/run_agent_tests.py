@@ -1520,6 +1520,29 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
         list(validator.iter_errors(current)) == [],
         "valid v3 PASS certificate must carry the complete adjacent-pair proof",
     )
+    current_v4 = copy.deepcopy(current)
+    current_v4["semantic_audit_contract"] = (
+        "semantic-audit-v4-adjacent-continuity-structured-voice"
+    )
+    current_v4["voice_field_coverage"] = {
+        "contract": "fixed-voice-template-v1",
+        "expected_dialogue_shot_count": 0,
+        "reviewed_voice_field_count": 0,
+        "coverage_percent": 100,
+        "evidence_ids": [],
+        "audio_layer_status": "pass",
+        "machine_voice_issue_count": 0,
+    }
+    assert_true(
+        list(validator.iter_errors(current_v4)) == [],
+        "valid v4 PASS certificate must carry the structured-voice proof",
+    )
+    missing_voice_proof = copy.deepcopy(current_v4)
+    missing_voice_proof.pop("voice_field_coverage")
+    assert_true(
+        list(validator.iter_errors(missing_voice_proof)),
+        "v4 certificate without voice-field proof must fail schema validation",
+    )
     missing_adjacent = copy.deepcopy(current)
     missing_adjacent.pop("adjacent_continuity")
     assert_true(

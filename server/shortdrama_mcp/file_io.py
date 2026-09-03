@@ -496,6 +496,10 @@ def _parse_labeled_cell(value: Any) -> dict[str, str]:
         "色温",
     }
     current_label: str | None = None
+    voice_nested_labels = {
+        "基础声线", "言语行为", "当前表达", "发声方式", "音量", "语速与节奏",
+        "呼吸", "停顿", "重音", "尾音", "禁止语气",
+    }
     # Legacy formal cells used both newlines and full-/half-width pipes as
     # structural separators. Unlabelled fragments remain continuations of the
     # preceding field (for example movement modifiers and picture time stages).
@@ -509,6 +513,14 @@ def _parse_labeled_cell(value: Any) -> dict[str, str]:
         if labeled:
             candidate = labeled.group(1).strip()
             text = labeled.group(2)
+        if (
+            current_label == "音色"
+            and candidate in voice_nested_labels
+            and (candidate != "发声方式" or not text.strip())
+        ):
+            prior = parsed.get("音色", "")
+            parsed["音色"] = f"{prior}\n{line}".strip()
+            continue
         if candidate in accepted:
             current_label = candidate
             if text.strip():

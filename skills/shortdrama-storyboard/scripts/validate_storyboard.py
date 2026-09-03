@@ -42,6 +42,14 @@ DEPRECATED_DISPLAY_LABELS = (
     "发声方式：", "发声方式:", "标点语气：", "标点语气:",
     "心理音轨属性：", "心理音轨属性:", "生成批次：", "生成批次:",
 )
+VOICE_TEMPLATE_LABELS = (
+    "基础声线", "言语行为", "当前表达", "发声方式", "音量", "语速与节奏",
+    "呼吸", "停顿", "重音", "尾音", "禁止语气",
+)
+VOICE_TEMPLATE_LINE_RE = re.compile(
+    r"^(基础声线|言语行为|当前表达|发声方式|音量|语速与节奏|呼吸|停顿|重音|尾音|禁止语气)([：:])(.*)$"
+)
+VOICE_NO_DIALOGUE_RE = re.compile(r"^无对白[，,；;。\s]*(?:本镜)?不适用[。.]?$|^不适用[：:]?\s*无对白[。.]?$")
 DEPRECATED_LABEL_SCAN_FIELDS = {
     "功能类型", "场景连续性ID", "镜头类型", "可见主体", "空间站位描述", "起始状态",
     "机位", "运镜方式", "画面内容", "音色", "心理音轨", "环境音效", "环境动态",
@@ -297,6 +305,29 @@ VOICE_DIMENSION_PATTERNS = {
     "重音位置": re.compile(r"重音|加重|强调|咬重"),
     "尾音变化": re.compile(r"尾音|上扬|下压|发虚|放柔|拉长|落下|收住"),
 }
+VOICE_SPEECH_ACT_RE = re.compile(
+    r"命令|质问|试探|讥讽|安抚|回避|逼问|恳求|警告|敷衍|认错|询问|问候|"
+    r"陈述|解释|回答|反问|请求|劝说|拒绝|威胁|调侃|挑衅|确认|提醒|承诺|道歉|示弱|宣告"
+)
+VOICE_EMOTION_RE = re.compile(
+    r"平静|温和|克制|冷硬|紧张|愤怒|委屈|警惕|讥讽|焦虑|害怕|坚定|迟疑|"
+    r"轻松|亲近|不耐|压迫|恳切|敷衍|歉疚|惊讶|震惊|悲伤|欣慰|急切|疏离|戒备"
+)
+VOICE_INTENT_RE = re.compile(
+    r"意在|试图|暗含|为了|借此|实则|潜在|避免|确认|安抚|回避|掩饰|警告|"
+    r"争取|拖延|试探|逼迫|探问|稳住|压住|说服|拒绝|示弱|隐藏|提醒"
+)
+VOICE_BASE_REQUIREMENTS = {
+    "年龄感": re.compile(r"少年|青年|中年|老年|年长|年轻|成熟|年龄感|年纪|\d+岁|[一二三四五六七八九十]+岁"),
+    "音区": re.compile(r"音区|低音|中低音|中音|中高音|高音|偏低|偏高"),
+    "厚薄": re.compile(r"厚|薄|纤细|饱满|浑厚"),
+    "明暗": re.compile(r"明亮|清亮|低沉|暗沉|黯哑|沙哑|温润|冷冽|明暗"),
+    "长期稳定特征": re.compile(r"长期|稳定|一贯|常态|平时|惯常|固定|持续保持"),
+}
+VOICE_ALLOWED_TAILS = ("上抬", "下压", "截断", "发虚", "落稳", "短收")
+GENERIC_NEUTRAL_VOICE_CLAUSES = (
+    "声音中等清晰", "语速从容", "关键词加重", "尾音随句意收住",
+)
 
 PUBLIC_SCENE_RE = re.compile(
     r"街道|街市|闹市|市集|集市|市场|商街|商业街|长街|巷口|巷道|城门|码头|渡口|"
@@ -424,6 +455,115 @@ def _forbidden_extension_paths(value: Any, location: str = "canonical_extension"
 def is_none_value(value: Any) -> bool:
     text = str(value or "").strip().rstrip("。.;；")
     return not text or text in {"无", "不适用", "N/A", "none", "None"} or text.startswith("不适用：")
+
+
+def _parse_voice_template(value: Any) -> tuple[dict[str, str], list[str], list[str]]:
+    """Parse the fixed nested voice block without treating it as shot fields."""
+
+    parsed: dict[str, str] = {}
+    order: list[str] = []
+    format_errors: list[str] = []
+    current: str | None = None
+    for raw_line in str(value or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = VOICE_TEMPLATE_LINE_RE.match(line)
+        if match:
+            label, colon, body = match.groups()
+            order.append(label)
+            current = label
+            if colon != "：":
+                format_errors.append(f"{label}必须使用全角冒号")
+            if label in parsed:
+                format_errors.append(f"{label}重复")
+            parsed.setdefault(label, body.strip())
+            if label == "发声方式" and body.strip():
+                format_errors.append("发声方式必须是空值分组标题，六项分别换行填写")
+            continue
+        if current is None:
+            format_errors.append(f"固定子模板前出现无标签内容：{line}")
+            continue
+        parsed[current] = f"{parsed.get(current, '')}{line}".strip()
+    return parsed, order, format_errors
+
+
+def _voice_template_errors(value: Any, dialogue: str) -> list[str]:
+    """Return deterministic THG-15 failures for one dialogue shot."""
+
+    text = str(value or "").strip()
+    if not text or VOICE_NO_DIALOGUE_RE.fullmatch(text):
+        return ["带对白镜不得把音色写为空值或‘无对白，不适用’"]
+    parsed, order, errors = _parse_voice_template(text)
+    if order != list(VOICE_TEMPLATE_LABELS):
+        errors.append(
+            "音色子模板必须按固定顺序且各出现一次："
+            + "→".join(VOICE_TEMPLATE_LABELS)
+        )
+    for label in VOICE_TEMPLATE_LABELS:
+        if label == "发声方式":
+            continue
+        if not parsed.get(label, "").strip():
+            errors.append(f"{label}不能为空")
+
+    baseline = parsed.get("基础声线", "")
+    missing_baseline = [
+        name for name, pattern in VOICE_BASE_REQUIREMENTS.items()
+        if not pattern.search(baseline)
+    ]
+    if missing_baseline:
+        errors.append("基础声线缺少：" + "、".join(missing_baseline))
+    if parsed.get("言语行为") and not VOICE_SPEECH_ACT_RE.search(parsed["言语行为"]):
+        errors.append("言语行为未给出可执行的话语动作")
+    current_expression = parsed.get("当前表达", "")
+    if current_expression:
+        if cjk_len(current_expression) > 80:
+            errors.append("当前表达必须是一句短而可执行的话，不得写成长篇心理分析")
+        if not VOICE_EMOTION_RE.search(current_expression):
+            errors.append("当前表达缺少可执行的表层情绪")
+        if not VOICE_INTENT_RE.search(current_expression):
+            errors.append("当前表达缺少必要的潜在意图")
+
+    emphasis = parsed.get("重音", "")
+    quoted = re.findall(r"[‘’“”\"「」『』]([^‘’“”\"「」『』]{1,24})[‘’“”\"「」『』]", emphasis)
+    if emphasis and not quoted:
+        errors.append("重音必须用引号明确标出原文中的字或词")
+    elif quoted and not any(fragment in dialogue for fragment in quoted):
+        errors.append("重音引号中的字词未逐字出现在本镜原文对白中")
+    tail = parsed.get("尾音", "")
+    if tail and not any(value in tail for value in VOICE_ALLOWED_TAILS):
+        errors.append("尾音必须明确选择上抬、下压、截断、发虚、落稳或短收")
+
+    prohibited = parsed.get("禁止语气", "")
+    prohibited_items = [
+        item.strip(" 。.")
+        for item in re.split(r"[、，,；;/／]", prohibited)
+        if item.strip(" 。.")
+    ]
+    if prohibited and not 2 <= len(prohibited_items) <= 4:
+        errors.append("禁止语气必须只列本句最可能出现的2—4种错误表达")
+    generic_count = sum(clause in text for clause in GENERIC_NEUTRAL_VOICE_CLAUSES)
+    if generic_count >= 3:
+        errors.append("个性化音色后不得追加统一中性发声模板")
+    return list(dict.fromkeys(errors))
+
+
+def _deprecated_display_label_hits(field: str, value: Any) -> list[str]:
+    """Allow only the fixed nested 发声方式 heading inside 音色."""
+
+    text = str(value or "")
+    hits: list[str] = []
+    for label in DEPRECATED_DISPLAY_LABELS:
+        if label not in text:
+            continue
+        if (
+            field == "音色"
+            and label in {"发声方式：", "发声方式:"}
+            and re.search(r"(?m)^\s*发声方式\s*[：:]\s*$", text)
+        ):
+            continue
+        hits.append(label)
+    return hits
 
 
 def _issue(
@@ -890,10 +1030,9 @@ def project_formal_master(shot: dict[str, Any]) -> str:
         f"镜头类型：{_projection_text(projected.get('镜头类型'))}｜"
         f"可见主体：{_projection_text(projected.get('可见主体'))}",
     ]
-    paragraphs.extend(
-        f"{field}：{_projection_text(projected.get(field))}"
-        for field in FORMAL_MASTER_FIELD_ORDER
-    )
+    for field in FORMAL_MASTER_FIELD_ORDER:
+        value = _projection_text(projected.get(field))
+        paragraphs.append(f"音色：\n\n{value}" if field == "音色" else f"{field}：{value}")
     formal = "\n\n".join(paragraphs)
     _assert_projected_aspect_contract(formal, projection="formal_master")
     if BGM_TOKEN_RE.search(formal):
@@ -2325,8 +2464,7 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         deprecated_label_hits = sorted({
             f"{field}:{label}"
             for field in DEPRECATED_LABEL_SCAN_FIELDS
-            for label in DEPRECATED_DISPLAY_LABELS
-            if label in str(raw.get(field, ""))
+            for label in _deprecated_display_label_hits(field, raw.get(field, ""))
         })
         if deprecated_label_hits:
             issues.append(_issue(
@@ -2698,15 +2836,43 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         dialogue = "".join(line for _, line in dialogue_rows)
         if dialogue_rows:
             if is_none_value(shot.get("音色")):
-                issues.append(_issue(catalog, "E-VOICE-001", f"{location}.音色", "带对白镜必须保留独立音色字段。"))
-            delivery = f"{image_content} {shot.get('音色', '')}"
-            dimensions = [name for name, pattern in VOICE_DIMENSION_PATTERNS.items() if pattern.search(delivery)]
-            if strict_contract and len(dimensions) < 6:
-                issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容/音色", f"R10-SPC-1对白发声只覆盖 {len(dimensions)}/6 项：{dimensions}"))
-            elif core_emotion and len(dimensions) < 6:
-                issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容", f"核心情绪对白的发声说明只覆盖 {len(dimensions)}/6 项：{dimensions}"))
-            elif len(dimensions) < 4:
-                issues.append(_issue(catalog, "E-VOICE-002", f"{location}.画面内容", f"普通对白的发声说明只覆盖 {len(dimensions)}/6 项：{dimensions}", severity="warning"))
+                issues.append(_issue(
+                    catalog,
+                    "E-VOICE-001",
+                    f"{location}.音色",
+                    "带对白镜必须填写固定结构音色子模板。",
+                    template_gate_id="THG-15",
+                ))
+            elif strict_contract:
+                voice_errors = _voice_template_errors(shot.get("音色"), dialogue)
+                if voice_errors:
+                    issues.append(_issue(
+                        catalog,
+                        "E-VOICE-001",
+                        f"{location}.音色",
+                        "；".join(voice_errors),
+                        template_gate_id="THG-15",
+                    ))
+                picture_voice_labels = [
+                    label for label in VOICE_TEMPLATE_LABELS
+                    if re.search(rf"(?m)^\s*{re.escape(label)}\s*[：:]", image_content)
+                ]
+                if picture_voice_labels:
+                    issues.append(_issue(
+                        catalog,
+                        "E-VOICE-001",
+                        f"{location}.画面内容",
+                        "固定音色子标签不得散落或复制进画面内容："
+                        + "、".join(picture_voice_labels),
+                        template_gate_id="THG-15",
+                    ))
+            else:
+                delivery = f"{image_content} {shot.get('音色', '')}"
+                dimensions = [name for name, pattern in VOICE_DIMENSION_PATTERNS.items() if pattern.search(delivery)]
+                if core_emotion and len(dimensions) < 6:
+                    issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容/音色", f"核心情绪对白的发声说明只覆盖 {len(dimensions)}/6 项：{dimensions}"))
+                elif len(dimensions) < 4:
+                    issues.append(_issue(catalog, "E-VOICE-002", f"{location}.画面内容/音色", f"普通对白的发声说明只覆盖 {len(dimensions)}/6 项：{dimensions}", severity="warning"))
             if re.search(r"标点(?:语气|效果|按[^：:]{0,30}表现)[：:]\s*(?:无|不适用)", image_content):
                 issues.append(_issue(catalog, "E-PUNCT-001", f"{location}.画面内容", "带对白镜在画面内容中明确取消了标点语气。"))
             missing_punct = _validate_punctuation(dialogue, image_content)
@@ -2723,6 +2889,14 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                 visible_people = [part for part in re.split(r"[、，,；;]", visible) if part.strip()]
                 if len(visible_people) > 1 and not re.search(r"错开|晚约|随后|不抢反应|先.{0,20}再|依次|晚半拍|延迟", image_content):
                     issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "多人对白镜未写听者错峰反应。"))
+        elif strict_contract and not VOICE_NO_DIALOGUE_RE.fullmatch(str(shot.get("音色") or "").strip()):
+            issues.append(_issue(
+                catalog,
+                "E-VOICE-001",
+                f"{location}.音色",
+                "无对白镜的音色必须明确写“无对白，不适用。”，不得伪造发声规格。",
+                template_gate_id="THG-15",
+            ))
 
         if strict_contract:
             action_seconds, action_units = _action_capacity_seconds(image_content)

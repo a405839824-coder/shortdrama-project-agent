@@ -182,12 +182,12 @@
   {
     "validator_rule_id": "V-R10-016",
     "module": "VOICE",
-    "handler": "check_voice_dimensions_in_picture_content",
+    "handler": "check_fixed_voice_template_in_tone_field",
     "severity": "fail",
     "error_code": "E-VOICE-001",
-    "applies_when": "相关字段/模式触发",
-    "pass_condition": "handler执行且未产生对应错误码",
-    "repair_action": "保留独立音色，并在画面内容补声音、语速、呼吸、停顿、重音、尾音",
+    "applies_when": "THG-15：任一R10-SPC-1正式镜头；对白镜使用固定音色子模板，无对白镜使用固定不适用值",
+    "pass_condition": "音色子标签顺序/唯一性/非空值、基础声线五项、言语行为、当前表达、六项发声方式、原文重音、尾音方向、2—4项禁止语气及反向解析全部通过；画面内容无复制的固定音色子标签",
+    "repair_action": "只在音色字段按fixed-voice-template-v1补齐；画面内容只保留对白时点、口型和可见表演，不恢复顶层发声方式字段",
     "implementation": "scripts/validate_storyboard.py",
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -235,7 +235,7 @@
     "error_code": "E-DEPRECATED-FIELD-001",
     "applies_when": "R10.1镜头存在退休字段、旧【角色】对白标签或两条冗长旧9:16固定短语",
     "pass_condition": "镜头只包含27个紧凑语义字段，使用角色说道：“对白”，干净的9:16竖屏保留且两条冗长旧短语零命中",
-    "repair_action": "把动作、表演、对白、发声和标点并入画面内容，把运镜主体/功能并入运镜方式；删除退休字段、旧标签及9:16竖屏真人古装短剧截图质感/9:16竖屏真人古装短剧单帧两条冗长短语，保留9:16竖屏",
+    "repair_action": "把动作、表演和对白并入画面内容，把旧发声参数保留到音色并标记待按固定子模板修订，把标点时点保留在画面内容；把运镜主体/功能并入运镜方式，删除退休顶层字段、旧标签及两条冗长旧9:16短语，保留9:16竖屏",
     "implementation": "scripts/validate_storyboard.py",
     "version": "V16.3-148-R10-StableRuntime"
   },

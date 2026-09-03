@@ -238,7 +238,11 @@ class SemanticAuditConclusionInput(BaseModel):
 
 
 class SemanticAuditInput(BaseModel):
-    """Independent semantic review required on an uncached audit path."""
+    """Independent semantic review required on an uncached audit path.
+
+    Service-level v4 validation additionally requires ordered pair evidence in
+    空间连续 and every dialogue shot's ``field:shot_id.音色`` in 禁项与声音.
+    """
 
     model_config = ConfigDict(extra="forbid")
 

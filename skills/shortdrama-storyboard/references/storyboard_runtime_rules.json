@@ -60,13 +60,27 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.17",
+    "plugin_version": "0.5.18",
     "output_contract": "R10-SPC-1",
-    "semantic_audit_contract_version": "semantic-audit-v3-adjacent-continuity",
+    "semantic_audit_contract_version": "semantic-audit-v4-adjacent-continuity-structured-voice",
     "canonical_atomic_field_count": 27,
     "removed_new_write_fields": ["运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气", "心理音轨属性", "生成批次"],
-    "picture_content_single_write": ["可见动作", "表情", "视线起点与焦点转移", "眼球先动与头部跟随关系", "眼睑松紧", "具体眨眼时点或有理由不眨眼", "精确对白", "声音强弱", "语速", "呼吸", "停顿", "重音期间不眨眼", "尾音", "标点效果", "口型一致", "不看镜头", "听者错峰反应与眨眼错峰", "镜尾视线与状态", "恰好三个Seedance 2.5单镜时间阶段"],
-    "standalone_required": ["空间站位描述", "起始状态", "音色", "光影", "光源来源", "光源方向", "色温倾向", "生成限制中的9:16竖屏"],
+    "picture_content_single_write": ["可见动作", "表情", "视线起点与焦点转移", "眼球先动与头部跟随关系", "眼睑松紧", "具体眨眼时点或有理由不眨眼", "精确对白", "对白发生时点", "可见呼吸与停顿", "重音期间不眨眼", "标点对应表演", "口型一致", "不看镜头", "听者错峰反应与眨眼错峰", "镜尾视线与状态", "恰好三个Seedance 2.5单镜时间阶段"],
+    "standalone_required": ["空间站位描述", "起始状态", "音色固定子模板", "光影", "光源来源", "光源方向", "色温倾向", "生成限制中的9:16竖屏"],
+    "voice_template_contract": {
+      "contract": "fixed-voice-template-v1",
+      "outer_field": "音色",
+      "ordered_nested_labels": ["基础声线", "言语行为", "当前表达", "发声方式", "音量", "语速与节奏", "呼吸", "停顿", "重音", "尾音", "禁止语气"],
+      "group_heading_only": "发声方式",
+      "baseline_required_dimensions": ["年龄感", "音区", "声音厚薄", "明亮或低沉", "长期稳定特征"],
+      "delivery_required_dimensions": ["音量", "语速与节奏", "呼吸", "停顿", "原文重音", "尾音"],
+      "allowed_tail_directions": ["上抬", "下压", "截断", "发虚", "落稳", "短收"],
+      "prohibited_tone_item_count": {"minimum": 2, "maximum": 4},
+      "no_dialogue_value": "无对白，不适用。",
+      "forbid_generic_neutral_suffix": ["声音中等清晰", "语速从容", "关键词加重", "尾音随句意收住"],
+      "formal_rendering": "音色：后空一行，再渲染完整固定子模板",
+      "keyframe_projection": "excluded"
+    },
     "mother_template_columns": ["分镜序号", "时长", "累计时长", "功能类型/场景连续性ID", "正式分镜母版", "GPT关键帧生成指令", "参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句"],
     "single_execution_master": "正式分镜母版",
     "display_shot_id_pattern": "^EP\\d{2}-\\d{3}$",
@@ -197,7 +211,8 @@
       {"gate_id": "THG-11", "name": "canonical投影XLSX反向解析一致", "error_code": "E-INTEGRATION-001"},
       {"gate_id": "THG-12", "name": "审计状态签发权", "error_code": "E-ARCHIVE-001"},
       {"gate_id": "THG-13", "name": "眼神眼睑眨眼与静帧自然性", "error_code": "E-EXPRESSION-003"},
-      {"gate_id": "THG-14", "name": "相邻镜头N-1逐组连续性证明", "error_code": "E-CONTINUITY-001"}
+      {"gate_id": "THG-14", "name": "相邻镜头N-1逐组连续性证明", "error_code": "E-CONTINUITY-001"},
+      {"gate_id": "THG-15", "name": "音色固定子模板与原文重音", "error_code": "E-VOICE-001"}
     ],
     "first_draft_quality_gate": {
       "measurement_unit": "unique_affected_shots",
@@ -238,7 +253,7 @@
       "正式分镜母版唯一且按R10-SPC-1空白上下文可执行",
       "Seedance 2.5恰好3个一位小数方括号时间阶段并闭合单镜时长",
       "GPT关键帧为显式9:16、无时间/对白/声音/运镜/转场的静态白名单投影",
-      "THG-01–THG-14全部通过且多行文本反向解析一致",
+      "THG-01–THG-15全部通过且多行音色子模板反向解析一致",
       "无batches、Seedance列、生成批次表或后台重复生成"
     ],
     "release": [
@@ -289,15 +304,16 @@
     "compact_master_execution_evidence": [
       "空间站位描述",
       "起始状态",
-      "画面内容中的动作过程/对白发声/听者反应/结束状态",
+      "画面内容中的动作过程/精确对白/声画同步时点/听者反应/结束状态",
+      "音色中的固定发声子模板",
       "机位与运镜方式",
       "环境音效",
       "环境动态",
       "光影",
       "光源来源",
       "光源方向",
-      "色温倾向"
-      ,"生成限制中的9:16竖屏"
+      "色温倾向",
+      "生成限制中的9:16竖屏"
     ],
     "i2v_forbidden_context_terms": [
       "承接上一镜",
@@ -416,7 +432,7 @@
     }
   },
   "windowed_execution_policy": {
-    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-14、八层审计、相邻镜头N-1逐组证据或质量阈值。",
+    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-15、八层审计、相邻镜头N-1逐组证据、逐对白镜音色字段证据或质量阈值。",
     "activation": {
       "user_window_access": "authenticated_namespace_window_neutral",
       "window_role_restrictions": false,
@@ -900,7 +916,7 @@
         "scope"
       ],
       "explicit_fresh_audit": "reuse_extraction_and_parsing_only_then_recompute_semantic_verdict",
-      "semantic_audit_contract": "semantic-audit-v3-adjacent-continuity",
+      "semantic_audit_contract": "semantic-audit-v4-adjacent-continuity-structured-voice",
       "invalidation": {
         "dialogue_or_story": "beat_source_mapping_protected_dialogue_cognition",
         "action_or_gaze": "current_shot_neighbors_visibility",
@@ -1742,7 +1758,7 @@
       ]
     },
     "VOICE": {
-      "scene_formula": "场景+人物状态+音色+画面内容中的发声与精确对白",
+      "scene_formula": "场景+人物状态+音色固定子模板+画面内容中的精确对白与声画同步时点",
       "base_formula": "语气=声音大小+语速快慢+停顿位置+尾音变化",
       "full_formula": "情绪语气=声音强弱+语速节奏+呼吸状态+停顿位置+重音位置+尾音变化",
       "dimensions": [
@@ -1753,6 +1769,13 @@
         "重音位置",
         "尾音变化"
       ],
+      "fixed_voice_template": {
+        "contract": "fixed-voice-template-v1",
+        "ordered_nested_labels": ["基础声线", "言语行为", "当前表达", "发声方式", "音量", "语速与节奏", "呼吸", "停顿", "重音", "尾音", "禁止语气"],
+        "authoritative_field": "音色",
+        "picture_content_scope": "对白时点、口型、可见呼吸/停顿、重音期表演、听者反应",
+        "no_dialogue_value": "无对白，不适用。"
+      },
       "punctuation": [
         {
           "symbol": "，",
@@ -2068,7 +2091,7 @@
       ]
     },
     "JIMENG_TIMING": {
-      "formal_visual_description": "画面内容是动作、表情、精确对白、发声、口型、视线、听者错峰反应和三个单镜时间阶段的唯一写入位置。",
+      "formal_visual_description": "画面内容是动作、表情、精确对白、声画同步时点、口型、视线、听者错峰反应和三个单镜时间阶段的唯一写入位置；完整发声规格只在音色固定子模板写一次。",
       "single_shot_timeline": "目标锁定Seedance 2.5时，画面内容必须恰好3个【0.0—x.x秒】一位小数阶段，从0.0开始、连续不重叠并以本镜时长结束；旧自然阶段仅作只读迁移输入。",
       "image_prompt": "GPT关键帧确定性投影禁止时间码、对白、口型、发声与音效指令。",
       "formal_execution_column": "正式分镜母版",
@@ -2400,9 +2423,9 @@
       "module": "VOICE",
       "severity": "fail",
       "blocking": true,
-      "trigger_condition": "画面内容含具名对白但音色为空，或画面内容未包含声音强弱、语速、呼吸、停顿、重音、尾音",
-      "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "repair_action": "音色字段独立补齐；六维发声只补入画面内容，不创建发声方式字段",
+      "trigger_condition": "THG-15：带对白镜的音色未按固定顺序完整填写基础声线、言语行为、当前表达、发声方式六项和2—4项禁止语气，重音不在原文、尾音方向无效、附加统一中性模板，或无对白镜未明确不适用",
+      "required_evidence": "镜头编号、音色字段、原文对白、固定标签顺序、重音逐字匹配和独审field:镜头编号.音色覆盖证明",
+      "repair_action": "只在音色字段内按fixed-voice-template-v1补齐；发声方式仅作音色内部空值分组标题，画面内容只保留声画同步时点，不创建顶层发声方式字段",
       "final_status_if_unfixed": "fail_current",
       "version": "V16.3-148-R10-StableRuntime"
     },
@@ -2411,7 +2434,7 @@
       "module": "VOICE",
       "severity": "warning",
       "blocking": false,
-      "trigger_condition": "画面内容中的普通对白发声维度少于4项",
+      "trigger_condition": "非R10-SPC-1只读兼容输入中的普通对白发声维度少于4项",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
       "repair_action": "补足至少4项；核心情绪补足6项",
       "final_status_if_unfixed": "warning",
@@ -2908,7 +2931,7 @@
       "blocking": true,
       "trigger_condition": "R10.1镜头仍含退休字段、旧【角色】对白标签，或正式/GPT提示词残留9:16竖屏真人古装短剧截图质感、9:16竖屏真人古装短剧单帧两条冗长旧短语；干净的9:16竖屏是必需项",
       "required_evidence": "镜头编号及命中的旧字段名",
-      "repair_action": "将动作、表演、角色说道：“精确对白”、发声和标点合入画面内容，将运镜主体和叙事功能合入运镜方式，只删除退休字段、旧标签和两条冗长旧短语并保留9:16竖屏。",
+      "repair_action": "将动作、表演和角色说道：“精确对白”合入画面内容，将旧发声参数保留到音色并显式标记待按固定子模板修订，将标点时点保留在画面内容；将运镜主体和叙事功能合入运镜方式，只删除退休顶层字段、旧标签和两条冗长旧短语并保留9:16竖屏。",
       "final_status_if_unfixed": "fail_current",
       "version": "V16.3-148-R10-StableRuntime"
     },

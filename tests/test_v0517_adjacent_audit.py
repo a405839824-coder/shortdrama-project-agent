@@ -90,7 +90,10 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
     def test_exact_n_minus_one_ordered_pair_set_passes(self) -> None:
         enriched = self.attach()
         proof = enriched["independent_evidence_matrix"]["adjacent_continuity"]
-        self.assertEqual(SEMANTIC_AUDIT_CONTRACT_VERSION, "semantic-audit-v3-adjacent-continuity")
+        self.assertEqual(
+            SEMANTIC_AUDIT_CONTRACT_VERSION,
+            "semantic-audit-v4-adjacent-continuity-structured-voice",
+        )
         self.assertEqual(proof["expected_pair_count"], 2)
         self.assertEqual(proof["reviewed_pair_count"], 2)
         self.assertEqual(proof["coverage_percent"], 100.0)
@@ -128,6 +131,39 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
     def test_machine_pair_manifest_is_mandatory(self) -> None:
         self.report["quality_metrics"].pop("adjacent_continuity")
         with self.assertRaisesRegex(ValueError, "adjacent_pair_machine_proof_missing"):
+            self.attach()
+
+    def test_dialogue_voice_field_evidence_is_mandatory_and_recorded(self) -> None:
+        self.storyboard["shots"][0].update({
+            "画面内容": "江氏说道：“好。”",
+            "音色": "基础声线：青年女声。",
+        })
+        canonical_hash = canonical_storyboard_sha256(self.storyboard)
+        self.submission["canonical_sha256"] = canonical_hash
+        for layer in self.submission["layers"]:
+            if layer["layer"] != "空间连续":
+                layer["evidence_ids"] = [f"canonical:{canonical_hash}"]
+            if layer["layer"] == "禁项与声音":
+                layer["evidence_ids"].append("field:EP01-001.音色")
+        enriched = self.attach()
+        proof = enriched["independent_evidence_matrix"]["voice_field_coverage"]
+        self.assertEqual(proof["contract"], "fixed-voice-template-v1")
+        self.assertEqual(proof["expected_dialogue_shot_count"], 1)
+        self.assertEqual(proof["reviewed_voice_field_count"], 1)
+        self.assertEqual(proof["coverage_percent"], 100.0)
+        self.assertEqual(proof["evidence_ids"], ["field:EP01-001.音色"])
+
+    def test_missing_dialogue_voice_field_evidence_is_rejected(self) -> None:
+        self.storyboard["shots"][0].update({
+            "画面内容": "江氏说道：“好。”",
+            "音色": "基础声线：青年女声。",
+        })
+        canonical_hash = canonical_storyboard_sha256(self.storyboard)
+        self.submission["canonical_sha256"] = canonical_hash
+        for layer in self.submission["layers"]:
+            if layer["layer"] != "空间连续":
+                layer["evidence_ids"] = [f"canonical:{canonical_hash}"]
+        with self.assertRaisesRegex(ValueError, "voice_field_coverage_incomplete"):
             self.attach()
 
     def test_delta_rebuilds_complete_global_pair_proof(self) -> None:

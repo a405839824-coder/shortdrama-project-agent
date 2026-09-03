@@ -578,7 +578,9 @@ PATCH_FORBIDDEN_FIELD_TERMS = (
 
 AUDIT_GATE_IDS = tuple(f"G{index}" for index in range(14))
 AUDIT_LAYER_NAMES = SEMANTIC_AUDIT_LAYER_NAMES
-SEMANTIC_AUDIT_CONTRACT_VERSION = "semantic-audit-v3-adjacent-continuity"
+SEMANTIC_AUDIT_CONTRACT_VERSION = (
+    "semantic-audit-v4-adjacent-continuity-structured-voice"
+)
 STRICT_OUTPUT_CONTRACT = "R10-SPC-1"
 SEMANTIC_AUDIT_CONTRACT_FINGERPRINT = sha256_bytes(
     SEMANTIC_AUDIT_CONTRACT_VERSION.encode("utf-8")
@@ -992,7 +994,9 @@ def _issue_category(error_code: str) -> str:
         return "机位可见性"
     if any(term in code for term in ("CONTINUITY", "SPATIAL", "LIGHT")):
         return "空间连续"
-    if any(term in code for term in ("PERFORMANCE", "EXPRESSION", "BLINK", "VOICE", "PUNCT")):
+    if "VOICE" in code:
+        return "禁项与声音"
+    if any(term in code for term in ("PERFORMANCE", "EXPRESSION", "BLINK", "PUNCT")):
         return "表演链"
     if any(term in code for term in ("DURATION", "RHYTHM", "SHOTLOAD", "SHOT-")):
         return "镜头节奏"
@@ -3125,6 +3129,30 @@ class StoryboardService:
             for evidence_id in row["evidence_ids"]:
                 validate_evidence_id(str(evidence_id))
 
+        dialogue_shot_refs = [
+            str(row.get("镜头编号") or row.get("shot_uid") or "").strip()
+            for row in shots
+            if re.search(
+                r"说道\s*[：:]?\s*[“\"]",
+                str(row.get("画面内容") or ""),
+            )
+        ]
+        expected_voice_evidence_ids = [
+            f"field:{shot_ref}.音色" for shot_ref in dialogue_shot_refs
+        ]
+        submitted_voice_evidence_ids = [
+            str(evidence_id)
+            for evidence_id in layer_by_name["禁项与声音"]["evidence_ids"]
+            if str(evidence_id).startswith("field:")
+            and str(evidence_id).endswith(".音色")
+        ]
+        if submitted_voice_evidence_ids != expected_voice_evidence_ids:
+            raise ValueError(
+                "semantic_audit_voice_field_coverage_incomplete: 禁项与声音层必须按canonical顺序"
+                "逐镜提交全部带对白镜的field:镜头编号.音色证据；"
+                f"expected={expected_voice_evidence_ids}, submitted={submitted_voice_evidence_ids}"
+            )
+
         spatial_pair_ids = [
             str(evidence_id).split(":", 1)[1]
             for evidence_id in layer_by_name["空间连续"]["evidence_ids"]
@@ -3388,6 +3416,18 @@ class StoryboardService:
                     machine_adjacent.get("failed_pair_count", 0)
                 ),
                 "spatial_layer_status": layer_matrix["空间连续"]["status"],
+            },
+            "voice_field_coverage": {
+                "contract": "fixed-voice-template-v1",
+                "expected_dialogue_shot_count": len(dialogue_shot_refs),
+                "reviewed_voice_field_count": len(submitted_voice_evidence_ids),
+                "coverage_percent": 100.0,
+                "evidence_ids": expected_voice_evidence_ids,
+                "audio_layer_status": layer_matrix["禁项与声音"]["status"],
+                "machine_voice_issue_count": sum(
+                    str(item.get("error_code") or "") == "E-VOICE-001"
+                    for item in machine_issues
+                ),
             },
         }
         enriched["status"] = "pass" if clean else "fail_current"
@@ -13933,6 +13973,9 @@ class StoryboardService:
                     "adjacent_continuity": copy.deepcopy(
                         evidence_matrix.get("adjacent_continuity")
                     ),
+                    "voice_field_coverage": copy.deepcopy(
+                        evidence_matrix.get("voice_field_coverage")
+                    ),
                     "semantic_conclusion": copy.deepcopy(
                         semantic_submission.get("conclusion")
                     ),
@@ -16035,6 +16078,9 @@ class StoryboardService:
             ),
             "adjacent_continuity": evidence_matrix.get(
                 "adjacent_continuity"
+            ),
+            "voice_field_coverage": evidence_matrix.get(
+                "voice_field_coverage"
             ),
             "source_ingestion_mode": (
                 "chapter_to_storyboard"
