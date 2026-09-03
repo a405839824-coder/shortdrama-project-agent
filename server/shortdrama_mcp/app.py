@@ -968,9 +968,12 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         title="审计并记录分镜",
         description=(
             "独立审计已存在的分镜文件时调用。首次或指纹变化后的审计必须提交semantic_audit："
-            "绑定准确canonical哈希和全表镜头数，逐一提交恰好八层的结论、摘要、具体证据ID"
+            "绑定准确canonical哈希、全表镜头数、N-1相邻镜头组数与有序pair清单SHA-256；"
+            "空间连续层必须按canonical顺序逐组提交全部pair:左镜->右镜证据，覆盖率必须100%。"
+            "同时逐一提交恰好八层的结论、摘要、具体证据ID"
             "及语义问题，reviewed_batch_count固定为0且禁止batch证据/目标；第六层审计正式母版"
-            "单镜执行完整性。服务端再合并完整机器校验问题。只有完全匹配且已签名的独立审计证书"
+            "单镜执行完整性，表演层必须检查眼球换焦、眼睑变化、眨眼时点、重音不眨与多人错峰。"
+            "服务端再合并完整机器校验问题。只有完全匹配且已签名的独立审计证书"
             "缓存命中时才可省略semantic_audit。同一安全缓存键重复审计不增加轮次。"
         ),
         annotations=_annotations(read_only=False),

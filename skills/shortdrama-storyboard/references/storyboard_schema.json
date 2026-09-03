@@ -39,6 +39,49 @@
         "change_lock": {"type": "object"},
         "cognition_matrix": {"type": "array", "minItems": 1},
         "scene_state_ledger": {"type": "array", "minItems": 1},
+        "adjacent_continuity_audit": {
+          "type": "object",
+          "required": ["contract", "expected_pair_count", "reviewed_pair_count", "coverage_percent", "ordered_pair_sha256", "pairs"],
+          "properties": {
+            "contract": {"const": "adjacent-pair-continuity-v1"},
+            "expected_pair_count": {"type": "integer", "minimum": 0},
+            "reviewed_pair_count": {"type": "integer", "minimum": 0},
+            "coverage_percent": {"const": 100},
+            "ordered_pair_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "pairs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "pair_id", "left_shot_id", "right_shot_id", "boundary_type",
+                  "left_end_state_sha256", "right_start_state_sha256",
+                  "reviewed_fields", "continuity_status", "transition_explanation"
+                ],
+                "properties": {
+                  "pair_id": {"type": "string", "pattern": "^.+->.+$"},
+                  "left_shot_id": {"type": "string", "minLength": 1},
+                  "right_shot_id": {"type": "string", "minLength": 1},
+                  "boundary_type": {"enum": ["same_scene", "scene_cut", "episode_cut"]},
+                  "left_end_state_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+                  "right_start_state_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+                  "reviewed_fields": {
+                    "type": "array",
+                    "minItems": 7,
+                    "maxItems": 7,
+                    "uniqueItems": true,
+                    "items": {
+                      "enum": ["人物位置", "身体朝向", "视线落点", "手持道具", "门窗状态", "动作进度", "光源方向"]
+                    }
+                  },
+                  "continuity_status": {"enum": ["closed", "explained_transition", "fail_current"]},
+                  "transition_explanation": {"type": ["string", "null"]}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
         "shot_plan": {"type": "array", "minItems": 1},
         "performance_chains": {"type": "array"},
         "audio_workflow": {"type": "object"},

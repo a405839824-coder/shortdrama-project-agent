@@ -271,12 +271,12 @@
   },
   {
     "conflict_id": "C-019",
-    "conflict_pair": "4秒2-3次眨眼 vs 新自然频率",
-    "higher_priority_rule": "新自然频率",
-    "decision": "3-5秒0-1次，6-10秒1-2次，震惊可停眨1-2秒",
+    "conflict_pair": "4秒2-3次机械眨眼或全程不眨 vs 完整自然眼部行为链",
+    "higher_priority_rule": "THG-13完整眼部行为链",
+    "decision": "面部清楚且>=2秒先写视线起点、眼球换焦、头部跟随关系、眼睑变化和镜尾视线；3-5秒每人0-1次、>5-10秒每人1-2次，重音期不眨，多人错峰；高压/震惊不眨必须有理由和替代动态",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
-    "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
+    "exception_condition": "不可用用户授权豁免自然性门禁；原文明确闭眼或高压停眨仍须写可执行依据与替代动态。",
     "user_authorization_required": false,
     "output_status_if_violated": "fail_current",
     "linked_error_codes": [

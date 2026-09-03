@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import importlib.util
 import json
 import re
@@ -27,6 +28,85 @@ DEPRECATED_SHOT_FIELDS = [
     "运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气",
     "心理音轨属性", "生成批次",
 ]
+STATE_VECTOR_FIELDS = [
+    "人物位置", "身体朝向", "视线落点", "手持道具", "门窗状态", "动作进度", "光源方向",
+]
+BOUNDARY_EXPLANATION_RE = re.compile(
+    r"切|转入|转到|换场|场景|地点|时空|翌日|次日|稍后|片刻|另一|新空间|跨集|集间"
+)
+
+
+def _stable_sha256(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def build_adjacent_continuity_audit(
+    shots: list[dict[str, Any]],
+    scene_states: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build the exact N-1 pair proof used by otherwise-valid fixtures."""
+
+    by_shot = {str(row.get("shot_id")): row for row in scene_states}
+    pairs: list[dict[str, Any]] = []
+    for ordinal in range(max(len(shots) - 1, 0)):
+        left = shots[ordinal]
+        right = shots[ordinal + 1]
+        left_id = str(left.get("镜头编号"))
+        right_id = str(right.get("镜头编号"))
+        left_state = by_shot[left_id]
+        right_state = by_shot[right_id]
+        left_episode = left_id[2:4] if re.fullmatch(r"EP\d{2}-\d{3}", left_id) else "LEGACY"
+        right_episode = right_id[2:4] if re.fullmatch(r"EP\d{2}-\d{3}", right_id) else "LEGACY"
+        left_scene = str(left_state.get("scene_id", left.get("场景连续性ID", "")))
+        right_scene = str(right_state.get("scene_id", right.get("场景连续性ID", "")))
+        boundary_type = (
+            "episode_cut"
+            if left_episode != right_episode
+            else "scene_cut"
+            if left_scene != right_scene
+            else "same_scene"
+        )
+        prior_end = left_state["end_state"]
+        current_start = right_state["start_state"]
+        closed = prior_end == current_start
+        transition_explanation = right_state.get("transition_explanation")
+        if boundary_type == "same_scene":
+            continuity_status = "closed" if closed else "fail_current"
+        else:
+            continuity_status = (
+                "explained_transition"
+                if BOUNDARY_EXPLANATION_RE.search(
+                    str(transition_explanation or "")
+                )
+                else "fail_current"
+            )
+        pairs.append({
+            "pair_id": f"{left_id}->{right_id}",
+            "left_shot_id": left_id,
+            "right_shot_id": right_id,
+            "boundary_type": boundary_type,
+            "left_end_state_sha256": _stable_sha256(prior_end),
+            "right_start_state_sha256": _stable_sha256(current_start),
+            "reviewed_fields": list(STATE_VECTOR_FIELDS),
+            "continuity_status": continuity_status,
+            "transition_explanation": transition_explanation,
+        })
+    pair_ids = [row["pair_id"] for row in pairs]
+    return {
+        "contract": "adjacent-pair-continuity-v1",
+        "expected_pair_count": len(pairs),
+        "reviewed_pair_count": len(pairs),
+        "coverage_percent": 100,
+        "ordered_pair_sha256": _stable_sha256(pair_ids),
+        "pairs": pairs,
+    }
 
 
 def normalize_fixture_generation_limit(value: str) -> str:
@@ -182,6 +262,37 @@ def inject_pg1_fixture_evidence(obj: dict[str, Any]) -> None:
             shot["生成限制"] = normalize_fixture_generation_limit(
                 shot["生成限制"]
             )
+        visible_text = f"{shot.get('镜头类型', '')} {shot.get('可见主体', '')}"
+        face_visible = (
+            float(shot.get("时长") or 0) >= 2.0
+            and any(term in visible_text for term in (
+                "面部", "眼睛", "眼神", "眼睑", "眼球", "双眼", "侧脸", "人物反应",
+                "大特写", "特写", "近景", "中近景", "胸部以上", "腰部以上",
+            ))
+            and not ("书页" in visible_text and "人物反应" not in visible_text)
+        )
+        if face_visible:
+            eye_chain = (
+                "视线从门框移向桌面信件，眼球先完成轻微焦点调整，头部随后轻微跟转；"
+                "视线落稳前自然短眨一次，重新睁眼后上眼睑略微下压；"
+                "镜尾视线落在信件上"
+            )
+            shot["画面内容"] = f"{str(shot.get('画面内容') or '').rstrip('；')}；{eye_chain}"
+            dialogue_value = str(shot.get("台词") or "")
+            if (
+                dialogue_value and not dialogue_value.startswith(("无", "不适用"))
+            ) or re.search(r"说道|【[^】]{1,20}】|重音|加重", str(shot.get("画面内容") or "")):
+                shot["画面内容"] += "；台词关键词与重音期间不眨眼"
+            start = str(shot.get("起始状态") or "人物位置、朝向、视线、姿态与道具起始状态明确")
+            shot["起始状态"] = f"{start}；双眼自然睁开，不处于半眨眼瞬间"
+            limits = str(shot.get("生成限制") or "").rstrip("；")
+            shot["生成限制"] = (
+                f"{limits}；眼神自然聚焦，保留轻微眼球焦点调整和眼睑松紧变化；"
+                "禁止无依据全程不眨眼；禁止僵直瞪视；禁止高频机械眨眼"
+            )
+            if re.search(r"两人|二人|双人|三人|多人|群像", str(shot.get("可见主体") or "")):
+                shot["画面内容"] += "；多人眨眼错开、不同时闭眼"
+                shot["生成限制"] += "；禁止多人同步眨眼"
         shot_id = str(shot.get("镜头编号"))
         support = str(shot.get("原文支撑句") or shot.get("覆盖原文") or f"测试源文{index}")
         source_ledger.append({
@@ -241,6 +352,7 @@ def inject_pg1_fixture_evidence(obj: dict[str, Any]) -> None:
             "forbidden": ["不得提前泄露后文"],
         }],
         "scene_state_ledger": scene_states,
+        "adjacent_continuity_audit": build_adjacent_continuity_audit(shots, scene_states),
         "shot_plan": shot_plan,
         "performance_chains": performance_chains,
         "audio_workflow": {
@@ -421,6 +533,24 @@ def inject_chapter_intake_evidence(obj: dict[str, Any]) -> None:
     }
 
 
+def expand_fixture_for_adjacent_audit(obj: dict[str, Any]) -> None:
+    """Deterministically create a second contiguous shot before evidence injection."""
+
+    shots = obj.get("shots")
+    if not isinstance(shots, list) or len(shots) != 1 or not isinstance(shots[0], dict):
+        raise ValueError("adjacent-audit Golden fixture requires exactly one source shot")
+    first = shots[0]
+    second = copy.deepcopy(first)
+    first_duration = float(first.get("时长") or 0)
+    first_id = str(first.get("镜头编号") or "S001")
+    second["镜头编号"] = "S002" if first_id == "S001" else f"{first_id}-NEXT"
+    second["累计时长"] = first_duration * 2
+    second["画面内容"] = "女主停在桌前，继续看向桌上的信件"
+    second["动作与表演"] = "右手离开门框后自然垂落，肩背与呼吸保持细微自然变化"
+    obj["shots"] = [first, second]
+    obj["total_duration"] = first_duration * 2
+
+
 def main() -> int:
     root = project_root()
     parser = argparse.ArgumentParser()
@@ -435,6 +565,8 @@ def main() -> int:
     for test in suite.get("tests", []):
         fixture_id = test["fixture_id"]
         obj = copy.deepcopy(fixtures[fixture_id])
+        if test.get("expand_for_adjacent_audit"):
+            expand_fixture_for_adjacent_audit(obj)
         if suite.get("inject_pg1_fixture_evidence"):
             inject_pg1_fixture_evidence(obj)
         if test.get("inject_chapter_intake"):

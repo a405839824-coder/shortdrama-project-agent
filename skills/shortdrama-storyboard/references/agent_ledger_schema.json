@@ -461,13 +461,32 @@
             "cross_context_term_count": {"type": "integer", "minimum": 0},
             "shot_pass_percent": {"type": "number", "minimum": 0, "maximum": 100},
             "residual_issue_count": {"type": "integer", "minimum": 0},
-            "introduced_issue_count": {"type": "integer", "minimum": 0}
+            "introduced_issue_count": {"type": "integer", "minimum": 0},
+            "adjacent_pair_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100}
           }
         },
-        "semantic_audit_contract": {"const": "semantic-audit-v2-compact-master"},
+        "semantic_audit_contract": {"enum": ["semantic-audit-v2-compact-master", "semantic-audit-v3-adjacent-continuity"]},
         "semantic_audit_sha256": {"$ref": "#/$defs/sha256"},
         "reviewed_shot_count": {"type": "integer", "minimum": 0},
         "reviewed_batch_count": {"const": 0, "deprecated": true},
+        "reviewed_adjacent_pair_count": {"type": "integer", "minimum": 0},
+        "adjacent_pair_order_sha256": {"$ref": "#/$defs/sha256"},
+        "adjacent_continuity": {
+          "type": "object",
+          "required": ["contract", "expected_pair_count", "reviewed_pair_count", "coverage_percent", "ordered_pair_sha256", "pair_ids", "production_proof_verified", "production_failed_pair_count", "spatial_layer_status"],
+          "properties": {
+            "contract": {"const": "adjacent-pair-continuity-v1"},
+            "expected_pair_count": {"type": "integer", "minimum": 0},
+            "reviewed_pair_count": {"type": "integer", "minimum": 0},
+            "coverage_percent": {"const": 100},
+            "ordered_pair_sha256": {"$ref": "#/$defs/sha256"},
+            "pair_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+            "production_proof_verified": {"type": "boolean"},
+            "production_failed_pair_count": {"type": "integer", "minimum": 0},
+            "spatial_layer_status": {"enum": ["pass", "fail_current"]}
+          },
+          "additionalProperties": false
+        },
         "semantic_conclusion": {
           "type": "object",
           "required": ["status", "summary"],
@@ -553,6 +572,21 @@
         "stage_trace_id": {"type": "string", "minLength": 1}
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {"semantic_audit_contract": {"const": "semantic-audit-v3-adjacent-continuity"}},
+            "required": ["semantic_audit_contract"]
+          },
+          "then": {
+            "required": ["reviewed_adjacent_pair_count", "adjacent_pair_order_sha256", "adjacent_continuity"],
+            "properties": {
+              "quality_thresholds": {
+                "required": ["adjacent_pair_coverage_percent"],
+                "properties": {"adjacent_pair_coverage_percent": {"const": 100}}
+              }
+            }
+          }
+        },
         {
           "if": {
             "anyOf": [

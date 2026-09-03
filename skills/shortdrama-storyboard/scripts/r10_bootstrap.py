@@ -207,7 +207,7 @@ def verify_bundled(self_test: bool) -> dict:
         "error_codes": 66,
         "atomic_rules": 154,
         "templates": 48,
-        "golden_tests": 73,
+        "golden_tests": 82,
     }
     policy = runtime.get("preventive_gate_policy", {})
     preventive_counts = {
@@ -220,7 +220,7 @@ def verify_bundled(self_test: bool) -> dict:
     }
     expected_preventive = {
         "ordered_gates": 14,
-        "required_evidence_blocks": 10,
+        "required_evidence_blocks": 11,
         "state_vector_fields": 7,
         "performance_chain_fields": 7,
         "compact_master_execution_evidence": 11,

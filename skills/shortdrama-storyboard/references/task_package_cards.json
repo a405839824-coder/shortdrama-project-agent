@@ -54,7 +54,7 @@
       "错误码/通过证据",
       "重跑结论",
       "G0-G13十四道门禁证据（小说条件门可N/A并附理由）",
-      "THG-01至THG-12全部通过；任一失败不得导出或commit",
+      "THG-01至THG-14全部通过；THG-13眼部链与THG-14相邻镜头N-1逐组证明任一失败不得导出或commit",
       "唯一canonical及全量指纹",
       "production_preflight不得冒充独立审计，审计overlay只能为PENDING_AUDIT/未签发结论且计数和trace为空",
       "生产到审计交接包",
@@ -141,12 +141,12 @@
       "错误码/通过证据",
       "重跑结论",
       "G0-G13十四道门禁证据（小说条件门可N/A并附理由）",
-      "THG-01至THG-12独立重算，含静态GPT、转场去重、状态/道具、时长容量及多行XLSX一致性",
+      "THG-01至THG-14独立重算，含眼球换焦/眼睑/眨眼/静帧、相邻镜头N-1逐组证明、静态GPT、转场去重、状态/道具、时长容量及多行XLSX一致性",
       "handoff和canonical指纹验证",
       "生产结论不得复用；生产审计overlay必须为PENDING_AUDIT且不得预填PASS/0问题",
       "handoff不得重放，repair返回必须由原审计工单与authority root消费；同命名空间任意认证窗口可调用该精确root",
     "八层独立重算且不得在审计中再生成镜头、Seedance或导出正文",
-    "新签发证书必须使用semantic-audit-v2-compact-master；v1只作历史记录且不得命中缓存或放行",
+    "新签发证书必须使用semantic-audit-v3-adjacent-continuity，空间层按canonical顺序提交全部pair:left->right、N-1计数和有序pair SHA-256；v1/v2只作历史记录且不得命中当前缓存或放行",
       "阶段计时"
     ],
     "minimum_input_required": [
@@ -1359,7 +1359,7 @@
     "重跑结论",
     "十列名称和顺序精确一致",
     "无Seedance列、无生成批次表、无后台预生成",
-    "THG-01至THG-12全部通过，逐镜生成限制/正式母版/GPT各含9:16竖屏且GPT仅静态投影",
+    "THG-01至THG-14全部通过，逐镜生成限制/正式母版/GPT各含9:16竖屏且GPT仅静态投影；眼部链完整，相邻镜头N-1逐组证明100%",
     "多行对白反向解析哈希一致；独立审计前只写PENDING_AUDIT并清空计数与trace"
     ],
     "minimum_input_required": [
@@ -1478,7 +1478,7 @@
       "具体证据",
       "错误码/通过证据",
     "重跑结论",
-    "49 validators、66 error codes、G0-G13与THG-01至THG-12完整保留",
+    "49 validators、66 error codes、G0-G13与THG-01至THG-14完整保留，并新增正反例证明眼部链及相邻N-1审计不可绕过",
     "旧字段只读迁移且新版本禁止回写",
     "后台Seedance/批次生成计数为0",
     "每个历史错误负向样本必须FAIL且修复正例必须PASS；多行XLSX round-trip纳入回归",
@@ -1494,7 +1494,7 @@
     "0.5.12历史生产预检证明必须覆盖GAP-1bb91d83751b422f精确有序六条、逐handoff规则画像、冻结报告与原签名报告完全相等，以及每条真实当前FAIL的canonical SHA、完整current-report SHA、shot/error/warning计数、完整error histogram和当前validator composite/完整SHA精确封存；六条画像不得互换，任一画像、provenance、列表、顺序或双报告字段漂移均须零写入失败关闭；HISTCACHE不可复用，GAP-0e5d48969c4c494e精确有序11条恢复后仍强制当前独审",
     "0.5.15恢复后继再次签发必须覆盖普通与历史证明两类prepared successor在后续运行时指纹变化后的plan→execute→幂等重放；严格验证立即前序签名恢复日志、old/new/certificate/trace after-image、Hub投影、恢复工单authority、不可变内容指纹与当前验证画像；历史分支继续锁定HISTCACHE、冻结PASS/0、完整当前FAIL哈希/计数/直方图/validator及非复用标志，任一漂移零写入失败关闭",
     "0.5.16 Library项目快照回归必须覆盖bundle SHA与完整tree SHA双校验、持久卷零项目内容、临时挂载、导出、Library回读后单调代次提交、未同步变化禁止卸载，以及11条交接及其恢复记录在Library中原字节保留；存储动作复用migrate_project_state且公共工具仍精确19个",
-    "插件当前发布版本、清单与活跃发布报告统一标记0.5.16；0.5.15恢复后继再次签发、0.5.14起用户窗口无角色限制及后台production/audit/repair authority分离、0.5.13及更早窗口接续兼容、0.5.12历史报告勘误、0.5.10历史投影复验、0.5.9受控phase推断、0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门与历史升级文档均保留其原始语义"
+    "插件当前发布版本、清单与活跃发布报告统一标记0.5.17；0.5.17眼部表演与N-1相邻逐组证明、0.5.15恢复后继再次签发、0.5.14起用户窗口无角色限制及后台production/audit/repair authority分离、0.5.13及更早窗口接续兼容、0.5.12历史报告勘误、0.5.10历史投影复验、0.5.9受控phase推断、0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门与历史升级文档均保留其原始语义"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1566,7 +1566,7 @@
       "错误码/通过证据",
     "重跑结论",
     "27字段原子、画面内容唯一语义写入、音色独立、四项光线必填",
-    "THG-01至THG-12逐项核验；逐镜9:16、静态GPT、转场去重、状态/道具、容量和多行投影一致性不得跳过",
+    "THG-01至THG-14逐项核验；逐镜9:16、眼部链、静态GPT、转场去重、全部N-1相邻状态/道具、容量和多行投影一致性不得跳过",
     "审计不得再生成Seedance、批次或改写原生产正文；只能基于已验证的PENDING_AUDIT生产工件创建带trace/指纹的不可变签名overlay新工件/后继工作簿"
     ],
     "minimum_input_required": [
