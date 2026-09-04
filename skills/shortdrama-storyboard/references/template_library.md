@@ -399,7 +399,7 @@
 ## TPL-R10-49 文生图静帧与光影决策模板
 
 - 触发条件：GPT关键帧、文生图、场景定帧、古装视觉提示词或任何光影选择
-- 字段顺序：candidate_semantic｜classification（可直接静态投影/先转为可见证据/不得进入单帧）｜visible_translation｜time｜interior_exterior｜door_window_state｜weather｜primary_source｜weak_fill_source｜source_direction_height｜lit_subject｜exposure_material｜narrative_function｜scene_continuity_id｜physical_preconditions｜status
-- 必填规则：每个关键帧词组必须单帧可见或摄影可控；抽象情绪、象征、声音与连续动作先转为可见证据；光影按时间→空间/门窗→天气→真实主光/弱补光→方向/高度→受光对象→曝光材质→叙事功能→同场连续性选择。轮廓光、灯火反射、halation和丁达尔光分别绑定后/侧后光、真实灯火、真实高亮边缘、定向光与散射介质。
-- 失败标准：作者旁白/未来信息/象征结论直接进入静帧，日夜/空间与光源冲突，无来源光，轮廓光方向矛盾，低照度均匀面光无补光，或同场光向/色温跳变即fail。
+- 字段顺序：candidate_semantic｜classification（可直接静态投影/先转为可见证据/不得进入单帧）｜visible_translation｜time｜interior_exterior｜door_window_state｜weather｜primary_source｜weak_fill_source｜source_direction_height｜lit_subject｜exposure_material｜indoor_background_clarity｜atmosphere_scope｜narrative_function｜scene_continuity_id｜physical_preconditions｜status
+- 必填规则：每个词组必须单帧可见或摄影可控；普通室内保留方向字段但写大面积漫射明暗，锁定空气清澈、背景可辨、不泛白不雾化和门窗原状态；室外氛围光或室内剧情介质才允许雾烟、光束、扩散并须有物理前提及局部范围。
+- 失败标准：作者旁白/未来/象征进入静帧；普通室内出现雾烟、穿插光束、柔焦扩散、强逆光、背景泛白或擅改门窗；剧情介质未局部控制；日夜/空间/光源冲突或同场光向跳变即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check

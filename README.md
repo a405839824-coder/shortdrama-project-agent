@@ -1,4 +1,4 @@
-# 分镜项目 Agent 0.5.21
+# 分镜项目 Agent 0.5.22
 
 这是一个“技能 + MCP 执行服务”的完整工具型插件。ChatGPT 负责理解、生成与改写内容，MCP 负责项目状态、文件导入、版本化提交、全表审计、修复回归、跨聊天问题台账和人工签核。没有真实工具调用时，插件规则禁止声称“已经执行”。
 
@@ -24,6 +24,7 @@
 - 0.5.5 初稿质量门：生成前读取跨批次问题画像，逐场景执行无产物预检，再对完整 canonical 签发全量预检证书；总体正确率与直接可用率均须至少98%，每集至少96%，新增局部问题率最多2%，硬错、重大问题、已知问题复发和系统性重复均为0
 - 0.5.21 文生图与光影决策：把参考提示词划分为“可直接进入静帧／先转为单帧可见语义／禁止进入静帧”三类；光影按时段、空间、天气、真实光源、方向、受光对象、曝光材质、叙事功能和同场连续性闭合。轮廓光、眼中灯火反射、halation与丁达尔光缺物理前提时阻断
 - 0.5.21 模板硬门禁：THG-01至THG-17继续强制逐镜`9:16竖屏`、直接对白逐字、叙述性会话场景还原、事实转化对白来源证明、单机位/状态/道具/时长容量闭合、完整眼部表演链、N−1相邻逐组证明、音色固定子模板及静帧可见光影证明
+- 0.5.22 室内外光影分流：普通室内默认空气清澈、背景可辨、闭窗窗纸漫射与前侧/侧面柔和塑形；无剧情依据的雾烟、可见穿插光束、全画面柔焦扩散、无开口强逆光、背景泛白或光线擅改门窗由THG-17阻断。室内剧情烟雾须局部且不遮背景；室外雾气、逆光和体积光只在天气、介质与真实光源闭合时启用
 - 0.5.12 旧交接当前报告精确封存修正：只对`GAP-1bb91d83751b422f`登记的精确后六条交接追加独立的`historical_production_preflight_attestation`。不再把真实当前FAIL概括为单一9:16问题，而是逐handoff锁定canonical、完整`current_report_sha256`、镜头/错误/警告计数、错误直方图及当前validator完整指纹；任一字段漂移都在权威写入前失败关闭。冻结历史报告仍须逐字段等于旧签名PASS/0报告；历史证明不声称当前生产预检通过，`HISTCACHE`不得作为当前预检或独立审计缓存复用。补签后仅在`GAP-0e5d48969c4c494e`下按精确顺序统一恢复原11条，旧交接只标记`superseded`，新交接保持`prepared + PENDING_AUDIT`并强制完整当前独立审计
 - 0.5.10 旧交接生产预检证据受控补签：仅在`recover_storyboard_handoff` 的补签/恢复内部路由复验历史工作簿。可接受精确签名的0.5.4/当前投影，或通过冻结0.5.3投影器逐格重放、且与8列canonical侧车及正式10列短表头完全一致的合法基线组合。复验证明必须绑定原始XLSX、canonical、旧handoff、旧生产证书与原生产trace；一般`extract_xlsx`不放宽，不修改任何原件/历史记录，公共工具仍精确为19个
 - 0.5.9 旧工具参数表受控兼容：`recover_storyboard_handoff`省略或提交`null` phase时，不再默认恢复阶段；服务端先校验当前会话和`rule_improvement + execute + explicit_execute` production工单，再只从targets中唯一、精确的`controlled_phase:preflight_evidence_backfill`或`controlled_phase:handoff_recovery`令牌推断。无令牌、重复、双阶段、未知、大小写/空白漂移或任意额外target全部零写入失败关闭；工具总数仍精确为19
@@ -41,7 +42,7 @@
 - 执行架构：生产与独立审计使用不同的服务端 authority root/window binding/actor binding；只有审计失败且用户授权修复时才启用独立 repair authority，修复结果必须返回原审计 authority 复核。这里的“独立”是后台证据身份隔离，不要求用户切换聊天窗口
 - 增量提速：已有分镜的同身份、同数量、对白与人物认知不变的局部执行变化使用 `commit_storyboard_delta`，只传受影响的完整 27 字段镜头及边界；服务端校验稳定 UID、CAS、保护范围，合并未变化镜头后仍执行完整 R10.1 全表生产校验并生成独立审计 handoff。任何对白或说话人变化、心理音轨、插删移、拆并、重编号或上游证据失效，都重建完整受影响场景/分集
 - 停止后台重复生成：canonical 不持久化正式母版、GPT投影、独立 Seedance 文本或批次；导出器只对最终 canonical 执行一次正式母版和GPT投影，不在生产、审计、修复、缓存预热或后台任务中再次扩写语义
-- 真实独立审计：首次或指纹变化后的 `audit_storyboard` 必须按`semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting`提交绑定精确canonical、镜头数、N−1相邻对数量及有序pair SHA-256的八层语义证据；空间层逐组列出完整有序pair全集，表演层复核眼球/眼睑/眨眼时间轴，禁项与声音层逐镜覆盖所有带对白镜的音色字段，源文对白层按Source Ledger逐单元复核会话分类并逐镜覆盖事实转化对白目标镜，机位可见性层按镜头顺序覆盖全部四项光影字段。服务端与新鲜机器证明交叉校验，不能由机器零报错自动合成独立语义通过；仅同一v7契约下的精确缓存命中可省略
+- 真实独立审计：首次或指纹变化后的 `audit_storyboard` 必须按`semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting`提交绑定精确canonical、镜头数、N−1相邻对数量及有序pair SHA-256的八层语义证据；空间层逐组列出完整有序pair全集，表演层复核眼球/眼睑/眨眼时间轴，禁项与声音层逐镜覆盖所有带对白镜的音色字段，源文对白层按Source Ledger逐单元复核会话分类并逐镜覆盖事实转化对白目标镜，机位可见性层按镜头顺序覆盖全部四项光影字段并核对普通室内清透/门窗状态或有依据的氛围介质。服务端与新鲜机器证明交叉校验，不能由机器零报错自动合成独立语义通过；仅同一v8契约下的精确缓存命中可省略
 - 安全修复：非结构字段使用证书约束 patch；结构、边界、认知、原文证据、镜头顺序/时长或核心计划变化必须使用绑定同一修复包的完整场景/分集重建。生产 delta 不能借给 repair 绕过证书；repair 不能签发最终结论，也不能替代独立审计
 - 云端：已锁定 Railway + Railway 自动域名 + Auth0，并补齐部署、持久卷、预检和验收配置
 - UI：当前采用工具型插件，不含自定义小组件；功能会出现在插件/MCP 工具中，不依赖聊天窗口的“技能选项”
@@ -127,7 +128,7 @@ ChatGPT 不能直接访问普通的 `localhost`。先保持本地服务运行，
 
 0.5.20 叙述性会话场景还原见 [docs/UPGRADE_0.5.20.md](docs/UPGRADE_0.5.20.md)；0.5.19 原文事实转化对白双轨见 [docs/UPGRADE_0.5.19.md](docs/UPGRADE_0.5.19.md)；0.5.18 正式母版音色固定模板见 [docs/UPGRADE_0.5.18.md](docs/UPGRADE_0.5.18.md)；0.5.17 眼部表演与相邻镜头全覆盖审计见 [docs/UPGRADE_0.5.17.md](docs/UPGRADE_0.5.17.md)；0.5.16 Library项目快照迁移见 [docs/UPGRADE_0.5.16.md](docs/UPGRADE_0.5.16.md)；0.5.15 恢复后继再次签发见 [docs/UPGRADE_0.5.15.md](docs/UPGRADE_0.5.15.md)；0.5.14 窗口无角色限制见 [docs/UPGRADE_0.5.14.md](docs/UPGRADE_0.5.14.md)；0.5.12 对后六条真实当前验证报告的逐handoff精确封存修正见 [docs/UPGRADE_0.5.12.md](docs/UPGRADE_0.5.12.md)；0.5.11 首次引入的受控历史生产预检证明与精确11条恢复见 [docs/UPGRADE_0.5.11.md](docs/UPGRADE_0.5.11.md)；0.5.10 的历史工作簿受控复验与补签见 [docs/UPGRADE_0.5.10.md](docs/UPGRADE_0.5.10.md)；0.5.9 的旧工具参数表受控阶段推断见 [docs/UPGRADE_0.5.9.md](docs/UPGRADE_0.5.9.md)；0.5.8 的历史Hub交接投影严格只读兼容见 [docs/UPGRADE_0.5.8.md](docs/UPGRADE_0.5.8.md)；0.5.7 的旧交接生产预检证据受控补签见 [docs/UPGRADE_0.5.7.md](docs/UPGRADE_0.5.7.md)；0.5.6 首次引入的源文权威、独立复审、台账重放与受控交接恢复见 [docs/UPGRADE_0.5.6.md](docs/UPGRADE_0.5.6.md)；0.5.5 的初稿质量门、项目迁移和发布验收见 [docs/UPGRADE_0.5.5.md](docs/UPGRADE_0.5.5.md)；0.5.4 的集成升级历史见 [docs/UPGRADE_0.5.4.md](docs/UPGRADE_0.5.4.md)。十二项模板硬门禁的原始设计见 [docs/UPGRADE_0.5.1.md](docs/UPGRADE_0.5.1.md)，无API性能诊断见 [docs/UPGRADE_0.5.3.md](docs/UPGRADE_0.5.3.md)。
 
-0.5.21 文生图语义与光影决策见 [docs/UPGRADE_0.5.21.md](docs/UPGRADE_0.5.21.md)。
+0.5.22 室内外光影分流见 [docs/UPGRADE_0.5.22.md](docs/UPGRADE_0.5.22.md)；0.5.21 文生图语义与光影决策见 [docs/UPGRADE_0.5.21.md](docs/UPGRADE_0.5.21.md)。
 
 ## 云端 MCP
 
