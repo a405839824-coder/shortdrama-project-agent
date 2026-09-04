@@ -201,12 +201,12 @@ def verify_bundled(self_test: bool) -> dict:
         "golden_tests": len(read_json(refs / "golden_tests.json").get("tests", [])),
     }
     expected_structural = {
-        "conflicts": 31,
+        "conflicts": 32,
         "task_cards": 30,
-        "validators": 49,
-        "error_codes": 67,
-        "atomic_rules": 155,
-        "templates": 49,
+        "validators": 50,
+        "error_codes": 68,
+        "atomic_rules": 156,
+        "templates": 50,
         "golden_tests": 82,
     }
     policy = runtime.get("preventive_gate_policy", {})
@@ -221,7 +221,7 @@ def verify_bundled(self_test: bool) -> dict:
     }
     expected_preventive = {
         "ordered_gates": 14,
-        "template_hard_gates": 16,
+        "template_hard_gates": 17,
         "required_evidence_blocks": 11,
         "state_vector_fields": 7,
         "performance_chain_fields": 7,

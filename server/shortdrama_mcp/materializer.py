@@ -360,6 +360,12 @@ KEYFRAME_FORBIDDEN_RE = re.compile(
     r"BGM|配乐|声音|声响|脚步声|呼吸声|衣料声)",
     flags=re.IGNORECASE,
 )
+KEYFRAME_UNOBSERVABLE_RE = re.compile(
+    r"整个故事中最幸福的一刻|没有战争|没有离别|没有未来的悲伤|"
+    r"(?:红色|颜色)[^；。\n]{0,10}代表(?:着)?[^；。\n]{0,12}(?:爱情|婚姻|希望)|"
+    r"(?:未来|多年后)[^；。\n]{0,18}(?:无法忘记|仍然难忘|仍难忘|忘不了)",
+    flags=re.IGNORECASE,
+)
 # Import-compatible representative literals for callers that enumerate the
 # v0.5.1 static gate.  The regex above is the authoritative detector.
 KEYFRAME_FORBIDDEN_DYNAMIC_TERMS = (
@@ -977,15 +983,25 @@ def compile_gpt_keyframe_instruction(
     dynamic_hits = sorted(
         {match.group(0) for match in KEYFRAME_FORBIDDEN_RE.finditer(prompt)}
     )
+    unobservable_hits = sorted(
+        {match.group(0) for match in KEYFRAME_UNOBSERVABLE_RE.finditer(prompt)}
+    )
     context_hits = _contract_hits(prompt, BLANK_CONTEXT_FORBIDDEN_TERMS)
-    if dynamic_hits or context_hits:
+    if dynamic_hits or context_hits or unobservable_hits:
         reasons = []
         if dynamic_hits:
             reasons.append("dynamic=" + ",".join(dynamic_hits))
         if context_hits:
             reasons.append("cross_shot=" + ",".join(context_hits))
+        if unobservable_hits:
+            reasons.append("unobservable=" + ",".join(unobservable_hits))
         raise ValueError(
-            "keyframe_static_contract_violation: " + "; ".join(reasons)
+            (
+                "keyframe_unobservable_contract_violation: "
+                if unobservable_hits
+                else "keyframe_static_contract_violation: "
+            )
+            + "; ".join(reasons)
         )
     return prompt
 

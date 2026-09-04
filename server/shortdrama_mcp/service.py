@@ -579,7 +579,7 @@ PATCH_FORBIDDEN_FIELD_TERMS = (
 AUDIT_GATE_IDS = tuple(f"G{index}" for index in range(14))
 AUDIT_LAYER_NAMES = SEMANTIC_AUDIT_LAYER_NAMES
 SEMANTIC_AUDIT_CONTRACT_VERSION = (
-    "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes"
+    "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting"
 )
 STRICT_OUTPUT_CONTRACT = "R10-SPC-1"
 SEMANTIC_AUDIT_CONTRACT_FINGERPRINT = sha256_bytes(
@@ -976,9 +976,9 @@ def _issue_category(error_code: str) -> str:
         return "镜头节奏"
     if any(term in code for term in ("SOURCE", "DIALOGUE", "COGNITION", "CHANGELOCK", "CHAPTER-INTAKE")):
         return "源文对白"
-    if any(term in code for term in ("CAMERA", "VISIBLE", "VISIBILITY")):
+    if any(term in code for term in ("CAMERA", "VISIBLE", "VISIBILITY", "T2I", "LIGHT")):
         return "机位可见性"
-    if any(term in code for term in ("CONTINUITY", "SPATIAL", "LIGHT")):
+    if any(term in code for term in ("CONTINUITY", "SPATIAL")):
         return "空间连续"
     if "VOICE" in code:
         return "禁项与声音"
@@ -3127,6 +3127,26 @@ class StoryboardService:
                 f"expected={expected_voice_evidence_ids}, submitted={submitted_voice_evidence_ids}"
             )
 
+        lighting_fields = ("光影", "光源来源", "光源方向", "色温倾向")
+        expected_lighting_evidence_ids = [
+            f"field:{shot_ref}.{field_name}"
+            for shot_ref in ordered_shot_refs
+            for field_name in lighting_fields
+        ]
+        expected_lighting_evidence_set = set(expected_lighting_evidence_ids)
+        submitted_lighting_evidence_ids = [
+            str(evidence_id)
+            for evidence_id in layer_by_name["机位可见性"]["evidence_ids"]
+            if str(evidence_id) in expected_lighting_evidence_set
+        ]
+        if submitted_lighting_evidence_ids != expected_lighting_evidence_ids:
+            raise ValueError(
+                "semantic_audit_t2i_lighting_coverage_incomplete: 机位可见性层必须按canonical顺序"
+                "逐镜依次提交field:镜头编号.光影、光源来源、光源方向、色温倾向证据；"
+                f"expected={expected_lighting_evidence_ids}, "
+                f"submitted={submitted_lighting_evidence_ids}"
+            )
+
         adaptation_audit = (
             storyboard.get("prevention_evidence", {}).get(
                 "dialogue_adaptation_audit"
@@ -3477,6 +3497,24 @@ class StoryboardService:
                 "audio_layer_status": layer_matrix["禁项与声音"]["status"],
                 "machine_voice_issue_count": sum(
                     str(item.get("error_code") or "") == "E-VOICE-001"
+                    for item in machine_issues
+                ),
+            },
+            "t2i_lighting_field_coverage": {
+                "contract": "t2i-static-observable-lighting-v1",
+                "expected_shot_count": len(ordered_shot_refs),
+                "expected_field_count": len(expected_lighting_evidence_ids),
+                "reviewed_field_count": len(submitted_lighting_evidence_ids),
+                "coverage_percent": 100.0,
+                "ordered_fields": list(lighting_fields),
+                "evidence_ids": expected_lighting_evidence_ids,
+                "camera_visibility_layer_status": layer_matrix["机位可见性"]["status"],
+                "machine_t2i_issue_count": sum(
+                    str(item.get("error_code") or "") == "E-T2I-001"
+                    for item in machine_issues
+                ),
+                "machine_lighting_issue_count": sum(
+                    str(item.get("error_code") or "") == "E-LIGHT-001"
                     for item in machine_issues
                 ),
             },
@@ -14024,6 +14062,9 @@ class StoryboardService:
                     "voice_field_coverage": copy.deepcopy(
                         evidence_matrix.get("voice_field_coverage")
                     ),
+                    "t2i_lighting_field_coverage": copy.deepcopy(
+                        evidence_matrix.get("t2i_lighting_field_coverage")
+                    ),
                     "adapted_dialogue_coverage": copy.deepcopy(
                         evidence_matrix.get("adapted_dialogue_coverage")
                     ),
@@ -16124,6 +16165,9 @@ class StoryboardService:
             ),
             "voice_field_coverage": evidence_matrix.get(
                 "voice_field_coverage"
+            ),
+            "t2i_lighting_field_coverage": evidence_matrix.get(
+                "t2i_lighting_field_coverage"
             ),
             "adapted_dialogue_coverage": evidence_matrix.get(
                 "adapted_dialogue_coverage"

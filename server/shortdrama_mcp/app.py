@@ -975,6 +975,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "源文对白层必须按Source Ledger顺序提交每个source-unit:单元ID，独立复核"
             "会话／混合会话／非会话判定；并按canonical顺序提交每个事实转化对白目标镜的"
             "field:镜头编号.画面内容证据，与THG-16场景语义和来源证明共同闭合。"
+            "机位可见性层必须按canonical及固定字段顺序，逐镜提交光影、光源来源、"
+            "光源方向、色温倾向四项field证据，并与THG-17静帧可见语义及有源光影机器门禁闭合。"
             "同时逐一提交恰好八层的结论、摘要、具体证据ID"
             "及语义问题，reviewed_batch_count固定为0且禁止batch证据/目标；第六层审计正式母版"
             "单镜执行完整性，表演层必须检查眼球换焦、眼睑变化、眨眼时点、重音不眨与多人错峰。"

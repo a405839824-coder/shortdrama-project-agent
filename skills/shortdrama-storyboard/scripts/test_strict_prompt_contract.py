@@ -349,6 +349,50 @@ def main() -> int:
         "THG-15",
     )
     run_code_test(
+        "SPC-THG17-UNOBSERVABLE-SYMBOLISM",
+        lambda obj: obj["shots"][0].__setitem__(
+            "光影",
+            obj["shots"][0]["光影"] + "；红色代表爱情、婚姻和希望。",
+        ),
+        "E-T2I-001",
+        "THG-17",
+    )
+    run_code_test(
+        "SPC-THG17-DAY-NIGHT-CONFLICT",
+        lambda obj: obj["shots"][0].__setitem__(
+            "空间站位描述",
+            "深夜的香雅院正厅；邹氏坐画面中右主位，江氏坐左侧下首椅，"
+            "许氏坐右侧后位；闭合厅门与木格窗关系清楚。",
+        ),
+        "E-LIGHT-001",
+        "THG-17",
+    )
+    run_code_test(
+        "SPC-THG17-RIM-LIGHT-WITHOUT-BACKLIGHT",
+        lambda obj: obj["shots"][0].__setitem__(
+            "光影",
+            obj["shots"][0]["光影"] + "；江氏发丝边缘形成暖色轮廓光。",
+        ),
+        "E-LIGHT-001",
+        "THG-17",
+    )
+    run_code_test(
+        "SPC-THG17-PRACTICAL-SOURCE-NOT-IN-SCENE",
+        lambda obj: obj["shots"][0].__setitem__(
+            "光源来源", "画面右侧红烛为主光，左前浅色墙面提供弱反射光。"
+        ),
+        "E-LIGHT-001",
+        "THG-17",
+    )
+    run_code_test(
+        "SPC-THG17-VOLUMETRIC-LIGHT-WITHOUT-MEDIUM",
+        lambda obj: obj["shots"][0].__setitem__(
+            "光影", obj["shots"][0]["光影"] + "；窗前出现清晰丁达尔光束。"
+        ),
+        "E-LIGHT-001",
+        "THG-17",
+    )
+    run_code_test(
         "SPC-BGM-LITERAL-IN-EXECUTION-FIELD",
         lambda obj: obj["shots"][0].__setitem__("生成限制", "9:16竖屏；禁止BGM、字幕与水印。"),
         "E-AUDIO-STAGE-001",
@@ -392,9 +436,9 @@ def main() -> int:
     )
     production_audit = audit_types.get("production_preflight", {})
     independent_audit = audit_types.get("independent_audit", {})
-    thg16_passed = (
+    thg17_passed = (
         [row.get("gate_id") for row in hard_gates]
-        == [f"THG-{index:02d}" for index in range(1, 17)]
+        == [f"THG-{index:02d}" for index in range(1, 18)]
         and runtime_rules.get("compact_master_contract", {}).get(
             "projection_text_normalization"
         ) == "UTF-8_NFC_LF"
@@ -405,8 +449,8 @@ def main() -> int:
         and independent_audit.get("must_recompute_all_quality_conclusions") is True
     )
     results.append({
-        "test_id": "SPC-THG01-16-AUDIT-AUTHORITY-AND-RULE-CERTIFICATE",
-        "passed": thg16_passed,
+        "test_id": "SPC-THG01-17-AUDIT-AUTHORITY-AND-RULE-CERTIFICATE",
+        "passed": thg17_passed,
         "hard_gate_ids": [row.get("gate_id") for row in hard_gates],
         "projection_text_normalization": runtime_rules.get(
             "compact_master_contract", {}

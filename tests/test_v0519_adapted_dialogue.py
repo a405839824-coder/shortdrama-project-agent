@@ -220,12 +220,20 @@ class AdaptedDialogueIndependentAuditTests(unittest.TestCase):
                     "场景连续性ID": "E13-S01",
                     "画面内容": "老管事代表说道：“夫人，要不先开始？”",
                     "音色": "基础声线：中年男声。",
+                    "光影": "晨光照亮人物面部与名册",
+                    "光源来源": "左侧窗外晨光",
+                    "光源方向": "画面左侧斜落并向厅内衰减",
+                    "色温倾向": "中性微暖，肤色与木色保持本色",
                 },
                 {
                     "镜头编号": "EP13-002",
                     "场景连续性ID": "E13-S01",
                     "画面内容": "苏清柳点头。",
                     "音色": "无对白，不适用。",
+                    "光影": "晨光照亮人物面部与名册",
+                    "光源来源": "左侧窗外晨光",
+                    "光源方向": "画面左侧斜落并向厅内衰减",
+                    "色温倾向": "中性微暖，肤色与木色保持本色",
                 },
             ],
         }
@@ -263,6 +271,12 @@ class AdaptedDialogueIndependentAuditTests(unittest.TestCase):
                 evidence = ["pair:EP13-001->EP13-002"]
             elif layer == "禁项与声音":
                 evidence.append("field:EP13-001.音色")
+            elif layer == "机位可见性":
+                evidence.extend(
+                    f"field:{shot['镜头编号']}.{field_name}"
+                    for shot in self.storyboard["shots"]
+                    for field_name in ("光影", "光源来源", "光源方向", "色温倾向")
+                )
             elif layer == "源文对白":
                 evidence.append("field:EP13-001.画面内容")
                 evidence.append("source-unit:CH18-U01")

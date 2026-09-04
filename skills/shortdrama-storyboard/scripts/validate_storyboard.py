@@ -68,6 +68,10 @@ ADAPTED_DIALOGUE_TREATMENTS = {
     "不转对白",
 }
 ADAPTED_DIALOGUE_AFFORDANCE = {"必须转对白", "建议转对白", "不宜转对白"}
+NARRATIVE_SCENE_SEMANTICS = {"叙述性会话场景", "混合会话场景", "非会话叙述"}
+COMMUNICATION_FUNCTIONS = {
+    "问答", "劝决", "令应", "报听", "辩核", "证判", "说明", "协商", "拒绝", "其他",
+}
 DEPRECATED_LABEL_SCAN_FIELDS = {
     "功能类型", "场景连续性ID", "镜头类型", "可见主体", "空间站位描述", "起始状态",
     "机位", "运镜方式", "画面内容", "音色", "心理音轨", "环境音效", "环境动态",
@@ -233,6 +237,12 @@ KEYFRAME_FORBIDDEN_RE = re.compile(
     r"BGM|配乐|声音|声响|脚步声|呼吸声|衣料声)",
     re.I,
 )
+KEYFRAME_UNOBSERVABLE_RE = re.compile(
+    r"整个故事中最幸福的一刻|没有战争|没有离别|没有未来的悲伤|"
+    r"(?:红色|颜色)[^；。\n]{0,10}代表(?:着)?[^；。\n]{0,12}(?:爱情|婚姻|希望)|"
+    r"(?:未来|多年后)[^；。\n]{0,18}(?:无法忘记|仍然难忘|仍难忘|忘不了)",
+    re.I,
+)
 
 KEYFRAME_TIMECODE_RE = re.compile(
     r"(?:\[|【)?\s*\d+(?:\.\d+)?\s*(?:秒|s)?\s*[-—–~至]\s*"
@@ -308,6 +318,26 @@ LIGHT_SUBJECT_RE = re.compile(r"主体|人物|面部|眼神|手部|道具|高光
 LIGHT_SOURCE_RE = re.compile(r"窗|门|日光|晨光|天光|烛|灯|火|月光|反射光|补光|廊|庭院|水面|雪面")
 LIGHT_DIRECTION_RE = re.compile(r"画面左|画面右|左侧|右侧|左前|右前|左后|右后|上方|下方|前方|后方")
 LIGHT_PATH_RE = re.compile(r"斜落|斜照|投向|落向|补面|衰减|递减|纵深|暗侧|明侧")
+DAY_SCENE_RE = re.compile(r"清晨|晨间|早晨|上午|正午|午后|白昼|日间|晴日|早膳后")
+NIGHT_SCENE_RE = re.compile(r"夜晚|夜间|深夜|月夜|入夜|黄昏后|黎明前|子时|亥时")
+DAYLIGHT_SOURCE_RE = re.compile(r"日光|阳光|晨光|午后光|太阳光")
+MOONLIGHT_SOURCE_RE = re.compile(r"月光|月色|夜空")
+PRACTICAL_LIGHT_RE = re.compile(r"红烛|烛火|烛台|油灯|灯笼|火盆|火焰|火场|灯火")
+INTERIOR_SCENE_RE = re.compile(r"室内|内室|闺阁|厅|房|堂|殿|阁|书斋|卧室|侧厅")
+DAYLIGHT_APERTURE_RE = re.compile(r"窗|门|天井|敞口|廊|庭院|院中|室外|户外|街|巷|市|城门|野外")
+DARK_INTERIOR_EXCEPTION_RE = re.compile(r"暗室|密室|地窖|地下|无窗|封闭|遮光")
+BACKLIGHT_EFFECT_RE = re.compile(r"轮廓光|发丝(?:边缘|外缘)[^；。\n]{0,8}(?:光|亮)|肩(?:线|部)(?:边缘)?[^；。\n]{0,8}(?:光|亮)")
+BACKLIGHT_DIRECTION_RE = re.compile(r"后方|侧后|斜后|背后|逆光")
+EYE_FIRE_REFLECTION_RE = re.compile(
+    r"(?:眼睛|眼中|眼神)[^；。\n]{0,12}(?:烛火|灯火|火光)[^；。\n]{0,10}(?:反射|倒影|光点)|"
+    r"(?:烛火|灯火|火光)[^；。\n]{0,12}(?:映在|反射)[^；。\n]{0,8}(?:眼睛|眼中|眼神)"
+)
+HALATION_RE = re.compile(r"halation|高光晕染|高光[^；。\n]{0,6}光晕|镜头光晕", re.I)
+RESTRAINED_EFFECT_RE = re.compile(r"轻微|极轻微|克制|细腻|仅有|少量")
+VOLUMETRIC_LIGHT_RE = re.compile(r"丁达尔|体积光|光束")
+SCATTERING_MEDIUM_RE = re.compile(r"雾|烟|尘|水汽|香火|空气颗粒")
+UNIFORM_FACE_LIGHT_RE = re.compile(r"面部[^；。\n]{0,12}(?:柔和均匀|均匀照亮)|全脸[^；。\n]{0,8}均匀")
+WEAK_FILL_RE = re.compile(r"反射|补光|夜空|月色|浅色墙|地面|纱幔|窗外")
 
 FORMAL_MASTER_FIELD_ORDER = [
     "空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "音色", "心理音轨",
@@ -1185,10 +1215,16 @@ def project_gpt_keyframe(shot: dict[str, Any]) -> str:
     prompt = "\n".join(lines)
     _assert_projected_aspect_contract(prompt, projection="gpt_keyframe")
     forbidden_hits = _keyframe_forbidden_hits(prompt)
+    unobservable_hits = _keyframe_unobservable_hits(prompt)
     context_hits = sorted(term for term in CROSS_SHOT_TERMS if term in prompt)
-    if forbidden_hits or context_hits:
+    if forbidden_hits or context_hits or unobservable_hits:
+        violation_name = (
+            "keyframe_unobservable_contract_violation"
+            if unobservable_hits
+            else "keyframe_static_contract_violation"
+        )
         raise ValueError(
-            "keyframe_static_contract_violation: "
+            violation_name + ": "
             + "; ".join(
                 part
                 for part in (
@@ -1196,6 +1232,8 @@ def project_gpt_keyframe(shot: dict[str, Any]) -> str:
                     if forbidden_hits else "",
                     "cross_shot=" + ",".join(context_hits)
                     if context_hits else "",
+                    "unobservable=" + ",".join(unobservable_hits)
+                    if unobservable_hits else "",
                 )
                 if part
             )
@@ -1352,6 +1390,94 @@ def _keyframe_forbidden_hits(value: Any) -> list[str]:
     return sorted({match.group(0) for match in KEYFRAME_FORBIDDEN_RE.finditer(str(value or ""))})
 
 
+def _keyframe_unobservable_hits(value: Any) -> list[str]:
+    return sorted({
+        match.group(0)
+        for match in KEYFRAME_UNOBSERVABLE_RE.finditer(str(value or ""))
+    })
+
+
+def _lighting_context_faults(shot: dict[str, Any]) -> list[str]:
+    """Check that authored light effects follow the scene's physical facts."""
+
+    light = str(shot.get("光影") or "")
+    source = str(shot.get("光源来源") or "")
+    direction = str(shot.get("光源方向") or "")
+    color = str(shot.get("色温倾向") or "")
+    physical_fields = (
+        "可见主体", "空间站位描述", "起始状态", "画面内容",
+        "环境动态", "参考图锚定",
+    )
+    context_fields = (
+        "功能类型", "镜头类型", *physical_fields,
+        "覆盖原文", "原文依据类型", "原文支撑句",
+    )
+    physical = " ".join(str(shot.get(field) or "") for field in physical_fields)
+    context = " ".join(str(shot.get(field) or "") for field in context_fields)
+    effect_blob = f"{light} {color} {shot.get('生成限制') or ''}"
+    faults: list[str] = []
+
+    is_day = bool(DAY_SCENE_RE.search(context))
+    is_night = bool(NIGHT_SCENE_RE.search(context))
+    dark_exception = bool(DARK_INTERIOR_EXCEPTION_RE.search(context))
+    if is_day and is_night:
+        faults.append("同一静态镜头同时声明日景与夜景时段，必须先锁定唯一时间")
+    if is_night and DAYLIGHT_SOURCE_RE.search(source):
+        faults.append("夜景/黄昏后/黎明前不得使用清晨、午后或太阳日光")
+    if is_day and not dark_exception and (
+        MOONLIGHT_SOURCE_RE.search(source)
+        or re.search(r"青黑夜色|电影级低照度", effect_blob)
+    ):
+        faults.append("明确日景不得套用月光、青黑夜色或无依据低照度预设")
+
+    if (
+        DAYLIGHT_SOURCE_RE.search(source)
+        and INTERIOR_SCENE_RE.search(context)
+        and not DAYLIGHT_APERTURE_RE.search(physical)
+    ):
+        faults.append("室内日光缺窗、门、天井或其他真实入光开口")
+
+    practical_match = PRACTICAL_LIGHT_RE.search(source)
+    if practical_match and not PRACTICAL_LIGHT_RE.search(physical):
+        external_practical = re.search(
+            r"(?:门外|窗外|画外)[^；。\n]{0,12}(?:烛|灯|火)", source
+        )
+        has_aperture = re.search(r"门|窗", physical)
+        if not (external_practical and has_aperture):
+            faults.append(
+                f"主光写{practical_match.group(0)!r}，但空间/起始/画面/锚点未建立对应灯火"
+            )
+
+    if MOONLIGHT_SOURCE_RE.search(source) and not DAYLIGHT_APERTURE_RE.search(physical):
+        faults.append("月光/夜空补光缺室外空间或门窗等真实通路")
+
+    if BACKLIGHT_EFFECT_RE.search(light) and not BACKLIGHT_DIRECTION_RE.search(direction):
+        faults.append("发丝或肩线轮廓光必须由后方、侧后、斜后或明确逆光形成")
+
+    if EYE_FIRE_REFLECTION_RE.search(light) and not PRACTICAL_LIGHT_RE.search(source):
+        faults.append("眼中灯火反射缺场内真实烛、灯或火光来源")
+
+    if HALATION_RE.search(effect_blob) and not RESTRAINED_EFFECT_RE.search(effect_blob):
+        faults.append("halation/镜头光晕必须限定为轻微、极轻微、克制或少量")
+
+    if VOLUMETRIC_LIGHT_RE.search(effect_blob) and not SCATTERING_MEDIUM_RE.search(physical):
+        faults.append("丁达尔/体积光/光束缺雾、烟、尘或水汽等散射介质")
+
+    if (
+        UNIFORM_FACE_LIGHT_RE.search(light)
+        and (PRACTICAL_LIGHT_RE.search(source) or MOONLIGHT_SOURCE_RE.search(source))
+        and not WEAK_FILL_RE.search(source)
+    ):
+        faults.append("低照度灯火下的柔和均匀面光缺可解释的弱反射补光")
+
+    if "如梦似幻" in effect_blob and not (
+        "真实" in effect_blob and RESTRAINED_EFFECT_RE.search(effect_blob)
+    ):
+        faults.append("如梦似幻必须转成真实且克制的扩散/晕染，不能作为无物理依据光效")
+
+    return faults
+
+
 def _active_music_directive(value: Any) -> str:
     without_bans, _mentioned = _strip_negative_music_clauses(value)
     instruction_text, _protected = _protect_visual_text_fragments(without_bans)
@@ -1498,9 +1624,11 @@ def _validate_adapted_dialogue_audit(
     Direct source dialogue remains governed by THG-05.  Any audible line that
     is not one of those exact protected occurrences is an adapted line and
     must be traceable to a narrative source fact without adding plot facts.
-    The ledger also forces an explicit treatment decision for narrative units
-    that contain an observable speech act, preventing them from silently
-    collapsing into generic hand gestures.
+    Every in-scope narrative unit receives a scene-semantic decision.  This is
+    deliberately broader than verb matching: prose may describe a question /
+    report / excuse / verification exchange without quoting a line or using a
+    canonical speech verb.  Conversation and mixed-conversation units must be
+    realised as dialogue beats instead of silently collapsing into gestures.
     """
 
     source_lock = obj.get("source_lock")
@@ -1597,10 +1725,6 @@ def _validate_adapted_dialogue_audit(
                 protected_occurrences.add((ref, speaker, text))
 
     source_ledger = evidence.get("source_ledger") if isinstance(evidence, dict) else None
-    mandatory_re = re.compile(
-        r"有人(?:劝|说|称)|声称|宣称|亲口说|只让.{0,40}(?:说明|陈述)|"
-        r"主动指出|承认|反问|急忙解释|要求.{0,30}(?:再看|交|做)"
-    )
     expected_candidates: list[dict[str, Any]] = []
     if isinstance(source_ledger, list):
         for index, row in enumerate(source_ledger, 1):
@@ -1631,17 +1755,14 @@ def _validate_adapted_dialogue_audit(
                 NARRATIVE_SPEECH_ACT_RE.search(positive_speech_text)
                 or re.search(r"改编完整展开对白|保护对白完整展开", source_type)
             )
-            if not speech_cue or has_protected_target:
+            if has_protected_target:
                 continue
             expected_candidates.append({
                 "source_ledger_index": index,
                 "source_unit_id": str(row.get("source_id") or "").strip(),
                 "source_text": source_text,
                 "target_shots": targets,
-                "mandatory": bool(
-                    mandatory_re.search(source_text)
-                    or re.search(r"改编完整展开对白|保护对白完整展开", source_type)
-                ),
+                "speech_cue": speech_cue,
                 "scope_crossing": False,
             })
 
@@ -1658,6 +1779,8 @@ def _validate_adapted_dialogue_audit(
         "dialogue_affordance", "treatment", "speaker", "adapted_text",
         "target_shots", "fact_atoms", "speaker_basis", "authorization",
         "plot_change", "new_plot_facts", "entailment_status", "adaptation_reason",
+        "scene_semantics", "communication_functions", "exchange_participants",
+        "speech_necessity_basis",
     }
     candidate_keys = [
         (row["source_ledger_index"], row["source_unit_id"], tuple(row["target_shots"]))
@@ -1718,9 +1841,38 @@ def _validate_adapted_dialogue_audit(
             add(location, f"dialogue_affordance非法：{affordance!r}")
         if treatment not in ADAPTED_DIALOGUE_TREATMENTS:
             add(location, f"treatment非法：{treatment!r}")
-        if matching_candidate and matching_candidate["mandatory"]:
+        scene_semantics = str(row.get("scene_semantics") or "").strip()
+        if scene_semantics not in NARRATIVE_SCENE_SEMANTICS:
+            add(location, f"scene_semantics非法：{scene_semantics!r}")
+        communication_functions = row.get("communication_functions")
+        if not isinstance(communication_functions, list):
+            add(location, "communication_functions必须是有序数组。")
+            communication_functions = []
+        invalid_functions = [
+            value for value in communication_functions
+            if str(value).strip() not in COMMUNICATION_FUNCTIONS
+        ]
+        if invalid_functions:
+            add(location, f"communication_functions含非法值：{invalid_functions}")
+        participants = row.get("exchange_participants")
+        if not isinstance(participants, list):
+            add(location, "exchange_participants必须是有序数组。")
+            participants = []
+        if not str(row.get("speech_necessity_basis") or "").strip():
+            add(location, "speech_necessity_basis不能为空，必须说明本叙述为何需要或不需要人物开口。")
+
+        conversation_scene = scene_semantics in {"叙述性会话场景", "混合会话场景"}
+        if matching_candidate and matching_candidate.get("speech_cue") and not conversation_scene:
+            add(location, "原文已发生言语行为，不得判为非会话叙述。")
+        if conversation_scene:
             if affordance != "必须转对白" or treatment != "原文事实转化对白":
-                add(location, "原文明确说话行为必须转为对白，不得再次降级为无声动作。")
+                add(location, "会话或混合会话场景必须还原为对白，不得降级为无声动作。")
+            if not communication_functions:
+                add(location, "会话场景必须列出问答、劝决、令应、报听、辩核或证判等交流功能。")
+            if len([value for value in participants if str(value).strip()]) < 2:
+                add(location, "会话场景必须列出至少两个交流参与方（说话者与接收者）。")
+        elif treatment == "原文事实转化对白":
+            add(location, "采用原文事实转化对白时，scene_semantics不得标为非会话叙述。")
 
         if row.get("plot_change") is not False:
             add(location, "plot_change必须明确为false。")
@@ -1781,10 +1933,17 @@ def _validate_adapted_dialogue_audit(
         1 for row in entries
         if isinstance(row, dict) and row.get("treatment") == "原文事实转化对白"
     )
+    conversation_scene_count = sum(
+        1 for row in entries
+        if isinstance(row, dict)
+        and row.get("scene_semantics") in {"叙述性会话场景", "混合会话场景"}
+    )
     metrics = {
         "candidate_unit_count": expected_count,
         "reviewed_unit_count": reviewed_count,
         "adapted_dialogue_count": adapted_count,
+        "conversation_scene_count": conversation_scene_count,
+        "scene_classification_count": reviewed_count,
         "coverage_percent": 100,
         "ordered_entry_sha256": _stable_sha256(adaptation_ids),
     }
@@ -3032,6 +3191,8 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                 message = str(exc)
                 if "aspect_ratio" in message:
                     code, gate = "E-I2V-INDEP-002", "THG-01"
+                elif "unobservable_contract" in message:
+                    code, gate = "E-T2I-001", "THG-17"
                 else:
                     code, gate = "E-JIMENG-TIMING-001", "THG-03"
                 issues.append(_issue(
@@ -3051,6 +3212,16 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                     f"静态关键帧投影命中动态、时间、对白或声音指令：{keyframe_hits}",
                     repair="只从静态起始状态、静态机位、光影、锚点和9:16生成限制重投影。",
                     template_gate_id="THG-03",
+                ))
+            unobservable_hits = _keyframe_unobservable_hits(gpt_projection)
+            if unobservable_hits:
+                issues.append(_issue(
+                    catalog,
+                    "E-T2I-001",
+                    f"{location}.GPT关键帧生成指令",
+                    f"静态关键帧含单帧不可证明的作者旁白、未来信息或象征结论：{unobservable_hits}",
+                    repair="将必要含义转为可见眼神、唇线、手部、距离、道具、环境活动、材质与有源光色；其余从关键帧删除。",
+                    template_gate_id="THG-17",
                 ))
         invisible_context = _has_any(f"{shot_type} {visible}", INVISIBLE_SHOT_TERMS) and not _has_any(visible, FACE_VISIBLE_TERMS)
         if invisible_context:
@@ -3149,12 +3320,15 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                 light_faults.append("色温倾向必须写定性暖冷关系及空间/肤色/材质本色")
             if color_temp.strip() in {"暖中性", "中性微暖", "偏暖", "偏冷", "冷暖对比", "电影感"}:
                 light_faults.append("色温倾向只有空泛色调标签")
+            light_faults.extend(_lighting_context_faults(shot))
             if light_faults:
                 issues.append(_issue(
                     catalog,
                     "E-LIGHT-001",
                     f"{location}.光影/光源来源/光源方向/色温倾向",
                     "；".join(light_faults),
+                    repair="按时间→空间/门窗→天气→真实主光/弱补光→方向/高度→受光对象→曝光材质→叙事功能→同场连续性重写；无物理前提的轮廓光、眼中灯火反射、halation和丁达尔光必须删除。",
+                    template_gate_id="THG-17",
                 ))
         if "底光" in f"{light} {light_source}" and _has_any(str(shot.get("功能类型", "")), ["甜宠", "温情", "浪漫", "关系"]):
             issues.append(_issue(catalog, "E-LIGHT-002", f"{location}.光影", "普通关系/浪漫镜使用底光，需改为有源且有剧情必要的光效。", severity="warning"))

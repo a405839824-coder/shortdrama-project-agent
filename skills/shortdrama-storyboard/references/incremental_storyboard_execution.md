@@ -7,9 +7,9 @@ Use this reference for an existing storyboard version when the requested work ca
 All paths in this protocol preserve these invariants:
 
 - one final canonical object per artifact version;
-- the existing 49 content validators;
+- the existing 50 content validators;
 - the ordered G0–G13 preventive gates;
-- the THG-01–THG-16 template hard gates, complete N-1 adjacent-pair proof, dialogue-shot voice-field proof, source-fact dialogue proof, and actual multiline XLSX round-trip;
+- the THG-01–THG-17 template hard gates, complete N-1 adjacent-pair proof, dialogue-shot voice-field proof, source-fact dialogue proof, and actual multiline XLSX round-trip;
 - the complete eight-layer independent audit;
 - the mandatory `get_agent_status` → `migrate_project_state` when required → `query_project_issues` → per-scene `preflight_storyboard_draft` → signed full `preflight_storyboard_draft` → certificate-bound `commit_storyboard` → `audit_storyboard` sequence;
 - a first-draft grade of overall correctness and direct usability at least 98%, each episode at least 96%, new local issues at most 2%, and zero hard errors, major issues, known recurrences, or systemic duplicate patterns;
@@ -111,7 +111,7 @@ The 0.5.5 deterministic outputs are limited to cumulative time, total duration, 
 - `正式分镜母版`, the only blank-context executable single-shot master, beginning with the exact EP ID/duration/cumulative line and paragraph order defined by `strict_prompt_contract.md`; every shot's `生成限制` explicitly contains `9:16竖屏` and uses `禁止额外配乐` rather than the literal `BGM`;
 - `GPT关键帧生成指令`, beginning with `画幅：9:16竖屏` and projected only from the static whitelist, with timing, motion, transition, dialogue, lip-sync and audio instructions removed.
 
-The workbook projection has exactly ten columns: `分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`. No third long-text projection exists. New display IDs use `EP##-###`; cumulative time resets at each episode boundary while batch total duration remains the sum of all shot durations. Export is blocked until THG-01–THG-16, the complete N-1 adjacent-pair proof, fixed voice-template validation, source-fact dialogue validation, and the actual multiline XLSX round-trip pass.
+The workbook projection has exactly ten columns: `分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`. No third long-text projection exists. New display IDs use `EP##-###`; cumulative time resets at each episode boundary while batch total duration remains the sum of all shot durations. Export is blocked until THG-01–THG-17, the complete N-1 adjacent-pair proof, fixed voice-template validation, source-fact dialogue validation, T2I/lighting validation, and the actual multiline XLSX round-trip pass.
 
 The exporter must not invent or reinterpret plot, dialogue, character knowledge, motivation, action, camera intent, performance, sound source, lighting, or continuity. If a required creative fact is absent, export fails and returns the task to semantic generation. Production, audit, repair, cache warm-up and background workers must not pre-generate or persist Seedance prompts or batches.
 
@@ -128,7 +128,7 @@ The first submitted full draft is graded immutably. Grade A requires overall cor
 Before `production_to_audit` or `repair_to_audit`:
 
 1. validate every required 27-field formal shot, compile the two deterministic export projections, and compute formulas/statistics;
-2. run the complete existing 49-validator R10 content suite on the full successor artifact;
+2. run the complete existing 50-validator R10 content suite on the full successor artifact;
 3. run all applicable G0–G13 gates and required chapter coverage checks;
 4. verify unchanged-unit semantic hashes and all authorized boundary effects;
 5. verify numbering, cumulative time, formulas, total duration, exact ten-column order, removed-field absence, four lighting atoms, and single-shot stage closure globally;
@@ -146,7 +146,7 @@ The independent auditor then verifies the handoff fingerprints and recomputes al
 7. prohibitions, public-scene people/audio ecology, and audiovisual sources;
 8. numbering, formulas, statistics, residuals, and introduced issues.
 
-On an uncached fingerprint set, this review is an explicit `semantic_audit` submission under `semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes`, bound to the canonical hash, exact reviewed shot count, `reviewed_adjacent_pair_count=N-1`, and the SHA-256 of the canonical ordered pair list. Each of the eight unique layers must carry its own pass/fail state, concise summary, and concrete evidence IDs; the spatial layer lists every `pair:left->right` exactly once and in canonical order, the performance layer audits the timed eye/blink contract, the prohibitions/audio layer lists every dialogue shot's `field:shot_id.音色` exactly once in canonical order, and the source/dialogue layer first lists every `source-unit:unit_id` in Source Ledger order and then every source-fact dialogue target's `field:shot_id.画面内容` exactly once in canonical order. Every failed layer must have at least one targeted issue with evidence and a repair action, and the conclusion must agree with the layers. The service combines that submission with a freshly recomputed machine report. It must not manufacture an eight-layer pass from zero machine issues or regenerate text during audit. Only a valid exact independent-audit cache hit under the same v6 contract may omit the submission; v1/v2/v3/v4/v5 cache entries remain history but are invalid for active release.
+On an uncached fingerprint set, this review is an explicit `semantic_audit` submission under `semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting`, bound to the canonical hash, exact reviewed shot count, `reviewed_adjacent_pair_count=N-1`, and the SHA-256 of the canonical ordered pair list. Each of the eight unique layers must carry its own pass/fail state, concise summary, and concrete evidence IDs; the spatial layer lists every `pair:left->right` exactly once and in canonical order, the performance layer audits the timed eye/blink contract, the prohibitions/audio layer lists every dialogue shot's `field:shot_id.音色` exactly once in canonical order, and the source/dialogue layer first lists every `source-unit:unit_id` in Source Ledger order and then every source-fact dialogue target's `field:shot_id.画面内容` exactly once in canonical order. The camera-visibility layer lists all four lighting fields for every shot in exact canonical and field order. Every failed layer must have at least one targeted issue with evidence and a repair action, and the conclusion must agree with the layers. The service combines that submission with a freshly recomputed machine report. It must not manufacture an eight-layer pass from zero machine issues or regenerate text during audit. Only a valid exact independent-audit cache hit under the same v7 contract may omit the submission; v1–v6 cache entries remain history but are invalid for active release.
 
 Production preflight, semantic preflight, compact canonicalization/export success, full-table machine validation, repair regression, and cache hits are evidence. None is an independent-audit verdict.
 
