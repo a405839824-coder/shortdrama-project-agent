@@ -3,10 +3,10 @@
   "runtime_version": "V16.3-148-R10-StableRuntime",
   "workflow_revision": "R10-PG1",
   "compact_master_contract": {
-    "plugin_version": "0.5.19",
+    "plugin_version": "0.5.20",
     "schema_version": "R10.1",
     "output_contract": "R10-SPC-1",
-    "semantic_audit_contract_version": "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue",
+    "semantic_audit_contract_version": "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes",
     "source_dialogue_parser_version": "source-dialogue-authority-v6",
     "source_dialogue_grammar_version": "source-dialogue-closed-grammar-v6.3",
     "source_dialogue_authority": "server_registered_source_payload_sha_hub_authority_entry_and_artifact_metadata_role_cross_binding",
@@ -295,7 +295,7 @@
       "operation": "storyboard_audit",
       "group": "审计闭环",
       "status": "supported",
-      "output": "任意认证窗口以独立审计authority按semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue对精确compact canonical提交八层语义证据；绑定镜头数、N-1相邻对数量和有序pair SHA-256，空间层按序覆盖全部pair:left->right，表演层复核眼部链，禁项与声音层按序覆盖每个带对白镜的field:镜头编号.音色，源文对白层按序覆盖每个事实转化对白目标镜的field:镜头编号.画面内容；服务端与源文对白v6权威、新鲜机器N-1证明、THG-15固定音色模板及THG-16事实转化台账交叉校验并创建不可变签名audit overlay新工件/后继工作簿；原生产XLSX和已消费root不就地改写，审计过程禁止再生成内容",
+      "output": "任意认证窗口以独立审计authority按semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes对精确compact canonical提交八层语义证据；绑定镜头数、N-1相邻对数量和有序pair SHA-256，空间层按序覆盖全部pair:left->right，表演层复核眼部链，禁项与声音层按序覆盖每个带对白镜的field:镜头编号.音色，源文对白层按Source Ledger顺序覆盖每个source-unit:单元ID，并按序覆盖每个事实转化对白目标镜的field:镜头编号.画面内容；服务端与源文对白v6权威、新鲜机器N-1证明、THG-15固定音色模板及THG-16事实转化台账交叉校验并创建不可变签名audit overlay新工件/后继工作簿；原生产XLSX和已消费root不就地改写，审计过程禁止再生成内容",
       "approval_policy": "read_only"
     },
     {

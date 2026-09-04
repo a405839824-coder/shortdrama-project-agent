@@ -10,7 +10,7 @@ from mcp.client.stdio import stdio_client
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.5.19"
+EXPECTED_VERSION = "0.5.20"
 EXPECTED_TOOL_NAMES = {
     "get_agent_status",
     "migrate_project_state",
