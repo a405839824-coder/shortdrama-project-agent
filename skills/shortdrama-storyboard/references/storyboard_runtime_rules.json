@@ -60,9 +60,9 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.20",
+    "plugin_version": "0.5.21",
     "output_contract": "R10-SPC-1",
-    "semantic_audit_contract_version": "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes",
+    "semantic_audit_contract_version": "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting",
     "canonical_atomic_field_count": 27,
     "removed_new_write_fields": ["运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气", "心理音轨属性", "生成批次"],
     "picture_content_single_write": ["可见动作", "表情", "视线起点与焦点转移", "眼球先动与头部跟随关系", "眼睑松紧", "具体眨眼时点或有理由不眨眼", "精确对白", "对白发生时点", "可见呼吸与停顿", "重音期间不眨眼", "标点对应表演", "口型一致", "不看镜头", "听者错峰反应与眨眼错峰", "镜尾视线与状态", "恰好三个Seedance 2.5单镜时间阶段"],
@@ -96,6 +96,23 @@
     "gpt_projection": "deterministic_static_export_only",
     "gpt_projection_allowed_fields": ["画幅", "场景", "可见主体", "空间站位描述", "起始状态的单一静态姿态", "机位", "镜头类型", "光影", "光源来源", "光源方向", "色温倾向", "环境静态瞬间", "材质", "参考图锚定", "生成限制"],
     "gpt_projection_forbidden_dynamic_terms": ["硬切", "切至", "转场", "推镜", "拉镜", "跟镜", "摇镜", "由远及近", "随后", "接着", "几秒后"],
+    "static_visual_prompt_contract": {
+      "contract": "t2i-static-observable-lighting-v1",
+      "classification": ["可直接静态投影", "先转为可见证据", "不得进入单帧"],
+      "direct_static_semantics": ["时代地点与空间", "人物造型服饰材质", "一个确定瞬间的表演状态", "站位朝向视线持物", "机位焦段景深焦点", "有源光影与色彩材质", "静态环境状态", "相关负面限制"],
+      "translate_before_projection": ["抽象情绪", "象征意义", "声音活动", "连续动作", "梦幻氛围", "未分责参考图"],
+      "forbidden_still_semantics": ["对白与音频", "时间码与动作过程", "运镜与转场", "眨眼过程", "未来信息", "作者旁白结论", "未决候选"],
+      "lighting_decision_order": ["时间", "室内外与门窗", "天气", "真实主光与弱补光", "方向与高度", "受光对象", "曝光与材质", "叙事功能", "同场连续性"],
+      "physical_preconditions": {
+        "轮廓光": "后方或侧后或斜后主光",
+        "眼中灯火反射": "场内真实灯火与合理反射角",
+        "halation": "真实高亮边缘且轻微克制",
+        "丁达尔光": "定向光束与雾烟尘水汽散射介质",
+        "低照度均匀面光": "明确弱反射补光"
+      },
+      "conditional_song_wedding_profile": "仅在宋代/北宋、新婚或出嫁准备、相符时段与真实光源同时成立时使用对应晨光、朱红婚服、简洁发髻和婚俗限制",
+      "reference": "text_to_image_visual_prompt_decision.md"
+    },
     "projection_text_normalization": "UTF-8_NFC_LF",
     "xlsx_multiline_text_must_roundtrip": true,
     "forbid_canonical_derived_text": true,
@@ -213,7 +230,8 @@
       {"gate_id": "THG-13", "name": "眼神眼睑眨眼与静帧自然性", "error_code": "E-EXPRESSION-003"},
       {"gate_id": "THG-14", "name": "相邻镜头N-1逐组连续性证明", "error_code": "E-CONTINUITY-001"},
       {"gate_id": "THG-15", "name": "音色固定子模板与本镜对白重音", "error_code": "E-VOICE-001"},
-      {"gate_id": "THG-16", "name": "叙述性会话场景逐单元识别与对白还原", "error_code": "E-ADAPTED-DIALOGUE-001"}
+      {"gate_id": "THG-16", "name": "叙述性会话场景逐单元识别与对白还原", "error_code": "E-ADAPTED-DIALOGUE-001"},
+      {"gate_id": "THG-17", "name": "文生图静帧语义与场景光影物理闭合", "error_code": "E-T2I-001/E-LIGHT-001"}
     ],
     "first_draft_quality_gate": {
       "measurement_unit": "unique_affected_shots",
@@ -254,7 +272,7 @@
       "正式分镜母版唯一且按R10-SPC-1空白上下文可执行",
       "Seedance 2.5恰好3个一位小数方括号时间阶段并闭合单镜时长",
       "GPT关键帧为显式9:16、无时间/对白/声音/运镜/转场的静态白名单投影",
-      "THG-01–THG-16全部通过，事实转化对白来源证明闭合，且多行音色子模板反向解析一致",
+      "THG-01–THG-17全部通过，事实转化对白来源证明、静帧语义与场景光影物理前提闭合，且多行音色子模板反向解析一致",
       "无batches、Seedance列、生成批次表或后台重复生成"
     ],
     "release": [
@@ -433,7 +451,7 @@
     }
   },
   "windowed_execution_policy": {
-    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-16、八层审计、相邻镜头N-1逐组证据、逐对白镜音色字段证据、全量叙述单元会话分类与事实转化对白证据或质量阈值。",
+    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少50项验证器、G0-G13、THG-01–THG-17、八层审计、相邻镜头N-1逐组证据、逐对白镜音色字段证据、全量叙述单元会话分类与事实转化对白证据、逐镜四光影字段证据或质量阈值。",
     "activation": {
       "user_window_access": "authenticated_namespace_window_neutral",
       "window_role_restrictions": false,
@@ -917,7 +935,7 @@
         "scope"
       ],
       "explicit_fresh_audit": "reuse_extraction_and_parsing_only_then_recompute_semantic_verdict",
-      "semantic_audit_contract": "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes",
+      "semantic_audit_contract": "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting",
       "invalidation": {
         "dialogue_or_story": "beat_source_mapping_protected_dialogue_cognition",
         "action_or_gaze": "current_shot_neighbors_visibility",
@@ -1011,7 +1029,7 @@
       "efficiency_claim_rule": "只比较相同源文、边界、规则、服务等级和输出契约的可比trace。"
     },
     "quality_equivalence": {
-      "preserve_validator_count": 49,
+      "preserve_validator_count": 50,
       "preserve_ordered_gates": "G0-G13",
       "preserve_audit_layers": 8,
       "preserve_quality_thresholds": true,

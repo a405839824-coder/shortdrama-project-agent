@@ -1522,7 +1522,7 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
     )
     current_v5 = copy.deepcopy(current)
     current_v5["semantic_audit_contract"] = (
-        "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes"
+        "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting"
     )
     current_v5["voice_field_coverage"] = {
         "contract": "fixed-voice-template-v1",
@@ -1532,6 +1532,23 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
         "evidence_ids": [],
         "audio_layer_status": "pass",
         "machine_voice_issue_count": 0,
+    }
+    current_v5["t2i_lighting_field_coverage"] = {
+        "contract": "t2i-static-observable-lighting-v1",
+        "expected_shot_count": 1,
+        "expected_field_count": 4,
+        "reviewed_field_count": 4,
+        "coverage_percent": 100,
+        "ordered_fields": ["光影", "光源来源", "光源方向", "色温倾向"],
+        "evidence_ids": [
+            "field:EP01-001.光影",
+            "field:EP01-001.光源来源",
+            "field:EP01-001.光源方向",
+            "field:EP01-001.色温倾向",
+        ],
+        "camera_visibility_layer_status": "pass",
+        "machine_t2i_issue_count": 0,
+        "machine_lighting_issue_count": 0,
     }
     current_v5["adapted_dialogue_coverage"] = {
         "contract": "source-fact-dialogue-v1",
@@ -1555,7 +1572,7 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
     }
     assert_true(
         list(validator.iter_errors(current_v5)) == [],
-        "valid v6 PASS certificate must carry voice, dialogue, and conversation-scene proofs",
+        "valid v7 PASS certificate must carry voice, dialogue, conversation, T2I, and lighting proofs",
     )
     missing_voice_proof = copy.deepcopy(current_v5)
     missing_voice_proof.pop("voice_field_coverage")
@@ -1574,6 +1591,12 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
     assert_true(
         list(validator.iter_errors(missing_scene_proof)),
         "v6 certificate without conversation-scene classification proof must fail schema validation",
+    )
+    missing_t2i_lighting_proof = copy.deepcopy(current_v5)
+    missing_t2i_lighting_proof.pop("t2i_lighting_field_coverage")
+    assert_true(
+        list(validator.iter_errors(missing_t2i_lighting_proof)),
+        "v7 certificate without T2I/lighting field proof must fail schema validation",
     )
     missing_adjacent = copy.deepcopy(current)
     missing_adjacent.pop("adjacent_continuity")

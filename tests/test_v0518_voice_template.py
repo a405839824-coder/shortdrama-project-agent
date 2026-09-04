@@ -16,6 +16,7 @@ from shortdrama_mcp.file_io import _parse_labeled_cell  # noqa: E402
 from shortdrama_mcp.materializer import (  # noqa: E402
     COMPACT_SHOT_FIELDS,
     compile_formal_merged_field,
+    compile_gpt_keyframe_instruction,
     migrate_storyboard_to_compact,
 )
 
@@ -76,6 +77,12 @@ class FormalVoiceTemplateTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "forbids legacy"):
             migrate_storyboard_to_compact(storyboard)
+
+    def test_gpt_keyframe_rejects_unobservable_symbolic_narration(self) -> None:
+        shot = compact_shot()
+        shot["光影"] = "红色代表爱情、婚姻和希望。"
+        with self.assertRaisesRegex(ValueError, "keyframe_unobservable_contract_violation"):
+            compile_gpt_keyframe_instruction(shot, assume_compact=True)
 
 
 if __name__ == "__main__":

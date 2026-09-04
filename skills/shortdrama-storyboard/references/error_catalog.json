@@ -158,9 +158,20 @@
     "module": "CINEMATIC",
     "severity": "fail",
     "blocking": true,
-    "trigger_condition": "光影四项缺失或空泛；光源来源/方向存在二选一‘或’；色温倾向含Kelvin/K数值、只有暖中性等泛词或缺场景暖冷空间关系",
-    "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-    "repair_action": "分别重写主要受光关系、唯一有源光源、画面方向/衰减和无Kelvin的定性暖冷空间关系",
+    "trigger_condition": "THG-17：光影四项缺失或空泛；光源来源/方向存在二选一；色温含K值或只有泛词；场景时间/空间不支持主光；轮廓光、眼中灯火反射、halation、丁达尔光或均匀面光缺物理前提",
+    "required_evidence": "镜头编号、时间/空间/门窗/天气、光影四项、实际灯火或自然光通路、受光面和同场连续性",
+    "repair_action": "按时间→空间/门窗→天气→真实主光/弱补光→方向/高度→受光对象→曝光材质→叙事功能→连续性重写，删除无物理前提光效",
+    "final_status_if_unfixed": "fail_current",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "error_code": "E-T2I-001",
+    "module": "T2I_PROMPT",
+    "severity": "fail",
+    "blocking": true,
+    "trigger_condition": "THG-17：GPT关键帧含单帧不可证明的作者旁白、未来信息、象征结论，或把声音、连续事件和抽象氛围直接当成静态可见事实",
+    "required_evidence": "镜头编号、GPT关键帧投影、命中的不可见语义及其canonical来源字段",
+    "repair_action": "把必要含义转为一个确定瞬间可见的眼神、唇线、手部、距离、道具、环境活动、材质和有源光色；其余从关键帧删除",
     "final_status_if_unfixed": "fail_current",
     "version": "V16.3-148-R10-StableRuntime"
   },

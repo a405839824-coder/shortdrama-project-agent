@@ -1,7 +1,7 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.20",
-  "description": "Chinese short-drama production with a fixed formal-master voice template, timed eye-performance gates, provable N-1 continuity, and independent audit.",
+  "version": "0.5.21",
+  "description": "Chinese short-drama production with static-observable T2I prompts, scene-grounded lighting, fixed voice, N-1 continuity, and independent audit.",
   "author": {
     "name": "Storyboard Project Agent"
   },
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.20新增叙述性会话场景还原：授权范围内全部叙述单元必须判定为会话、混合会话或非会话；问答、劝决、令应、报听、辩核、证判等交流闭环必须还原为人物对白，不得依赖言语动词关键词或降级为无声动作。独立审计逐单元复核并逐镜核对对白。0.5.18固定音色子模板、0.5.17眼部表演和精确N-1相邻连续性门禁继续生效。完整项目内容保存于ChatGPT Library，公共工具仍精确为19个。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.21新增静态文生图语义筛选与场景有源光影决策：提示词分为可直接使用、需转为单帧可见语义、禁止进入静帧三类；光影必须闭合时段、空间、天气、真实光源、方向、受光对象、曝光材质和连续性。THG-17及独审逐镜四光影字段证据会阻断无来源光和无物理前提效果。0.5.20会话还原、0.5.18固定音色、0.5.17眼部表演与N-1连续性继续生效。完整项目内容保存于ChatGPT Library，公共工具仍精确为19个。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [

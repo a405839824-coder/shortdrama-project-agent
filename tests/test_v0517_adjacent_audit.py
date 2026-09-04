@@ -29,14 +29,31 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
         self.storyboard: dict[str, Any] = {
             "schema_version": "R10.1",
             "shots": [
-                {"镜头编号": "EP01-001", "场景连续性ID": "EP01-SC01"},
-                {"镜头编号": "EP01-002", "场景连续性ID": "EP01-SC01"},
-                {"镜头编号": "EP01-003", "场景连续性ID": "EP01-SC02"},
+                {
+                    "镜头编号": "EP01-001", "场景连续性ID": "EP01-SC01",
+                    "光影": "窗光柔和照亮面部", "光源来源": "左侧窗外晨光",
+                    "光源方向": "画面左侧平视高度照向主体", "色温倾向": "中性微暖",
+                },
+                {
+                    "镜头编号": "EP01-002", "场景连续性ID": "EP01-SC01",
+                    "光影": "窗光柔和照亮面部", "光源来源": "左侧窗外晨光",
+                    "光源方向": "画面左侧平视高度照向主体", "色温倾向": "中性微暖",
+                },
+                {
+                    "镜头编号": "EP01-003", "场景连续性ID": "EP01-SC02",
+                    "光影": "窗光柔和照亮面部", "光源来源": "左侧窗外晨光",
+                    "光源方向": "画面左侧平视高度照向主体", "色温倾向": "中性微暖",
+                },
             ],
         }
         self.pair_ids = ["EP01-001->EP01-002", "EP01-002->EP01-003"]
         self.pair_hash = sha256_bytes(_stable_json_bytes(self.pair_ids))
         canonical_hash = canonical_storyboard_sha256(self.storyboard)
+        self.lighting_evidence_ids = [
+            f"field:{shot['镜头编号']}.{field_name}"
+            for shot in self.storyboard["shots"]
+            for field_name in ("光影", "光源来源", "光源方向", "色温倾向")
+        ]
         self.report: dict[str, Any] = {
             "status": "pass",
             "issues": [],
@@ -67,6 +84,9 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
                         [f"pair:{pair_id}" for pair_id in self.pair_ids]
                         if layer == "空间连续"
                         else [f"canonical:{canonical_hash}"]
+                        + self.lighting_evidence_ids
+                        if layer == "机位可见性"
+                        else [f"canonical:{canonical_hash}"]
                     ),
                 }
                 for layer in SEMANTIC_AUDIT_LAYER_NAMES
@@ -92,7 +112,7 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
         proof = enriched["independent_evidence_matrix"]["adjacent_continuity"]
         self.assertEqual(
             SEMANTIC_AUDIT_CONTRACT_VERSION,
-            "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes",
+            "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting",
         )
         self.assertEqual(proof["expected_pair_count"], 2)
         self.assertEqual(proof["reviewed_pair_count"], 2)
@@ -100,6 +120,34 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
         self.assertEqual(proof["pair_ids"], self.pair_ids)
         self.assertEqual(proof["ordered_pair_sha256"], self.pair_hash)
         self.assertEqual(enriched["status"], "pass")
+        lighting = enriched["independent_evidence_matrix"][
+            "t2i_lighting_field_coverage"
+        ]
+        self.assertEqual(lighting["expected_shot_count"], 3)
+        self.assertEqual(lighting["expected_field_count"], 12)
+        self.assertEqual(lighting["reviewed_field_count"], 12)
+        self.assertEqual(lighting["evidence_ids"], self.lighting_evidence_ids)
+
+    def test_missing_lighting_field_evidence_is_rejected(self) -> None:
+        submission = copy.deepcopy(self.submission)
+        layer = next(
+            row for row in submission["layers"] if row["layer"] == "机位可见性"
+        )
+        layer["evidence_ids"].remove("field:EP01-002.光源方向")
+        with self.assertRaisesRegex(ValueError, "t2i_lighting_coverage_incomplete"):
+            self.attach(submission)
+
+    def test_misordered_lighting_field_evidence_is_rejected(self) -> None:
+        submission = copy.deepcopy(self.submission)
+        layer = next(
+            row for row in submission["layers"] if row["layer"] == "机位可见性"
+        )
+        first = layer["evidence_ids"].index("field:EP01-001.光影")
+        layer["evidence_ids"][first], layer["evidence_ids"][first + 1] = (
+            layer["evidence_ids"][first + 1], layer["evidence_ids"][first]
+        )
+        with self.assertRaisesRegex(ValueError, "t2i_lighting_coverage_incomplete"):
+            self.attach(submission)
 
     def test_missing_pair_is_rejected(self) -> None:
         submission = copy.deepcopy(self.submission)
@@ -141,7 +189,9 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
         canonical_hash = canonical_storyboard_sha256(self.storyboard)
         self.submission["canonical_sha256"] = canonical_hash
         for layer in self.submission["layers"]:
-            if layer["layer"] != "空间连续":
+            if layer["layer"] == "机位可见性":
+                layer["evidence_ids"] = [f"canonical:{canonical_hash}"] + self.lighting_evidence_ids
+            elif layer["layer"] != "空间连续":
                 layer["evidence_ids"] = [f"canonical:{canonical_hash}"]
             if layer["layer"] == "禁项与声音":
                 layer["evidence_ids"].append("field:EP01-001.音色")
@@ -161,7 +211,9 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
         canonical_hash = canonical_storyboard_sha256(self.storyboard)
         self.submission["canonical_sha256"] = canonical_hash
         for layer in self.submission["layers"]:
-            if layer["layer"] != "空间连续":
+            if layer["layer"] == "机位可见性":
+                layer["evidence_ids"] = [f"canonical:{canonical_hash}"] + self.lighting_evidence_ids
+            elif layer["layer"] != "空间连续":
                 layer["evidence_ids"] = [f"canonical:{canonical_hash}"]
         with self.assertRaisesRegex(ValueError, "voice_field_coverage_incomplete"):
             self.attach()

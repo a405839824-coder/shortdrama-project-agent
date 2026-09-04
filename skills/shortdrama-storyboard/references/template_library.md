@@ -352,7 +352,7 @@
 - 触发条件：生成或导出任何正式镜头
 - 原子字段顺序：镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句
 - 对外执行列名：`正式分镜母版`
-- 必填规则：每格首行为`镜头序号：EP##-###（x.xs；累计x.xs）`，之后严格按`strict_prompt_contract.md`空行分段并可脱离历史上下文执行；`生成限制`和正式母版都写`9:16竖屏`；动作/表情/眼部链/精确对白/声画同步时点/听者错峰反应/恰好3段时间描写只在`画面内容`写一次；完整发声规格只在`音色`固定子模板写一次；四项光线必填且色温不含Kelvin/K；单镜一主机位/主运镜/核心阶段；负面音乐限制统一写`禁止额外配乐`，不得出现`BGM`字面量。导出前THG-01–16、事实转化对白证明及N-1相邻组证明全部通过。
+- 必填规则：每格首行为`镜头序号：EP##-###（x.xs；累计x.xs）`，之后严格按`strict_prompt_contract.md`空行分段并可脱离历史上下文执行；`生成限制`和正式母版都写`9:16竖屏`；动作/表情/眼部链/精确对白/声画同步时点/听者错峰反应/恰好3段时间描写只在`画面内容`写一次；完整发声规格只在`音色`固定子模板写一次；四项光线必填且色温不含Kelvin/K；单镜一主机位/主运镜/核心阶段；负面音乐限制统一写`禁止额外配乐`，不得出现`BGM`字面量。导出前THG-01–17、事实转化对白证明、静帧语义/光影物理闭合及N-1相邻组证明全部通过。
 - 失败标准：第五列表头恢复“·字段合并”，出现跨镜代指、转场重复、GPT动态词、缺失干净`9:16竖屏`、两条冗长旧9:16短语、`BGM`、时间段非三段闭合、眼神/眨眼/静帧门禁失败、相邻组证明不全、音色固定子模板失败、旧顶层字段/批次回写、四项光线缺失/歧义、投影/XLSX反向解析不一致、生产阶段预填审计PASS/0问题，或后台预生成Seedance即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
@@ -394,4 +394,12 @@
 - 字段顺序：shot_id｜scene_id｜location_type｜empty_scene_state｜empty_scene_reason｜crowd_density｜ordinary_roles｜foreground_actions｜midground_actions｜background_actions｜near_audio_sources｜mid_audio_sources｜far_audio_sources｜dialogue_ducking｜visible_audio_sources｜offscreen_audio_sources｜formal_master_people_match｜formal_master_audio_match｜continuity_transition｜status
 - 必填规则：非豁免场景必须填密度、地点角色、错峰动作和空间层次；建立/全/远景至少三类三层声源，其余至少两类两层；对白镜必须避让；唯一正式母版从零复现。空场必须同时填状态和剧情原因。
 - 失败标准：只写人群、路人、环境声或街道嘈杂声；匿名群演清晰说话；时代错位声源；声画无源；正式母版生态不完整；同场生态无过渡跳变即fail。
+- 输出状态：pass / warning / fail_current / unable_to_check
+
+## TPL-R10-49 文生图静帧与光影决策模板
+
+- 触发条件：GPT关键帧、文生图、场景定帧、古装视觉提示词或任何光影选择
+- 字段顺序：candidate_semantic｜classification（可直接静态投影/先转为可见证据/不得进入单帧）｜visible_translation｜time｜interior_exterior｜door_window_state｜weather｜primary_source｜weak_fill_source｜source_direction_height｜lit_subject｜exposure_material｜narrative_function｜scene_continuity_id｜physical_preconditions｜status
+- 必填规则：每个关键帧词组必须单帧可见或摄影可控；抽象情绪、象征、声音与连续动作先转为可见证据；光影按时间→空间/门窗→天气→真实主光/弱补光→方向/高度→受光对象→曝光材质→叙事功能→同场连续性选择。轮廓光、灯火反射、halation和丁达尔光分别绑定后/侧后光、真实灯火、真实高亮边缘、定向光与散射介质。
+- 失败标准：作者旁白/未来信息/象征结论直接进入静帧，日夜/空间与光源冲突，无来源光，轮廓光方向矛盾，低照度均匀面光无补光，或同场光向/色温跳变即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check

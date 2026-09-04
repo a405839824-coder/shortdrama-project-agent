@@ -162,8 +162,8 @@
     "severity": "fail",
     "error_code": "E-LIGHT-001",
     "applies_when": "相关字段/模式触发",
-    "pass_condition": "handler执行且未产生对应错误码",
-    "repair_action": "分别填写主要受光、唯一有源来源、明确方向/衰减和无Kelvin的定性暖冷空间关系",
+    "pass_condition": "光影四项完整且时间、空间、门窗、天气、真实光源、方向、受光效果、曝光材质和连续性闭合",
+    "repair_action": "按场景事实顺序重选主光/弱补光并删除无物理前提的轮廓光、灯火反射、halation和丁达尔光",
     "implementation": "scripts/validate_storyboard.py",
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -585,6 +585,18 @@
     "pass_condition": "人流密度连续，或变化由涌入、散开、疏散、离开、时间推进等画面事实解释",
     "repair_action": "统一相邻镜生态或补可见过渡",
     "implementation": "scripts/validate_storyboard.py",
+    "version": "V16.3-148-R10-StableRuntime"
+  },
+  {
+    "validator_rule_id": "V-R10-PG1-050",
+    "module": "T2I_PROMPT",
+    "handler": "check_t2i_static_observable_semantics",
+    "severity": "fail",
+    "error_code": "E-T2I-001",
+    "applies_when": "R10-SPC-1 GPT关键帧确定性投影",
+    "pass_condition": "每个词组均为单帧可见事实或摄影可控参数，作者旁白、未来信息、象征结论、声音、时间过程和未决候选零命中",
+    "repair_action": "把必要含义转为一个确定瞬间可见的表演、空间、道具、材质和有源光色，其余从关键帧删除",
+    "implementation": "scripts/validate_storyboard.py + server/shortdrama_mcp/materializer.py",
     "version": "V16.3-148-R10-StableRuntime"
   }
 ]
