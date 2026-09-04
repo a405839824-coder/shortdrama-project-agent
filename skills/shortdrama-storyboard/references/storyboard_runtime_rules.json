@@ -60,9 +60,9 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.18",
+    "plugin_version": "0.5.19",
     "output_contract": "R10-SPC-1",
-    "semantic_audit_contract_version": "semantic-audit-v4-adjacent-continuity-structured-voice",
+    "semantic_audit_contract_version": "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue",
     "canonical_atomic_field_count": 27,
     "removed_new_write_fields": ["运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气", "心理音轨属性", "生成批次"],
     "picture_content_single_write": ["可见动作", "表情", "视线起点与焦点转移", "眼球先动与头部跟随关系", "眼睑松紧", "具体眨眼时点或有理由不眨眼", "精确对白", "对白发生时点", "可见呼吸与停顿", "重音期间不眨眼", "标点对应表演", "口型一致", "不看镜头", "听者错峰反应与眨眼错峰", "镜尾视线与状态", "恰好三个Seedance 2.5单镜时间阶段"],
@@ -73,7 +73,7 @@
       "ordered_nested_labels": ["基础声线", "言语行为", "当前表达", "发声方式", "音量", "语速与节奏", "呼吸", "停顿", "重音", "尾音", "禁止语气"],
       "group_heading_only": "发声方式",
       "baseline_required_dimensions": ["年龄感", "音区", "声音厚薄", "明亮或低沉", "长期稳定特征"],
-      "delivery_required_dimensions": ["音量", "语速与节奏", "呼吸", "停顿", "原文重音", "尾音"],
+      "delivery_required_dimensions": ["音量", "语速与节奏", "呼吸", "停顿", "本镜实际对白重音", "尾音"],
       "allowed_tail_directions": ["上抬", "下压", "截断", "发虚", "落稳", "短收"],
       "prohibited_tone_item_count": {"minimum": 2, "maximum": 4},
       "no_dialogue_value": "无对白，不适用。",
@@ -212,7 +212,8 @@
       {"gate_id": "THG-12", "name": "审计状态签发权", "error_code": "E-ARCHIVE-001"},
       {"gate_id": "THG-13", "name": "眼神眼睑眨眼与静帧自然性", "error_code": "E-EXPRESSION-003"},
       {"gate_id": "THG-14", "name": "相邻镜头N-1逐组连续性证明", "error_code": "E-CONTINUITY-001"},
-      {"gate_id": "THG-15", "name": "音色固定子模板与原文重音", "error_code": "E-VOICE-001"}
+      {"gate_id": "THG-15", "name": "音色固定子模板与本镜对白重音", "error_code": "E-VOICE-001"},
+      {"gate_id": "THG-16", "name": "原文事实转化对白逐单元全覆盖", "error_code": "E-ADAPTED-DIALOGUE-001"}
     ],
     "first_draft_quality_gate": {
       "measurement_unit": "unique_affected_shots",
@@ -253,7 +254,7 @@
       "正式分镜母版唯一且按R10-SPC-1空白上下文可执行",
       "Seedance 2.5恰好3个一位小数方括号时间阶段并闭合单镜时长",
       "GPT关键帧为显式9:16、无时间/对白/声音/运镜/转场的静态白名单投影",
-      "THG-01–THG-15全部通过且多行音色子模板反向解析一致",
+      "THG-01–THG-16全部通过，事实转化对白来源证明闭合，且多行音色子模板反向解析一致",
       "无batches、Seedance列、生成批次表或后台重复生成"
     ],
     "release": [
@@ -432,7 +433,7 @@
     }
   },
   "windowed_execution_policy": {
-    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-15、八层审计、相邻镜头N-1逐组证据、逐对白镜音色字段证据或质量阈值。",
+    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-16、八层审计、相邻镜头N-1逐组证据、逐对白镜音色字段证据、事实转化对白逐单元证据或质量阈值。",
     "activation": {
       "user_window_access": "authenticated_namespace_window_neutral",
       "window_role_restrictions": false,
@@ -916,7 +917,7 @@
         "scope"
       ],
       "explicit_fresh_audit": "reuse_extraction_and_parsing_only_then_recompute_semantic_verdict",
-      "semantic_audit_contract": "semantic-audit-v4-adjacent-continuity-structured-voice",
+      "semantic_audit_contract": "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue",
       "invalidation": {
         "dialogue_or_story": "beat_source_mapping_protected_dialogue_cognition",
         "action_or_gaze": "current_shot_neighbors_visibility",
@@ -2419,12 +2420,23 @@
       "version": "V16.3-148-R10-StableRuntime"
     },
     {
+      "error_code": "E-ADAPTED-DIALOGUE-001",
+      "module": "DIALOGUE",
+      "severity": "fail",
+      "blocking": true,
+      "trigger_condition": "THG-16：原文叙述中的明确说话行为被机械改成无声动作，或非原文直接对白未绑定逐字原文事实、说话人依据、事实原子、目标镜头与无新增剧情证明",
+      "required_evidence": "source_ledger顺序、逐条事实转化台账、说话人和改编对白、fact_atoms、plot_change=false、new_plot_facts=[]、entailed_by_source、100%覆盖率及有序集合SHA-256",
+      "repair_action": "区分原文直接对白与原文事实转化对白；直接对白维持逐字逐标点，转化对白只重组原文已给事实并重做对应音色、时长、口型、表演和连续性证据",
+      "final_status_if_unfixed": "fail_current",
+      "version": "V16.3-148-R10-StableRuntime"
+    },
+    {
       "error_code": "E-VOICE-001",
       "module": "VOICE",
       "severity": "fail",
       "blocking": true,
-      "trigger_condition": "THG-15：带对白镜的音色未按固定顺序完整填写基础声线、言语行为、当前表达、发声方式六项和2—4项禁止语气，重音不在原文、尾音方向无效、附加统一中性模板，或无对白镜未明确不适用",
-      "required_evidence": "镜头编号、音色字段、原文对白、固定标签顺序、重音逐字匹配和独审field:镜头编号.音色覆盖证明",
+      "trigger_condition": "THG-15：带对白镜的音色未按固定顺序完整填写基础声线、言语行为、当前表达、发声方式六项和2—4项禁止语气，重音不在本镜实际对白、尾音方向无效、附加统一中性模板，或无对白镜未明确不适用",
+      "required_evidence": "镜头编号、音色字段、本镜实际对白、固定标签顺序、重音逐字匹配和独审field:镜头编号.音色覆盖证明",
       "repair_action": "只在音色字段内按fixed-voice-template-v1补齐；发声方式仅作音色内部空值分组标题，画面内容只保留声画同步时点，不创建顶层发声方式字段",
       "final_status_if_unfixed": "fail_current",
       "version": "V16.3-148-R10-StableRuntime"
