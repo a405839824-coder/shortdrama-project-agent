@@ -579,7 +579,7 @@ PATCH_FORBIDDEN_FIELD_TERMS = (
 AUDIT_GATE_IDS = tuple(f"G{index}" for index in range(14))
 AUDIT_LAYER_NAMES = SEMANTIC_AUDIT_LAYER_NAMES
 SEMANTIC_AUDIT_CONTRACT_VERSION = (
-    "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting"
+    "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting"
 )
 STRICT_OUTPUT_CONTRACT = "R10-SPC-1"
 SEMANTIC_AUDIT_CONTRACT_FINGERPRINT = sha256_bytes(
@@ -3501,7 +3501,7 @@ class StoryboardService:
                 ),
             },
             "t2i_lighting_field_coverage": {
-                "contract": "t2i-static-observable-lighting-v1",
+                "contract": "t2i-static-observable-lighting-v2",
                 "expected_shot_count": len(ordered_shot_refs),
                 "expected_field_count": len(expected_lighting_evidence_ids),
                 "reviewed_field_count": len(submitted_lighting_evidence_ids),

@@ -465,7 +465,7 @@
             "adjacent_pair_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100}
           }
         },
-        "semantic_audit_contract": {"enum": ["semantic-audit-v2-compact-master", "semantic-audit-v3-adjacent-continuity", "semantic-audit-v4-adjacent-continuity-structured-voice", "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue", "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes", "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting"]},
+        "semantic_audit_contract": {"enum": ["semantic-audit-v2-compact-master", "semantic-audit-v3-adjacent-continuity", "semantic-audit-v4-adjacent-continuity-structured-voice", "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue", "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes", "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting", "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting"]},
         "semantic_audit_sha256": {"$ref": "#/$defs/sha256"},
         "reviewed_shot_count": {"type": "integer", "minimum": 0},
         "reviewed_batch_count": {"const": 0, "deprecated": true},
@@ -505,7 +505,7 @@
           "type": "object",
           "required": ["contract", "expected_shot_count", "expected_field_count", "reviewed_field_count", "coverage_percent", "ordered_fields", "evidence_ids", "camera_visibility_layer_status", "machine_t2i_issue_count", "machine_lighting_issue_count"],
           "properties": {
-            "contract": {"const": "t2i-static-observable-lighting-v1"},
+            "contract": {"enum": ["t2i-static-observable-lighting-v1", "t2i-static-observable-lighting-v2"]},
             "expected_shot_count": {"type": "integer", "minimum": 0},
             "expected_field_count": {"type": "integer", "minimum": 0},
             "reviewed_field_count": {"type": "integer", "minimum": 0},
@@ -643,6 +643,30 @@
         "stage_trace_id": {"type": "string", "minLength": 1}
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {"semantic_audit_contract": {"const": "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting"}},
+            "required": ["semantic_audit_contract"]
+          },
+          "then": {
+            "required": ["reviewed_adjacent_pair_count", "adjacent_pair_order_sha256", "adjacent_continuity", "voice_field_coverage", "t2i_lighting_field_coverage", "adapted_dialogue_coverage", "conversation_scene_classification_coverage"],
+            "properties": {
+              "quality_thresholds": {
+                "required": ["adjacent_pair_coverage_percent"],
+                "properties": {"adjacent_pair_coverage_percent": {"const": 100}}
+              },
+              "voice_field_coverage": {"properties": {"coverage_percent": {"const": 100}}},
+              "t2i_lighting_field_coverage": {
+                "properties": {
+                  "contract": {"const": "t2i-static-observable-lighting-v2"},
+                  "coverage_percent": {"const": 100}
+                }
+              },
+              "adapted_dialogue_coverage": {"properties": {"coverage_percent": {"const": 100}}},
+              "conversation_scene_classification_coverage": {"properties": {"coverage_percent": {"const": 100}}}
+            }
+          }
+        },
         {
           "if": {
             "properties": {"semantic_audit_contract": {"const": "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting"}},

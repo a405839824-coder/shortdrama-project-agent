@@ -1522,7 +1522,7 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
     )
     current_v5 = copy.deepcopy(current)
     current_v5["semantic_audit_contract"] = (
-        "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting"
+        "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting"
     )
     current_v5["voice_field_coverage"] = {
         "contract": "fixed-voice-template-v1",
@@ -1534,7 +1534,7 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
         "machine_voice_issue_count": 0,
     }
     current_v5["t2i_lighting_field_coverage"] = {
-        "contract": "t2i-static-observable-lighting-v1",
+        "contract": "t2i-static-observable-lighting-v2",
         "expected_shot_count": 1,
         "expected_field_count": 4,
         "reviewed_field_count": 4,

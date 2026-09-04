@@ -162,8 +162,8 @@
     "severity": "fail",
     "error_code": "E-LIGHT-001",
     "applies_when": "相关字段/模式触发",
-    "pass_condition": "光影四项完整且时间、空间、门窗、天气、真实光源、方向、受光效果、曝光材质和连续性闭合",
-    "repair_action": "按场景事实顺序重选主光/弱补光并删除无物理前提的轮廓光、灯火反射、halation和丁达尔光",
+    "pass_condition": "光影四项完整且时间、室内外、门窗、天气、真实光源、方向、受光效果、曝光材质和连续性闭合；普通室内空气清澈、背景可辨、不泛白不雾化，无雾烟/穿插光束/柔焦扩散/无依据逆光，负面禁词不误判为正向效果",
+    "repair_action": "普通室内改用前侧/侧面漫射明暗，锁定门窗原状态与清晰背景；删除雾烟、穿插光束、柔焦扩散、强逆光和无依据轮廓光。室外或剧情介质按物理前提局部使用",
     "implementation": "scripts/validate_storyboard.py",
     "version": "V16.3-148-R10-StableRuntime"
   },

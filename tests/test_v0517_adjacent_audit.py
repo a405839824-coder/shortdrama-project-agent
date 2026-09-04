@@ -112,7 +112,7 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
         proof = enriched["independent_evidence_matrix"]["adjacent_continuity"]
         self.assertEqual(
             SEMANTIC_AUDIT_CONTRACT_VERSION,
-            "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting",
+            "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting",
         )
         self.assertEqual(proof["expected_pair_count"], 2)
         self.assertEqual(proof["reviewed_pair_count"], 2)
@@ -123,6 +123,7 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
         lighting = enriched["independent_evidence_matrix"][
             "t2i_lighting_field_coverage"
         ]
+        self.assertEqual(lighting["contract"], "t2i-static-observable-lighting-v2")
         self.assertEqual(lighting["expected_shot_count"], 3)
         self.assertEqual(lighting["expected_field_count"], 12)
         self.assertEqual(lighting["reviewed_field_count"], 12)

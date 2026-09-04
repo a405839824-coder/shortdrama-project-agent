@@ -326,6 +326,55 @@ PRACTICAL_LIGHT_RE = re.compile(r"红烛|烛火|烛台|油灯|灯笼|火盆|火�
 INTERIOR_SCENE_RE = re.compile(r"室内|内室|闺阁|厅|房|堂|殿|阁|书斋|卧室|侧厅")
 DAYLIGHT_APERTURE_RE = re.compile(r"窗|门|天井|敞口|廊|庭院|院中|室外|户外|街|巷|市|城门|野外")
 DARK_INTERIOR_EXCEPTION_RE = re.compile(r"暗室|密室|地窖|地下|无窗|封闭|遮光")
+EXPLICIT_INTERIOR_RE = re.compile(
+    r"室内|内室|闺阁|厅内|房内|堂内|殿内|阁内|屋内|书斋|卧室|侧厅|"
+    r"正厅|花厅|新房|祠堂内|寝殿|厢房|偏殿"
+)
+CLOSED_APERTURE_RE = re.compile(
+    r"(?:门|窗)(?:扇)?[^；。\n]{0,8}(?:闭合|关闭|紧闭|关着)|"
+    r"(?:闭合|关闭|紧闭|关着)[^；。\n]{0,8}(?:门|窗)|窗纸完整"
+)
+OPEN_APERTURE_RE = re.compile(
+    r"(?:门|窗)(?:扇)?[^；。\n]{0,8}(?:开启|打开|敞开|半开)|"
+    r"(?:开启|打开|敞开|半开)[^；。\n]{0,8}(?:门|窗)"
+)
+INDOOR_HAZE_RE = re.compile(
+    r"薄雾|雾蒙蒙|烟雾缭绕|烟雾弥漫|烟尘弥漫|空气颗粒|奶雾|"
+    r"全屋[^；。\n]{0,8}(?:雾|烟)|朦胧雾化"
+)
+INDOOR_MILKY_OPTICS_RE = re.compile(
+    r"柔焦|镜头扩散|高光晕染|全画面光晕|全画面雾化|泛白光晕",
+    re.I,
+)
+VISIBLE_RAY_RE = re.compile(
+    r"丁达尔|体积光|可见光束|光柱|耶稣光|"
+    r"(?:日光|晨光|阳光|光线)[^；。\n]{0,24}(?:穿过|射入|斜射|穿插)"
+)
+INDOOR_STRONG_BACKLIGHT_RE = re.compile(
+    r"强逆光|侧逆光|斜后方[^；。\n]{0,8}(?:日光|晨光|光线|主光)|"
+    r"背后[^；。\n]{0,8}(?:日光|晨光|光线|主光)|轮廓光"
+)
+PLOT_ATMOSPHERE_RE = re.compile(
+    r"火场|失火|着火|燃烧|浓烟|烟尘|扬尘|尘土飞扬|爆炸|蒸汽|"
+    r"水汽弥漫|雾天|雨雾|破门"
+)
+LOCALIZED_ATMOSPHERE_RE = re.compile(
+    r"(?:仅|只在|局部|一缕)[^；。\n]{0,24}(?:烟|雾|尘|水汽)"
+    r"[^；。\n]{0,24}(?:不扩散|不遮挡|背景(?:清晰|可辨))"
+)
+ATMOSPHERE_CONTROL_RE = re.compile(
+    r"局部|一缕|不扩散|不遮挡|背景[^；。\n]{0,8}(?:清晰|可辨)|不泛白"
+)
+INDOOR_BACKGROUND_CLARITY_RE = re.compile(
+    r"空气清澈|背景[^；。\n]{0,12}(?:清晰|清楚|可辨)|"
+    r"(?:木构|门窗|陈设|空间结构)[^；。\n]{0,12}(?:清晰|清楚|可辨)|"
+    r"不泛白|不雾化"
+)
+BACKLIGHT_STORY_NEED_RE = re.compile(r"剪影|逆光登场|门口现身|轮廓辨人|遮蔽身份")
+NEGATED_EFFECT_PREFIX_RE = re.compile(
+    r"(?:禁止|不得|不要|避免|不使用|不生成|不出现|不存在|没有|无|不)"
+    r"(?:任何|明显|全画面|可见|强烈|额外)?[^；。！？!?，,、]{0,12}$"
+)
 BACKLIGHT_EFFECT_RE = re.compile(r"轮廓光|发丝(?:边缘|外缘)[^；。\n]{0,8}(?:光|亮)|肩(?:线|部)(?:边缘)?[^；。\n]{0,8}(?:光|亮)")
 BACKLIGHT_DIRECTION_RE = re.compile(r"后方|侧后|斜后|背后|逆光")
 EYE_FIRE_REFLECTION_RE = re.compile(
@@ -338,6 +387,19 @@ VOLUMETRIC_LIGHT_RE = re.compile(r"丁达尔|体积光|光束")
 SCATTERING_MEDIUM_RE = re.compile(r"雾|烟|尘|水汽|香火|空气颗粒")
 UNIFORM_FACE_LIGHT_RE = re.compile(r"面部[^；。\n]{0,12}(?:柔和均匀|均匀照亮)|全脸[^；。\n]{0,8}均匀")
 WEAK_FILL_RE = re.compile(r"反射|补光|夜空|月色|浅色墙|地面|纱幔|窗外")
+
+
+def _has_affirmative_match(pattern: re.Pattern[str], value: Any) -> bool:
+    """Ignore effect names that occur only inside explicit negative clauses."""
+
+    text = str(value or "")
+    for match in pattern.finditer(text):
+        prefix = text[max(0, match.start() - 28):match.start()]
+        clause_prefix = re.split(r"[；。！？!?，,、\n]", prefix)[-1]
+        if NEGATED_EFFECT_PREFIX_RE.search(clause_prefix):
+            continue
+        return True
+    return False
 
 FORMAL_MASTER_FIELD_ORDER = [
     "空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "音色", "心理音轨",
@@ -1414,7 +1476,9 @@ def _lighting_context_faults(shot: dict[str, Any]) -> list[str]:
     )
     physical = " ".join(str(shot.get(field) or "") for field in physical_fields)
     context = " ".join(str(shot.get(field) or "") for field in context_fields)
-    effect_blob = f"{light} {color} {shot.get('生成限制') or ''}"
+    limits = str(shot.get("生成限制") or "")
+    effect_blob = f"{light} {color} {limits}"
+    lighting_blob = f"{light} {source} {direction} {color} {limits} {physical}"
     faults: list[str] = []
 
     is_day = bool(DAY_SCENE_RE.search(context))
@@ -1451,17 +1515,56 @@ def _lighting_context_faults(shot: dict[str, Any]) -> list[str]:
     if MOONLIGHT_SOURCE_RE.search(source) and not DAYLIGHT_APERTURE_RE.search(physical):
         faults.append("月光/夜空补光缺室外空间或门窗等真实通路")
 
-    if BACKLIGHT_EFFECT_RE.search(light) and not BACKLIGHT_DIRECTION_RE.search(direction):
+    if _has_affirmative_match(BACKLIGHT_EFFECT_RE, light) and not BACKLIGHT_DIRECTION_RE.search(direction):
         faults.append("发丝或肩线轮廓光必须由后方、侧后、斜后或明确逆光形成")
 
     if EYE_FIRE_REFLECTION_RE.search(light) and not PRACTICAL_LIGHT_RE.search(source):
         faults.append("眼中灯火反射缺场内真实烛、灯或火光来源")
 
-    if HALATION_RE.search(effect_blob) and not RESTRAINED_EFFECT_RE.search(effect_blob):
+    if _has_affirmative_match(HALATION_RE, effect_blob) and not RESTRAINED_EFFECT_RE.search(effect_blob):
         faults.append("halation/镜头光晕必须限定为轻微、极轻微、克制或少量")
 
-    if VOLUMETRIC_LIGHT_RE.search(effect_blob) and not SCATTERING_MEDIUM_RE.search(physical):
+    if _has_affirmative_match(VOLUMETRIC_LIGHT_RE, effect_blob) and not _has_affirmative_match(SCATTERING_MEDIUM_RE, physical):
         faults.append("丁达尔/体积光/光束缺雾、烟、尘或水汽等散射介质")
+
+    is_indoor = bool(EXPLICIT_INTERIOR_RE.search(context))
+    has_plot_atmosphere = _has_affirmative_match(PLOT_ATMOSPHERE_RE, context)
+    has_localized_atmosphere = bool(LOCALIZED_ATMOSPHERE_RE.search(lighting_blob))
+    has_practical = bool(
+        PRACTICAL_LIGHT_RE.search(source) and PRACTICAL_LIGHT_RE.search(physical)
+    )
+    aperture_open = bool(OPEN_APERTURE_RE.search(physical))
+    aperture_closed = bool(CLOSED_APERTURE_RE.search(physical))
+
+    if is_indoor:
+        positive_haze = _has_affirmative_match(INDOOR_HAZE_RE, lighting_blob)
+        positive_milky_optics = _has_affirmative_match(
+            INDOOR_MILKY_OPTICS_RE, effect_blob
+        )
+        positive_visible_ray = _has_affirmative_match(VISIBLE_RAY_RE, lighting_blob)
+        positive_strong_backlight = _has_affirmative_match(
+            INDOOR_STRONG_BACKLIGHT_RE, f"{light} {direction}"
+        )
+
+        if positive_haze and not (has_plot_atmosphere or has_localized_atmosphere):
+            faults.append("普通清洁室内不得添加薄雾、烟雾缭绕、空气颗粒或奶雾化背景")
+        if positive_milky_optics and not has_plot_atmosphere:
+            faults.append("普通室内不得用柔焦、镜头扩散或高光晕染制造全画面雾白")
+        if positive_visible_ray and not has_plot_atmosphere:
+            faults.append("普通室内不得添加丁达尔光、体积光、光柱或穿插式可见光束")
+        if positive_strong_backlight and not (
+            has_practical
+            or (aperture_open and BACKLIGHT_STORY_NEED_RE.search(context))
+        ):
+            faults.append("普通室内强逆光、侧逆光或轮廓光须有已开启门窗及明确剧情用途；否则改为前侧/侧面漫射明暗")
+        if aperture_closed and positive_visible_ray:
+            faults.append("门窗闭合时不得写光线穿过、射入或形成窗门光柱；闭窗只能写窗纸漫射透光")
+        if (positive_haze or positive_visible_ray) and not ATMOSPHERE_CONTROL_RE.search(lighting_blob):
+            faults.append("室内确有烟雾/扬尘/水汽时也必须限制为局部并保证不扩散、不遮挡、背景可辨")
+        if not has_plot_atmosphere and not INDOOR_BACKGROUND_CLARITY_RE.search(
+            f"{light} {limits}"
+        ):
+            faults.append("普通室内必须明确空气清澈、背景结构清晰可辨且不泛白/不雾化")
 
     if (
         UNIFORM_FACE_LIGHT_RE.search(light)
@@ -3327,7 +3430,11 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                     "E-LIGHT-001",
                     f"{location}.光影/光源来源/光源方向/色温倾向",
                     "；".join(light_faults),
-                    repair="按时间→空间/门窗→天气→真实主光/弱补光→方向/高度→受光对象→曝光材质→叙事功能→同场连续性重写；无物理前提的轮廓光、眼中灯火反射、halation和丁达尔光必须删除。",
+                    repair=(
+                        "按时间→室内外/门窗→天气→真实主光/弱补光→方向/高度→受光对象→曝光材质→叙事功能→同场连续性重写；"
+                        "普通室内使用前侧/侧面漫射明暗并保持空气清澈、背景清晰，删除柔焦、镜头扩散、雾烟、穿插光束、"
+                        "无依据逆光/轮廓光；室外或剧情烟尘场景的氛围光仍须满足物理前提并限制范围。"
+                    ),
                     template_gate_id="THG-17",
                 ))
         if "底光" in f"{light} {light_source}" and _has_any(str(shot.get("功能类型", "")), ["甜宠", "温情", "浪漫", "关系"]):

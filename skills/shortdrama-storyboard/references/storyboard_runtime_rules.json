@@ -60,9 +60,9 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.21",
+    "plugin_version": "0.5.22",
     "output_contract": "R10-SPC-1",
-    "semantic_audit_contract_version": "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting",
+    "semantic_audit_contract_version": "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting",
     "canonical_atomic_field_count": 27,
     "removed_new_write_fields": ["运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气", "心理音轨属性", "生成批次"],
     "picture_content_single_write": ["可见动作", "表情", "视线起点与焦点转移", "眼球先动与头部跟随关系", "眼睑松紧", "具体眨眼时点或有理由不眨眼", "精确对白", "对白发生时点", "可见呼吸与停顿", "重音期间不眨眼", "标点对应表演", "口型一致", "不看镜头", "听者错峰反应与眨眼错峰", "镜尾视线与状态", "恰好三个Seedance 2.5单镜时间阶段"],
@@ -97,7 +97,7 @@
     "gpt_projection_allowed_fields": ["画幅", "场景", "可见主体", "空间站位描述", "起始状态的单一静态姿态", "机位", "镜头类型", "光影", "光源来源", "光源方向", "色温倾向", "环境静态瞬间", "材质", "参考图锚定", "生成限制"],
     "gpt_projection_forbidden_dynamic_terms": ["硬切", "切至", "转场", "推镜", "拉镜", "跟镜", "摇镜", "由远及近", "随后", "接着", "几秒后"],
     "static_visual_prompt_contract": {
-      "contract": "t2i-static-observable-lighting-v1",
+      "contract": "t2i-static-observable-lighting-v2",
       "classification": ["可直接静态投影", "先转为可见证据", "不得进入单帧"],
       "direct_static_semantics": ["时代地点与空间", "人物造型服饰材质", "一个确定瞬间的表演状态", "站位朝向视线持物", "机位焦段景深焦点", "有源光影与色彩材质", "静态环境状态", "相关负面限制"],
       "translate_before_projection": ["抽象情绪", "象征意义", "声音活动", "连续动作", "梦幻氛围", "未分责参考图"],
@@ -109,6 +109,12 @@
         "halation": "真实高亮边缘且轻微克制",
         "丁达尔光": "定向光束与雾烟尘水汽散射介质",
         "低照度均匀面光": "明确弱反射补光"
+      },
+      "indoor_outdoor_split": {
+        "ordinary_indoor": "空气清澈、背景可辨、不泛白不雾化；前侧或侧面大面积漫射，无可见光束；闭窗只写窗纸漫射透光并保持门窗原状态",
+        "ordinary_indoor_forbidden_positive_effects": ["薄雾", "烟雾缭绕", "空气颗粒", "奶雾", "丁达尔光", "体积光", "光柱", "柔焦", "镜头扩散", "高光晕染", "强逆光", "侧逆光", "无依据轮廓光"],
+        "indoor_atmosphere_exception": "仅火场、扬尘、爆炸、蒸汽、雨雾侵入等剧情事实；香炉/药炉只允许局部一缕且必须不扩散、不遮挡、背景可辨",
+        "outdoor_atmosphere": "太阳或天空方向与雾烟尘水汽等介质成立时，条件化使用侧逆光、空气透视和可见光束"
       },
       "conditional_song_wedding_profile": "仅在宋代/北宋、新婚或出嫁准备、相符时段与真实光源同时成立时使用对应晨光、朱红婚服、简洁发髻和婚俗限制",
       "reference": "text_to_image_visual_prompt_decision.md"
@@ -231,7 +237,7 @@
       {"gate_id": "THG-14", "name": "相邻镜头N-1逐组连续性证明", "error_code": "E-CONTINUITY-001"},
       {"gate_id": "THG-15", "name": "音色固定子模板与本镜对白重音", "error_code": "E-VOICE-001"},
       {"gate_id": "THG-16", "name": "叙述性会话场景逐单元识别与对白还原", "error_code": "E-ADAPTED-DIALOGUE-001"},
-      {"gate_id": "THG-17", "name": "文生图静帧语义与场景光影物理闭合", "error_code": "E-T2I-001/E-LIGHT-001"}
+      {"gate_id": "THG-17", "name": "文生图静帧语义、室内清透与场景光影物理闭合", "error_code": "E-T2I-001/E-LIGHT-001"}
     ],
     "first_draft_quality_gate": {
       "measurement_unit": "unique_affected_shots",
@@ -935,7 +941,7 @@
         "scope"
       ],
       "explicit_fresh_audit": "reuse_extraction_and_parsing_only_then_recompute_semantic_verdict",
-      "semantic_audit_contract": "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting",
+      "semantic_audit_contract": "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting",
       "invalidation": {
         "dialogue_or_story": "beat_source_mapping_protected_dialogue_cognition",
         "action_or_gaze": "current_shot_neighbors_visibility",
