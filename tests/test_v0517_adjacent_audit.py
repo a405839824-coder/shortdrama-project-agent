@@ -92,7 +92,7 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
         proof = enriched["independent_evidence_matrix"]["adjacent_continuity"]
         self.assertEqual(
             SEMANTIC_AUDIT_CONTRACT_VERSION,
-            "semantic-audit-v4-adjacent-continuity-structured-voice",
+            "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue",
         )
         self.assertEqual(proof["expected_pair_count"], 2)
         self.assertEqual(proof["reviewed_pair_count"], 2)

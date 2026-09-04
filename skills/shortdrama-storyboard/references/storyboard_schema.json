@@ -82,6 +82,39 @@
           },
           "additionalProperties": false
         },
+        "dialogue_adaptation_audit": {
+          "type": "object",
+          "required": [
+            "contract", "scope_episode_ids", "candidate_unit_count", "reviewed_unit_count",
+            "adapted_dialogue_count", "coverage_percent", "ordered_entry_sha256", "entries"
+          ],
+          "properties": {
+            "contract": {"const": "source-fact-dialogue-v1"},
+            "scope_episode_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "string", "pattern": "^EP\\d{2,}$"}
+            },
+            "candidate_unit_count": {"type": "integer", "minimum": 0},
+            "reviewed_unit_count": {"type": "integer", "minimum": 0},
+            "adapted_dialogue_count": {"type": "integer", "minimum": 0},
+            "coverage_percent": {"const": 100},
+            "ordered_entry_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "adaptation_id", "source_ledger_index", "source_unit_id", "source_text",
+                  "dialogue_affordance", "treatment", "speaker", "adapted_text",
+                  "target_shots", "fact_atoms", "speaker_basis", "authorization",
+                  "plot_change", "new_plot_facts", "entailment_status", "adaptation_reason"
+                ]
+              }
+            }
+          }
+        },
         "shot_plan": {"type": "array", "minItems": 1},
         "performance_chains": {"type": "array"},
         "audio_workflow": {"type": "object"},
@@ -215,7 +248,7 @@
         "机位": {"type": ["string", "number"]},
         "运镜方式": {"type": "string", "minLength": 1, "description": "移动镜头在同一字段写明速度、运镜主体和叙事功能。"},
         "画面内容": {"type": "string", "minLength": 1, "description": "按R10-SPC-1恰好写三个【0.0—x.x秒】阶段：刺激/起始反应、核心动作或角色说道：“精确对白”、镜尾反应/切点；只保留口型、可见呼吸/停顿、重音期表演、视线、听者错峰反应与最终状态，不复制完整发声规格。"},
-        "音色": {"type": "string", "minLength": 1, "description": "THG-15：带对白镜按fixed-voice-template-v1固定顺序填写基础声线、言语行为、当前表达、发声方式下六项和2—4项禁止语气；重音逐字来自原文。发声方式是本字段内部空值分组标题，不是顶层字段。无对白时固定写无对白，不适用。"},
+        "音色": {"type": "string", "minLength": 1, "description": "THG-15：带对白镜按fixed-voice-template-v1固定顺序填写基础声线、言语行为、当前表达、发声方式下六项和2—4项禁止语气；重音逐字来自本镜实际对白。原文直接对白受THG-05逐字保护，原文事实转化对白受THG-16来源证明约束。发声方式是本字段内部空值分组标题，不是顶层字段。无对白时固定写无对白，不适用。"},
         "心理音轨": {"type": ["string", "number"]},
         "环境音效": {"type": ["string", "number"]},
         "环境动态": {"type": ["string", "number"]},

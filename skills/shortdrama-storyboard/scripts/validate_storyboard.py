@@ -21,6 +21,7 @@ VERSION = "V16.3-148-R10-StableRuntime"
 SCHEMA_VERSION = "R10.1"
 WORKFLOW_PROFILE = "R10-PG1"
 STRICT_OUTPUT_CONTRACT = "R10-SPC-1"
+ADAPTED_DIALOGUE_CONTRACT = "source-fact-dialogue-v1"
 
 COMPACT_SHOT_FIELDS = [
     "镜头编号", "时长", "累计时长", "功能类型", "场景连续性ID", "镜头类型", "可见主体",
@@ -50,6 +51,23 @@ VOICE_TEMPLATE_LINE_RE = re.compile(
     r"^(基础声线|言语行为|当前表达|发声方式|音量|语速与节奏|呼吸|停顿|重音|尾音|禁止语气)([：:])(.*)$"
 )
 VOICE_NO_DIALOGUE_RE = re.compile(r"^无对白[，,；;。\s]*(?:本镜)?不适用[。.]?$|^不适用[：:]?\s*无对白[。.]?$")
+NARRATIVE_SPEECH_ACT_RE = re.compile(
+    r"劝|说|说道|称|声称|宣称|陈述|解释|回答|答应|回应|问|反问|"
+    r"承认|指出|禀告|报告|吩咐|命令|要求|提醒|警告|承诺|拒绝|央求|叫嚷"
+)
+NEGATED_SPEECH_ACT_RE = re.compile(
+    r"(?:不敢继续|没有|并未|未曾|不再|无需|无须)[^。；，]{0,24}"
+    r"(?:劝|说|说道|称|陈述|解释|回答|回应|问|承认|指出|禀告|报告|吩咐|命令|提醒|警告|央求|叫嚷)"
+)
+ADAPTED_DIALOGUE_TREATMENTS = {
+    "原文直接对白",
+    "原文事实转化对白",
+    "可视动作",
+    "心理音轨",
+    "合并压缩",
+    "不转对白",
+}
+ADAPTED_DIALOGUE_AFFORDANCE = {"必须转对白", "建议转对白", "不宜转对白"}
 DEPRECATED_LABEL_SCAN_FIELDS = {
     "功能类型", "场景连续性ID", "镜头类型", "可见主体", "空间站位描述", "起始状态",
     "机位", "运镜方式", "画面内容", "音色", "心理音轨", "环境音效", "环境动态",
@@ -527,9 +545,9 @@ def _voice_template_errors(value: Any, dialogue: str) -> list[str]:
     emphasis = parsed.get("重音", "")
     quoted = re.findall(r"[‘’“”\"「」『』]([^‘’“”\"「」『』]{1,24})[‘’“”\"「」『』]", emphasis)
     if emphasis and not quoted:
-        errors.append("重音必须用引号明确标出原文中的字或词")
+        errors.append("重音必须用引号明确标出本镜实际对白中的字或词")
     elif quoted and not any(fragment in dialogue for fragment in quoted):
-        errors.append("重音引号中的字词未逐字出现在本镜原文对白中")
+        errors.append("重音引号中的字词未逐字出现在本镜实际对白中")
     tail = parsed.get("尾音", "")
     if tail and not any(value in tail for value in VOICE_ALLOWED_TAILS):
         errors.append("尾音必须明确选择上抬、下压、截断、发虚、落稳或短收")
@@ -1467,6 +1485,315 @@ def _validate_protected_dialogue_alignment(
             evidence,
             template_gate_id="THG-05",
         ))
+    return issues
+
+
+def _validate_adapted_dialogue_audit(
+    obj: dict[str, Any],
+    shots: list[dict[str, Any]],
+    catalog: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Validate the source-fact dialogue conversion ledger (THG-16).
+
+    Direct source dialogue remains governed by THG-05.  Any audible line that
+    is not one of those exact protected occurrences is an adapted line and
+    must be traceable to a narrative source fact without adding plot facts.
+    The ledger also forces an explicit treatment decision for narrative units
+    that contain an observable speech act, preventing them from silently
+    collapsing into generic hand gestures.
+    """
+
+    source_lock = obj.get("source_lock")
+    enabled = bool(
+        isinstance(source_lock, dict)
+        and source_lock.get("adapted_dialogue_contract")
+        == ADAPTED_DIALOGUE_CONTRACT
+    )
+    evidence = obj.get("prevention_evidence")
+    audit = evidence.get("dialogue_adaptation_audit") if isinstance(evidence, dict) else None
+    if not enabled and not isinstance(audit, dict):
+        return []
+
+    issues: list[dict[str, Any]] = []
+
+    def add(location: str, message: str) -> None:
+        issues.append(_issue(
+            catalog,
+            "E-ADAPTED-DIALOGUE-001",
+            location,
+            message,
+            template_gate_id="THG-16",
+        ))
+
+    if not enabled:
+        add(
+            "source_lock.adapted_dialogue_contract",
+            f"存在事实转化对白审计，但source_lock未锁定{ADAPTED_DIALOGUE_CONTRACT}。",
+        )
+    if not isinstance(audit, dict):
+        add(
+            "prevention_evidence.dialogue_adaptation_audit",
+            "启用原文事实转化对白后，必须提交完整逐单元转化审计。",
+        )
+        return issues
+    if audit.get("contract") != ADAPTED_DIALOGUE_CONTRACT:
+        add(
+            "prevention_evidence.dialogue_adaptation_audit.contract",
+            f"事实转化对白契约必须为{ADAPTED_DIALOGUE_CONTRACT}。",
+        )
+
+    scope_episode_ids = audit.get("scope_episode_ids")
+    if not isinstance(scope_episode_ids, list) or not scope_episode_ids:
+        add(
+            "prevention_evidence.dialogue_adaptation_audit.scope_episode_ids",
+            "事实转化对白审计必须声明至少一个授权集范围。",
+        )
+        scope_episode_ids = []
+    else:
+        scope_episode_ids = [str(value).strip() for value in scope_episode_ids]
+        if any(not re.fullmatch(r"EP\d{2,}", value) for value in scope_episode_ids):
+            add(
+                "prevention_evidence.dialogue_adaptation_audit.scope_episode_ids",
+                f"授权集范围必须使用EP##格式：{scope_episode_ids}",
+            )
+    scope_episode_set = set(scope_episode_ids)
+
+    def in_scope(shot_id: str) -> bool:
+        episode_id = shot_id.split("-", 1)[0]
+        return episode_id in scope_episode_set
+
+    by_shot: dict[str, dict[str, Any]] = {}
+    ordered_shot_ids: list[str] = []
+    actual_dialogues: list[tuple[str, str, str]] = []
+    for shot in shots:
+        shot_id = str(shot.get("镜头编号") or shot.get("shot_uid") or "").strip()
+        if shot_id:
+            ordered_shot_ids.append(shot_id)
+            by_shot[shot_id] = shot
+        if in_scope(shot_id):
+            for speaker, text in extract_dialogues(shot.get("画面内容")):
+                actual_dialogues.append((shot_id, speaker, text))
+
+    protected_rows: list[dict[str, Any]] = []
+    if isinstance(obj.get("protected_dialogue"), list):
+        protected_rows.extend(row for row in obj["protected_dialogue"] if isinstance(row, dict))
+    source_ingestion = obj.get("source_ingestion")
+    if isinstance(source_ingestion, dict) and isinstance(source_ingestion.get("protected_dialogue"), list):
+        protected_rows.extend(
+            row for row in source_ingestion["protected_dialogue"] if isinstance(row, dict)
+        )
+    protected_occurrences: set[tuple[str, str, str]] = set()
+    protected_target_refs: set[str] = set()
+    for row in protected_rows:
+        speaker = str(row.get("speaker") or "").strip()
+        text = str(row.get("text") or "").strip()
+        targets = row.get("mapped_shot_uids") or row.get("target_shots") or []
+        if not isinstance(targets, list):
+            continue
+        for target in targets:
+            ref = str(target).strip()
+            if ref:
+                protected_target_refs.add(ref)
+                protected_occurrences.add((ref, speaker, text))
+
+    source_ledger = evidence.get("source_ledger") if isinstance(evidence, dict) else None
+    mandatory_re = re.compile(
+        r"有人(?:劝|说|称)|声称|宣称|亲口说|只让.{0,40}(?:说明|陈述)|"
+        r"主动指出|承认|反问|急忙解释|要求.{0,30}(?:再看|交|做)"
+    )
+    expected_candidates: list[dict[str, Any]] = []
+    if isinstance(source_ledger, list):
+        for index, row in enumerate(source_ledger, 1):
+            if not isinstance(row, dict):
+                continue
+            source_text = str(row.get("source_text") or "").strip()
+            source_type = str(row.get("source_type") or "").strip()
+            targets = [
+                str(value).strip()
+                for value in (row.get("target_shots") or [])
+                if str(value).strip()
+            ]
+            if not any(in_scope(target) for target in targets):
+                continue
+            if any(not in_scope(target) for target in targets):
+                expected_candidates.append({
+                    "source_ledger_index": index,
+                    "source_unit_id": str(row.get("source_id") or "").strip(),
+                    "source_text": source_text,
+                    "target_shots": targets,
+                    "mandatory": True,
+                    "scope_crossing": True,
+                })
+                continue
+            has_protected_target = bool(set(targets) & protected_target_refs)
+            positive_speech_text = NEGATED_SPEECH_ACT_RE.sub("", source_text)
+            speech_cue = bool(
+                NARRATIVE_SPEECH_ACT_RE.search(positive_speech_text)
+                or re.search(r"改编完整展开对白|保护对白完整展开", source_type)
+            )
+            if not speech_cue or has_protected_target:
+                continue
+            expected_candidates.append({
+                "source_ledger_index": index,
+                "source_unit_id": str(row.get("source_id") or "").strip(),
+                "source_text": source_text,
+                "target_shots": targets,
+                "mandatory": bool(
+                    mandatory_re.search(source_text)
+                    or re.search(r"改编完整展开对白|保护对白完整展开", source_type)
+                ),
+                "scope_crossing": False,
+            })
+
+    entries = audit.get("entries")
+    if not isinstance(entries, list):
+        add(
+            "prevention_evidence.dialogue_adaptation_audit.entries",
+            "事实转化对白审计entries必须是数组。",
+        )
+        entries = []
+
+    required_fields = {
+        "adaptation_id", "source_ledger_index", "source_unit_id", "source_text",
+        "dialogue_affordance", "treatment", "speaker", "adapted_text",
+        "target_shots", "fact_atoms", "speaker_basis", "authorization",
+        "plot_change", "new_plot_facts", "entailment_status", "adaptation_reason",
+    }
+    candidate_keys = [
+        (row["source_ledger_index"], row["source_unit_id"], tuple(row["target_shots"]))
+        for row in expected_candidates
+    ]
+    entry_keys: list[tuple[int, str, tuple[str, ...]]] = []
+    mapped_adapted: list[tuple[str, str, str]] = []
+    adaptation_ids: list[str] = []
+    seen_adaptation_ids: set[str] = set()
+    for index, row in enumerate(entries, 1):
+        location = f"prevention_evidence.dialogue_adaptation_audit.entries[{index}]"
+        if not isinstance(row, dict):
+            add(location, "事实转化对白审计项必须是对象。")
+            continue
+        missing = sorted(required_fields - set(row))
+        if missing:
+            add(location, f"事实转化对白审计项缺字段：{missing}")
+            continue
+        adaptation_id = str(row.get("adaptation_id") or "").strip()
+        if not adaptation_id or adaptation_id in seen_adaptation_ids:
+            add(location, "adaptation_id必须非空且全局唯一。")
+        else:
+            seen_adaptation_ids.add(adaptation_id)
+            adaptation_ids.append(adaptation_id)
+        try:
+            source_index = int(row.get("source_ledger_index"))
+        except (TypeError, ValueError):
+            source_index = -1
+        source_unit_id = str(row.get("source_unit_id") or "").strip()
+        targets = row.get("target_shots")
+        if not isinstance(targets, list) or not targets:
+            add(location, "target_shots必须是至少含一个镜头的有序数组。")
+            target_refs: list[str] = []
+        else:
+            target_refs = [str(value).strip() for value in targets]
+            if any(not value or value not in by_shot for value in target_refs):
+                add(location, f"target_shots含空值或不存在镜头：{target_refs}")
+        entry_keys.append((source_index, source_unit_id, tuple(target_refs)))
+        matching_candidate = next(
+            (
+                candidate for candidate in expected_candidates
+                if candidate["source_ledger_index"] == source_index
+                and candidate["source_unit_id"] == source_unit_id
+                and candidate["target_shots"] == target_refs
+            ),
+            None,
+        )
+        if matching_candidate is None:
+            add(location, "审计项未精确绑定source_ledger中的候选单元、顺序和目标镜头。")
+        elif str(row.get("source_text") or "") != matching_candidate["source_text"]:
+            add(location, "source_text必须逐字绑定source_ledger原文事实。")
+        if matching_candidate and matching_candidate.get("scope_crossing"):
+            add(location, "同一事实转化候选不得跨越授权集范围；请先拆分source_ledger单元。")
+
+        affordance = str(row.get("dialogue_affordance") or "").strip()
+        treatment = str(row.get("treatment") or "").strip()
+        if affordance not in ADAPTED_DIALOGUE_AFFORDANCE:
+            add(location, f"dialogue_affordance非法：{affordance!r}")
+        if treatment not in ADAPTED_DIALOGUE_TREATMENTS:
+            add(location, f"treatment非法：{treatment!r}")
+        if matching_candidate and matching_candidate["mandatory"]:
+            if affordance != "必须转对白" or treatment != "原文事实转化对白":
+                add(location, "原文明确说话行为必须转为对白，不得再次降级为无声动作。")
+
+        if row.get("plot_change") is not False:
+            add(location, "plot_change必须明确为false。")
+        if row.get("new_plot_facts") != []:
+            add(location, "new_plot_facts必须为空数组；事实转化对白不得新增剧情事实。")
+        if str(row.get("entailment_status") or "") != "entailed_by_source":
+            add(location, "entailment_status必须为entailed_by_source。")
+        if not isinstance(row.get("fact_atoms"), list) or not row.get("fact_atoms"):
+            add(location, "fact_atoms必须逐项列出对白承载的原文事实。")
+        for field in ("speaker_basis", "authorization", "adaptation_reason"):
+            if not str(row.get(field) or "").strip():
+                add(location, f"{field}不能为空。")
+
+        if treatment == "原文事实转化对白":
+            speaker = str(row.get("speaker") or "").strip()
+            adapted_text = str(row.get("adapted_text") or "").strip()
+            if not speaker or not adapted_text:
+                add(location, "事实转化对白必须填写speaker和adapted_text。")
+            occurrences = [
+                (shot_id, actual_speaker, actual_text)
+                for shot_id, actual_speaker, actual_text in actual_dialogues
+                if shot_id in target_refs
+                and actual_speaker == speaker
+                and actual_text == adapted_text
+            ]
+            if len(occurrences) != 1:
+                add(
+                    location,
+                    "事实转化对白必须在目标镜头中恰好出现一次，且说话人、正文和标点完全一致。",
+                )
+            else:
+                mapped_adapted.extend(occurrences)
+        else:
+            if str(row.get("speaker") or "").strip() or str(row.get("adapted_text") or "").strip():
+                add(location, "非对白处理不得填写speaker或adapted_text。")
+            if affordance == "建议转对白" and not str(row.get("non_dialogue_reason") or "").strip():
+                add(location, "建议转对白但未采用时必须填写non_dialogue_reason。")
+
+    if entry_keys != candidate_keys:
+        add(
+            "prevention_evidence.dialogue_adaptation_audit.entries",
+            "entries必须按source_ledger顺序100%覆盖全部叙述性说话候选，且不得多项、少项或乱序。",
+        )
+
+    actual_adapted = [
+        occurrence for occurrence in actual_dialogues
+        if occurrence not in protected_occurrences
+    ]
+    if mapped_adapted != actual_adapted:
+        add(
+            "prevention_evidence.dialogue_adaptation_audit.entries",
+            "所有非原文直接对白必须按成片顺序逐条进入事实转化台账；不得漏记、重复或把原文原句误标为改编对白。",
+        )
+
+    expected_count = len(expected_candidates)
+    reviewed_count = len(entries)
+    adapted_count = sum(
+        1 for row in entries
+        if isinstance(row, dict) and row.get("treatment") == "原文事实转化对白"
+    )
+    metrics = {
+        "candidate_unit_count": expected_count,
+        "reviewed_unit_count": reviewed_count,
+        "adapted_dialogue_count": adapted_count,
+        "coverage_percent": 100,
+        "ordered_entry_sha256": _stable_sha256(adaptation_ids),
+    }
+    for field, expected in metrics.items():
+        if audit.get(field) != expected:
+            add(
+                f"prevention_evidence.dialogue_adaptation_audit.{field}",
+                f"事实转化对白审计汇总不闭合：expected={expected!r}, actual={audit.get(field)!r}。",
+            )
     return issues
 
 
@@ -2944,6 +3271,11 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         normalized_shots,
         catalog,
         strict=strict_contract,
+    ))
+    issues.extend(_validate_adapted_dialogue_audit(
+        obj,
+        normalized_shots,
+        catalog,
     ))
 
     for scene_id, items in scene_groups.items():

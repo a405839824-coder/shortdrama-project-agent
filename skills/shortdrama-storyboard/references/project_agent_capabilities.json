@@ -3,10 +3,10 @@
   "runtime_version": "V16.3-148-R10-StableRuntime",
   "workflow_revision": "R10-PG1",
   "compact_master_contract": {
-    "plugin_version": "0.5.18",
+    "plugin_version": "0.5.19",
     "schema_version": "R10.1",
     "output_contract": "R10-SPC-1",
-    "semantic_audit_contract_version": "semantic-audit-v4-adjacent-continuity-structured-voice",
+    "semantic_audit_contract_version": "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue",
     "source_dialogue_parser_version": "source-dialogue-authority-v6",
     "source_dialogue_grammar_version": "source-dialogue-closed-grammar-v6.3",
     "source_dialogue_authority": "server_registered_source_payload_sha_hub_authority_entry_and_artifact_metadata_role_cross_binding",
@@ -18,7 +18,7 @@
     "seedance_25_timeline_stage_count": 3,
     "export_only_projection": "GPT关键帧生成指令",
     "required_per_shot_aspect_phrase": "9:16竖屏",
-    "template_hard_gates": "THG-01..THG-15",
+    "template_hard_gates": "THG-01..THG-16",
     "eye_performance_contract": "face_visible_2s_requires_timed_gaze_focus_eyelid_blink_or_justified_no_blink_end_gaze_and_static_open_eye_state",
     "adjacent_continuity_contract": "N_shots_exactly_N_minus_1_ordered_pairs_with_state_hashes_100_percent_spatial_audit_evidence",
     "voice_template_contract": "fixed_voice_template_v1_in_音色_with_all_dialogue_shots_field_evidence_in_audio_audit_layer",
@@ -295,7 +295,7 @@
       "operation": "storyboard_audit",
       "group": "审计闭环",
       "status": "supported",
-      "output": "任意认证窗口以独立审计authority按semantic-audit-v4-adjacent-continuity-structured-voice对精确compact canonical提交八层语义证据；绑定镜头数、N-1相邻对数量和有序pair SHA-256，空间层按序覆盖全部pair:left->right，表演层复核眼部链，禁项与声音层按序覆盖每个带对白镜的field:镜头编号.音色；服务端与源文对白v6权威、新鲜机器N-1证明及THG-15固定音色模板门禁交叉校验并创建不可变签名audit overlay新工件/后继工作簿；原生产XLSX和已消费root不就地改写，审计过程禁止再生成内容",
+      "output": "任意认证窗口以独立审计authority按semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue对精确compact canonical提交八层语义证据；绑定镜头数、N-1相邻对数量和有序pair SHA-256，空间层按序覆盖全部pair:left->right，表演层复核眼部链，禁项与声音层按序覆盖每个带对白镜的field:镜头编号.音色，源文对白层按序覆盖每个事实转化对白目标镜的field:镜头编号.画面内容；服务端与源文对白v6权威、新鲜机器N-1证明、THG-15固定音色模板及THG-16事实转化台账交叉校验并创建不可变签名audit overlay新工件/后继工作簿；原生产XLSX和已消费root不就地改写，审计过程禁止再生成内容",
       "approval_policy": "read_only"
     },
     {

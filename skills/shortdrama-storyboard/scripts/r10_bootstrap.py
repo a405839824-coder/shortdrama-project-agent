@@ -204,9 +204,9 @@ def verify_bundled(self_test: bool) -> dict:
         "conflicts": 31,
         "task_cards": 30,
         "validators": 49,
-        "error_codes": 66,
-        "atomic_rules": 154,
-        "templates": 48,
+        "error_codes": 67,
+        "atomic_rules": 155,
+        "templates": 49,
         "golden_tests": 82,
     }
     policy = runtime.get("preventive_gate_policy", {})
@@ -221,7 +221,7 @@ def verify_bundled(self_test: bool) -> dict:
     }
     expected_preventive = {
         "ordered_gates": 14,
-        "template_hard_gates": 15,
+        "template_hard_gates": 16,
         "required_evidence_blocks": 11,
         "state_vector_fields": 7,
         "performance_chain_fields": 7,

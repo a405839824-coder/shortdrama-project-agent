@@ -579,7 +579,7 @@ PATCH_FORBIDDEN_FIELD_TERMS = (
 AUDIT_GATE_IDS = tuple(f"G{index}" for index in range(14))
 AUDIT_LAYER_NAMES = SEMANTIC_AUDIT_LAYER_NAMES
 SEMANTIC_AUDIT_CONTRACT_VERSION = (
-    "semantic-audit-v4-adjacent-continuity-structured-voice"
+    "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue"
 )
 STRICT_OUTPUT_CONTRACT = "R10-SPC-1"
 SEMANTIC_AUDIT_CONTRACT_FINGERPRINT = sha256_bytes(
@@ -3153,6 +3153,56 @@ class StoryboardService:
                 f"expected={expected_voice_evidence_ids}, submitted={submitted_voice_evidence_ids}"
             )
 
+        adaptation_audit = (
+            storyboard.get("prevention_evidence", {}).get(
+                "dialogue_adaptation_audit"
+            )
+            if isinstance(storyboard.get("prevention_evidence"), dict)
+            else None
+        )
+        adapted_target_set: set[str] = set()
+        adapted_dialogue_count = 0
+        adaptation_entry_sha256 = ""
+        if isinstance(adaptation_audit, dict):
+            adaptation_entry_sha256 = str(
+                adaptation_audit.get("ordered_entry_sha256") or ""
+            )
+            entries = adaptation_audit.get("entries")
+            if isinstance(entries, list):
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    if entry.get("treatment") != "原文事实转化对白":
+                        continue
+                    adapted_dialogue_count += 1
+                    targets = entry.get("target_shots")
+                    if isinstance(targets, list):
+                        adapted_target_set.update(
+                            str(value).strip()
+                            for value in targets
+                            if str(value).strip()
+                        )
+        expected_adapted_dialogue_evidence_ids = [
+            f"field:{shot_ref}.画面内容"
+            for shot_ref in ordered_shot_refs
+            if shot_ref in adapted_target_set
+        ]
+        submitted_adapted_dialogue_evidence_ids = [
+            str(evidence_id)
+            for evidence_id in layer_by_name["源文对白"]["evidence_ids"]
+            if str(evidence_id) in set(expected_adapted_dialogue_evidence_ids)
+        ]
+        if (
+            submitted_adapted_dialogue_evidence_ids
+            != expected_adapted_dialogue_evidence_ids
+        ):
+            raise ValueError(
+                "semantic_audit_adapted_dialogue_coverage_incomplete: 源文对白层必须按canonical顺序"
+                "逐镜提交全部事实转化对白目标镜的field:镜头编号.画面内容证据；"
+                f"expected={expected_adapted_dialogue_evidence_ids}, "
+                f"submitted={submitted_adapted_dialogue_evidence_ids}"
+            )
+
         spatial_pair_ids = [
             str(evidence_id).split(":", 1)[1]
             for evidence_id in layer_by_name["空间连续"]["evidence_ids"]
@@ -3426,6 +3476,25 @@ class StoryboardService:
                 "audio_layer_status": layer_matrix["禁项与声音"]["status"],
                 "machine_voice_issue_count": sum(
                     str(item.get("error_code") or "") == "E-VOICE-001"
+                    for item in machine_issues
+                ),
+            },
+            "adapted_dialogue_coverage": {
+                "contract": "source-fact-dialogue-v1",
+                "expected_adapted_dialogue_count": adapted_dialogue_count,
+                "expected_target_shot_count": len(
+                    expected_adapted_dialogue_evidence_ids
+                ),
+                "reviewed_target_shot_count": len(
+                    submitted_adapted_dialogue_evidence_ids
+                ),
+                "coverage_percent": 100.0,
+                "ordered_entry_sha256": adaptation_entry_sha256,
+                "evidence_ids": expected_adapted_dialogue_evidence_ids,
+                "source_layer_status": layer_matrix["源文对白"]["status"],
+                "machine_adaptation_issue_count": sum(
+                    str(item.get("error_code") or "")
+                    == "E-ADAPTED-DIALOGUE-001"
                     for item in machine_issues
                 ),
             },
@@ -13976,6 +14045,9 @@ class StoryboardService:
                     "voice_field_coverage": copy.deepcopy(
                         evidence_matrix.get("voice_field_coverage")
                     ),
+                    "adapted_dialogue_coverage": copy.deepcopy(
+                        evidence_matrix.get("adapted_dialogue_coverage")
+                    ),
                     "semantic_conclusion": copy.deepcopy(
                         semantic_submission.get("conclusion")
                     ),
@@ -16081,6 +16153,9 @@ class StoryboardService:
             ),
             "voice_field_coverage": evidence_matrix.get(
                 "voice_field_coverage"
+            ),
+            "adapted_dialogue_coverage": evidence_matrix.get(
+                "adapted_dialogue_coverage"
             ),
             "source_ingestion_mode": (
                 "chapter_to_storyboard"

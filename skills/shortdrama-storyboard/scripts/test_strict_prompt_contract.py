@@ -392,9 +392,9 @@ def main() -> int:
     )
     production_audit = audit_types.get("production_preflight", {})
     independent_audit = audit_types.get("independent_audit", {})
-    thg15_passed = (
+    thg16_passed = (
         [row.get("gate_id") for row in hard_gates]
-        == [f"THG-{index:02d}" for index in range(1, 16)]
+        == [f"THG-{index:02d}" for index in range(1, 17)]
         and runtime_rules.get("compact_master_contract", {}).get(
             "projection_text_normalization"
         ) == "UTF-8_NFC_LF"
@@ -405,8 +405,8 @@ def main() -> int:
         and independent_audit.get("must_recompute_all_quality_conclusions") is True
     )
     results.append({
-        "test_id": "SPC-THG01-15-AUDIT-AUTHORITY-AND-RULE-CERTIFICATE",
-        "passed": thg15_passed,
+        "test_id": "SPC-THG01-16-AUDIT-AUTHORITY-AND-RULE-CERTIFICATE",
+        "passed": thg16_passed,
         "hard_gate_ids": [row.get("gate_id") for row in hard_gates],
         "projection_text_normalization": runtime_rules.get(
             "compact_master_contract", {}

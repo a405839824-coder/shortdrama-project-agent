@@ -1,6 +1,6 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.18",
+  "version": "0.5.19",
   "description": "Chinese short-drama production with a fixed formal-master voice template, timed eye-performance gates, provable N-1 continuity, and independent audit.",
   "author": {
     "name": "Storyboard Project Agent"
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.18把正式母版原有音色字段固定为基础声线、言语行为、当前表达、六项发声方式和禁止语气的多行子模板，并由THG-15及独立审计逐个覆盖所有对白镜；同时保留眼部表演和精确N-1相邻镜头连续性硬门禁。完整项目内容继续保存于ChatGPT Library，公共工具仍精确为19个。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.19新增原文直接对白与原文事实转化对白双轨：授权范围内的叙述性言语行为不得机械无声动作化，必须通过THG-16逐单元绑定原文事实、说话人依据、目标镜头与无新增剧情证明；独立审计同步覆盖事实转化对白目标镜。0.5.18固定音色子模板、0.5.17眼部表演和精确N-1相邻连续性门禁继续生效。完整项目内容保存于ChatGPT Library，公共工具仍精确为19个。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [
