@@ -86,7 +86,8 @@
           "type": "object",
           "required": [
             "contract", "scope_episode_ids", "candidate_unit_count", "reviewed_unit_count",
-            "adapted_dialogue_count", "coverage_percent", "ordered_entry_sha256", "entries"
+            "adapted_dialogue_count", "conversation_scene_count", "scene_classification_count",
+            "coverage_percent", "ordered_entry_sha256", "entries"
           ],
           "properties": {
             "contract": {"const": "source-fact-dialogue-v1"},
@@ -99,6 +100,8 @@
             "candidate_unit_count": {"type": "integer", "minimum": 0},
             "reviewed_unit_count": {"type": "integer", "minimum": 0},
             "adapted_dialogue_count": {"type": "integer", "minimum": 0},
+            "conversation_scene_count": {"type": "integer", "minimum": 0},
+            "scene_classification_count": {"type": "integer", "minimum": 0},
             "coverage_percent": {"const": 100},
             "ordered_entry_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
             "entries": {
@@ -109,8 +112,19 @@
                   "adaptation_id", "source_ledger_index", "source_unit_id", "source_text",
                   "dialogue_affordance", "treatment", "speaker", "adapted_text",
                   "target_shots", "fact_atoms", "speaker_basis", "authorization",
-                  "plot_change", "new_plot_facts", "entailment_status", "adaptation_reason"
-                ]
+                  "plot_change", "new_plot_facts", "entailment_status", "adaptation_reason",
+                  "scene_semantics", "communication_functions", "exchange_participants",
+                  "speech_necessity_basis"
+                ],
+                "properties": {
+                  "scene_semantics": {"enum": ["叙述性会话场景", "混合会话场景", "非会话叙述"]},
+                  "communication_functions": {
+                    "type": "array",
+                    "items": {"enum": ["问答", "劝决", "令应", "报听", "辩核", "证判", "说明", "协商", "拒绝", "其他"]}
+                  },
+                  "exchange_participants": {"type": "array", "items": {"type": "string"}},
+                  "speech_necessity_basis": {"type": "string", "minLength": 1}
+                }
               }
             }
           }

@@ -579,7 +579,7 @@ PATCH_FORBIDDEN_FIELD_TERMS = (
 AUDIT_GATE_IDS = tuple(f"G{index}" for index in range(14))
 AUDIT_LAYER_NAMES = SEMANTIC_AUDIT_LAYER_NAMES
 SEMANTIC_AUDIT_CONTRACT_VERSION = (
-    "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue"
+    "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes"
 )
 STRICT_OUTPUT_CONTRACT = "R10-SPC-1"
 SEMANTIC_AUDIT_CONTRACT_FINGERPRINT = sha256_bytes(
@@ -665,14 +665,7 @@ def _release_consumption_claims_on_error(method: Any) -> Any:
 
 
 def _fence_role_operation(method: Any) -> Any:
-    """Keep one storyboard role generation active for the whole tool call.
-
-    The short-lived storage lease prevents a continuation from rotating the
-    authority between validation and persistence.  Every storage write made
-    inside the call also rechecks and renews the same signed lease, so a stale
-    request that wakes after a crash/expiry cannot cross the new authority
-    head.  Nested repair/delta calls reuse the outer lease.
-    """
+    """Keep one storyboard role generation active for the whole tool call."""
 
     signature = inspect.signature(method)
 
@@ -768,14 +761,7 @@ def _draft_commit_payload_sha256(
     source_artifact_id: str | None,
     file_name: str,
 ) -> str:
-    """Hash the logical commit independently from a physical window.
-
-    ``commit_request_sha256`` remains the issuance identity used to derive the
-    deterministic artifact/certificate/handoff ids.  This second identity is
-    deliberately session-free: after a hard crash, a signed descendant of the
-    same authority root can prove that it is finishing the exact logical
-    payload without minting a second publication.
-    """
+    """Hash the logical commit independently from a physical window."""
 
     return sha256_bytes(
         _stable_json_bytes(
@@ -2227,13 +2213,7 @@ class StoryboardService:
         affected_rows: list[dict[str, Any]],
         requested_uids: list[str],
     ) -> None:
-        """Prove that the selected rows belong to the machine-readable target.
-
-        Merely finding the target text in a work order is not enough: without
-        this check an EP06 order could submit the stable UIDs of EP20.  Legacy
-        workbooks without episode IDs may still use an exact shot_uid target.
-        Ambiguous natural-language targets must take the full commit route.
-        """
+        """Prove that the selected rows belong to the machine-readable target."""
 
         compact = re.sub(r"\s+", "", str(scope_target or "")).casefold()
         episode_match = re.fullmatch(
@@ -2481,13 +2461,7 @@ class StoryboardService:
         *,
         hub: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Resolve one historical physical binding from the signed chain.
-
-        Certificates and re-audit routes outlive the window that issued them.
-        Their physical binding must therefore be checked against the exact
-        signed continuation generation, rather than either the immutable
-        generation-zero work order or the current active head alone.
-        """
+        """Resolve one historical physical binding from the signed chain."""
 
         if (
             isinstance(generation, bool)
@@ -3100,10 +3074,10 @@ class StoryboardService:
                 raise ValueError(
                     "semantic_audit_evidence_invalid: evidence references must use non-empty kind:id"
                 )
-            if kind not in {"shot", "field", "canonical", "pair"}:
+            if kind not in {"shot", "field", "canonical", "pair", "source-unit"}:
                 raise ValueError(
                     "semantic_audit_evidence_invalid: evidence kind must be one of "
-                    "shot, field, canonical, or pair"
+                    "shot, field, canonical, pair, or source-unit"
                 )
             if kind == "shot" and value not in shot_refs:
                 raise ValueError(
@@ -3163,6 +3137,8 @@ class StoryboardService:
         adapted_target_set: set[str] = set()
         adapted_dialogue_count = 0
         adaptation_entry_sha256 = ""
+        expected_scene_classification_evidence_ids: list[str] = []
+        conversation_scene_count = 0
         if isinstance(adaptation_audit, dict):
             adaptation_entry_sha256 = str(
                 adaptation_audit.get("ordered_entry_sha256") or ""
@@ -3172,6 +3148,15 @@ class StoryboardService:
                 for entry in entries:
                     if not isinstance(entry, dict):
                         continue
+                    source_unit_id = str(entry.get("source_unit_id") or "").strip()
+                    if source_unit_id:
+                        expected_scene_classification_evidence_ids.append(
+                            f"source-unit:{source_unit_id}"
+                        )
+                    if entry.get("scene_semantics") in {
+                        "叙述性会话场景", "混合会话场景"
+                    }:
+                        conversation_scene_count += 1
                     if entry.get("treatment") != "原文事实转化对白":
                         continue
                     adapted_dialogue_count += 1
@@ -3201,6 +3186,22 @@ class StoryboardService:
                 "逐镜提交全部事实转化对白目标镜的field:镜头编号.画面内容证据；"
                 f"expected={expected_adapted_dialogue_evidence_ids}, "
                 f"submitted={submitted_adapted_dialogue_evidence_ids}"
+            )
+
+        submitted_scene_classification_evidence_ids = [
+            str(evidence_id)
+            for evidence_id in layer_by_name["源文对白"]["evidence_ids"]
+            if str(evidence_id).startswith("source-unit:")
+        ]
+        if (
+            submitted_scene_classification_evidence_ids
+            != expected_scene_classification_evidence_ids
+        ):
+            raise ValueError(
+                "semantic_audit_conversation_scene_coverage_incomplete: 源文对白层必须按Source Ledger顺序"
+                "逐单元提交全部source-unit:单元ID，独立复核其会话/混合会话/非会话判定；"
+                f"expected={expected_scene_classification_evidence_ids}, "
+                f"submitted={submitted_scene_classification_evidence_ids}"
             )
 
         spatial_pair_ids = [
@@ -3497,6 +3498,19 @@ class StoryboardService:
                     == "E-ADAPTED-DIALOGUE-001"
                     for item in machine_issues
                 ),
+            },
+            "conversation_scene_classification_coverage": {
+                "contract": "narrative-conversation-scene-v1",
+                "expected_source_unit_count": len(
+                    expected_scene_classification_evidence_ids
+                ),
+                "reviewed_source_unit_count": len(
+                    submitted_scene_classification_evidence_ids
+                ),
+                "conversation_scene_count": conversation_scene_count,
+                "coverage_percent": 100.0,
+                "evidence_ids": expected_scene_classification_evidence_ids,
+                "source_layer_status": layer_matrix["源文对白"]["status"],
             },
         }
         enriched["status"] = "pass" if clean else "fail_current"
@@ -3819,15 +3833,7 @@ class StoryboardService:
         source_record: dict[str, Any],
         certificate: dict[str, Any],
     ) -> None:
-        """Bind every visible audit-page claim to the signed certificate.
-
-        Artifact metadata is an index and its public SHA can be recomputed by a
-        local writer.  It is therefore insufficient evidence for a PASS.  This
-        verifier reparses the authoritative workbook (which also checks the
-        hidden canonical sidecar and both visible projections), reconstructs
-        the complete audit-page value matrix from the signed certificate, and
-        requires the two to be identical before status may expose PASS.
-        """
+        """Bind every visible audit-page claim to the signed certificate."""
 
         overlay_id = str(overlay_record.get("artifact_id") or "")
         if not overlay_id:
@@ -5021,13 +5027,7 @@ class StoryboardService:
         related_artifact_id: str | None = None,
         request_session_id: str | None = None,
     ) -> ToolResponse:
-        """Persist content-free checkpoints around a native ChatGPT run.
-
-        The server timestamps receipt of each marker.  It does not accept
-        caller-authored timestamps, prompt text, dialogue, source excerpts, or
-        hidden-reasoning claims, so the resulting report remains useful even
-        when the caller cannot use the OpenAI API.
-        """
+        """Persist content-free checkpoints around a native ChatGPT run."""
 
         self._require_runtime()
         if action not in {"start", "mark", "finish"}:
@@ -6107,15 +6107,7 @@ class StoryboardService:
         hub_handoff: dict[str, Any],
         signed_handoff: dict[str, Any],
     ) -> bool:
-        """Accept only the two historically emitted exact Hub shapes.
-
-        Current writers embed the envelope-free projection.  A legacy
-        production finalizer instead copied the complete signed handoff into
-        the Hub, including ``record_id``, ``project_id`` and
-        ``integrity_hmac``.  Those rows are safe to consume only when every
-        byte represented by the parsed JSON still equals the signed record;
-        no other missing, additional or changed field is tolerated.
-        """
+        """Accept only the two historically emitted exact Hub shapes."""
 
         expected_projection = cls._handoff_record_projection(signed_handoff)
         return hub_handoff == expected_projection or hub_handoff == signed_handoff
@@ -6941,13 +6933,7 @@ class StoryboardService:
         hub: dict[str, Any],
         handoff: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Return the signed immediate recovery journal for a prepared successor.
-
-        A successor may be recovered again after a later deployment changes
-        only runtime dependencies. The immediate committed journal seals the
-        predecessor, certificate and production trace, so no mutable label is
-        accepted as recovery provenance.
-        """
+        """Return the signed immediate recovery journal for a prepared successor."""
 
         recovery_id = str(handoff.get("recovery_id") or "")
         if not recovery_id:
@@ -13412,14 +13398,7 @@ class StoryboardService:
     def _known_prevention_pattern_keys_before_event(
         ledger: dict[str, Any], event_index: int
     ) -> set[str]:
-        """Reconstruct the prevention profile visible before one event.
-
-        ``ledger.issues`` is a materialized projection of the full event
-        history.  Reusing it directly while validating a completed replay
-        would count patterns learned from the event being validated as prior
-        knowledge.  Select only issue histories whose authority event is in
-        the immutable prefix before ``event_index`` instead.
-        """
+        """Reconstruct the prevention profile visible before one event."""
 
         prefix_event_ids = {
             str(row.get("event_id") or "").strip().casefold()
@@ -14048,6 +14027,11 @@ class StoryboardService:
                     "adapted_dialogue_coverage": copy.deepcopy(
                         evidence_matrix.get("adapted_dialogue_coverage")
                     ),
+                    "conversation_scene_classification_coverage": copy.deepcopy(
+                        evidence_matrix.get(
+                            "conversation_scene_classification_coverage"
+                        )
+                    ),
                     "semantic_conclusion": copy.deepcopy(
                         semantic_submission.get("conclusion")
                     ),
@@ -14172,14 +14156,7 @@ class StoryboardService:
         certificate_id: str,
         artifact_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Verify audit authority against current bytes and current rules.
-
-        A certificate can be internally well signed yet stale after any Skill,
-        validator, parser, schema, runtime, dependency, model-contract or
-        full-regression-certificate change. Status and reuse decisions must
-        therefore rebuild the exact cache identity instead of accepting the
-        historical certificate's self-consistent component map.
-        """
+        """Verify audit authority against current bytes and current rules."""
 
         storyboard, artifact_record = self._storyboard_from_artifact(
             namespace,
@@ -15146,13 +15123,7 @@ class StoryboardService:
         semantic_audit: dict[str, Any] | None,
         fingerprints: dict[str, str],
     ) -> dict[str, Any] | None:
-        """Recognize an exact retry of one already-completed re-audit.
-
-        The signed certificate is the server-side completion receipt.  A
-        caller cannot create a new audit round by resubmitting byte-equivalent
-        semantic evidence after losing the first response; a genuinely new
-        round must carry a different normalized semantic submission.
-        """
+        """Recognize an exact retry of one already-completed re-audit."""
 
         if (
             semantic_audit is None
@@ -16156,6 +16127,9 @@ class StoryboardService:
             ),
             "adapted_dialogue_coverage": evidence_matrix.get(
                 "adapted_dialogue_coverage"
+            ),
+            "conversation_scene_classification_coverage": evidence_matrix.get(
+                "conversation_scene_classification_coverage"
             ),
             "source_ingestion_mode": (
                 "chapter_to_storyboard"
@@ -17234,14 +17208,7 @@ class StoryboardService:
         state: str,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        """Publish or reject every projection of one successor candidate.
-
-        Candidate bytes are persisted before the base compare-and-set so the
-        validator can bind exact hashes.  They remain fail-closed until the
-        compare-and-set succeeds.  This method updates the artifact pair,
-        signed handoff, and hub projections together under the project lock's
-        normal serialization boundary.
-        """
+        """Publish or reject every projection of one successor candidate."""
 
         return self.store.set_successor_candidate_publication(
             namespace,
@@ -18470,14 +18437,7 @@ class StoryboardService:
         expected_kind: str | None = None,
         expected_scope_hash: str | None = None,
     ) -> dict[str, Any]:
-        """Validate the exact WAL left after package consume and before CAS.
-
-        A consumed repair package is normally terminal.  It becomes
-        recoverable only when every durable projection names the same still-
-        incomplete successor transaction and candidate.  This helper is
-        deliberately read-only; the operation-fenced recovery below performs
-        the forward/compensation writes.
-        """
+        """Validate the exact WAL left after package consume and before CAS."""
 
         work_order_id = str(work_order.get("work_order_id") or "")
         package_id = str(package.get("repair_package_id") or "")
@@ -19162,13 +19122,7 @@ class StoryboardService:
         source_artifact_id: str | None,
         repair_package_id: str,
     ) -> dict[str, Any]:
-        """Resolve and verify the complete, server-signed structural-repair chain.
-
-        A package id is only an index.  Authorization comes from the exact
-        immutable package, independent-audit certificate, production handoff,
-        audit-to-repair handoff, original artifact bytes, and distinct repair
-        authority all agreeing before the package is claimed.
-        """
+        """Resolve and verify the complete, server-signed structural-repair chain."""
 
         if not source_artifact_id:
             raise ValueError(
@@ -21812,14 +21766,7 @@ class StoryboardService:
         file_name: str,
         request_session_id: str | None = None,
     ) -> ToolResponse:
-        """Apply evidence-bound shot-field repairs, then run the full validator.
-
-        This is intentionally narrower than ``commit_storyboard``: the caller
-        cannot alter structural, source, boundary, timing, or cognition fields,
-        and an independent-audit certificate must prove every requested fix.
-        The final persistence and project-ledger path is delegated to the
-        existing full commit function so patching never weakens R10 gates.
-        """
+        """Apply evidence-bound shot-field repairs, then run the full validator."""
 
         self._require_runtime()
         if not isinstance(operations, list) or not operations:

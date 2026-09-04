@@ -59,6 +59,10 @@ class AdaptedDialogueGateTests(unittest.TestCase):
             "new_plot_facts": [],
             "entailment_status": "entailed_by_source",
             "adaptation_reason": "把可观察的劝说行为恢复为可听对白，避免机械无声手势。",
+            "scene_semantics": "叙述性会话场景",
+            "communication_functions": ["劝决"],
+            "exchange_participants": ["老管事代表", "苏清柳"],
+            "speech_necessity_basis": "劝说必须由管事向苏清柳传递理由并等待她决定，单靠动作无法完成信息交换。",
         }
         self.storyboard = {
             "source_lock": {"adapted_dialogue_contract": "source-fact-dialogue-v1"},
@@ -83,6 +87,8 @@ class AdaptedDialogueGateTests(unittest.TestCase):
                     "candidate_unit_count": 1,
                     "reviewed_unit_count": 1,
                     "adapted_dialogue_count": 1,
+                    "conversation_scene_count": 1,
+                    "scene_classification_count": 1,
                     "coverage_percent": 100,
                     "ordered_entry_sha256": _stable_sha256(["ADP-EP13-001"]),
                     "entries": [copy.deepcopy(self.entry)],
@@ -128,14 +134,66 @@ class AdaptedDialogueGateTests(unittest.TestCase):
             "source_type": "D级人物反应",
         })
         audit = self.storyboard["prevention_evidence"]["dialogue_adaptation_audit"]
+        non_dialogue_entry = copy.deepcopy(self.entry)
+        non_dialogue_entry.update({
+            "adaptation_id": "ADP-EP13-013",
+            "source_ledger_index": 2,
+            "source_unit_id": "CH18-U13",
+            "source_text": "田婆子见状，不敢继续仗着老资格叫嚷。",
+            "dialogue_affordance": "不宜转对白",
+            "treatment": "可视动作",
+            "speaker": "",
+            "adapted_text": "",
+            "fact_atoms": ["田婆子没有继续叫嚷"],
+            "adaptation_reason": "原文明确否定开口，以收声后的反应表现。",
+            "scene_semantics": "非会话叙述",
+            "communication_functions": [],
+            "exchange_participants": [],
+            "speech_necessity_basis": "本单元描述的是停止说话，不应反向新增台词。",
+        })
         audit.update({
-            "candidate_unit_count": 0,
-            "reviewed_unit_count": 0,
+            "candidate_unit_count": 1,
+            "reviewed_unit_count": 1,
             "adapted_dialogue_count": 0,
-            "ordered_entry_sha256": _stable_sha256([]),
-            "entries": [],
+            "conversation_scene_count": 0,
+            "scene_classification_count": 1,
+            "ordered_entry_sha256": _stable_sha256(["ADP-EP13-013"]),
+            "entries": [non_dialogue_entry],
         })
         self.assertEqual(self.validate(), [])
+
+    def test_implicit_conversation_scene_without_speech_verb_must_be_dialogue(self) -> None:
+        self.storyboard["prevention_evidence"]["source_ledger"][1].update({
+            "source_id": "CH18-U09",
+            "source_text": "苏清柳只先确认究竟是消息没到，还是有人故意试探新主母的底线。",
+            "source_type": "D级叙述",
+        })
+        entry = self.storyboard["prevention_evidence"]["dialogue_adaptation_audit"]["entries"][0]
+        entry.update({
+            "source_unit_id": "CH18-U09",
+            "source_text": "苏清柳只先确认究竟是消息没到，还是有人故意试探新主母的底线。",
+            "speaker": "苏清柳",
+            "adapted_text": "先查清消息究竟有没有送到，再论迟到之责。",
+            "fact_atoms": ["先核实消息是否送达", "暂不因一次迟到直接定罪"],
+            "communication_functions": ["令应", "证判"],
+            "exchange_participants": ["苏清柳", "门房与副管事"],
+            "speaker_basis": "原文明确由苏清柳作出先核验再判断的处理决定。",
+            "speech_necessity_basis": "苏清柳需要把核验命令传达给执行者，事件无法靠静默动作完成。",
+        })
+        self.shots[1]["画面内容"] = "苏清柳说道：“先查清消息究竟有没有送到，再论迟到之责。”"
+        self.assertEqual(self.validate(), [])
+
+        self.shots[1]["画面内容"] = "苏清柳翻看签名簿，没有开口。"
+        self.assertTrue(self.validate())
+
+    def test_every_in_scope_narrative_unit_requires_scene_semantic_decision(self) -> None:
+        self.storyboard["prevention_evidence"]["source_ledger"].append({
+            "source_id": "CH18-U10",
+            "source_type": "D级叙述",
+            "source_text": "召集帖昨日下午便送到各房。",
+            "target_shots": ["EP13-001"],
+        })
+        self.assertTrue(self.validate())
 
 
 class AdaptedDialogueIndependentAuditTests(unittest.TestCase):
@@ -148,6 +206,8 @@ class AdaptedDialogueIndependentAuditTests(unittest.TestCase):
                     "ordered_entry_sha256": "b" * 64,
                     "entries": [
                         {
+                            "source_unit_id": "CH18-U01",
+                            "scene_semantics": "叙述性会话场景",
                             "treatment": "原文事实转化对白",
                             "target_shots": ["EP13-001"],
                         }
@@ -205,6 +265,7 @@ class AdaptedDialogueIndependentAuditTests(unittest.TestCase):
                 evidence.append("field:EP13-001.音色")
             elif layer == "源文对白":
                 evidence.append("field:EP13-001.画面内容")
+                evidence.append("source-unit:CH18-U01")
             self.submission["layers"].append({
                 "layer": layer,
                 "status": "pass",
@@ -228,6 +289,12 @@ class AdaptedDialogueIndependentAuditTests(unittest.TestCase):
         self.assertEqual(proof["expected_target_shot_count"], 1)
         self.assertEqual(proof["reviewed_target_shot_count"], 1)
         self.assertEqual(proof["evidence_ids"], ["field:EP13-001.画面内容"])
+        scene_proof = enriched["independent_evidence_matrix"][
+            "conversation_scene_classification_coverage"
+        ]
+        self.assertEqual(scene_proof["expected_source_unit_count"], 1)
+        self.assertEqual(scene_proof["reviewed_source_unit_count"], 1)
+        self.assertEqual(scene_proof["evidence_ids"], ["source-unit:CH18-U01"])
 
     def test_missing_adapted_dialogue_field_evidence_is_rejected(self) -> None:
         submission = copy.deepcopy(self.submission)
@@ -236,6 +303,18 @@ class AdaptedDialogueIndependentAuditTests(unittest.TestCase):
         )
         source_layer["evidence_ids"] = [submission["layers"][0]["evidence_ids"][0]]
         with self.assertRaisesRegex(ValueError, "adapted_dialogue_coverage_incomplete"):
+            self.attach(submission)
+
+    def test_missing_scene_classification_evidence_is_rejected(self) -> None:
+        submission = copy.deepcopy(self.submission)
+        source_layer = next(
+            row for row in submission["layers"] if row["layer"] == "源文对白"
+        )
+        source_layer["evidence_ids"] = [
+            value for value in source_layer["evidence_ids"]
+            if not value.startswith("source-unit:")
+        ]
+        with self.assertRaisesRegex(ValueError, "conversation_scene_coverage_incomplete"):
             self.attach(submission)
 
 

@@ -1522,7 +1522,7 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
     )
     current_v5 = copy.deepcopy(current)
     current_v5["semantic_audit_contract"] = (
-        "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue"
+        "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes"
     )
     current_v5["voice_field_coverage"] = {
         "contract": "fixed-voice-template-v1",
@@ -1544,9 +1544,18 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
         "source_layer_status": "pass",
         "machine_adaptation_issue_count": 0,
     }
+    current_v5["conversation_scene_classification_coverage"] = {
+        "contract": "narrative-conversation-scene-v1",
+        "expected_source_unit_count": 0,
+        "reviewed_source_unit_count": 0,
+        "conversation_scene_count": 0,
+        "coverage_percent": 100,
+        "evidence_ids": [],
+        "source_layer_status": "pass",
+    }
     assert_true(
         list(validator.iter_errors(current_v5)) == [],
-        "valid v5 PASS certificate must carry voice and source-fact-dialogue proofs",
+        "valid v6 PASS certificate must carry voice, dialogue, and conversation-scene proofs",
     )
     missing_voice_proof = copy.deepcopy(current_v5)
     missing_voice_proof.pop("voice_field_coverage")
@@ -1559,6 +1568,12 @@ def test_certificate_pass_contract_requires_reviewed_shot_and_pass_conclusion() 
     assert_true(
         list(validator.iter_errors(missing_dialogue_proof)),
         "v5 certificate without source-fact-dialogue proof must fail schema validation",
+    )
+    missing_scene_proof = copy.deepcopy(current_v5)
+    missing_scene_proof.pop("conversation_scene_classification_coverage")
+    assert_true(
+        list(validator.iter_errors(missing_scene_proof)),
+        "v6 certificate without conversation-scene classification proof must fail schema validation",
     )
     missing_adjacent = copy.deepcopy(current)
     missing_adjacent.pop("adjacent_continuity")

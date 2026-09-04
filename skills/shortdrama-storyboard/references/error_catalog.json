@@ -180,9 +180,9 @@
     "module": "DIALOGUE",
     "severity": "fail",
     "blocking": true,
-    "trigger_condition": "THG-16：原文叙述中的明确说话行为被机械改成无声动作，或非原文直接对白未绑定逐字原文事实、说话人依据、事实原子、目标镜头与无新增剧情证明",
+    "trigger_condition": "THG-16：授权范围内叙述单元未逐条完成场景语义判定；叙述性会话或混合会话的问答、劝决、令应、报听、辩核、证判被改成无声动作；或事实转化对白未绑定原文事实、交流双方、说话人依据、目标镜头与无新增剧情证明",
     "required_evidence": "source_ledger顺序、逐条事实转化台账、说话人和改编对白、fact_atoms、plot_change=false、new_plot_facts=[]、entailed_by_source、100%覆盖率及有序集合SHA-256",
-    "repair_action": "区分原文直接对白与原文事实转化对白；直接对白维持逐字逐标点，转化对白只重组原文已给事实并重做对应音色、时长、口型、表演和连续性证据",
+    "repair_action": "按场景实际交流闭环重新判定全部叙述单元；会话单元拆成对白节拍，直接对白维持逐字逐标点，事实转化对白只重组原文已给事实，并重做音色、时长、口型、听者反应和连续性证据",
     "final_status_if_unfixed": "fail_current",
     "version": "V16.3-148-R10-StableRuntime"
   },

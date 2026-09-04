@@ -465,7 +465,7 @@
             "adjacent_pair_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100}
           }
         },
-        "semantic_audit_contract": {"enum": ["semantic-audit-v2-compact-master", "semantic-audit-v3-adjacent-continuity", "semantic-audit-v4-adjacent-continuity-structured-voice", "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue"]},
+        "semantic_audit_contract": {"enum": ["semantic-audit-v2-compact-master", "semantic-audit-v3-adjacent-continuity", "semantic-audit-v4-adjacent-continuity-structured-voice", "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue", "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes"]},
         "semantic_audit_sha256": {"$ref": "#/$defs/sha256"},
         "reviewed_shot_count": {"type": "integer", "minimum": 0},
         "reviewed_batch_count": {"const": 0, "deprecated": true},
@@ -514,6 +514,20 @@
             "evidence_ids": {"type": "array", "items": {"type": "string", "pattern": "^field:.+\\.画面内容$"}, "uniqueItems": true},
             "source_layer_status": {"enum": ["pass", "fail_current"]},
             "machine_adaptation_issue_count": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        },
+        "conversation_scene_classification_coverage": {
+          "type": "object",
+          "required": ["contract", "expected_source_unit_count", "reviewed_source_unit_count", "conversation_scene_count", "coverage_percent", "evidence_ids", "source_layer_status"],
+          "properties": {
+            "contract": {"const": "narrative-conversation-scene-v1"},
+            "expected_source_unit_count": {"type": "integer", "minimum": 0},
+            "reviewed_source_unit_count": {"type": "integer", "minimum": 0},
+            "conversation_scene_count": {"type": "integer", "minimum": 0},
+            "coverage_percent": {"const": 100},
+            "evidence_ids": {"type": "array", "items": {"type": "string", "pattern": "^source-unit:.+$"}, "uniqueItems": true},
+            "source_layer_status": {"enum": ["pass", "fail_current"]}
           },
           "additionalProperties": false
         },
@@ -602,6 +616,24 @@
         "stage_trace_id": {"type": "string", "minLength": 1}
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {"semantic_audit_contract": {"const": "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes"}},
+            "required": ["semantic_audit_contract"]
+          },
+          "then": {
+            "required": ["reviewed_adjacent_pair_count", "adjacent_pair_order_sha256", "adjacent_continuity", "voice_field_coverage", "adapted_dialogue_coverage", "conversation_scene_classification_coverage"],
+            "properties": {
+              "quality_thresholds": {
+                "required": ["adjacent_pair_coverage_percent"],
+                "properties": {"adjacent_pair_coverage_percent": {"const": 100}}
+              },
+              "voice_field_coverage": {"properties": {"coverage_percent": {"const": 100}}},
+              "adapted_dialogue_coverage": {"properties": {"coverage_percent": {"const": 100}}},
+              "conversation_scene_classification_coverage": {"properties": {"coverage_percent": {"const": 100}}}
+            }
+          }
+        },
         {
           "if": {
             "properties": {"semantic_audit_contract": {"const": "semantic-audit-v3-adjacent-continuity"}},
@@ -708,6 +740,12 @@
                   "G11": {"$ref": "#/$defs/pass_check_result"},
                   "G12": {"$ref": "#/$defs/pass_check_result"},
                   "G13": {"$ref": "#/$defs/pass_check_result"}
+                }
+              },
+              "conversation_scene_classification_coverage": {
+                "properties": {
+                  "source_layer_status": {"const": "pass"},
+                  "coverage_percent": {"const": 100}
                 }
               },
               "adapted_dialogue_coverage": {

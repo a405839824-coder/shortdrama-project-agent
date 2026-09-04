@@ -60,9 +60,9 @@
     "原文依据": "原文支撑句"
   },
   "compact_master_contract": {
-    "plugin_version": "0.5.19",
+    "plugin_version": "0.5.20",
     "output_contract": "R10-SPC-1",
-    "semantic_audit_contract_version": "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue",
+    "semantic_audit_contract_version": "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes",
     "canonical_atomic_field_count": 27,
     "removed_new_write_fields": ["运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气", "心理音轨属性", "生成批次"],
     "picture_content_single_write": ["可见动作", "表情", "视线起点与焦点转移", "眼球先动与头部跟随关系", "眼睑松紧", "具体眨眼时点或有理由不眨眼", "精确对白", "对白发生时点", "可见呼吸与停顿", "重音期间不眨眼", "标点对应表演", "口型一致", "不看镜头", "听者错峰反应与眨眼错峰", "镜尾视线与状态", "恰好三个Seedance 2.5单镜时间阶段"],
@@ -213,7 +213,7 @@
       {"gate_id": "THG-13", "name": "眼神眼睑眨眼与静帧自然性", "error_code": "E-EXPRESSION-003"},
       {"gate_id": "THG-14", "name": "相邻镜头N-1逐组连续性证明", "error_code": "E-CONTINUITY-001"},
       {"gate_id": "THG-15", "name": "音色固定子模板与本镜对白重音", "error_code": "E-VOICE-001"},
-      {"gate_id": "THG-16", "name": "原文事实转化对白逐单元全覆盖", "error_code": "E-ADAPTED-DIALOGUE-001"}
+      {"gate_id": "THG-16", "name": "叙述性会话场景逐单元识别与对白还原", "error_code": "E-ADAPTED-DIALOGUE-001"}
     ],
     "first_draft_quality_gate": {
       "measurement_unit": "unique_affected_shots",
@@ -433,7 +433,7 @@
     }
   },
   "windowed_execution_policy": {
-    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-16、八层审计、相邻镜头N-1逐组证据、逐对白镜音色字段证据、事实转化对白逐单元证据或质量阈值。",
+    "principle": "用户窗口不设角色限制；同一认证命名空间的任意窗口可发起生产、独立审计或修正。服务端为生产与独立审计签发不同执行authority，仅审计失败且获修复授权时签发repair authority；复用经指纹验证的客观事实，不复用生产或修复结论；任何提速不得减少49项验证器、G0-G13、THG-01–THG-16、八层审计、相邻镜头N-1逐组证据、逐对白镜音色字段证据、全量叙述单元会话分类与事实转化对白证据或质量阈值。",
     "activation": {
       "user_window_access": "authenticated_namespace_window_neutral",
       "window_role_restrictions": false,
@@ -917,7 +917,7 @@
         "scope"
       ],
       "explicit_fresh_audit": "reuse_extraction_and_parsing_only_then_recompute_semantic_verdict",
-      "semantic_audit_contract": "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue",
+      "semantic_audit_contract": "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes",
       "invalidation": {
         "dialogue_or_story": "beat_source_mapping_protected_dialogue_cognition",
         "action_or_gaze": "current_shot_neighbors_visibility",
@@ -2424,7 +2424,7 @@
       "module": "DIALOGUE",
       "severity": "fail",
       "blocking": true,
-      "trigger_condition": "THG-16：原文叙述中的明确说话行为被机械改成无声动作，或非原文直接对白未绑定逐字原文事实、说话人依据、事实原子、目标镜头与无新增剧情证明",
+      "trigger_condition": "THG-16：授权范围内叙述单元未逐条完成会话／混合会话／非会话判定；叙述性会话的问答、劝决、令应、报听、辩核、证判被改成无声动作；或事实转化对白未绑定原文事实、交流双方、说话人依据、目标镜头与无新增剧情证明",
       "required_evidence": "source_ledger顺序、逐条事实转化台账、说话人和改编对白、fact_atoms、plot_change=false、new_plot_facts=[]、entailed_by_source、100%覆盖率及有序集合SHA-256",
       "repair_action": "区分原文直接对白与原文事实转化对白；直接对白维持逐字逐标点，转化对白只重组原文已给事实并重做对应音色、时长、口型、表演和连续性证据",
       "final_status_if_unfixed": "fail_current",
