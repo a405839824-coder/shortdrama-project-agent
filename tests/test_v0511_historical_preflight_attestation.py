@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from shortdrama_mcp.models import SEMANTIC_AUDIT_LAYER_NAMES
 import shortdrama_mcp.service as service_module
 
+from semantic_audit_helpers import semantic_audit_for_artifact
 from test_efficiency import valid_storyboard
 from test_v057_preflight_evidence_reissue import (
     V057PreflightEvidenceReissueTests,
@@ -772,33 +772,15 @@ class V0511HistoricalPreflightAttestationTests(_V057FixtureOnly):
         )
         return Path(path).read_bytes()
 
-    def _semantic_pass_for_historical_storyboard(self) -> dict[str, Any]:
-        shots = self.historical_storyboard["shots"]
-        batches = self.historical_storyboard.get("batches", [])
-        shot_id = str(shots[0].get("镜头编号") or shots[0].get("shot_uid"))
-        return {
-            "canonical_sha256": (
-                service_module.canonical_storyboard_sha256(
-                    self.historical_storyboard
-                )
-            ),
-            "reviewed_shot_count": len(shots),
-            "reviewed_batch_count": len(batches),
-            "layers": [
-                {
-                    "layer": layer,
-                    "status": "pass",
-                    "summary": f"{layer} independently reviewed.",
-                    "evidence_ids": [f"shot:{shot_id}"],
-                }
-                for layer in SEMANTIC_AUDIT_LAYER_NAMES
-            ],
-            "issues": [],
-            "conclusion": {
-                "status": "pass",
-                "summary": "Complete independent semantic review.",
-            },
-        }
+    def _semantic_pass_for_historical_storyboard(
+        self, artifact_id: str
+    ) -> dict[str, Any]:
+        return semantic_audit_for_artifact(
+            self.service,
+            self.settings,
+            self.project_id,
+            artifact_id,
+        )
 
     async def test_normal_current_revalidation_route_is_unchanged(self) -> None:
         response = self.service.recover_storyboard_handoff(
@@ -1839,7 +1821,9 @@ class V0511HistoricalPreflightAttestationTests(_V057FixtureOnly):
                 ),
                 force_machine_recheck=False,
                 semantic_audit=(
-                    self._semantic_pass_for_historical_storyboard()
+                    self._semantic_pass_for_historical_storyboard(
+                        str(historical_successor["storyboard_artifact_id"])
+                    )
                 ),
                 request_session_id=audit_session,
             )
@@ -1885,7 +1869,9 @@ class V0511HistoricalPreflightAttestationTests(_V057FixtureOnly):
             work_order_id=str(audit_order.work_order_id),
             handoff_artifact_id=str(historical_successor["handoff_id"]),
             force_machine_recheck=True,
-            semantic_audit=self._semantic_pass_for_historical_storyboard(),
+            semantic_audit=self._semantic_pass_for_historical_storyboard(
+                str(historical_successor["storyboard_artifact_id"])
+            ),
             request_session_id=audit_session,
         )
         self.assertEqual(reaudit_response.status, "fail_current")

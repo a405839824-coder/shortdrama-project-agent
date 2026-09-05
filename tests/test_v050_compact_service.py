@@ -136,7 +136,10 @@ class CompactCanonicalContractTests(unittest.TestCase):
         self.assertIn("聚焦注意力", shot["运镜方式"])
         self.assertIn("垂眸整理袖口", shot["画面内容"])
         self.assertIn("【苏清柳】母亲", shot["画面内容"])
-        self.assertEqual(shot["音色"], "平静克制、温和带锋")
+        self.assertEqual(
+            shot["音色"],
+            "平静克制、温和带锋；历史发声参数（待按固定音色子模板修订）：对白清晰，速度自然",
+        )
 
     def test_declared_compact_input_cannot_smuggle_legacy_fields(self) -> None:
         shot = _compact_shot("EP01-001", cumulative=3.0)

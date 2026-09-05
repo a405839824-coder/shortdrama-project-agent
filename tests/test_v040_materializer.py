@@ -15,6 +15,7 @@ from shortdrama_mcp.canonical import (
     LEGACY_DERIVED_SHOT_FIELDS,
     LEGACY_REMOVED_SHOT_FIELDS,
     NO_DUPLICATE_GENERATION_EVIDENCE,
+    compact_storyboard_canonical,
 )
 from shortdrama_mcp.config import Settings
 from shortdrama_mcp.delta import ensure_shot_uids, merge_storyboard_delta
@@ -77,7 +78,19 @@ class CompactMasterMaterializerTests(unittest.TestCase):
             "【苏清柳】母亲，儿媳失手，请见谅。口型与精确台词一致；"
             "[3.1–4.0s] 邹氏延后约0.6秒收紧呼吸，苏清柳保持站位。"
         )
-        shot["音色"] = "平静克制、温和带锋，声量中等，逻辑关键词清楚"
+        shot["音色"] = (
+            "基础声线：二十余岁青年女声，中音区，声线偏薄而清亮，长期保持温和克制的质感。\n\n"
+            "言语行为：承认失手并向母亲请求见谅。\n\n"
+            "当前表达：平静克制、温和带锋，致歉时保持自身分寸。\n\n"
+            "发声方式：\n"
+            "音量：声量中等，仅够近处母亲听清。\n"
+            "语速与节奏：语速平稳，逻辑关键词清楚，不拖长字音。\n"
+            "呼吸：开口前轻吸气，句中保持稳定，不额外抢气。\n"
+            "停顿：在“母亲”后短停，在“失手”后稍停。\n"
+            "重音：明确落在原文中的“失手”和“见谅”。\n"
+            "尾音：克制落稳。\n\n"
+            "禁止语气：撒娇、讨好、夸张惊慌。"
+        )
 
         merged = compile_formal_merged_field(shot)
         keyframe = compile_gpt_keyframe_instruction(shot)
@@ -87,11 +100,12 @@ class CompactMasterMaterializerTests(unittest.TestCase):
         self.assertIn("画面内容：[0.0–0.8s]", merged)
         self.assertIn("【苏清柳】母亲，儿媳失手，请见谅。", merged)
         self.assertIn("口型与精确台词一致", merged)
-        self.assertIn("音色：平静克制、温和带锋", merged)
+        self.assertIn(f"音色：\n\n{shot['音色']}", merged)
         for field in ("光影", "光源来源", "光源方向", "色温倾向"):
             self.assertIn(f"{field}：{shot[field]}", merged)
-        for removed in ("人物调度：", "动作与表演：", "台词：", "发声方式：", "标点语气："):
+        for removed in ("人物调度：", "动作与表演：", "台词：", "标点语气："):
             self.assertNotIn(removed, merged)
+        self.assertNotIn("发声方式", shot)
         self.assertNotIn("Seedance 2.5独立执行", merged)
         self.assertNotIn("【苏清柳】", keyframe)
         self.assertNotIn("0.0–0.8s", keyframe)
@@ -125,7 +139,7 @@ class CompactMasterMaterializerTests(unittest.TestCase):
         )
 
     def test_xlsx_has_exact_compact_ten_columns_and_no_batch_sheet(self) -> None:
-        storyboard = valid_storyboard()
+        storyboard = compact_storyboard_canonical(valid_storyboard())
         workbook_bytes = storyboard_to_xlsx(storyboard, {"issues": []})
         workbook = load_workbook(io.BytesIO(workbook_bytes), read_only=True, data_only=False)
 

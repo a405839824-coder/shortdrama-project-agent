@@ -460,6 +460,18 @@ def main() -> int:
         ("ROOM-MENTION-IN-EXTERIOR", {"空间站位描述": "书房门外廊下，清晨。", "原文支撑句": "她准备进入书房。", "光源来源": "室外晨光和天空弱补光。", "光源方向": "画面左后方侧逆光，向石阶衰减。"}, False),
         ("REAL-FIRE-NO-FULL-FRAME-DIFFUSION", {"起始状态": "屋角失火，局部火焰燃烧。", "光影": "自然镜头扩散覆盖整个室内，背景木构可辨。"}, True),
         ("PRACTICAL-LOCAL-HALATION", {"空间站位描述": "夜晚卧房，窗户关闭。", "起始状态": "案上红烛燃着。", "光源来源": "红烛为主光，浅墙提供极弱反射光。", "光影": "空气清澈，背景木构可辨。仅烛火边缘出现局部极轻微halation。"}, False),
+        ("TIME-PREFIX-DOES-NOT-HIDE-INDOOR", {"空间站位描述": "清晨，女主位于室内卧房，闭合木窗在左后。", "光影": "薄雾笼罩背景，人物面部清晰。"}, True),
+        ("OUTSIDE-VIEW-DOES-NOT-MOVE-ROOM", {"空间站位描述": "卧室靠近窗外庭院的一侧，女主坐在床沿。", "光影": "薄雾笼罩背景，人物面部清晰。"}, True),
+        ("LIST-NEGATION-STOPS-AT-AFFIRMATIVE-PREDICATE", {"光影": "无字幕、镜头使用柔焦；女主面部自然明暗。"}, True),
+        ("LIST-NEGATION-STOPS-AT-CONTRAST", {"光影": "不使用柔焦、但允许薄雾笼罩人物。背景可辨。"}, True),
+        ("NEGATED-WINDOW-OPENING-IS-NOT-OPENING", {"空间站位描述": "室内清晨；左窗紧闭。", "光源来源": "左窗没有打开，晨光经窗纸漫射透入。"}, False),
+        ("UNRELATED-NO-DIALOGUE-DOES-NOT-CLOSE-WINDOW", {"空间站位描述": "室内清晨；无对白、窗户打开；女主逆光登场。", "光源来源": "敞开窗户外的晨光，浅墙反射弱补光。", "光源方向": "画面左后方晨光形成侧逆光，向室内纵深衰减。"}, False),
+        ("OPEN-RIGHT-WINDOW-CANNOT-AUTHORIZE-CLOSED-LEFT", {"空间站位描述": "清晨正厅；左窗紧闭，右窗打开。", "起始状态": "桌上热茶冒出局部水汽。", "光影": "仅茶杯口上方一缕水汽，不扩散、不遮挡人物，背景木构清晰可辨。", "光源来源": "晨光穿过左侧闭合木窗形成可见光束。", "光源方向": "光束从左前方斜落，向室内纵深衰减。"}, True),
+        ("OPEN-RIGHT-WINDOW-AUTHORIZES-ITS-OWN-LOCAL-RAY", {"空间站位描述": "清晨正厅；左窗紧闭，右窗打开。", "起始状态": "桌上热茶冒出局部水汽。", "光影": "仅茶杯口上方一缕水汽，不扩散、不遮挡人物，背景木构清晰可辨。", "光源来源": "晨光穿过右侧敞开木窗形成可见光束。", "光源方向": "光束从右前方斜落，向室内纵深衰减。"}, False),
+        ("AMBIGUOUS-WINDOW-DOES-NOT-BORROW-OTHER-OPENING", {"空间站位描述": "清晨正厅；左窗紧闭，右窗打开。", "起始状态": "桌上热茶冒出局部水汽。", "光影": "仅茶杯口上方一缕水汽，不扩散、不遮挡人物，背景木构清晰可辨。", "光源来源": "晨光穿过木窗形成可见光束。", "光源方向": "光束从右前方斜落，向室内纵深衰减。"}, True),
+        ("SHADOW-SIDE-IS-NOT-BACKLIGHT-SETUP", {"光影": clean_room["光影"] + "女主背光一侧面部保留暗部质感。"}, False),
+        ("CANDLE-LIGHT-SYNONYM-LOCAL-HALATION", {"空间站位描述": "夜晚卧房，窗户关闭。", "起始状态": "案上红烛燃着。", "光源来源": "烛光为主光，浅墙提供极弱反射光。", "光影": "空气清澈，背景木构可辨。仅烛火边缘出现局部极轻微halation。"}, False),
+        ("CANDLE-LIGHT-CANNOT-AUTHORIZE-FULL-FRAME-HALATION", {"空间站位描述": "夜晚卧房，窗户关闭。", "起始状态": "案上红烛燃着。", "光源来源": "烛光为主光，浅墙提供极弱反射光。", "光影": "空气清澈，背景木构可辨。仅烛火边缘出现局部极轻微halation，同时镜头扩散覆盖全画面。"}, True),
     ]
     for room_name in ("卧房", "书房", "账房", "厅堂"):
         lighting_cases.append(("ROOM-ALIAS-" + room_name, {"空间站位描述": "清晨" + room_name + "，窗户闭合。", "光影": "薄雾弥漫，背景不泛白。"}, True))

@@ -322,7 +322,7 @@ DAY_SCENE_RE = re.compile(r"清晨|晨间|早晨|上午|正午|午后|白昼|日
 NIGHT_SCENE_RE = re.compile(r"夜晚|夜间|深夜|月夜|入夜|黄昏后|黎明前|子时|亥时")
 DAYLIGHT_SOURCE_RE = re.compile(r"日光|阳光|晨光|午后光|太阳光")
 MOONLIGHT_SOURCE_RE = re.compile(r"月光|月色|夜空")
-PRACTICAL_LIGHT_RE = re.compile(r"红烛|烛火|烛台|油灯|灯笼|火盆|火焰|火场|灯火")
+PRACTICAL_LIGHT_RE = re.compile(r"红烛|烛火|烛光|烛台|油灯|灯笼|火盆|火焰|火场|灯火")
 INTERIOR_SCENE_RE = re.compile(r"室内|内室|闺阁|厅|房|堂|殿|阁|书斋|卧室|侧厅")
 DAYLIGHT_APERTURE_RE = re.compile(r"窗|门|天井|敞口|廊|庭院|院中|室外|户外|街|巷|市|城门|野外")
 DARK_INTERIOR_EXCEPTION_RE = re.compile(r"暗室|密室|地窖|地下|无窗|封闭|遮光")
@@ -353,7 +353,7 @@ VISIBLE_RAY_RE = re.compile(
     r"(?:日光|晨光|阳光|光线)[^；。\n]{0,24}(?:穿过|射入|斜射|穿插)"
 )
 INDOOR_STRONG_BACKLIGHT_RE = re.compile(
-    r"强逆光|侧逆光|背光|(?:斜后方|侧后方)[^；。\n]{0,8}(?:日光|晨光|光线|主光)|"
+    r"强逆光|侧逆光|背光(?!一侧|侧面|面)|(?:斜后方|侧后方)[^；。\n]{0,8}(?:日光|晨光|光线|主光)|"
     r"背后[^；。\n]{0,8}(?:日光|晨光|光线|主光)|轮廓光"
 )
 PLOT_ATMOSPHERE_RE = re.compile(
@@ -403,10 +403,21 @@ def _has_affirmative_match(pattern: re.Pattern[str], value: Any) -> bool:
     for match in pattern.finditer(text):
         prefix = text[max(0, match.start() - 28):match.start()]
         clause_prefix = re.split(r"[；。！？!?，,\n]", prefix)[-1]
-        # A prohibition continues across an enumeration, but not a new clause.
+        # Bare effect lists inherit a prohibition; a new affirmative predicate
+        # or contrast starts its own clause even when separated by a list comma.
         list_head = clause_prefix.split("、", 1)[0]
+        current_item = clause_prefix.rsplit("、", 1)[-1] + match.group(0)
+        affirmative_restart = re.search(
+            r"但是|但|然而|却|不过|改用|改为|使用|采用|允许|出现|生成|形成|摆放|点燃",
+            current_item,
+        ) or (
+            re.search(r"打开|开启|敞开|半开|闭合|关闭|紧闭|关着", current_item)
+            and not re.match(r"\s*(?:禁止|不得|不要|避免)", list_head)
+        )
         if NEGATED_EFFECT_PREFIX_RE.search(clause_prefix) or (
-            "、" in clause_prefix and re.match(
+            "、" in clause_prefix
+            and not affirmative_restart
+            and re.match(
                 r"\s*(?:禁止|不得|不要|避免|不使用|不生成|不出现|不存在|没有|无)",
                 list_head,
             )
@@ -416,13 +427,54 @@ def _has_affirmative_match(pattern: re.Pattern[str], value: Any) -> bool:
     return False
 
 
-def _has_aperture_state(value: str, kind: str, state: str) -> bool:
-    # Do not let the state of a door authorize light through a closed window.
+APERTURE_KEY_RE = re.compile(
+    r"左前|左后|右前|右后|左|右|前|后|东南|东北|西南|西北|东|南|西|北|"
+    r"第[一二三四五六七八九十百0-9]+(?:扇|道|号)?|[A-Za-z0-9]+号"
+)
+
+
+def _aperture_state_rows(value: str, kind: str, state: str) -> list[str]:
+    """Keep each opening's identity with its affirmative state."""
+
     noun = rf"(?:门窗|窗门|{kind})"
     gap = r"[^门窗；。！？!?，,、\n]{0,8}"
-    return _has_affirmative_match(
-        re.compile(rf"{noun}{gap}(?:{state})|(?:{state}){gap}{noun}"), value
-    )
+    pattern = re.compile(rf"{noun}{gap}(?P<after>{state})|(?P<before>{state}){gap}{noun}")
+    negated_state = re.compile(r"没有|尚未|并未|从未|还未|未|不能|不得|不要|禁止|不再|不")
+    text = str(value or "")
+    rows: list[str] = []
+    for match in pattern.finditer(text):
+        if not _has_affirmative_match(re.compile(re.escape(match.group())), text):
+            continue
+        state_start = match.start("after") if match.group("after") else match.start("before")
+        # Negation can occur inside a noun-to-state match: “左窗没有打开”.
+        before_state = re.split(
+            r"[；。！？!?，,、\n]", text[max(0, state_start - 16):state_start]
+        )[-1]
+        if negated_state.search(before_state):
+            continue
+        local = re.split(
+            r"[门窗；。！？!?，,、\n]", text[max(0, match.start() - 12):match.start()]
+        )[-1] + match.group()
+        keys = list(APERTURE_KEY_RE.finditer(local))
+        rows.append(keys[-1].group() if keys else "")
+    return rows
+
+
+def _has_aperture_state(value: str, kind: str, state: str) -> bool:
+    return bool(_aperture_state_rows(value, kind, state))
+
+
+def _aperture_reference_keys(value: str, kind: str) -> list[str]:
+    text = str(value or "")
+    keys: list[str] = []
+    for match in re.finditer(rf"(?:门窗|窗门|{kind})", text):
+        local = re.split(
+            r"[门窗；。！？!?，,、\n]", text[max(0, match.start() - 12):match.start()]
+        )[-1]
+        found = list(APERTURE_KEY_RE.finditer(local))
+        keys.append(found[-1].group() if found else "")
+    return keys
+
 
 FORMAL_MASTER_FIELD_ORDER = [
     "空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "音色", "心理音轨",
@@ -1550,12 +1602,25 @@ def _lighting_context_faults(shot: dict[str, Any]) -> list[str]:
     if _has_affirmative_match(VOLUMETRIC_LIGHT_RE, effect_blob) and not _has_affirmative_match(SCATTERING_MEDIUM_RE, physical):
         faults.append("丁达尔/体积光/光束缺雾、烟、尘或水汽等散射介质")
 
-    # Prefer this shot's location over room names mentioned in source narration.
-    location = re.split(r"[；;。，,\n]", str(shot.get("空间站位描述") or ""))[0]
-    if EXPLICIT_EXTERIOR_RE.search(location) and not re.search(r"室内|内景|屋内|厅内|房内", location):
-        is_indoor = False
-    else:
-        is_indoor = bool(EXPLICIT_INTERIOR_RE.search(location or context))
+    # Scan past time-only prefixes.  A room in “书房门外” describes the
+    # building being viewed; an indoor location stays indoor when it also
+    # mentions the view through its windows or doors.
+    is_indoor = None
+    for location_clause in re.split(
+        r"[；;。，,\n]", str(shot.get("空间站位描述") or "")
+    ):
+        location_clause = re.sub(
+            rf"(?:{EXPLICIT_INTERIOR_RE.pattern})(?:的)?(?=门外|窗外|外廊|外侧|外面)",
+            "",
+            location_clause,
+        )
+        interior = EXPLICIT_INTERIOR_RE.search(location_clause)
+        exterior = EXPLICIT_EXTERIOR_RE.search(location_clause)
+        if interior or exterior:
+            is_indoor = bool(interior and (not exterior or interior.start() < exterior.start()))
+            break
+    if is_indoor is None:
+        is_indoor = bool(EXPLICIT_INTERIOR_RE.search(context))
     has_plot_atmosphere = _has_affirmative_match(PLOT_ATMOSPHERE_RE, context)
     # A lighting description cannot invent the prop that authorizes its own smoke.
     has_atmosphere_source = has_plot_atmosphere or _has_affirmative_match(
@@ -1571,8 +1636,14 @@ def _lighting_context_faults(shot: dict[str, Any]) -> list[str]:
         _has_affirmative_match(PRACTICAL_LIGHT_RE, source)
         and _has_affirmative_match(PRACTICAL_LIGHT_RE, physical)
     )
-    aperture_open = _has_affirmative_match(OPEN_APERTURE_RE, physical)
-    aperture_closed = bool(CLOSED_APERTURE_RE.search(physical))
+    aperture_open = any(
+        _has_aperture_state(physical, kind, "开启|打开|敞开|半开")
+        for kind in ("门", "窗")
+    )
+    aperture_closed = any(
+        _has_aperture_state(physical, kind, "闭合|关闭|紧闭|关着")
+        for kind in ("门", "窗")
+    )
 
     if is_indoor:
         positive_haze = _has_affirmative_match(INDOOR_HAZE_RE, lighting_blob)
@@ -1604,16 +1675,31 @@ def _lighting_context_faults(shot: dict[str, Any]) -> list[str]:
             or (aperture_open and BACKLIGHT_STORY_NEED_RE.search(context))
         ):
             faults.append("普通室内强逆光、侧逆光或轮廓光须有已开启门窗及明确剧情用途；否则改为前侧/侧面漫射明暗")
-        if aperture_closed and not aperture_open and positive_visible_ray:
+        authored_path = f"{source} {direction}"
+        if aperture_closed and positive_visible_ray and (
+            not aperture_open
+            or not any(_aperture_reference_keys(authored_path, kind) for kind in ("门", "窗"))
+        ):
             faults.append("门窗闭合时不得写光线穿过、射入或形成窗门光柱；闭窗只能写窗纸漫射透光")
-        if _has_affirmative_match(OPEN_APERTURE_RE, f"{source} {direction}") and not aperture_open:
+        if any(
+            _has_aperture_state(authored_path, kind, "开启|打开|敞开|半开")
+            for kind in ("门", "窗")
+        ) and not aperture_open:
             faults.append("光影字段不得擅自开启场景尚未证明开启的门窗")
         for aperture_kind in ("门", "窗"):
-            kind_open = _has_aperture_state(physical, aperture_kind, "开启|打开|敞开|半开")
-            kind_closed = _has_aperture_state(physical, aperture_kind, "闭合|关闭|紧闭|关着")
-            authored_open = _has_aperture_state(f"{source} {direction}", aperture_kind, "开启|打开|敞开|半开")
-            if kind_closed and not kind_open and (
-                authored_open or (positive_visible_ray and aperture_kind in f"{source} {direction}")
+            opened = set(_aperture_state_rows(physical, aperture_kind, "开启|打开|敞开|半开"))
+            closed = set(_aperture_state_rows(physical, aperture_kind, "闭合|关闭|紧闭|关着"))
+            authored_open = _has_aperture_state(authored_path, aperture_kind, "开启|打开|敞开|半开")
+            references = _aperture_reference_keys(authored_path, aperture_kind)
+            # An explicitly open right window cannot authorize a closed left
+            # window. Unknown identities stay conservative in a mixed scene.
+            exact_open_path = (
+                bool(references)
+                and all(key and key in opened and key not in closed for key in references)
+                and "" not in closed
+            )
+            if closed and not exact_open_path and (
+                authored_open or (positive_visible_ray and references)
             ):
                 faults.append(f"光影与已有{aperture_kind}的闭合状态冲突；其他开口不能授权本开口透射光束")
         if positive_haze and not has_localized_atmosphere:

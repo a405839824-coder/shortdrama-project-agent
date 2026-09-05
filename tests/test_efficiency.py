@@ -89,12 +89,13 @@ def valid_storyboard() -> dict[str, Any]:
             "嘴角自然放松，本镜无对白；"
             "【3.3—4.0秒】她保持视线落点和稳定呼吸，手停在门框，动作收束。"
         )
-        shot["音色"] = "不适用：本镜无对白"
+        shot["音色"] = "无对白，不适用。"
         shot["心理音轨"] = (
             "不适用：本镜无心理音轨；不张嘴、不驱动口型、不生成字幕、不计入对白时长。"
         )
         shot["光影"] = (
             "女主面部与桌面信件保持自然明暗层次；高光不过曝，暗部保留皮肤、衣料和木构质感。"
+            "空气清澈，背景结构清晰可辨，不泛白、不雾化。"
         )
         shot["光源来源"] = "左侧闭合木格窗透入自然晨光，右前浅色墙面提供弱反射补光。"
         shot["光源方向"] = "主光由画面左上向右下斜落，右前反射光弱补暗侧，向室内纵深逐级衰减。"
@@ -515,9 +516,9 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(checked["data"]["runtime_test_certificate_valid"])
         certificate = checked["data"]["runtime_test_certificate"]
         self.assertEqual(certificate["certificate_type"], "runtime_full_regression")
-        self.assertEqual(certificate["tests"]["golden_tests"]["test_pass_count"], 73)
+        self.assertEqual(certificate["tests"]["golden_tests"]["test_pass_count"], 82)
         self.assertEqual(
-            certificate["tests"]["strict_prompt_tests"]["test_pass_count"], 25
+            certificate["tests"]["strict_prompt_tests"]["test_pass_count"], 75
         )
         self.assertEqual(certificate["tests"]["public_scene_tests"]["test_pass_count"], 11)
         self.assertEqual(certificate["tests"]["agent_tests"]["test_pass_count"], 38)
