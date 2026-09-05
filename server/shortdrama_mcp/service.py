@@ -84,6 +84,7 @@ import project_agent  # noqa: E402
 import r10_bootstrap  # noqa: E402
 import storyboard_agent  # noqa: E402
 import validate_storyboard  # noqa: E402
+from dialogue_occurrences import align_storyboard_dialogue, protected_dialogue_rows  # noqa: E402
 
 
 STORYBOARD_OPERATIONS = {
@@ -1163,6 +1164,21 @@ def _scene_candidate_for_validation(
         )
     evidence = scoped.get("prevention_evidence")
     if isinstance(evidence, dict):
+        fragments = evidence.get("protected_dialogue_fragments")
+        if isinstance(fragments, list):
+            try:
+                occurrence_ids = {
+                    row.get("occurrence_id") for row in protected_dialogue_rows(scoped)
+                    if row.get("occurrence_id")
+                }
+            except ValueError:
+                occurrence_ids = set()
+            evidence["protected_dialogue_fragments"] = [
+                copy.deepcopy(row) for row in fragments
+                if isinstance(row, dict)
+                and row.get("shot_id") in scoped_refs
+                and row.get("occurrence_id") in occurrence_ids
+            ]
         for field in ("scene_state_ledger", "shot_plan", "performance_chains"):
             rows = evidence.get(field)
             if isinstance(rows, list):
@@ -1195,6 +1211,8 @@ def _scene_candidate_for_validation(
 def _scene_issue_is_applicable(issue: dict[str, Any]) -> bool:
     """Return whether a finding is decidable from a complete scene alone."""
 
+    if issue.get("check_family") == "timing":
+        return issue.get("timing_scope_decidable") is True
     location = str(issue.get("location") or "")
     if location.endswith(".累计时长") or location == "total_duration":
         return False
@@ -1222,7 +1240,9 @@ def _scene_scoped_report(
     """Run local gates on a scene and explicitly mark global gates N/A."""
 
     scoped_candidate = _scene_candidate_for_validation(candidate, scoped_shots)
-    raw_report = validate_storyboard.validate_project(scoped_candidate, mode="audit")
+    raw_report = validate_storyboard.validate_project(
+        scoped_candidate, mode="audit", timing_context=candidate,
+    )
     raw_issues = [
         copy.deepcopy(row)
         for row in raw_report.get("issues", [])
@@ -1657,6 +1677,7 @@ class StoryboardService:
             "public_scene_tests",
             "agent_tests",
             "project_agent_tests",
+            "rule_upgrade_tests",
         ):
             value = report.get(key)
             if isinstance(value, dict):
@@ -2136,6 +2157,29 @@ class StoryboardService:
                     ),
                 )
             )
+        fragment_coverage = None
+        if not issues:
+            try:
+                alignment = align_storyboard_dialogue(
+                    candidate, candidate.get("shots", []), validate_storyboard.extract_dialogues,
+                    authoritative_occurrences=[row.as_dict() for row in occurrences],
+                )
+                fragment_coverage = {
+                    key: copy.deepcopy(alignment[key])
+                    for key in ("contract", "status", "fragments", "covered_utterances")
+                }
+                for fault in alignment["issues"]:
+                    issues.append(self._source_dialogue_issue(
+                        location="source_dialogue_authority.fragments",
+                        evidence=f"{fault['code']}: {fault['detail']}",
+                        repair_action="按服务端原句出现身份重建半开字符范围；逐镜精确重拼说话人、正文、标点及顺序，不得复用同一片段冒充多次原句。",
+                    ))
+            except (TypeError, ValueError, KeyError) as exc:
+                issues.append(self._source_dialogue_issue(
+                    location="source_dialogue_authority.fragments",
+                    evidence=str(exc),
+                    repair_action="修正原句出现身份、镜头引用和字符范围，再运行全量预检。",
+                ))
         manifest = {
             **base_manifest,
             "status": "pass" if not issues else "fail_current",
@@ -2149,6 +2193,7 @@ class StoryboardService:
             "exact_claim_match": exact_claim_match,
             "claim_validation_error": claim_error,
             "occurrences": [row.as_dict() for row in occurrences],
+            "dialogue_fragment_coverage": fragment_coverage,
         }
         manifest["manifest_sha256"] = sha256_bytes(_stable_json_bytes(manifest))
         return manifest, issues

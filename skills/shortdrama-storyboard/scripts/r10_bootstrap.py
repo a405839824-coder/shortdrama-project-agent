@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from rule_registry import validate_registry
+
 
 VERSION = "V16.3-148-R10-StableRuntime"
 WORKFLOW_REVISION = "R10-PG1"
@@ -108,10 +110,12 @@ def run_project(project: Path, self_test: bool) -> dict:
         public_scene_tests = run_test_script(skill_root(), "test_public_scene_ecology.py")
         agent_tests = run_test_script(skill_root(), "run_agent_tests.py")
         project_agent_tests = run_test_script(skill_root(), "run_project_agent_tests.py")
+        rule_upgrade_tests = run_test_script(skill_root(), "test_rule_upgrade.py")
         report["strict_prompt_tests"] = strict_prompt_tests
         report["public_scene_tests"] = public_scene_tests
         report["agent_tests"] = agent_tests
         report["project_agent_tests"] = project_agent_tests
+        report["rule_upgrade_tests"] = rule_upgrade_tests
         if strict_prompt_tests.get("status") != "pass" or strict_prompt_tests.get("exit_code") != 0:
             report["status"] = "fail"
             report.setdefault("error_code", "E-BOOTSTRAP-001")
@@ -122,6 +126,9 @@ def run_project(project: Path, self_test: bool) -> dict:
             report["status"] = "fail"
             report.setdefault("error_code", "E-BOOTSTRAP-001")
         if project_agent_tests.get("status") != "pass" or project_agent_tests.get("exit_code") != 0:
+            report["status"] = "fail"
+            report.setdefault("error_code", "E-BOOTSTRAP-001")
+        if rule_upgrade_tests.get("status") != "pass" or rule_upgrade_tests.get("exit_code") != 0:
             report["status"] = "fail"
             report.setdefault("error_code", "E-BOOTSTRAP-001")
     return report
@@ -159,6 +166,14 @@ def verify_bundled(self_test: bool) -> dict:
         root / "scripts" / "run_agent_tests.py",
         root / "scripts" / "project_agent.py",
         root / "scripts" / "run_project_agent_tests.py",
+        refs / "rule_registry.json",
+        root / "scripts" / "rule_registry.py",
+        root / "scripts" / "timing_model.py",
+        root / "scripts" / "timing_events.py",
+        root / "scripts" / "dialogue_occurrences.py",
+        root / "scripts" / "performance_checks.py",
+        root / "scripts" / "lighting_checks.py",
+        root / "scripts" / "test_rule_upgrade.py",
     ]
     missing = [str(path) for path in required if not path.is_file() or path.stat().st_size == 0]
     if missing:
@@ -228,7 +243,7 @@ def verify_bundled(self_test: bool) -> dict:
         "compact_master_execution_evidence": 12,
         "audit_layers": 8,
     }
-    errors = []
+    errors = validate_registry(refs)
     if runtime.get("version") != VERSION:
         errors.append(f"runtime version={runtime.get('version')!r}")
     if runtime.get("workflow_revision") != WORKFLOW_REVISION or policy.get("profile") != WORKFLOW_REVISION:
@@ -256,12 +271,14 @@ def verify_bundled(self_test: bool) -> dict:
     public_scene_tests = None
     agent_tests = None
     project_agent_tests = None
+    rule_upgrade_tests = None
     if self_test and not errors:
         golden = run_test_script(root, "run_golden_tests.py")
         strict_prompt_tests = run_test_script(root, "test_strict_prompt_contract.py")
         public_scene_tests = run_test_script(root, "test_public_scene_ecology.py")
         agent_tests = run_test_script(root, "run_agent_tests.py")
         project_agent_tests = run_test_script(root, "run_project_agent_tests.py")
+        rule_upgrade_tests = run_test_script(root, "test_rule_upgrade.py")
         if golden.get("exit_code") != 0 or golden.get("status") != "pass":
             errors.append("functional golden tests failed")
         if strict_prompt_tests.get("exit_code") != 0 or strict_prompt_tests.get("status") != "pass":
@@ -272,6 +289,8 @@ def verify_bundled(self_test: bool) -> dict:
             errors.append("Agent safety tests failed")
         if project_agent_tests.get("exit_code") != 0 or project_agent_tests.get("status") != "pass":
             errors.append("full-project Agent tests failed")
+        if rule_upgrade_tests.get("exit_code") != 0 or rule_upgrade_tests.get("status") != "pass":
+            errors.append("rule-upgrade regression tests failed")
 
     output = {
         "status": "fail" if errors else "pass",
@@ -296,6 +315,8 @@ def verify_bundled(self_test: bool) -> dict:
         output["agent_tests"] = agent_tests
     if project_agent_tests is not None:
         output["project_agent_tests"] = project_agent_tests
+    if rule_upgrade_tests is not None:
+        output["rule_upgrade_tests"] = rule_upgrade_tests
     if errors:
         output["error_code"] = "E-BOOTSTRAP-001"
     return output

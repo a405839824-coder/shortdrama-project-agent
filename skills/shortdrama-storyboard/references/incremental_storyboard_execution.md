@@ -19,14 +19,14 @@ All paths in this protocol preserve these invariants:
 
 Performance work removes repeated semantic authoring, duplicate Seedance text, batch packaging, background pre-generation, and redundant persistence. It may not remove a required quality conclusion or let production certify itself.
 
-## Keep two resident windows and create repair only when needed
+## Keep independent server authorities; any user window may execute
 
-Maintain two resident logical windows for a project audit cycle:
+Any trusted window in the same authenticated namespace may create or continue every in-scope stage, including production, independent audit, repair and export from one window. Preserve existing authorization within its original scope without asking again on window change. Maintain two separate server authorities for a project audit cycle:
 
 1. `production` creates or changes artifacts and issues production preflight evidence.
 2. `independent_audit` consumes an immutable handoff, keeps the artifact read-only, independently recomputes every quality conclusion, and alone issues final pass/fail.
 
-Do not create a third resident window at task start. Create `repair` only when all of the following are true:
+Do not pre-create a repair authority at task start. Create server `repair` only when all of the following are true:
 
 - the independent audit returned `fail_current`;
 - repair is explicitly authorized by the current work order or by a later user instruction;
@@ -34,21 +34,21 @@ Do not create a third resident window at task start. Create `repair` only when a
 - that package belongs to the newest completed failed event in the immutable root/successor re-audit lineage; no later completed audit supersedes it;
 - the repair package identifies the authorized targets, issue codes, protected scope, fingerprints, and required regression scope.
 
-An `audit_only` task may produce findings and a repair package, but it must not activate repair without execution authorization. A clean audit never creates a repair window.
+An `audit_only` task may produce findings and a repair package, but it must not activate repair without execution authorization. A clean audit never creates a repair authority; no user window switch is required.
 
 ### Exact role matrix
 
 | Role | Activation | Artifact mutation | Permitted commit route | Audit verdict | Exit condition |
 |---|---|---:|---|---:|---|
-| `production` | Resident project window | Yes, within the user-authorized scope | `commit_storyboard` or production-authorized `commit_storyboard_delta` | No | Production preflight and `production_to_audit` handoff created |
-| `independent_audit` | Resident project window, distinct from production | No | None; it may persist audit evidence, certificates, and handoffs only | Yes | Clean certificate, or `audit_to_repair` package when repair is authorized |
-| `repair` | Conditional, single-use window created from one immutable repair package | Yes, only within package scope | `commit_storyboard_patch` for eligible non-structural fields, or package-bound full `commit_storyboard` for an affected scene/episode rebuild | No | New version and `repair_to_audit` handoff created; package consumed and window closed |
+| `production` | Authorized server work order and authority root | Yes, within the user-authorized scope | `commit_storyboard` or production-authorized `commit_storyboard_delta` | No | Production preflight and `production_to_audit` handoff created |
+| `independent_audit` | Distinct read-only server work order and authority root | No | None; it may persist audit evidence, certificates, and handoffs only | Yes | Clean certificate, or `audit_to_repair` package when repair is authorized |
+| `repair` | Conditional server authority bound to one immutable repair package | Yes, only within package scope | `commit_storyboard_patch` for eligible non-structural fields, or package-bound full `commit_storyboard` for an affected scene/episode rebuild | No | New version and `repair_to_audit` handoff created; package consumed and repair authority completed |
 
 Role authority must come from server-minted authority-root, window, actor, and work-order bindings. Never trust a caller-supplied role label. Production, audit, and repair server identities must be distinct within the same audit cycle, while the same authenticated user window may request each identity. The transport session is request provenance and namespace access, not role permission.
 
 A user-requested new change is production work even if an older audit exists. Do not infer `repair` merely from an operation name such as `storyboard_change`; repair authority exists only through the bound immutable repair package.
 
-After repair, send the successor artifact to the original independent-audit window, using the same auditor binding and audit-cycle identity. The auditor verifies the new fingerprint, reruns the required independent checks, and issues the only final verdict. Repair cannot open a replacement auditor or sign its own result.
+After repair, send the successor artifact to the original independent-audit authority root, using the same auditor binding and audit-cycle identity. The auditor verifies the new fingerprint, reruns the required independent checks, and issues the only final verdict. Repair cannot open a replacement auditor or sign its own result.
 
 ## Select full, delta, or certificate-bound patch execution
 
@@ -104,7 +104,7 @@ Generate and merge unique semantic information once. Do not start a delayed/back
 
 Each shot uses exactly 27 atoms in this order: `镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`.
 
-`画面内容` is the sole atom for visible action, performance, exact dialogue, six-dimensional delivery, punctuation effect, listener reaction, breath/end state and the three required R10-SPC-1 Seedance 2.5 single-shot timing stages. `空间站位描述`, `起始状态`, and `音色` remain separate. `光影`, `光源来源`, `光源方向`, and `色温倾向` are four mandatory independent atoms; color temperature is qualitative and contains no Kelvin/K value, while source and direction contain no alternative-choice wording. The retired standalone fields are forbidden on new writes.
+`画面内容` is the sole atom for visible action, performance, exact dialogue, visible synchronized delivery cues, listener reaction, breath/end state and the three required R10-SPC-1 Seedance 2.5 stages. The full six-dimensional delivery specification remains only in `音色`, not duplicated in picture content. `空间站位描述`, `起始状态`, and `音色` remain separate. `光影`, `光源来源`, `光源方向`, and `色温倾向` are four mandatory independent atoms; color temperature is qualitative and contains no Kelvin/K value, while source and direction contain no alternative-choice wording. The retired standalone fields are forbidden on new writes.
 
 The 0.5.5 deterministic outputs are limited to cumulative time, total duration, formulas/statistics, and two export-only projections:
 
@@ -180,12 +180,12 @@ Trace data must never contain source prose, dialogue, prompt bodies, private dow
 4. For the full route, the service signs a clean full-draft preflight; production passes that exact certificate into commit. Failed drafts remain ledger evidence only and never create formal artifacts.
 5. The service compare-and-sets the base, merges by stable UID, validates the compact canonical, deterministically projects the ten-column workbook, exports a new version without Seedance/batch artifacts, and records the trace.
 6. Production issues `production_preflight` plus `production_to_audit`; its immutable workbook reports `PENDING_AUDIT` / `待独立审计` with null issue counts and trace.
-7. The resident audit window verifies every fingerprint and independently recomputes all eight layers.
+7. The independent audit authority verifies every fingerprint and independently recomputes all eight layers.
 8. If clean, the auditor creates a new immutable signed-audit-overlay artifact/successor workbook with the final certificate and waits for human sign-off; it never edits the production XLSX in place. Repair is never activated.
 
 Production owns semantic authorship and pre-commit correction. Deterministic service code owns schema/gate execution, projections, migration CAS, certificate bindings and issue-pattern learning. Independent audit owns read-only omission detection and the final semantic verdict; it must not regenerate or repair content, and it must not be used as the routine cleaner for known defects.
 
-For an unchanged-runtime ordinary task, keep execution on the fast-safe path: verify the runtime certificate once, reuse only fingerprint-matched objective records, transfer only the semantic delta, and make the server perform complete validation/export. Do not inspect runtime source or rerun system regression suites. In the audit window, call the signed-handoff audit once and report its compact result; do not regenerate the storyboard, Seedance text, export rows, or echo all rows into chat. Any extra reread, retry or rebuild must have a recorded cache miss, fingerprint mismatch, missing semantic input, validator failure or transport error.
+For an unchanged-runtime ordinary task, keep execution on the fast-safe path: verify the runtime certificate once, reuse only fingerprint-matched objective records, transfer only the semantic delta, and make the server perform complete validation/export. Do not inspect runtime source or rerun system regression suites. Under the read-only audit authority, call the signed-handoff audit once and report its compact result; do not regenerate the storyboard, Seedance text, export rows, or echo all rows into chat. Any extra reread, retry or rebuild must have a recorded cache miss, fingerprint mismatch, missing semantic input, validator failure or transport error.
 
 ## Failure and repair flow
 
@@ -194,7 +194,7 @@ For an unchanged-runtime ordinary task, keep execution on the fast-safe path: ve
 3. Create a distinct, single-use repair binding for that package.
 4. Use certificate-bound patch only for eligible non-structural fields; otherwise rebuild the complete affected scene or episode through the package-bound full repair route. The production-only delta tool cannot be used by repair authority.
 5. The service validates and exports a new compact artifact, records residual and introduced issues, consumes the package, closes repair, and creates `repair_to_audit`.
-6. The original audit window verifies the successor and performs the independent final audit through a fresh server-minted single-use successor handoff. A fail cannot turn into PASS on the same file/source_version/artifact/canonical bindings.
+6. The original audit authority verifies the successor and performs the independent final audit through a fresh server-minted single-use successor handoff. A fail cannot turn into PASS on the same file/source_version/artifact/canonical bindings.
 7. Prefer closure within two repair rounds. At the third recurrence, stop patching and require the defined upstream rebuild.
 
 On restart, resume only the exact signed lineage and normalized semantic submission. Normalize only a valid 64-hex caller `semantic_audit.canonical_sha256` to lowercase; a hex-case-only replay returns the same signed receipt without another successor, event, certificate or round, and no other semantic/evidence/identity field is case-normalized. An event-only half-write may deterministically recover its missing certificate after all event/report/handoff/trace/cache/fingerprint/result/issue/summary fields match. The certificate content itself must exactly match that deterministic binding: a mismatched certificate re-signed with a valid service HMAC, certificate-only, different-semantic, stale-package or cross-lineage state fails closed with zero authority/projection mutation. A completed signed receipt is a read-only idempotent no-op. Recover a missing repair-package or Hub projection only inside the same storage lock after revalidating the latest lineage, exact certificate HMAC and fenced single-finisher claim by CAS; if authority advances, the stale replay neither writes a projection nor returns the old verdict.

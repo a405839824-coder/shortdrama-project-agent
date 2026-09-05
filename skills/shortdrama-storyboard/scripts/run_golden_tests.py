@@ -272,24 +272,38 @@ def inject_pg1_fixture_evidence(obj: dict[str, Any]) -> None:
             and not ("书页" in visible_text and "人物反应" not in visible_text)
         )
         if face_visible:
+            # These source fixtures have one face-visible protagonist; a
+            # listener's shoulder is not a second visible pair of eyes.  Keep
+            # the eye chain owned by that protagonist before defect mutations.
+            eye_subject = "女主" if "女主" in visible_text else "男主" if "男主" in visible_text else re.split(
+                r"[、，,；;\s]", str(shot.get("可见主体") or "人物"), maxsplit=1
+            )[0]
             eye_chain = (
-                "视线从门框移向桌面信件，眼球先完成轻微焦点调整，头部随后轻微跟转；"
-                "视线落稳前自然短眨一次，重新睁眼后上眼睑略微下压；"
-                "镜尾视线落在信件上"
+                f"{eye_subject}视线从门框移向桌面信件，眼球先完成轻微焦点调整，头部随后轻微跟转；"
+                f"{eye_subject}在0.4秒换焦后自然短眨一次，重新睁眼后上眼睑略微下压；"
+                f"镜尾{eye_subject}视线最终落在信件上"
             )
-            shot["画面内容"] = f"{str(shot.get('画面内容') or '').rstrip('；')}；{eye_chain}"
+            picture = str(shot.get("画面内容") or "")
+            if not all(term in picture for term in (
+                eye_subject, "眼球先", "上眼睑", "0.4秒", "视线最终落在"
+            )):
+                shot["画面内容"] = f"{picture.rstrip('；')}；{eye_chain}"
             dialogue_value = str(shot.get("台词") or "")
             if (
                 dialogue_value and not dialogue_value.startswith(("无", "不适用"))
-            ) or re.search(r"说道|【[^】]{1,20}】|重音|加重", str(shot.get("画面内容") or "")):
-                shot["画面内容"] += "；台词关键词与重音期间不眨眼"
+            ) or re.search(r"说道|【[\u3400-\u9fffA-Za-z·]{1,20}】|重音|加重", str(shot.get("画面内容") or "")):
+                shot["画面内容"] += f"；{eye_subject}在台词关键词与重音期间不眨眼"
             start = str(shot.get("起始状态") or "人物位置、朝向、视线、姿态与道具起始状态明确")
-            shot["起始状态"] = f"{start}；双眼自然睁开，不处于半眨眼瞬间"
+            if not ("双眼自然睁开" in start and "不处于半眨眼" in start):
+                shot["起始状态"] = f"{start}；双眼自然睁开，不处于半眨眼瞬间"
             limits = str(shot.get("生成限制") or "").rstrip("；")
-            shot["生成限制"] = (
-                f"{limits}；眼神自然聚焦，保留轻微眼球焦点调整和眼睑松紧变化；"
-                "禁止无依据全程不眨眼；禁止僵直瞪视；禁止高频机械眨眼"
-            )
+            for requirement in (
+                "眼神自然聚焦，保留轻微眼球焦点调整和眼睑松紧变化",
+                "禁止无依据全程不眨眼", "禁止僵直瞪视", "禁止高频机械眨眼",
+            ):
+                if requirement not in limits:
+                    limits += f"；{requirement}"
+            shot["生成限制"] = limits
             if re.search(r"两人|二人|双人|三人|多人|群像", str(shot.get("可见主体") or "")):
                 shot["画面内容"] += "；多人眨眼错开、不同时闭眼"
                 shot["生成限制"] += "；禁止多人同步眨眼"
@@ -531,6 +545,55 @@ def inject_chapter_intake_evidence(obj: dict[str, Any]) -> None:
             "source_treatment_percent": 100,
         },
     }
+    # The chapter's protected utterance must exist in the actual authored shot,
+    # not just in a declaration of 100% coverage.  This is a complete positive
+    # baseline; callers apply their missing-dialogue/coverage mutations later.
+    shot = obj["shots"][0]
+    shot_id = str(shot["镜头编号"])
+    dialogue = "有人跟着我，我得马上离开。"
+    shot["功能类型"] = "对白推进"
+    shot["画面内容"] = (
+        "【0.0—0.6秒】女主发现门缝泥印，视线从门框移向泥印，眼球先轻微换焦，"
+        "头部随后轻跟，上眼睑略压，在0.4秒换焦后自然眨眼一次；"
+        f"【0.6—3.6秒】女主肩颈微紧，手指停在门框，呼吸收稳；女主说道：“{dialogue}”"
+        "女主口型与对白一致，不看镜头，在‘跟着我’和‘马上离开’重音期间不眨眼；"
+        "【3.6—4.0秒】女主视线最终落在门外来路，手仍停在门框，保持稳定呼吸。"
+    )
+    # The 27-field picture already owns the sole quote.  Do not let the legacy
+    # adapter append it again after the final phase.
+    shot["台词"] = "无"
+    shot["动作与表演"] = ""
+    shot["发声方式"] = "不适用：完整发声规格在音色字段"
+    shot["标点语气"] = "不适用：精确原句标点已在画面内容"
+    shot["音色"] = (
+        "基础声线：二十余岁青年女声，中音区，声线偏薄而清亮，长期保持克制质感。\n"
+        "言语行为：确认危险并明确离开的决定。\n"
+        "当前表达：警觉而利落，保持判断清楚。\n"
+        "发声方式：\n"
+        "音量：低声但字句完整，仅够近处听清。\n"
+        "语速与节奏：连贯利落，不拖长整句。\n"
+        "呼吸：随手指停住收稳气息，句中自然衔接。\n"
+        "停顿：逗号处自然短停，不添加额外沉默。\n"
+        "重音：落在本句的“跟着我”和“马上离开”。\n"
+        "尾音：决定句尾短收落稳。\n"
+        "禁止语气：拖沓、撒娇、夸张尖叫。"
+    )
+    shot["环境音效"] = "女主对白最清晰，近处衣料与呼吸声，门外远处风声压低避让对白。"
+    support = f"她在门缝里发现新鲜泥印，说道：“{dialogue}”"
+    shot["覆盖原文"] = support
+    shot["原文支撑句"] = support
+    shot["原文依据类型"] = "直接动作+原台词"
+    obj["source_ingestion"]["protected_dialogue"][0]["mapped_shot_uids"] = [shot_id]
+    evidence = obj.get("prevention_evidence", {})
+    for row in evidence.get("source_ledger", []):
+        if shot_id in row.get("target_shots", []):
+            row["source_text"] = support
+            row["source_type"] = "关键对白与决定"
+            row["speaker"] = "女主"
+    for row in evidence.get("shot_plan", []):
+        if row.get("shot_id") == shot_id:
+            row["core_function"] = "对白推进"
+            row["main_action_stage"] = "发现线索后确认危险并表明离开决定"
 
 
 def expand_fixture_for_adjacent_audit(obj: dict[str, Any]) -> None:

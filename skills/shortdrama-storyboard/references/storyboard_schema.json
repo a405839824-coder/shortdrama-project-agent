@@ -131,7 +131,28 @@
         },
         "shot_plan": {"type": "array", "minItems": 1},
         "performance_chains": {"type": "array"},
-        "audio_workflow": {"type": "object"},
+        "audio_workflow": {
+          "type": "object",
+          "properties": {
+            "timing": {"$ref": "#/$defs/shot_timing"}
+          },
+          "additionalProperties": true
+        },
+        "protected_dialogue_fragments": {
+          "type": "array",
+          "description": "仅保存源文出现身份和半开Unicode字符范围，不复制台词；完整覆盖、顺序、人物和单次消费由源文权威校验。",
+          "items": {
+            "type": "object",
+            "required": ["occurrence_id", "shot_id", "dialogue_index", "char_range"],
+            "properties": {
+              "occurrence_id": {"type": "string", "minLength": 1},
+              "shot_id": {"type": "string", "minLength": 1},
+              "dialogue_index": {"type": "integer", "minimum": 0},
+              "char_range": {"$ref": "#/$defs/char_range"}
+            },
+            "additionalProperties": false
+          }
+        },
         "audit_layers": {"type": "array", "minItems": 8},
         "repair_history": {"type": "array"}
       },
@@ -215,6 +236,79 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "char_range": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {"type": "integer", "minimum": 0}
+    },
+    "shot_timing": {
+      "type": "object",
+      "description": "后台计时证据，不增加27字段母版。只能引用注册profile；候选配置未标定，不能通过自报实测或倍率提高容量。精确范围、事件依赖、阶段和跨镜闭合由timing_model校验。",
+      "required": ["contract", "utterances", "events"],
+      "properties": {
+        "contract": {"const": "shot-timing-v1"},
+        "default_profile_id": {"type": "string", "minLength": 1},
+        "utterances": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "kind", "speaker", "source", "segments"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "kind": {"enum": ["dialogue", "psychological"]},
+              "speaker": {"type": "string", "minLength": 1},
+              "source": {
+                "type": "object",
+                "required": ["shot_id"],
+                "properties": {
+                  "shot_id": {"type": "string", "minLength": 1},
+                  "dialogue_index": {"type": "integer", "minimum": 0},
+                  "char_range": {"$ref": "#/$defs/char_range"}
+                },
+                "additionalProperties": false
+              },
+              "profile_id": {"type": "string", "minLength": 1},
+              "segments": {
+                "type": "array", "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["shot_id", "start", "end", "char_range"],
+                  "properties": {
+                    "shot_id": {"type": "string", "minLength": 1},
+                    "start": {"type": "number", "minimum": 0},
+                    "end": {"type": "number", "exclusiveMinimum": 0},
+                    "char_range": {"$ref": "#/$defs/char_range"}
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "pauses": {"type": "array", "items": {"type": "object"}}
+            },
+            "additionalProperties": false
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "shot_id", "kind", "start", "end"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "shot_id": {"type": "string", "minLength": 1},
+              "kind": {"enum": ["action", "reaction", "hold"]},
+              "actor": {"type": "string"},
+              "start": {"type": "number", "minimum": 0},
+              "end": {"type": "number", "exclusiveMinimum": 0},
+              "action": {"type": "string"},
+              "after": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+              "basis": {"type": "string"},
+              "trigger": {"type": "object"}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "shot": {
       "type": "object",
       "required": [

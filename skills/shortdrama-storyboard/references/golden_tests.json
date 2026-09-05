@@ -1462,7 +1462,7 @@
         {
           "op": "set",
           "path": "shots.0.动作与表演",
-          "value": "嘴角自然，眼神停在信封，右手扶门框，肩膀放松，说话过程中1次自然眨眼"
+          "value": "女主嘴角自然放松，眼神停在信封，右手扶门框，肩膀放松，呼吸稳定"
         }
       ],
       "expected_status": "pass",
@@ -1658,12 +1658,12 @@
         {
           "op": "set",
           "path": "shots.0.时长",
-          "value": 1.0
+          "value": 0.8
         },
         {
           "op": "set",
           "path": "shots.0.累计时长",
-          "value": 1.0
+          "value": 0.8
         },
         {
           "op": "set",
@@ -1673,7 +1673,7 @@
         {
           "op": "set",
           "path": "total_duration",
-          "value": 1.0
+          "value": 0.8
         }
       ],
       "expected_status": "fail",

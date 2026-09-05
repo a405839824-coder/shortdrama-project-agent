@@ -4,8 +4,8 @@ Use this policy together with `V16.3-148-R10-StableRuntime` and `R10-PG1`. The A
 
 ## Keep one authoritative cross-window ledger
 
-- Use the exact Library title `分镜项目Agent_问题台账.json` as the authoritative cross-window issue ledger.
-- At the start of Agent mode, resolve that exact title, load its latest version, and validate it with `python scripts/storyboard_agent.py validate --ledger LEDGER.json`.
+- In plugin mode, the authenticated exact `project_id` ledger is the sole operational authority. Its complete snapshot remains mandatory. Global summaries reference `(project_id, event_id)` and never duplicate the event or occurrence count. The following exact-title Library steps apply only to standalone or explicitly requested shared-ledger work.
+- On that standalone/shared route, resolve exact title `分镜项目Agent_问题台账.json`, load its latest version, and validate it with `python scripts/storyboard_agent.py validate --ledger LEDGER.json`.
 - If the file does not exist, initialize it once. If Library access is unavailable, write a local pending event bundle and state that it is not yet synchronized; never claim cross-window collection without a successful ledger write.
 - Treat the shared ledger as authoritative for exact counts. Use the current audit report and current file as primary evidence. Use prior chat context only as supplementary evidence and label any imported pattern as unquantified when exact event records are unavailable.
 - Replace the existing Library file after each accepted audit event. Preserve the same file identity instead of creating date-stamped duplicates.
@@ -104,7 +104,7 @@ Use this mandatory production sequence: `get_agent_status` → authorized `migra
 
 Do not edit or activate formal runtime rules automatically.
 
-1. Generate a rule candidate only after the same issue survives two consecutive rounds.
+1. Generate a recurrence-driven candidate after the same issue survives two consecutive rounds; a current explicit user request to improve rules may directly open a scoped candidate without fabricating recurrences.
 2. Link the candidate to its triggering issue records and evidence.
 3. Specify the proposed preventive change, deterministic validator change, positive and negative Golden Tests, impact-regression scope, and conflict-order check.
 4. Run the validator tests, all bundled Golden Tests, the Agent tests, and skill validation.

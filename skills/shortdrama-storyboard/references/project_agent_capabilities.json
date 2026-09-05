@@ -1,101 +1,457 @@
 {
-  "profile_version": "R10-PROJECT-AGENT-1",
-  "runtime_version": "V16.3-148-R10-StableRuntime",
-  "workflow_revision": "R10-PG1",
+  "capabilities": [
+    {
+      "approval_policy": "read_only",
+      "group": "项目管理",
+      "operation": "project_intake",
+      "output": "项目范围、目标、输入清单、缺口与执行顺序",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "read_only",
+      "group": "项目管理",
+      "operation": "source_lock",
+      "output": "唯一原文、修改剧情、最新版文件、保护范围与版本锁",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "read_only",
+      "group": "剧情策划",
+      "operation": "novel_analysis",
+      "output": "题材、主题、人物、冲突、爽点、悬念、风险与改编价值",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "read_only",
+      "group": "剧情策划",
+      "operation": "chapter_intake",
+      "output": "完整读取证明、章节边界、剧情事件与因果地图、人物状态认知、源文取舍、对白保护、时长预算和节拍计划",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "read_only",
+      "group": "剧情策划",
+      "operation": "story_diagnosis",
+      "output": "逻辑、动机、节奏、认知、情绪、信息密度与观众理解问题",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "plan_first",
+      "group": "剧情策划",
+      "operation": "hook_design",
+      "output": "开篇钩子、倒叙方案、高潮前置与多方案比较",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "plan_first",
+      "group": "剧情策划",
+      "operation": "adaptation_plan",
+      "output": "小说转短剧策略、取舍原则、集数时长和主线结构",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "plan_first",
+      "group": "剧情策划",
+      "operation": "episode_plan",
+      "output": "分集边界、每集钩子、节拍、高潮、结尾悬念与时长预算",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "plan_first",
+      "group": "剧情策划",
+      "operation": "character_arc",
+      "output": "人物认知、关系阶段、情绪进阶、动机与禁提前表达项",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "plan_first",
+      "group": "剧情策划",
+      "operation": "scene_plan",
+      "output": "场次顺序、时空关系、场景状态、转场与视觉承载方案",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "plan_only_until_execute_request",
+      "group": "剧本工作流",
+      "operation": "rewrite_plan",
+      "output": "改写目标、方案A/B/C、影响范围、保留删除项和推荐方案",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "剧本工作流",
+      "operation": "script_create",
+      "output": "新短剧剧本、场次、动作、对白、情绪与钩子",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "剧本工作流",
+      "operation": "script_rewrite",
+      "output": "完整改写剧本及修改说明",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "剧本工作流",
+      "operation": "script_change",
+      "output": "新增、修改、删除、替换、合并、拆分或移动后的剧本版本",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "剧本工作流",
+      "operation": "dialogue_rewrite",
+      "output": "对白补齐、压缩、人物归属、语气与标点表演设计",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "required_before_mutation",
+      "group": "变更管理",
+      "operation": "change_impact",
+      "output": "原文、节拍、认知、场景状态、27字段单镜母版、声音、十列投影和统计影响矩阵",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "plan_first",
+      "group": "分镜工作流",
+      "operation": "storyboard_plan",
+      "output": "镜头节拍、景别机位、时长、转场和镜头功能方案",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "分镜工作流",
+      "operation": "storyboard_create",
+      "output": "R10.1 compact 27字段正式分镜、章节/原文映射、完整眼部表演链、相邻镜头N-1逐组连续性证明、公共场景人物与环境音生态，以及精确十列XLSX；逐镜生成限制和GPT投影显式9:16竖屏，GPT仅保留单帧可见语义，四项光影按场景真实来源闭合，普通室内清透且门窗状态锁定，室外氛围光仅在真实介质与光源成立时启用，THG-01至THG-17通过；正式分镜母版是唯一单镜执行母版，生产XLSX审计状态为PENDING_AUDIT",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "分镜工作流",
+      "operation": "storyboard_regenerate",
+      "output": "根据最新版剧本走全量或稳定UID增量路线；增量后确定性重建全局N-1相邻镜头逐组证明，输出完整canonical、XLSX、生产预检与审计handoff",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "分镜工作流",
+      "operation": "storyboard_change",
+      "output": "仅对精确对白、标点、顺序/分句、说话人、原文映射、认知和保护对白证据均未变化的同身份同数量镜头，以稳定UID、更新后的镜头级证据、精确边界和CAS执行视觉或其他非认知增量变更；任何对白/说话人变化完整重建受影响场景或分集；服务端只更新27字段原子canonical并在导出时确定性投影正式母版与GPT关键帧，不生成Seedance或批次副本",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "read_only",
+      "group": "审计闭环",
+      "operation": "storyboard_audit",
+      "output": "任意认证窗口以独立审计authority按semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting对精确compact canonical提交八层语义证据；绑定镜头数、N-1相邻对数量和有序pair SHA-256，空间层按序覆盖全部pair:left->right，表演层复核眼部链，禁项与声音层按序覆盖每个带对白镜的field:镜头编号.音色，源文对白层按Source Ledger顺序覆盖每个source-unit:单元ID并按序覆盖事实转化对白目标镜，机位可见性层按canonical与固定字段顺序覆盖每镜的光影、光源来源、光源方向、色温倾向，并验证普通室内清透/门窗状态或有依据的局部介质与室外氛围光；服务端与源文对白v6权威、新鲜机器N-1证明、THG-15音色、THG-16对白转化及THG-17静帧光影门禁交叉校验并创建不可变签名audit overlay新工件/后继工作簿；原生产XLSX和已消费root不就地改写，审计过程禁止再生成内容",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "审计闭环",
+      "operation": "storyboard_repair",
+      "output": "仅在审计失败且授权后消费最新完成失败血缘的一次性修复包，生成新artifact/canonical与新鲜file/source_version/handoff/trace绑定，完整回归并返回原审计窗口；旧包和同字节翻绿失败关闭",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "视觉生产",
+      "operation": "anchor_management",
+      "output": "人物、场景、道具、服装、站位和光线锚点清单",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "视觉生产",
+      "operation": "keyframe_prompt",
+      "output": "关键帧、场景图、人物视图和反向限制提示词",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "condition": "需要可用图像生成工具及必要参考图",
+      "group": "视觉生产",
+      "operation": "keyframe_image",
+      "output": "单张关键帧、场景图、角色图或修正图",
+      "status": "conditional"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "声音生产",
+      "operation": "audio_bgm",
+      "output": "整场情绪基调、分段BGM、公共场景近中远环境声、转场音效、对白让位与听觉画面方案",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "声音生产",
+      "operation": "voice_design",
+      "output": "正式母版音色固定子模板：基础声线、言语行为、当前表达、发声方式六项与2—4项禁止语气；心理音轨保持独立",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "condition": "取决于输入格式和当前文件处理工具",
+      "group": "交付生产",
+      "operation": "format_convert",
+      "output": "Excel、JSON、Markdown或Word等目标格式文件",
+      "status": "conditional"
+    },
+    {
+      "approval_policy": "explicit_execute",
+      "group": "交付生产",
+      "operation": "production_batch",
+      "output": "按需生成镜头包、关键帧包和声音Cue清单；i2v直接使用正式单镜母版，不预生成或持久化独立Seedance提示词/批次",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "automatic_recording",
+      "group": "项目管理",
+      "operation": "version_management",
+      "output": "版本锁、变更单、修改说明、影响范围和最新版指针",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "read_only",
+      "group": "项目管理",
+      "operation": "statistics",
+      "output": "镜头、时长、对白、问题、闭环率、残留率和副作用统计",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "production_work_order_only",
+      "condition": "production窗口、已锁定工单与候选canonical",
+      "group": "分镜生产",
+      "operation": "storyboard_draft_preflight",
+      "output": "scene/episode/full草稿门禁、唯一问题镜质量指标、失败学习事件；零artifact/版本/XLSX/handoff副作用",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_execute_plus_full_regression_certificate",
+      "condition": "旧项目控制状态且用户已明确授权迁移",
+      "group": "项目管理",
+      "operation": "project_state_migration",
+      "output": "dry-run、签名快照、双哈希CAS、幂等恢复或安全回滚；历史event台账的replay checkpoint只由独立HMAC签名且已提交的migration journal授权，并绑定project/migration身份、before/after ledger SHA与完全相同checkpoint；历史分镜与审计证据只读",
+      "status": "guarded"
+    },
+    {
+      "approval_policy": "plan_hash_plus_ROTATE_WINDOW_AUTHORITY_REVOKE_PREVIOUS_SESSION",
+      "condition": "同一用户命名空间与project_id中的storyboard_create/regenerate/change/audit/repair工单绑定在不可用旧窗口；新窗口拥有可信cloud服务端session、当前全量回归证书、精确工单契约、预演哈希和确认字面量；不存在活动operation lease或未过期/字段不完整的handoff、repair-package、draft-preflight claim；passed audit仅在恰有一个签名prepared独立复审successor时可受限接续",
+      "group": "项目管理",
+      "operation": "window_role_continuation",
+      "output": "通过begin_project_task零写预演并为同一authority root追加新物理WIN/ACT/session epoch、推进唯一活动head；每个logical authority root的operation lease严格独占，同root并发返回authority_operation_in_progress且不join，不同root可并行；普通handoff、repair package和reaudit successor领取绑定当前root/generation/session及token/generation/有效lease，旧代次或过期token finish/release零写失败；普通handoff完成须真实签名独审certificate；delayed candidate发布保留已claim/consumed签名handoff；旧generation由head语义逻辑撤销而历史签名记录不改写；所有后续authority写入在持久化边界复核active generation；仅新handoff、repair package及当前Schema明确声明这些字段的其他记录持久化root/epoch/generation，消费claim另用token/generation/lease契约且不补写certificate/trace；角色、operation、mode、authorization、范围、工单状态及项目阻塞不变",
+      "status": "guarded"
+    },
+    {
+      "approval_policy": "plan_hash_plus_exact_confirmation_plus_current_revalidation",
+      "condition": "旧prepared production_to_audit交接缺少生产预检字段、存在可验证的原生产提交血缘、已登记能力缺口、production显式执行工单、精确handoff集合、有效全量回归证书及双阶段确认",
+      "group": "项目管理",
+      "operation": "legacy_handoff_preflight_evidence_reissue",
+      "output": "使用当前验证器复验不可变canonical与XLSX；仅内部受控路由接受精确签名0.5.4/当前投影，或由冻结0.5.3投影器逐格证明的合法基线组合，并将raw XLSX/canonical、旧handoff、旧生产证书、原生产trace与投影器来源封入证明；一般extract_xlsx不放宽。追加一个确定性签名生产预检证据后继；旧handoff、旧证书、内容产物和历史审计记录零修改，独立审计仍为PENDING_AUDIT",
+      "status": "guarded"
+    },
+    {
+      "approval_policy": "plan_hash_plus_exact_confirmation_plus_independent_audit",
+      "condition": "已登记能力缺口、production显式执行工单、精确handoff集合、有效全量回归证书及双阶段确认",
+      "group": "项目管理",
+      "operation": "storyboard_handoff_recovery",
+      "output": "逐条签名日志与CAS恢复；旧prepared交接保留并标记superseded，新交接按当前15项完整指纹重新签发且仍为PENDING_AUDIT",
+      "status": "guarded"
+    },
+    {
+      "approval_policy": "read_only",
+      "group": "系统改进",
+      "operation": "issue_query",
+      "output": "精确问题清单、跨批次pattern聚合与主动防错画像",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "explicit_diagnostic_only",
+      "condition": "用户明确要求排查原生ChatGPT耗时且插件版本不低于0.5.3",
+      "group": "系统改进",
+      "operation": "performance_diagnosis",
+      "output": "五阶段tool_bracketed_chat计时、已解析插件server_only耗时、主导观察区间、无API不可测项和受控思考模式A/B建议",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "automatic_recording",
+      "group": "系统改进",
+      "operation": "issue_learning",
+      "output": "跨窗口问题归档、去重、复发升级和趋势分析",
+      "status": "supported"
+    },
+    {
+      "approval_policy": "tests_plus_human_approval",
+      "group": "系统改进",
+      "operation": "rule_improvement",
+      "output": "规则候选、验证器候选和黄金测试候选",
+      "status": "guarded"
+    },
+    {
+      "approval_policy": "human_signoff",
+      "group": "项目管理",
+      "operation": "archive",
+      "output": "确认后的正式版本、交付清单与归档记录",
+      "status": "guarded"
+    },
+    {
+      "approval_policy": "proposal_only",
+      "group": "系统改进",
+      "operation": "capability_gap",
+      "output": "缺失能力、所需输入工具、风险、实现方案和测试门禁",
+      "status": "supported"
+    }
+  ],
+  "change_operations": [
+    "add",
+    "modify",
+    "delete",
+    "replace",
+    "merge",
+    "split",
+    "move"
+  ],
   "compact_master_contract": {
-    "plugin_version": "0.5.23",
-    "schema_version": "R10.1",
-    "output_contract": "R10-SPC-1",
-    "semantic_audit_contract_version": "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting",
-    "source_dialogue_parser_version": "source-dialogue-authority-v6",
-    "source_dialogue_grammar_version": "source-dialogue-closed-grammar-v6.3",
-    "source_dialogue_authority": "server_registered_source_payload_sha_hub_authority_entry_and_artifact_metadata_role_cross_binding",
-    "canonical_atomic_field_count": 27,
-    "mother_template_column_count": 10,
-    "single_execution_master": "正式分镜母版",
-    "display_shot_id_pattern": "^EP\\d{2}-\\d{3}$",
-    "cumulative_time_scope": "episode_local",
-    "seedance_25_timeline_stage_count": 3,
-    "export_only_projection": "GPT关键帧生成指令",
-    "required_per_shot_aspect_phrase": "9:16竖屏",
-    "template_hard_gates": "THG-01..THG-17",
-    "eye_performance_contract": "face_visible_2s_requires_timed_gaze_focus_eyelid_blink_or_justified_no_blink_end_gaze_and_static_open_eye_state",
     "adjacent_continuity_contract": "N_shots_exactly_N_minus_1_ordered_pairs_with_state_hashes_100_percent_spatial_audit_evidence",
-    "voice_template_contract": "fixed_voice_template_v1_in_音色_with_all_dialogue_shots_field_evidence_in_audio_audit_layer",
-    "t2i_lighting_contract": "static_observable_single_frame_semantics_plus_scene_grounded_light_source_direction_effect_indoor_clarity_outdoor_atmosphere_split_and_four_field_audit_evidence_v2",
-    "production_audit_status": "PENDING_AUDIT",
     "audit_result_artifact_policy": "immutable_signed_overlay_successor",
-    "forbid_new_writes": ["人物调度", "动作与表演", "台词", "发声方式", "标点语气", "心理音轨属性", "生成批次", "batches", "Seedance 2.5独立正式执行分镜"],
     "background_seedance_generation": false,
+    "canonical_atomic_field_count": 27,
+    "cumulative_time_scope": "episode_local",
+    "display_shot_id_pattern": "^EP\\d{2}-\\d{3}$",
+    "export_only_projection": "GPT关键帧生成指令",
+    "eye_performance_contract": "face_visible_2s_requires_timed_gaze_focus_eyelid_blink_or_justified_no_blink_end_gaze_and_static_open_eye_state",
+    "forbid_new_writes": [
+      "人物调度",
+      "动作与表演",
+      "台词",
+      "发声方式",
+      "标点语气",
+      "心理音轨属性",
+      "生成批次",
+      "batches",
+      "Seedance 2.5独立正式执行分镜"
+    ],
+    "legacy_ledger_replay_checkpoint": "hmac_signed_committed_migration_journal_plus_before_after_ledger_cas",
     "legacy_policy": "read_only_migration_to_compact_successor",
-    "legacy_ledger_replay_checkpoint": "hmac_signed_committed_migration_journal_plus_before_after_ledger_cas"
+    "mother_template_column_count": 10,
+    "output_contract": "R10-SPC-1",
+    "plugin_version": "0.5.24",
+    "production_audit_status": "PENDING_AUDIT",
+    "required_per_shot_aspect_phrase": "9:16竖屏",
+    "schema_version": "R10.1",
+    "seedance_25_timeline_stage_count": 3,
+    "semantic_audit_contract_version": "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting",
+    "single_execution_master": "正式分镜母版",
+    "source_dialogue_authority": "server_registered_source_payload_sha_hub_authority_entry_and_artifact_metadata_role_cross_binding",
+    "source_dialogue_grammar_version": "source-dialogue-closed-grammar-v6.3",
+    "source_dialogue_parser_version": "source-dialogue-authority-v6",
+    "t2i_lighting_contract": "static_observable_single_frame_semantics_plus_scene_grounded_light_source_direction_effect_indoor_clarity_outdoor_atmosphere_split_and_four_field_audit_evidence_v2",
+    "template_hard_gates": "THG-01..THG-17",
+    "voice_template_contract": "fixed_voice_template_v1_in_音色_with_all_dialogue_shots_field_evidence_in_audio_audit_layer"
   },
   "content_storage_architecture": {
+    "historical_byte_policy": "preserve_every_record_byte_in_library_snapshot_including_the_eleven_handoff_chains",
     "introduced_in": "0.5.16",
-    "mode": "chatgpt_library_snapshot_with_ephemeral_server_mount",
-    "public_tool_count_change": 0,
-    "public_route": "migrate_project_state.storage_action",
-    "persistent_allowlist": ["runtime_rules", "integrity_and_download_secrets", "signed_library_pointer_registry"],
-    "library_or_ephemeral_only": ["hub", "ledger", "source_files", "plans", "storyboard_xlsx", "canonical_json", "extracted_content", "audit_reports_and_evidence", "handoffs", "handoff_recoveries", "certificates", "traces", "migration_journals"],
-    "mount_verification": "exact_bundle_sha256_plus_complete_project_tree_sha256",
-    "writeback": "export_then_library_save_and_readback_then_monotonic_pointer_commit",
-    "unmount": "only_when_mounted_tree_equals_committed_pointer_tree",
     "legacy_delete_gate": "all_project_pointers_registered_plus_library_readback_plus_library_mode_deployed_plus_real_mount_roundtrip_plus_exact_action_time_user_confirmation",
-    "historical_byte_policy": "preserve_every_record_byte_in_library_snapshot_including_the_eleven_handoff_chains"
+    "library_or_ephemeral_only": [
+      "hub",
+      "ledger",
+      "source_files",
+      "plans",
+      "storyboard_xlsx",
+      "canonical_json",
+      "extracted_content",
+      "audit_reports_and_evidence",
+      "handoffs",
+      "handoff_recoveries",
+      "certificates",
+      "traces",
+      "migration_journals"
+    ],
+    "mode": "chatgpt_library_snapshot_with_ephemeral_server_mount",
+    "mount_verification": "exact_bundle_sha256_plus_complete_project_tree_sha256",
+    "persistent_allowlist": [
+      "runtime_rules",
+      "integrity_and_download_secrets",
+      "signed_library_pointer_registry"
+    ],
+    "public_route": "migrate_project_state.storage_action",
+    "public_tool_count_change": 0,
+    "unmount": "only_when_mounted_tree_equals_committed_pointer_tree",
+    "writeback": "export_then_library_save_and_readback_then_monotonic_pointer_commit"
   },
   "execution_progress_policy": {
-    "heartbeat_interval_seconds": 300,
-    "heartbeat_fields": ["completed_count_or_stage", "current_step", "last_verified_progress", "next_timeout_at"],
-    "ordinary_no_progress_timeout_seconds": 600,
+    "forbid_shared_or_unrelated_process_termination": true,
     "full_regression_no_progress_timeout_seconds": 1200,
+    "heartbeat_fields": [
+      "completed_count_or_stage",
+      "current_step",
+      "last_verified_progress",
+      "next_timeout_at"
+    ],
+    "heartbeat_interval_seconds": 300,
+    "ordinary_no_progress_timeout_seconds": 600,
     "progress_definition": "new_verifiable_stage_count_hash_byte_or_state_change_not_repeated_waiting_text",
-    "timeout_action": "stop_only_current_task_owned_process_or_session_preserve_checkpoint_and_report_exact_stop_point",
-    "forbid_shared_or_unrelated_process_termination": true
+    "timeout_action": "stop_only_current_task_owned_process_or_session_preserve_checkpoint_and_report_exact_stop_point"
   },
+  "known_limits": [
+    {
+      "description": "不能在未触发任务时后台扫描休眠聊天窗口；只在Agent任务运行并成功写回共享中枢时形成精确记录。",
+      "id": "no_dormant_chat_monitoring"
+    },
+    {
+      "description": "不能把不可访问的历史聊天推断成精确事件；只能标记为未量化历史模式。",
+      "id": "no_unavailable_history_inference"
+    },
+    {
+      "description": "无API时只能用服务器收件检查点测量工具调用之间的区间；不能精确拆分模型排队、隐藏思考、令牌生成、客户端传输和最终渲染，也不能由单次运行证明思考模式因果。",
+      "id": "no_api_hidden_model_substages"
+    },
+    {
+      "description": "图像、文件、音频或外部服务操作受当前工具、素材和权限限制；缺少条件时必须登记能力缺口。",
+      "id": "tool_and_permission_bound"
+    },
+    {
+      "description": "不能未经验证和人工确认自动激活正式规则。",
+      "id": "no_unapproved_rule_activation"
+    },
+    {
+      "description": "不能静默覆盖唯一原件、删除未授权范围或跨越用户锁定的剧情边界。",
+      "id": "no_silent_destructive_overwrite"
+    },
+    {
+      "description": "历史稳定ID（保留v054标识用于兼容，请勿改名）：增量路线沿用已发布的稳定UID、同数量且精确对白与说话人不变的视觉或其他非认知执行变化边界；不支持任何对白/说话人增删改、重排、拆并或改归属，也不支持镜头插入、删除、移动、拆分、合并或重编号；这些变化及原文/认知/保护对白/边界/拓扑失效必须完整重建受影响场景或分集。",
+      "id": "delta_no_structural_edit_v054"
+    }
+  ],
+  "profile_version": "R10-PROJECT-AGENT-1",
+  "project_ledger_policy": {
+    "event_identity": [
+      "project_id",
+      "event_id"
+    ],
+    "global_aggregation": "references_to_project_events_only_no_duplicate_occurrence_count",
+    "operational_authority": "exact_authenticated_project_id_ledger",
+    "ordinary_plugin_task": "project_tools_and_complete_snapshot_writeback_only_no_global_ledger_rewrite",
+    "preserve_full_project_snapshot": true,
+    "standalone_or_explicit_shared_task": "resolve_exact_owned_library_identity_and_validate_replay_before_replace"
+  },
+  "runtime_version": "V16.3-148-R10-StableRuntime",
   "storyboard_window_architecture": {
-    "user_window_access": "authenticated_namespace_window_neutral",
-    "window_role_restrictions": false,
-    "user_window_capabilities": ["production", "independent_audit", "repair"],
-    "public_create_route": "begin_project_task(action=create)_maps_to_server_window_neutral_contract",
-    "request_session_role": "provenance_and_authenticated_namespace_boundary_only_not_execution_role_permission",
-    "always_required_server_authorities": ["production", "independent_audit"],
-    "conditional_server_authority": "repair",
-    "repair_activation": "independent_audit_fail_and_explicit_authorization",
-    "repair_return": "original_independent_audit_authority_root_and_audit_cycle; any_authenticated_window_in_the_same_namespace_may_invoke_that_exact_root",
-    "independent_audit_separation": "distinct_work_order_authority_root_window_binding_and_actor_binding; a_separate_user_chat_session_is_not_required",
-    "workflow_gate_policy": "pending_audit_or_repair_restricts_allowed_next_operation_not_user_window_access",
-    "public_tool_count": 19,
-    "role_continuation_tool": "begin_project_task",
-    "role_continuation_compatibility": "legacy_0.5.13_and_earlier_window_bound_work_orders_only",
-    "role_continuation_required_for_new_work_orders": false,
-    "role_continuation_actions": ["plan_role_continuation", "execute_role_continuation"],
-    "role_continuation_confirmation": "ROTATE_WINDOW_AUTHORITY_REVOKE_PREVIOUS_SESSION",
-    "role_continuation_eligible_operations": ["storyboard_create", "storyboard_regenerate", "storyboard_change", "storyboard_audit", "storyboard_repair"],
-    "role_continuation_ineligible_operations": ["rule_improvement", "version_management", "all_other_production_classified_operations"],
-    "role_continuation_deployment": "trusted_cloud_transport_session_only",
-    "role_continuation_contract": "legacy_only; one_work_order_one_server_derived_role; stable_authority_root; zero_write_plan_bound_to_exact_work_order_contract_and_snapshot_active_head_target_session_and_runtime_certificate; execute_appends_new_physical_epoch_and_advances_active_head; previous_generation_is_logically_revoked_without_rewriting_signed_history; every_authority_write_checks_active_generation_at_next_persistence_boundary; no_role_scope_mode_authorization_or_status_change; pending_audit_still_blocks_production",
-    "role_continuation_quiescence": "plan_and_execute_fail_zero_write_for_live_operation_lease_or_unexpired_or_incomplete_handoff_repair_package_or_draft_preflight_commit_claim; valid_lease_expiry_allows_rotation",
-    "role_operation_lease_policy": "strictly_exclusive_per_logical_authority_root; every_same_root_concurrent_request_returns_authority_operation_in_progress_even_for_same_work_order_session_and_payload; no_join_or_shared_holders; different_authority_roots_may_run_in_parallel",
-    "role_continuation_repair_package_claim": "claim_token_plus_monotonic_claim_generation_plus_bounded_lease; legacy_0.5.10_consuming_without_complete_lease_fails_closed_without_migration",
+    "always_required_server_authorities": [
+      "production",
+      "independent_audit"
+    ],
     "authority_consumption_claim_policy": "ordinary_handoff_repair_package_and_independent_reaudit_successor_claims_bind_current_authority_root_generation_server_session_exact_claim_token_monotonic_claim_generation_and_live_bounded_lease; finish_and_release_revalidate_all_bindings_under_project_lock; old_generation_replaced_or_expired_token_expired_lease_or_prior_session_fails_zero_write; expiry_allows_only_fresh_current_epoch_claim",
-    "ordinary_handoff_completion_policy": "requires_real_service_stored_signed_independent_audit_certificate_exactly_bound_to_certificate_id_handoff_audit_work_order_and_artifact; caller_label_production_preflight_unsigned_or_mismatched_certificate_cannot_consume",
-    "delayed_successor_publication_policy": "advance_candidate_artifact_transaction_only; preserve_any_consuming_or_consumed_signed_handoff_and_exact_hub_projection_including_claim_history_token_generation_and_audit_certificate_binding; never_overwrite_with_earlier_prepared_candidate",
-    "passed_audit_continuation_policy": "normally_terminal; permitted_only_when_exactly_one_service_signed_prepared_independent_audit_successor_is_bound_to_the_same_audit_work_order_and_only_to_resume_that_existing_route; zero_multiple_unsigned_nonprepared_or_differently_bound_routes_fail_without_reopening_pass_or_minting_another_successor",
-    "repair_compensation_policy": "return_consumed_package_to_issued_only_for_exact_original_claim_token_and_generation_and_fixed_transaction_identity_when_base_successor_transaction_is_aborted_signed_handoff_and_hub_projection_are_both_rejected_plus_aborted_and_no_handoff_claim_consumption_snapshot_audit_certificate_or_other_independent_audit_downstream_exists; prepared_or_committed_base_different_claim_live_or_published_handoff_or_audit_downstream_forbids_release",
-    "role_continuation_authority_field_persistence": "only_new_handoffs_repair_packages_and_other_records_whose_current_schema_explicitly_defines_the_fields_persist_root_epoch_generation; consumption_claims_use_separate_token_generation_lease; certificates_and_traces_are_not_retrofitted",
-    "role_continuation_plan_hash_boundary": "completed_claim_handoff_or_certificate_changes_are_not_universally_plan_hash_inputs",
-    "role_continuation_idempotency": "sequential_replay_only_after_the_exclusive_operation_lease_ends_and_while_continuation_is_active_head_or_completing_its_signed_record_to_hub_half_write; never_concurrent_same_root_join; later_head_returns_superseded",
-    "role_continuation_expired_draft_preflight": "claim_expiry_stops_blocking_rotation_but_the_old_session_bound_preflight_cannot_be_reclaimed; continued_session_must_obtain_a_new_preflight",
-    "reaudit_route": "fresh_server_minted_single_use_successor_with_immutable_root_parent_lineage_and_parent_certificate_hmac_event_sha_bridge",
-    "legacy_certificate_policy": "missing_event_sha_requires_explicit_forced_modern_successor_before_replay_or_signoff",
-    "repair_package_authority": "latest_completed_failed_lineage_only; consuming_claim_requires_token_monotonic_generation_and_bounded_lease; legacy_0.5.10_consuming_without_complete_lease_fails_closed_without_migration; issued_requires_zero_downstream_evidence; consumed_requires_complete_repair_successor_cas_return_handoff_hub_closure; compensation_requires_exact_original_claim_token_and_generation_aborted_base_transaction_rejected_plus_aborted_signed_handoff_and_hub_and_zero_audit_downstream; no_resurrection",
-    "current_project_legacy_recovery_boundary": "the_previously_identified_eleven_invalid_prepared_production_to_audit_handoffs_remain_unrecovered_until_the_separate_two_work_order_controlled_backfill_and_recovery_succeeds_under_a_current_runtime_certificate; continuation_implementation_documentation_validation_or_deployment_is_not_recovery; production_must_not_audit_or_repair_replacements",
-    "legacy_hub_handoff_projection_compatibility": "read_only_exact_stripped_or_exact_full_signed_record_only; every_other_shape_fails_closed; future_writes_are_stripped",
+    "conditional_server_authority": "repair",
     "controlled_historical_preflight_attestation": {
-      "introduced_in": "0.5.11",
-      "sealed_per_handoff_current_report_profiles_corrected_in": "0.5.12",
-      "scope": "GAP-1bb91d83751b422f exact ordered six handoffs only",
-      "gap_id": "GAP-1bb91d83751b422f",
+      "cache_domain": "HISTCACHE",
+      "cache_reusable_for_current_preflight_or_independent_audit": false,
+      "current_production_pass_claimed": false,
+      "current_validator_composite": "V16.3-148-R10-StableRuntime:R10.1:R10-PG1:af1fccfe2ab8c3bc",
+      "current_validator_sha256": "af1fccfe2ab8c3bc946b0537cf9fe23241f51afc776a9d33275c133599570140",
+      "evidence": "frozen_historical_contract_pass_plus_complete_current_validator_fail_diagnostics_matching_one_non_interchangeable_sealed_profile_per_handoff",
       "exact_ordered_handoff_ids": [
         "HND-f6fd29730a074d2c",
         "HND-95e3b1c141a64783",
@@ -104,28 +460,10 @@
         "HND-0dd8fa51a9e24cd0",
         "HND-9029110f35d74270"
       ],
-      "evidence": "frozen_historical_contract_pass_plus_complete_current_validator_fail_diagnostics_matching_one_non_interchangeable_sealed_profile_per_handoff",
-      "sealed_current_profile_fields": [
-        "handoff_id",
-        "canonical_sha256",
-        "current_report_sha256",
-        "shot_count",
-        "error_count",
-        "warning_count",
-        "error_code_histogram",
-        "current_validator_composite",
-        "current_validator_sha256"
-      ],
-      "current_validator_composite": "V16.3-148-R10-StableRuntime:R10.1:R10-PG1:af1fccfe2ab8c3bc",
-      "current_validator_sha256": "af1fccfe2ab8c3bc946b0537cf9fe23241f51afc776a9d33275c133599570140",
-      "sealed_profile_authority": "service.CONTROLLED_V053_CURRENT_VALIDATION_PROFILES mirrored by storyboard_runtime_rules.controlled_recovery.preflight_evidence_backfill.historical_contract_attestation.sealed_current_report_profile_policy.profiles_by_handoff",
+      "gap_id": "GAP-1bb91d83751b422f",
+      "introduced_in": "0.5.11",
       "profile_cross_handoff_reuse": false,
       "profile_or_current_report_drift": "fail_closed_before_mutation",
-      "current_production_pass_claimed": false,
-      "cache_domain": "HISTCACHE",
-      "cache_reusable_for_current_preflight_or_independent_audit": false,
-      "requires_full_current_independent_audit": true,
-      "recovery_gap_id": "GAP-0e5d48969c4c494e",
       "recovery_exact_ordered_handoff_ids": [
         "HND-5394638be5fe4a55",
         "HND-ea122cf3048e482a",
@@ -138,351 +476,78 @@
         "HND-e8ca409208134104",
         "HND-0dd8fa51a9e24cd0",
         "HND-9029110f35d74270"
-      ]
+      ],
+      "recovery_gap_id": "GAP-0e5d48969c4c494e",
+      "requires_full_current_independent_audit": true,
+      "scope": "GAP-1bb91d83751b422f exact ordered six handoffs only",
+      "sealed_current_profile_fields": [
+        "handoff_id",
+        "canonical_sha256",
+        "current_report_sha256",
+        "shot_count",
+        "error_count",
+        "warning_count",
+        "error_code_histogram",
+        "current_validator_composite",
+        "current_validator_sha256"
+      ],
+      "sealed_per_handoff_current_report_profiles_corrected_in": "0.5.12",
+      "sealed_profile_authority": "service.CONTROLLED_V053_CURRENT_VALIDATION_PROFILES mirrored by storyboard_runtime_rules.controlled_recovery.preflight_evidence_backfill.historical_contract_attestation.sealed_current_report_profile_policy.profiles_by_handoff"
     },
-    "quality_contract": "生产初稿总体正确率与直接可用率>=98%、单集>=96%、新增局部问题镜率<=2%，硬错/重大/已知复发/系统性重复=0；50项validator + G0-G13 + THG-01至THG-17 + 相邻镜头N-1逐组证明 + 逐镜四光影字段及普通室内清透/室外氛围光分流证据 + 多行XLSX round-trip；最终独立审计仍须100%且零问题"
+    "current_project_legacy_recovery_boundary": "the_previously_identified_eleven_invalid_prepared_production_to_audit_handoffs_remain_unrecovered_until_the_separate_two_work_order_controlled_backfill_and_recovery_succeeds_under_a_current_runtime_certificate; continuation_implementation_documentation_validation_or_deployment_is_not_recovery; production_must_not_audit_or_repair_replacements",
+    "delayed_successor_publication_policy": "advance_candidate_artifact_transaction_only; preserve_any_consuming_or_consumed_signed_handoff_and_exact_hub_projection_including_claim_history_token_generation_and_audit_certificate_binding; never_overwrite_with_earlier_prepared_candidate",
+    "existing_authorization_survives_window_switch_within_scope": true,
+    "independent_audit_separation": "distinct_work_order_authority_root_window_binding_and_actor_binding; a_separate_user_chat_session_is_not_required",
+    "legacy_certificate_policy": "missing_event_sha_requires_explicit_forced_modern_successor_before_replay_or_signoff",
+    "legacy_hub_handoff_projection_compatibility": "read_only_exact_stripped_or_exact_full_signed_record_only; every_other_shape_fails_closed; future_writes_are_stripped",
+    "ordinary_handoff_completion_policy": "requires_real_service_stored_signed_independent_audit_certificate_exactly_bound_to_certificate_id_handoff_audit_work_order_and_artifact; caller_label_production_preflight_unsigned_or_mismatched_certificate_cannot_consume",
+    "passed_audit_continuation_policy": "normally_terminal; permitted_only_when_exactly_one_service_signed_prepared_independent_audit_successor_is_bound_to_the_same_audit_work_order_and_only_to_resume_that_existing_route; zero_multiple_unsigned_nonprepared_or_differently_bound_routes_fail_without_reopening_pass_or_minting_another_successor",
+    "public_create_route": "begin_project_task(action=create)_maps_to_server_window_neutral_contract",
+    "public_tool_count": 19,
+    "quality_contract": "生产初稿总体正确率与直接可用率>=98%、单集>=96%、新增局部问题镜率<=2%，硬错/重大/已知复发/系统性重复=0；50项validator + G0-G13 + THG-01至THG-17 + 相邻镜头N-1逐组证明 + 逐镜四光影字段及普通室内清透/室外氛围光分流证据 + 多行XLSX round-trip；最终独立审计仍须100%且零问题",
+    "reaudit_route": "fresh_server_minted_single_use_successor_with_immutable_root_parent_lineage_and_parent_certificate_hmac_event_sha_bridge",
+    "repair_activation": "independent_audit_fail_and_explicit_authorization",
+    "repair_compensation_policy": "return_consumed_package_to_issued_only_for_exact_original_claim_token_and_generation_and_fixed_transaction_identity_when_base_successor_transaction_is_aborted_signed_handoff_and_hub_projection_are_both_rejected_plus_aborted_and_no_handoff_claim_consumption_snapshot_audit_certificate_or_other_independent_audit_downstream_exists; prepared_or_committed_base_different_claim_live_or_published_handoff_or_audit_downstream_forbids_release",
+    "repair_package_authority": "latest_completed_failed_lineage_only; consuming_claim_requires_token_monotonic_generation_and_bounded_lease; legacy_0.5.10_consuming_without_complete_lease_fails_closed_without_migration; issued_requires_zero_downstream_evidence; consumed_requires_complete_repair_successor_cas_return_handoff_hub_closure; compensation_requires_exact_original_claim_token_and_generation_aborted_base_transaction_rejected_plus_aborted_signed_handoff_and_hub_and_zero_audit_downstream; no_resurrection",
+    "repair_return": "original_independent_audit_authority_root_and_audit_cycle; any_authenticated_window_in_the_same_namespace_may_invoke_that_exact_root",
+    "request_session_role": "provenance_and_authenticated_namespace_boundary_only_not_execution_role_permission",
+    "role_continuation_actions": [
+      "plan_role_continuation",
+      "execute_role_continuation"
+    ],
+    "role_continuation_authority_field_persistence": "only_new_handoffs_repair_packages_and_other_records_whose_current_schema_explicitly_defines_the_fields_persist_root_epoch_generation; consumption_claims_use_separate_token_generation_lease; certificates_and_traces_are_not_retrofitted",
+    "role_continuation_compatibility": "legacy_0.5.13_and_earlier_window_bound_work_orders_only",
+    "role_continuation_confirmation": "ROTATE_WINDOW_AUTHORITY_REVOKE_PREVIOUS_SESSION",
+    "role_continuation_contract": "legacy_only; one_work_order_one_server_derived_role; stable_authority_root; zero_write_plan_bound_to_exact_work_order_contract_and_snapshot_active_head_target_session_and_runtime_certificate; execute_appends_new_physical_epoch_and_advances_active_head; previous_generation_is_logically_revoked_without_rewriting_signed_history; every_authority_write_checks_active_generation_at_next_persistence_boundary; no_role_scope_mode_authorization_or_status_change; pending_audit_still_blocks_production",
+    "role_continuation_deployment": "trusted_cloud_transport_session_only",
+    "role_continuation_eligible_operations": [
+      "storyboard_create",
+      "storyboard_regenerate",
+      "storyboard_change",
+      "storyboard_audit",
+      "storyboard_repair"
+    ],
+    "role_continuation_expired_draft_preflight": "claim_expiry_stops_blocking_rotation_but_the_old_session_bound_preflight_cannot_be_reclaimed; continued_session_must_obtain_a_new_preflight",
+    "role_continuation_idempotency": "sequential_replay_only_after_the_exclusive_operation_lease_ends_and_while_continuation_is_active_head_or_completing_its_signed_record_to_hub_half_write; never_concurrent_same_root_join; later_head_returns_superseded",
+    "role_continuation_ineligible_operations": [
+      "rule_improvement",
+      "version_management",
+      "all_other_production_classified_operations"
+    ],
+    "role_continuation_plan_hash_boundary": "completed_claim_handoff_or_certificate_changes_are_not_universally_plan_hash_inputs",
+    "role_continuation_quiescence": "plan_and_execute_fail_zero_write_for_live_operation_lease_or_unexpired_or_incomplete_handoff_repair_package_or_draft_preflight_commit_claim; valid_lease_expiry_allows_rotation",
+    "role_continuation_repair_package_claim": "claim_token_plus_monotonic_claim_generation_plus_bounded_lease; legacy_0.5.10_consuming_without_complete_lease_fails_closed_without_migration",
+    "role_continuation_required_for_new_work_orders": false,
+    "role_continuation_tool": "begin_project_task",
+    "role_operation_lease_policy": "strictly_exclusive_per_logical_authority_root; every_same_root_concurrent_request_returns_authority_operation_in_progress_even_for_same_work_order_session_and_payload; no_join_or_shared_holders; different_authority_roots_may_run_in_parallel",
+    "user_window_access": "authenticated_namespace_window_neutral",
+    "user_window_capabilities": [
+      "production",
+      "independent_audit",
+      "repair"
+    ],
+    "window_role_restrictions": false,
+    "workflow_gate_policy": "pending_audit_or_repair_restricts_allowed_next_operation_not_user_window_access"
   },
-  "change_operations": [
-    "add",
-    "modify",
-    "delete",
-    "replace",
-    "merge",
-    "split",
-    "move"
-  ],
-  "capabilities": [
-    {
-      "operation": "project_intake",
-      "group": "项目管理",
-      "status": "supported",
-      "output": "项目范围、目标、输入清单、缺口与执行顺序",
-      "approval_policy": "read_only"
-    },
-    {
-      "operation": "source_lock",
-      "group": "项目管理",
-      "status": "supported",
-      "output": "唯一原文、修改剧情、最新版文件、保护范围与版本锁",
-      "approval_policy": "read_only"
-    },
-    {
-      "operation": "novel_analysis",
-      "group": "剧情策划",
-      "status": "supported",
-      "output": "题材、主题、人物、冲突、爽点、悬念、风险与改编价值",
-      "approval_policy": "read_only"
-    },
-    {
-      "operation": "chapter_intake",
-      "group": "剧情策划",
-      "status": "supported",
-      "output": "完整读取证明、章节边界、剧情事件与因果地图、人物状态认知、源文取舍、对白保护、时长预算和节拍计划",
-      "approval_policy": "read_only"
-    },
-    {
-      "operation": "story_diagnosis",
-      "group": "剧情策划",
-      "status": "supported",
-      "output": "逻辑、动机、节奏、认知、情绪、信息密度与观众理解问题",
-      "approval_policy": "read_only"
-    },
-    {
-      "operation": "hook_design",
-      "group": "剧情策划",
-      "status": "supported",
-      "output": "开篇钩子、倒叙方案、高潮前置与多方案比较",
-      "approval_policy": "plan_first"
-    },
-    {
-      "operation": "adaptation_plan",
-      "group": "剧情策划",
-      "status": "supported",
-      "output": "小说转短剧策略、取舍原则、集数时长和主线结构",
-      "approval_policy": "plan_first"
-    },
-    {
-      "operation": "episode_plan",
-      "group": "剧情策划",
-      "status": "supported",
-      "output": "分集边界、每集钩子、节拍、高潮、结尾悬念与时长预算",
-      "approval_policy": "plan_first"
-    },
-    {
-      "operation": "character_arc",
-      "group": "剧情策划",
-      "status": "supported",
-      "output": "人物认知、关系阶段、情绪进阶、动机与禁提前表达项",
-      "approval_policy": "plan_first"
-    },
-    {
-      "operation": "scene_plan",
-      "group": "剧情策划",
-      "status": "supported",
-      "output": "场次顺序、时空关系、场景状态、转场与视觉承载方案",
-      "approval_policy": "plan_first"
-    },
-    {
-      "operation": "rewrite_plan",
-      "group": "剧本工作流",
-      "status": "supported",
-      "output": "改写目标、方案A/B/C、影响范围、保留删除项和推荐方案",
-      "approval_policy": "plan_only_until_execute_request"
-    },
-    {
-      "operation": "script_create",
-      "group": "剧本工作流",
-      "status": "supported",
-      "output": "新短剧剧本、场次、动作、对白、情绪与钩子",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "script_rewrite",
-      "group": "剧本工作流",
-      "status": "supported",
-      "output": "完整改写剧本及修改说明",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "script_change",
-      "group": "剧本工作流",
-      "status": "supported",
-      "output": "新增、修改、删除、替换、合并、拆分或移动后的剧本版本",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "dialogue_rewrite",
-      "group": "剧本工作流",
-      "status": "supported",
-      "output": "对白补齐、压缩、人物归属、语气与标点表演设计",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "change_impact",
-      "group": "变更管理",
-      "status": "supported",
-      "output": "原文、节拍、认知、场景状态、27字段单镜母版、声音、十列投影和统计影响矩阵",
-      "approval_policy": "required_before_mutation"
-    },
-    {
-      "operation": "storyboard_plan",
-      "group": "分镜工作流",
-      "status": "supported",
-      "output": "镜头节拍、景别机位、时长、转场和镜头功能方案",
-      "approval_policy": "plan_first"
-    },
-    {
-      "operation": "storyboard_create",
-      "group": "分镜工作流",
-      "status": "supported",
-      "output": "R10.1 compact 27字段正式分镜、章节/原文映射、完整眼部表演链、相邻镜头N-1逐组连续性证明、公共场景人物与环境音生态，以及精确十列XLSX；逐镜生成限制和GPT投影显式9:16竖屏，GPT仅保留单帧可见语义，四项光影按场景真实来源闭合，普通室内清透且门窗状态锁定，室外氛围光仅在真实介质与光源成立时启用，THG-01至THG-17通过；正式分镜母版是唯一单镜执行母版，生产XLSX审计状态为PENDING_AUDIT",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "storyboard_regenerate",
-      "group": "分镜工作流",
-      "status": "supported",
-      "output": "根据最新版剧本走全量或稳定UID增量路线；增量后确定性重建全局N-1相邻镜头逐组证明，输出完整canonical、XLSX、生产预检与审计handoff",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "storyboard_change",
-      "group": "分镜工作流",
-      "status": "supported",
-      "output": "仅对精确对白、标点、顺序/分句、说话人、原文映射、认知和保护对白证据均未变化的同身份同数量镜头，以稳定UID、更新后的镜头级证据、精确边界和CAS执行视觉或其他非认知增量变更；任何对白/说话人变化完整重建受影响场景或分集；服务端只更新27字段原子canonical并在导出时确定性投影正式母版与GPT关键帧，不生成Seedance或批次副本",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "storyboard_audit",
-      "group": "审计闭环",
-      "status": "supported",
-      "output": "任意认证窗口以独立审计authority按semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting对精确compact canonical提交八层语义证据；绑定镜头数、N-1相邻对数量和有序pair SHA-256，空间层按序覆盖全部pair:left->right，表演层复核眼部链，禁项与声音层按序覆盖每个带对白镜的field:镜头编号.音色，源文对白层按Source Ledger顺序覆盖每个source-unit:单元ID并按序覆盖事实转化对白目标镜，机位可见性层按canonical与固定字段顺序覆盖每镜的光影、光源来源、光源方向、色温倾向，并验证普通室内清透/门窗状态或有依据的局部介质与室外氛围光；服务端与源文对白v6权威、新鲜机器N-1证明、THG-15音色、THG-16对白转化及THG-17静帧光影门禁交叉校验并创建不可变签名audit overlay新工件/后继工作簿；原生产XLSX和已消费root不就地改写，审计过程禁止再生成内容",
-      "approval_policy": "read_only"
-    },
-    {
-      "operation": "storyboard_repair",
-      "group": "审计闭环",
-      "status": "supported",
-      "output": "仅在审计失败且授权后消费最新完成失败血缘的一次性修复包，生成新artifact/canonical与新鲜file/source_version/handoff/trace绑定，完整回归并返回原审计窗口；旧包和同字节翻绿失败关闭",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "anchor_management",
-      "group": "视觉生产",
-      "status": "supported",
-      "output": "人物、场景、道具、服装、站位和光线锚点清单",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "keyframe_prompt",
-      "group": "视觉生产",
-      "status": "supported",
-      "output": "关键帧、场景图、人物视图和反向限制提示词",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "keyframe_image",
-      "group": "视觉生产",
-      "status": "conditional",
-      "condition": "需要可用图像生成工具及必要参考图",
-      "output": "单张关键帧、场景图、角色图或修正图",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "audio_bgm",
-      "group": "声音生产",
-      "status": "supported",
-      "output": "整场情绪基调、分段BGM、公共场景近中远环境声、转场音效、对白让位与听觉画面方案",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "voice_design",
-      "group": "声音生产",
-      "status": "supported",
-      "output": "正式母版音色固定子模板：基础声线、言语行为、当前表达、发声方式六项与2—4项禁止语气；心理音轨保持独立",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "format_convert",
-      "group": "交付生产",
-      "status": "conditional",
-      "condition": "取决于输入格式和当前文件处理工具",
-      "output": "Excel、JSON、Markdown或Word等目标格式文件",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "production_batch",
-      "group": "交付生产",
-      "status": "supported",
-      "output": "按需生成镜头包、关键帧包和声音Cue清单；i2v直接使用正式单镜母版，不预生成或持久化独立Seedance提示词/批次",
-      "approval_policy": "explicit_execute"
-    },
-    {
-      "operation": "version_management",
-      "group": "项目管理",
-      "status": "supported",
-      "output": "版本锁、变更单、修改说明、影响范围和最新版指针",
-      "approval_policy": "automatic_recording"
-    },
-    {
-      "operation": "statistics",
-      "group": "项目管理",
-      "status": "supported",
-      "output": "镜头、时长、对白、问题、闭环率、残留率和副作用统计",
-      "approval_policy": "read_only"
-    },
-    {
-      "operation": "storyboard_draft_preflight",
-      "group": "分镜生产",
-      "status": "supported",
-      "condition": "production窗口、已锁定工单与候选canonical",
-      "output": "scene/episode/full草稿门禁、唯一问题镜质量指标、失败学习事件；零artifact/版本/XLSX/handoff副作用",
-      "approval_policy": "production_work_order_only"
-    },
-    {
-      "operation": "project_state_migration",
-      "group": "项目管理",
-      "status": "guarded",
-      "condition": "旧项目控制状态且用户已明确授权迁移",
-      "output": "dry-run、签名快照、双哈希CAS、幂等恢复或安全回滚；历史event台账的replay checkpoint只由独立HMAC签名且已提交的migration journal授权，并绑定project/migration身份、before/after ledger SHA与完全相同checkpoint；历史分镜与审计证据只读",
-      "approval_policy": "explicit_execute_plus_full_regression_certificate"
-    },
-    {
-      "operation": "window_role_continuation",
-      "group": "项目管理",
-      "status": "guarded",
-      "condition": "同一用户命名空间与project_id中的storyboard_create/regenerate/change/audit/repair工单绑定在不可用旧窗口；新窗口拥有可信cloud服务端session、当前全量回归证书、精确工单契约、预演哈希和确认字面量；不存在活动operation lease或未过期/字段不完整的handoff、repair-package、draft-preflight claim；passed audit仅在恰有一个签名prepared独立复审successor时可受限接续",
-      "output": "通过begin_project_task零写预演并为同一authority root追加新物理WIN/ACT/session epoch、推进唯一活动head；每个logical authority root的operation lease严格独占，同root并发返回authority_operation_in_progress且不join，不同root可并行；普通handoff、repair package和reaudit successor领取绑定当前root/generation/session及token/generation/有效lease，旧代次或过期token finish/release零写失败；普通handoff完成须真实签名独审certificate；delayed candidate发布保留已claim/consumed签名handoff；旧generation由head语义逻辑撤销而历史签名记录不改写；所有后续authority写入在持久化边界复核active generation；仅新handoff、repair package及当前Schema明确声明这些字段的其他记录持久化root/epoch/generation，消费claim另用token/generation/lease契约且不补写certificate/trace；角色、operation、mode、authorization、范围、工单状态及项目阻塞不变",
-      "approval_policy": "plan_hash_plus_ROTATE_WINDOW_AUTHORITY_REVOKE_PREVIOUS_SESSION"
-    },
-    {
-      "operation": "legacy_handoff_preflight_evidence_reissue",
-      "group": "项目管理",
-      "status": "guarded",
-      "condition": "旧prepared production_to_audit交接缺少生产预检字段、存在可验证的原生产提交血缘、已登记能力缺口、production显式执行工单、精确handoff集合、有效全量回归证书及双阶段确认",
-      "output": "使用当前验证器复验不可变canonical与XLSX；仅内部受控路由接受精确签名0.5.4/当前投影，或由冻结0.5.3投影器逐格证明的合法基线组合，并将raw XLSX/canonical、旧handoff、旧生产证书、原生产trace与投影器来源封入证明；一般extract_xlsx不放宽。追加一个确定性签名生产预检证据后继；旧handoff、旧证书、内容产物和历史审计记录零修改，独立审计仍为PENDING_AUDIT",
-      "approval_policy": "plan_hash_plus_exact_confirmation_plus_current_revalidation"
-    },
-    {
-      "operation": "storyboard_handoff_recovery",
-      "group": "项目管理",
-      "status": "guarded",
-      "condition": "已登记能力缺口、production显式执行工单、精确handoff集合、有效全量回归证书及双阶段确认",
-      "output": "逐条签名日志与CAS恢复；旧prepared交接保留并标记superseded，新交接按当前15项完整指纹重新签发且仍为PENDING_AUDIT",
-      "approval_policy": "plan_hash_plus_exact_confirmation_plus_independent_audit"
-    },
-    {
-      "operation": "issue_query",
-      "group": "系统改进",
-      "status": "supported",
-      "output": "精确问题清单、跨批次pattern聚合与主动防错画像",
-      "approval_policy": "read_only"
-    },
-    {
-      "operation": "performance_diagnosis",
-      "group": "系统改进",
-      "status": "supported",
-      "condition": "用户明确要求排查原生ChatGPT耗时且插件版本不低于0.5.3",
-      "output": "五阶段tool_bracketed_chat计时、已解析插件server_only耗时、主导观察区间、无API不可测项和受控思考模式A/B建议",
-      "approval_policy": "explicit_diagnostic_only"
-    },
-    {
-      "operation": "issue_learning",
-      "group": "系统改进",
-      "status": "supported",
-      "output": "跨窗口问题归档、去重、复发升级和趋势分析",
-      "approval_policy": "automatic_recording"
-    },
-    {
-      "operation": "rule_improvement",
-      "group": "系统改进",
-      "status": "guarded",
-      "output": "规则候选、验证器候选和黄金测试候选",
-      "approval_policy": "tests_plus_human_approval"
-    },
-    {
-      "operation": "archive",
-      "group": "项目管理",
-      "status": "guarded",
-      "output": "确认后的正式版本、交付清单与归档记录",
-      "approval_policy": "human_signoff"
-    },
-    {
-      "operation": "capability_gap",
-      "group": "系统改进",
-      "status": "supported",
-      "output": "缺失能力、所需输入工具、风险、实现方案和测试门禁",
-      "approval_policy": "proposal_only"
-    }
-  ],
-  "known_limits": [
-    {
-      "id": "no_dormant_chat_monitoring",
-      "description": "不能在未触发任务时后台扫描休眠聊天窗口；只在Agent任务运行并成功写回共享中枢时形成精确记录。"
-    },
-    {
-      "id": "no_unavailable_history_inference",
-      "description": "不能把不可访问的历史聊天推断成精确事件；只能标记为未量化历史模式。"
-    },
-    {
-      "id": "no_api_hidden_model_substages",
-      "description": "无API时只能用服务器收件检查点测量工具调用之间的区间；不能精确拆分模型排队、隐藏思考、令牌生成、客户端传输和最终渲染，也不能由单次运行证明思考模式因果。"
-    },
-    {
-      "id": "tool_and_permission_bound",
-      "description": "图像、文件、音频或外部服务操作受当前工具、素材和权限限制；缺少条件时必须登记能力缺口。"
-    },
-    {
-      "id": "no_unapproved_rule_activation",
-      "description": "不能未经验证和人工确认自动激活正式规则。"
-    },
-    {
-      "id": "no_silent_destructive_overwrite",
-      "description": "不能静默覆盖唯一原件、删除未授权范围或跨越用户锁定的剧情边界。"
-    },
-    {
-      "id": "delta_no_structural_edit_v054",
-      "description": "历史稳定ID（保留v054标识用于兼容，请勿改名）：当前0.5.12增量路线只支持稳定UID、同数量且精确对白与说话人不变的视觉或其他非认知执行变化；不支持任何对白/说话人增删改、重排、拆并或改归属，也不支持镜头插入、删除、移动、拆分、合并或重编号；这些变化及原文/认知/保护对白/边界/拓扑失效必须完整重建受影响场景或分集。"
-    }
-  ]
+  "workflow_revision": "R10-PG1"
 }
