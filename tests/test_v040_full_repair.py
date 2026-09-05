@@ -12,6 +12,7 @@ from shortdrama_mcp.auth import request_namespace
 from shortdrama_mcp.config import Settings
 
 from test_v040_architecture import three_shot_storyboard
+from run_golden_tests import build_adjacent_continuity_audit
 from semantic_audit_helpers import (
     failing_semantic_audit_for_artifact,
     inject_semantic_audit,
@@ -91,6 +92,9 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
             "performance_chains",
         ):
             evidence[field] = evidence[field][:1]
+        evidence["adjacent_continuity_audit"] = build_adjacent_continuity_audit(
+            broken["shots"], evidence["scene_state_ledger"]
+        )
         return broken
 
     async def _prepare_failed_audit_chain(self) -> None:

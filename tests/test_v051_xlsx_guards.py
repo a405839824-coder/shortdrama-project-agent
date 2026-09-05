@@ -311,8 +311,11 @@ class V051XlsxGuardTests(unittest.TestCase):
         picture = canonical["shots"][0]["画面内容"]
 
         self.assertLess(picture.index("第一句"), picture.index("第二句"))
-        self.assertIn("第一句轻声", picture)
-        self.assertIn("第二句压低尾音", picture)
+        voice = canonical["shots"][0]["音色"]
+        self.assertIn("平静克制", voice)
+        self.assertIn("第一句轻声", voice)
+        self.assertIn("第二句压低尾音", voice)
+        self.assertLess(voice.index("第一句轻声"), voice.index("第二句压低尾音"))
 
     def test_visible_projection_drift_is_rejected_with_intact_sidecar(self) -> None:
         payload = storyboard_to_xlsx(

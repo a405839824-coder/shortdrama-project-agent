@@ -7,6 +7,7 @@ import unittest
 
 from openpyxl import Workbook, load_workbook
 
+from shortdrama_mcp.canonical import compact_storyboard_canonical
 from shortdrama_mcp.file_io import (
     CANONICAL_SIDECAR_PAYLOAD_PREFIX,
     CANONICAL_SIDECAR_SHEET,
@@ -18,7 +19,7 @@ from test_efficiency import legacy_storyboard, valid_storyboard
 
 
 def _full_canonical_storyboard() -> dict:
-    storyboard = copy.deepcopy(valid_storyboard())
+    storyboard = compact_storyboard_canonical(valid_storyboard())
     storyboard["shots"][0].update(
         {
             "shot_uid": "shot-uid-ep06-001",

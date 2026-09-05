@@ -196,6 +196,8 @@ class CompactMasterPerformanceContracts(unittest.IsolatedAsyncioTestCase):
         replacement_shot = copy.deepcopy(storyboard["shots"][1])
         replacement_shot["画面内容"] = (
             "【0.0—0.8秒】EP02女主在原位停步；【0.8—3.3秒】她确认桌上信件，"
+            "视线从门框移向桌面信件，眼球先完成轻微焦点调整，头部随后轻微跟转；"
+            "视线落稳前自然短眨一次，重新睁眼后上眼睑略微下压，"
             "表情、视线与呼吸连续，本镜无对白；【3.3—4.0秒】她保持视线并收束动作。"
         )
         performance = copy.deepcopy(

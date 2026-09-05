@@ -13,6 +13,7 @@ from shortdrama_mcp.service import _episode_range_from_target
 
 from semantic_audit_helpers import inject_semantic_audit
 from test_v040_architecture import three_shot_storyboard
+from run_golden_tests import build_adjacent_continuity_audit
 
 
 class EpisodeTargetParserTests(unittest.TestCase):
@@ -90,8 +91,16 @@ class ProjectReuseAndFullScopeTests(unittest.IsolatedAsyncioTestCase):
             evidence["source_ledger"][index]["target_shots"] = [shot_id]
             evidence["scene_state_ledger"][index]["scene_id"] = f"EP{episode:02d}-SC01"
             evidence["scene_state_ledger"][index]["shot_id"] = shot_id
+            if index:
+                evidence["scene_state_ledger"][index]["transition_explanation"] = (
+                    f"跨集切入EP{episode:02d}，同一清晨室内承接前一剧情阶段；"
+                    "女主保持既定站位、朝向和视线，桌面信件与门窗状态不变。"
+                )
             evidence["shot_plan"][index]["shot_id"] = shot_id
             evidence["performance_chains"][index]["shot_id"] = shot_id
+        evidence["adjacent_continuity_audit"] = build_adjacent_continuity_audit(
+            base["shots"], evidence["scene_state_ledger"]
+        )
         create = await self.call(
             "begin_project_task",
             {

@@ -8,7 +8,7 @@ from typing import Any
 
 from shortdrama_mcp.app import create_mcp
 from shortdrama_mcp.auth import request_namespace
-from shortdrama_mcp.canonical import stable_json_hash
+from shortdrama_mcp.canonical import compact_storyboard_canonical, stable_json_hash
 from shortdrama_mcp.config import Settings
 
 
@@ -17,10 +17,11 @@ from semantic_audit_helpers import (
     inject_semantic_audit,
 )
 from test_efficiency import valid_storyboard
+from run_golden_tests import build_adjacent_continuity_audit
 
 
 def three_shot_storyboard() -> dict[str, Any]:
-    value = valid_storyboard()
+    value = compact_storyboard_canonical(valid_storyboard())
     template_shot = value["shots"][0]
     shots: list[dict[str, Any]] = []
     for index in range(1, 4):
@@ -34,7 +35,10 @@ def three_shot_storyboard() -> dict[str, Any]:
                 "场景连续性ID": f"{episode_id}-SC01",
                 "画面内容": (
                     f"【0.0—0.8秒】第{index}个连续剧情动作开始，女主停在既定站位；"
-                    f"【0.8—3.3秒】女主转动视线并看向桌面信件，完成本镜表演，本镜无对白；"
+                    f"【0.8—3.3秒】女主转动视线并看向桌面信件，"
+                    "视线从门框移向桌面信件，眼球先完成轻微焦点调整，头部随后轻微跟转；"
+                    "视线落稳前自然短眨一次，重新睁眼后上眼睑略微下压，"
+                    "完成本镜表演，本镜无对白；"
                     f"【3.3—4.0秒】她保持视线、站位与稳定呼吸，动作收束。"
                 ),
                 "覆盖原文": f"第{index}个剧情动作。",
@@ -63,6 +67,14 @@ def three_shot_storyboard() -> dict[str, Any]:
             **copy.deepcopy(evidence["scene_state_ledger"][0]),
             "scene_id": f"EP{index:02d}-SC01",
             "shot_id": f"EP{index:02d}-001",
+            "transition_explanation": (
+                evidence["scene_state_ledger"][0]["transition_explanation"]
+                if index == 1
+                else (
+                    f"跨集切入EP{index:02d}，同一清晨室内承接前一剧情阶段；"
+                    "女主保持既定站位、朝向和视线，桌面信件与门窗状态不变。"
+                )
+            ),
         }
         for index in range(1, 4)
     ]
@@ -81,6 +93,9 @@ def three_shot_storyboard() -> dict[str, Any]:
         }
         for index in range(1, 4)
     ]
+    evidence["adjacent_continuity_audit"] = build_adjacent_continuity_audit(
+        shots, evidence["scene_state_ledger"]
+    )
     return value
 
 
@@ -191,7 +206,10 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
         replacement_shot = copy.deepcopy(storyboard["shots"][1])
         replacement_shot["画面内容"] = (
             "【0.0—0.8秒】EP02女主在原位先停步；"
-            "【0.8—3.3秒】她再确认桌上信件，因果、认知与表演连续，本镜无对白；"
+            "【0.8—3.3秒】她再确认桌上信件，"
+            "视线从门框移向桌面信件，眼球先完成轻微焦点调整，头部随后轻微跟转；"
+            "视线落稳前自然短眨一次，重新睁眼后上眼睑略微下压，"
+            "因果、认知与表演连续，本镜无对白；"
             "【3.3—4.0秒】她保持视线与稳定呼吸。"
         )
         performance = copy.deepcopy(
@@ -459,6 +477,9 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
         evidence = broken["prevention_evidence"]
         for field in ("source_ledger", "scene_state_ledger", "shot_plan", "performance_chains"):
             evidence[field] = evidence[field][:1]
+        evidence["adjacent_continuity_audit"] = build_adjacent_continuity_audit(
+            broken["shots"], evidence["scene_state_ledger"]
+        )
         broken["shots"][0]["光源来源"] = "右侧木格窗透入的日光"
         committed = await self.call(
             "commit_storyboard",

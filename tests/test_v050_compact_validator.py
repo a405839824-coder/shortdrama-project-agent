@@ -67,11 +67,13 @@ class V050CompactValidatorTests(unittest.TestCase):
     def test_compact_dialogue_and_three_stage_timeline_pass(self) -> None:
         obj = compact_fixture()
         obj["shots"][0]["画面内容"] = (
-            "0.0–0.8秒，女主站在桌前，目光落在来人身上，右手压住袖口；"
+            "0.0–0.8秒，女主站在桌前，右手压住袖口；视线从袖口移向来人，"
+            "眼球先完成轻微焦点调整，头部随后轻微跟转；视线落稳前自然短眨一次，"
+            "重新睁眼后上眼睑略微下压；"
             "0.8–4.3秒，女主嘴角收住、肩颈微紧，呼吸克制后开口："
             "【女主】你终于来了？声音压低，语速放慢，开口前呼吸稳定，在‘终于’前停顿，"
-            "‘来了’加重，尾音克制上扬，问号表现试探；"
-            "4.3–5.0秒，她保持视线和站位，听者延后反应，动作收束。"
+            "‘来了’加重，尾音克制上扬，问号表现试探；台词关键词与重音期间不眨眼；"
+            "4.3–5.0秒，她保持视线落在来人身上和原有站位，听者延后反应，动作收束。"
         )
         report = validate(obj)
         self.assertEqual(report["status"], "pass", report["issues"])

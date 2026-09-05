@@ -1,6 +1,6 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.22",
+  "version": "0.5.23",
   "description": "Chinese short-drama production with static-observable T2I prompts, scene-grounded lighting, fixed voice, N-1 continuity, and independent audit.",
   "author": {
     "name": "Storyboard Project Agent"
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 严格单镜契约全流程执行短剧项目。0.5.22在静态文生图与有源光影决策上增加室内外分流：普通室内默认空气清澈、背景可辨、闭窗窗纸漫射，禁止无依据雾烟、可见穿插光束、全画面柔焦扩散、无开口强逆光和门窗擅改；室外雾气、逆光与体积光只在天气、介质和真实光源闭合时启用。THG-17及独审v8逐镜四光影字段证据会阻断冲突。0.5.20会话还原、0.5.18固定音色、0.5.17眼部表演与N-1连续性继续生效。完整项目内容保存于ChatGPT Library，公共工具仍精确为19个。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 单镜契约执行短剧项目。0.5.23补齐普通烟雾、英文halation、卧房等场景别名、局部烟气来源及门窗状态的校验，并修正梦幻感与左后侧方向的误判。普通室内保持空气清澈、背景可辨和柔和漫射明暗；局部烟气必须有真实来源、受控范围且不遮挡背景；室外逆光与雾气分别按光源和介质条件选择。保留27个正式母版字段、结构化音色、叙述性会话还原、眼部表演、N−1连续性和独立审计；完整项目内容保存于ChatGPT Library，公共工具仍为19个。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [

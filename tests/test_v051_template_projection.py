@@ -132,8 +132,14 @@ class V051TemplateProjectionTests(unittest.TestCase):
             paragraphs[1],
             "镜头类型：双人中近景｜可见主体：苏清柳、邹氏",
         )
+        voice_index = 2 + list(FORMAL_MERGED_ATOMIC_FIELDS).index("音色")
+        self.assertEqual(paragraphs[voice_index], "音色：")
         self.assertEqual(
-            [paragraph.split("：", 1)[0] for paragraph in paragraphs[2:]],
+            paragraphs[voice_index + 1], compact_storyboard()["shots"][0]["音色"]
+        )
+        field_paragraphs = paragraphs[2 : voice_index + 1] + paragraphs[voice_index + 2 :]
+        self.assertEqual(
+            [paragraph.split("：", 1)[0] for paragraph in field_paragraphs],
             list(FORMAL_MERGED_ATOMIC_FIELDS),
         )
         self.assertNotIn("功能类型：", formal)
