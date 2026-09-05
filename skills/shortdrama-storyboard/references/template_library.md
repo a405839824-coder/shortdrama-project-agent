@@ -1,6 +1,6 @@
 # V16.3-148-R10-StableRuntime Full Template Library
 
-每个模板均为独立、可执行结构；不得用同一通用壳替代。
+每个模板均为独立、可执行结构；不得用同一通用壳替代。当前0.5.24规则由`rule_registry.json`唯一维护；时长统一引用`timing_policy`，未标定候选不能写为实测。本页的规划表字段不是新增正式母版顶层字段或工作簿列。
 
 ## TPL-R10-01 Source Progress Lock模板
 
@@ -61,15 +61,15 @@
 ## TPL-R10-08 DialogueUnit模板
 
 - 触发条件：每条台词
-- 字段顺序：角色｜台词｜字数｜2.8最小时长｜呼吸/停顿预算｜核心动作预算｜听者反应｜镜尾稳定｜镜头时长｜结论
+- 字段顺序：原句出现ID｜角色｜台词字符范围｜发音单位及依据｜profile_id/证据状态｜发言事件起止｜阶段范围｜独立停顿事件｜动作/反应及先后依赖｜必要镜尾依据｜镜头时长｜结论
 - 必填规则：字段必须出现；无内容时写“无”或“不适用+原因”，不得留空。
-- 失败标准：THG-05对白/说话人不精确，或THG-10“对白+呼吸停顿+动作+听者反应+镜尾稳定”超过镜头时长即fail
+- 失败标准：THG-05原句重拼/说话人不精确，或THG-10按`timing_policy`逐发言、逐阶段核对时发言/音轨/依赖事件超出可用范围即fail；真实串行相加，可并行共用，停顿去重，无固定呼吸/反应/镜尾费。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
 ## TPL-R10-09 ActionUnit模板
 
 - 触发条件：每个动作镜
-- 字段顺序：主体｜主动作｜次动作｜可见部位｜动作最低时间｜听者反应｜镜尾稳定｜复杂度｜生成结论
+- 字段顺序：主体｜动作事件ID｜主动作｜次动作｜可见部位｜动作起止｜前置依赖｜并行依据｜听者反应起止｜必要镜尾依据｜复杂度｜生成结论
 - 必填规则：字段必须出现；无内容时写“无”或“不适用+原因”，不得留空。
 - 失败标准：复杂动作超时或不可见即fail
 - 输出状态：pass / warning / fail_current / unable_to_check
@@ -128,7 +128,7 @@
 - 触发条件：存在心理音轨且无角色开口
 - 字段顺序：镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句
 - 必填规则：字段必须出现；无内容时写“无”或“不适用+原因”，不得留空。
-- 失败标准：心理音轨字段内缺不张嘴/不口型/不字幕/不计入安全属性，或新增心理音轨属性字段即fail
+- 失败标准：心理音轨字段内缺不张嘴/不口型/不字幕/不计入安全属性，新增心理音轨属性字段，或实际发声时间与跨镜范围未按timing_policy完整覆盖即fail；不计角色对白不等于不占时间。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
 ## TPL-R10-17 带台词+心理音轨镜头模板
@@ -136,7 +136,7 @@
 - 触发条件：台词与心理音轨同镜
 - 字段顺序：镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句
 - 必填规则：字段必须出现；无内容时写“无”或“不适用+原因”，不得留空。
-- 失败标准：两类音轨未分层或心声驱动口型即fail
+- 失败标准：两类音轨未分层、心声驱动口型、实际发声时间超范围，或无明确可听辨依据的声音重叠即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
 ## TPL-R10-18 书页特写模板
@@ -222,7 +222,7 @@
 ## TPL-R10-28 Final Release Checklist模板
 
 - 触发条件：最终发布
-- 字段顺序：Source Lock｜Beat/Ledger｜原文直接对白/事实转化对白双轨｜27字段模板｜可见性｜画面内容中的对白/表演/眼部链｜音色固定子模板｜运镜｜四项光线｜单镜母版执行完整性｜THG-01–16｜N-1相邻镜头逐组证明｜十列投影与反向解析｜独立审计证书｜统计｜人工签核
+- 字段顺序：Source Lock｜Beat/Ledger｜原文直接对白/事实转化对白双轨｜27字段模板｜可见性｜画面内容中的对白/表演/眼部链｜音色固定子模板｜运镜｜四项光线｜单镜母版执行完整性｜THG-01–17｜N-1相邻镜头逐组证明｜十列投影与反向解析｜独立审计证书｜统计｜人工签核
 - 必填规则：字段必须出现；每条负向样本必须fail并命中目标错误码，对应修复样本必须pass；多行XLSX样本必须执行真实导出与反向解析。
 - 失败标准：任一硬门未过即blocked
 - 输出状态：pass / warning / fail_current / unable_to_check
@@ -384,7 +384,7 @@
 
 - 触发条件：源文取舍完成、正式拆镜之前及生成之后
 - 字段顺序：target_duration_seconds｜dialogue_seconds｜action_seconds｜transition_seconds｜shot_count_min｜shot_count_max｜beat_id｜core_stage｜event_ids｜source_unit_ids｜entry_state｜exit_state｜target_duration_seconds｜shot_count_range｜function｜core_event_coverage_percent｜causal_link_coverage_percent｜character_state_change_coverage_percent｜protected_dialogue_coverage_percent｜source_treatment_percent
-- 必填规则：先预算后镜头；保护对白按2.8汉字/秒加停顿计算；所有覆盖指标必须100%；单镜一个核心阶段但允许同阶段连续动作链。
+- 必填规则：先预算后镜头；保护对白与心理音轨引用同一`timing_policy`并逐发言、逐阶段检查；串行依赖与并行占用明确，普通停顿不重复计时；实测配置优先、未标定候选明示；所有覆盖指标必须100%；单镜一个核心阶段但允许同阶段连续动作链。
 - 失败标准：最低时长超预算、事件未进节拍、固定镜头数挤压高潮或任一覆盖率不足100%即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
@@ -396,7 +396,7 @@
 - 失败标准：只写人群、路人、环境声或街道嘈杂声；匿名群演清晰说话；时代错位声源；声画无源；正式母版生态不完整；同场生态无过渡跳变即fail。
 - 输出状态：pass / warning / fail_current / unable_to_check
 
-## TPL-R10-49 文生图静帧与光影决策模板
+## TPL-R10-50 文生图静帧与光影决策模板
 
 - 触发条件：GPT关键帧、文生图、场景定帧、古装视觉提示词或任何光影选择
 - 字段顺序：candidate_semantic｜classification（可直接静态投影/先转为可见证据/不得进入单帧）｜visible_translation｜time｜interior_exterior｜door_window_state｜weather｜primary_source｜weak_fill_source｜source_direction_height｜lit_subject｜exposure_material｜indoor_background_clarity｜atmosphere_scope｜narrative_function｜scene_continuity_id｜physical_preconditions｜status

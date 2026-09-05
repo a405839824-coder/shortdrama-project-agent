@@ -2,489 +2,521 @@
   {
     "conflict_id": "C-001",
     "conflict_pair": "源文忠实 vs 美学增强",
-    "higher_priority_rule": "源文忠实",
     "decision": "不得为画面好看新增无源剧情",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": true,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": true,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "源文忠实",
     "linked_error_codes": [
       "E-SOURCE-004"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-002",
     "conflict_pair": "分集边界 vs 钩子强度",
-    "higher_priority_rule": "分集边界",
     "decision": "不得为了钩子跳过因果或提前后文",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": true,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": true,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "分集边界",
     "linked_error_codes": [
       "E-SOURCE-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-003",
     "conflict_pair": "台词容量 vs 原文台词完整",
-    "higher_priority_rule": "台词容量",
-    "decision": "拆句、延长或分镜保留，不得硬塞",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "decision": "保留原文逐字逐标点及说话人；可按原句出现身份与半开字符范围合法拆镜，不得删字、重复、错序或硬塞。",
     "exception_allowed": true,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": true,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "原文完整与可执行容量同时满足",
     "linked_error_codes": [
       "E-DIALOGUE-003"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-004",
-    "conflict_pair": "3.5字/秒 vs 2.8字/秒",
-    "higher_priority_rule": "2.8字/秒",
-    "decision": "2.8为默认；3.5只作普通平直短句参考",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "conflict_pair": "匹配实测语速配置 vs 无依据固定语速",
+    "decision": "逐发言选择匹配的可信timing_policy配置并逐阶段核对事件时间轴；暂无实测时使用明确标记未标定的候选估算；不得把候选速度当成普遍上限或按旧固定速度加固定呼吸、反应、镜尾费。",
     "exception_allowed": false,
-    "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "exception_condition": "候选估算只能标记provisional，不可冒充实测；实际字句完整和可听辨性不得豁免。",
+    "higher_priority_rule": "有依据且口径一致的timing_policy",
     "linked_error_codes": [
       "E-DIALOGUE-004"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-005",
     "conflict_pair": "97微表情 vs 102可见性",
-    "higher_priority_rule": "可见性",
     "decision": "不可见部位不写表演，需要反应就拆镜",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "可见性",
     "linked_error_codes": [
       "E-VIS-005"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-006",
     "conflict_pair": "心理音轨正文 vs i2v口型安全",
-    "higher_priority_rule": "i2v口型安全",
-    "decision": "心理音轨正文与不张嘴、不口型、不字幕、不计入对白等安全属性合写在唯一心理音轨字段，不新增心理音轨属性列",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "decision": "心理音轨正文与不张嘴、不口型、不字幕、不计入对白等安全属性合写在唯一心理音轨字段，不新增心理音轨属性列；不计角色对白统计不等于不占发声时间，心理音轨须另按timing_policy核对时间轴。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "i2v口型安全",
     "linked_error_codes": [
       "E-PSYCH-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-007",
     "conflict_pair": "正式短镜节奏 vs 旧生成批次4秒",
-    "higher_priority_rule": "正式镜节奏与唯一单镜母版",
     "decision": "正式镜保留自身时长，废止4秒批次包装，不得为满足旧下限重复生成或拉长内容",
-    "reason": "R10.1 compact母版直接执行单镜；额外包装会复制语义并增加生成耗时。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "正式镜节奏与唯一单镜母版",
     "linked_error_codes": [
       "E-BATCH-002"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "R10.1 compact母版直接执行单镜；额外包装会复制语义并增加生成耗时。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-008",
     "conflict_pair": "用户当前字段模板 vs 旧默认模板",
-    "higher_priority_rule": "用户当前模板/R10字段",
     "decision": "新版本严格使用27字段原子顺序与十列导出；旧独立字段、batches和Seedance列仅作只读迁移输入，禁止回写",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "用户当前模板/R10字段",
     "linked_error_codes": [
       "E-FIELDORDER-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-009",
     "conflict_pair": "人物锁脸 vs 分镜构图参考",
-    "higher_priority_rule": "人物锁脸",
     "decision": "分镜图只锁构图，不得改脸与服装",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "人物锁脸",
     "linked_error_codes": [
       "E-REFERENCE-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-010",
     "conflict_pair": "插画/彩铅参考 vs 真人写实",
-    "higher_priority_rule": "目标真人写实",
     "decision": "插画只参考构图，排除纸纹和画风",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "目标真人写实",
     "linked_error_codes": [
       "E-REFERENCE-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-011",
     "conflict_pair": "快节奏目标 vs 源文低密度",
-    "higher_priority_rule": "源文密度",
     "decision": "缩短本集或请求授权，不得无源扩写",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": true,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": true,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "源文密度",
     "linked_error_codes": [
       "E-SOURCE-004"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-012",
     "conflict_pair": "当前用户明确指令 vs 历史默认",
-    "higher_priority_rule": "当前用户明确指令",
     "decision": "最新明确指令优先，安全硬线除外",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": true,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": true,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "当前用户明确指令",
     "linked_error_codes": [
       "E-FINAL-999"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-013",
     "conflict_pair": "输出完整度 vs 单次长度",
-    "higher_priority_rule": "完整度",
     "decision": "分段输出并保持阶段令牌，不得压缩丢规则",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "完整度",
     "linked_error_codes": [
       "E-FINAL-999"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-014",
     "conflict_pair": "全表重写 vs 指定分段修复",
-    "higher_priority_rule": "用户指定范围",
     "decision": "指定分段时不得越界改全表",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": true,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": true,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "用户指定范围",
     "linked_error_codes": [
       "E-FINAL-999"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-015",
     "conflict_pair": "代码校验fail vs 模型自评pass",
-    "higher_priority_rule": "代码校验fail",
     "decision": "存在机器fail时不得宣称pass",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "代码校验fail",
     "linked_error_codes": [
       "E-FINAL-999"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-016",
     "conflict_pair": "人工授权 vs 安全合规",
-    "higher_priority_rule": "安全合规",
     "decision": "安全规则不可授权覆盖；其他例外需登记",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "安全合规",
     "linked_error_codes": [
       "E-ARCHIVE-002"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-017",
     "conflict_pair": "R10规则 vs R1-R9旧规则",
-    "higher_priority_rule": "R10规则",
     "decision": "旧规则进入deprecated map，不得继续并行激活",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "R10规则",
     "linked_error_codes": [
       "E-VERSION-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-018",
     "conflict_pair": "27字段原子canonical vs 重复派生正文",
-    "higher_priority_rule": "原子canonical与唯一执行母版",
     "decision": "canonical只存27字段原子；R10-SPC-1正式分镜母版与GPT关键帧仅在导出时确定性投影，禁止持久化Seedance/批次副本或后台预生成",
-    "reason": "同一语义只写一次，既避免版本分叉，也直接减少模型重复生成。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "原子canonical与唯一执行母版",
     "linked_error_codes": [
       "E-INTEGRATION-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "同一语义只写一次，既避免版本分叉，也直接减少模型重复生成。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-019",
     "conflict_pair": "4秒2-3次机械眨眼或全程不眨 vs 完整自然眼部行为链",
-    "higher_priority_rule": "THG-13完整眼部行为链",
     "decision": "面部清楚且>=2秒先写视线起点、眼球换焦、头部跟随关系、眼睑变化和镜尾视线；3-5秒每人0-1次、>5-10秒每人1-2次，重音期不眨，多人错峰；高压/震惊不眨必须有理由和替代动态",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "不可用用户授权豁免自然性门禁；原文明确闭眼或高压停眨仍须写可执行依据与替代动态。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "THG-13完整眼部行为链",
     "linked_error_codes": [
       "E-EXPRESSION-003"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-020",
     "conflict_pair": "装饰性运镜 vs 叙事功能",
-    "higher_priority_rule": "叙事功能",
     "decision": "每次运镜必须有类型、主体、原因和效果",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "叙事功能",
     "linked_error_codes": [
       "E-MOTION-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-021",
     "conflict_pair": "漂亮光效 vs 光源/连续性",
-    "higher_priority_rule": "光源与连续性",
     "decision": "必须是场景内可解释光源，连续镜方向与色温一致",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "光源与连续性",
     "linked_error_codes": [
       "E-LIGHT-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-022",
     "conflict_pair": "发声真实感 vs 台词时长",
-    "higher_priority_rule": "台词容量",
     "decision": "停顿、重音和尾音拉长必须计入时长",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "台词容量",
     "linked_error_codes": [
       "E-DIALOGUE-003"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-023",
     "conflict_pair": "Golden schema pass vs 功能行为pass",
-    "higher_priority_rule": "功能行为pass",
     "decision": "必须真实执行校验器并比对错误码",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "功能行为pass",
     "linked_error_codes": [
       "E-INTEGRATION-002"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-024",
     "conflict_pair": "自动审计pass vs 人工终审",
-    "higher_priority_rule": "人工终审",
     "decision": "生产归档必须有真实签核",
-    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
     "exception_allowed": false,
     "exception_condition": "仅限非安全硬线，且需用户明确授权并登记Authorization Ledger。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "人工终审",
     "linked_error_codes": [
       "E-ARCHIVE-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-025",
     "conflict_pair": "继续局部补丁 vs 重复问题上游重建",
-    "higher_priority_rule": "系统性问题升级",
     "decision": "第2轮执行根因修复；第3轮及以后停止局部补丁并重建对应上游产物",
-    "reason": "重复问题说明上游台账、状态、拆镜或单镜执行设计失效，继续补丁会扩大副作用。",
     "exception_allowed": false,
     "exception_condition": "不允许用局部补丁规避连续轮次升级。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "系统性问题升级",
     "linked_error_codes": [
       "E-SYSTEMIC-001",
       "E-REGRESSION-001",
       "E-REGRESSION-002"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "重复问题说明上游台账、状态、拆镜或单镜执行设计失效，继续补丁会扩大副作用。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-026",
     "conflict_pair": "正式单镜执行母版加入BGM vs 画面锁定后独立配乐",
-    "higher_priority_rule": "视听制作分层",
     "decision": "正式单镜执行母版禁止BGM；画面锁定后再按整场情绪基调制作独立音乐Cue",
-    "reason": "单镜执行阶段混入BGM会干扰对白、环境声和后期可控性。",
     "exception_allowed": false,
     "exception_condition": "无；试听参考不得写入正式单镜执行母版。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "视听制作分层",
     "linked_error_codes": [
       "E-AUDIO-STAGE-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "单镜执行阶段混入BGM会干扰对白、环境声和后期可控性。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-027",
     "conflict_pair": "整章必须完整读取 vs 长章节允许分块",
-    "higher_priority_rule": "完整理解后再生成",
     "decision": "允许分块读取与提取，但必须全部分块读完并合并为唯一章节地图后，才能规划节拍或生成镜头",
-    "reason": "完整读取是生成门禁，不等于必须把整章塞进一次模型输入；分块不能演变为边读边生成。",
     "exception_allowed": false,
     "exception_condition": "缺块、缺页或未解决歧义时停止生成。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "完整理解后再生成",
     "linked_error_codes": [
       "E-CHAPTER-INTAKE-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "完整读取是生成门禁，不等于必须把整章塞进一次模型输入；分块不能演变为边读边生成。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-028",
     "conflict_pair": "单镜只能一个动作/信息/情绪 vs 连续动作链",
-    "higher_priority_rule": "单镜一个核心叙事或情绪阶段",
     "decision": "单镜保持一个视角、一个摄影机位置和一个核心阶段；允许该阶段内相互依赖的动作、信息与情绪连续发生，第二个独立转折或时空跳跃必须拆镜",
-    "reason": "机械限制为一个动作会制造碎片化，而多核心阶段会造成信息过载。",
     "exception_allowed": false,
     "exception_condition": "不可用隐形切镜、多机位或跨时空跳跃伪装为连续动作。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "单镜一个核心叙事或情绪阶段",
     "linked_error_codes": [
       "E-SHOTLOAD-001",
       "E-SHOTFRAG-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "机械限制为一个动作会制造碎片化，而多核心阶段会造成信息过载。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-029",
     "conflict_pair": "C级内容自动删除 vs 环境描写的电影功能",
-    "higher_priority_rule": "源文忠实与功能保留",
     "decision": "C级仅是压缩或删除候选；删除必须有明确授权或冗余证据，时间、空间、情绪、伏笔、转场和人物生态功能必须由其他节拍承接",
-    "reason": "低剧情等级不等于无电影功能，自动删除会造成时空不清、情绪断层或伏笔丢失。",
     "exception_allowed": false,
     "exception_condition": "只有客观重复且全部功能已迁移时可无用户逐条授权删除。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "源文忠实与功能保留",
     "linked_error_codes": [
       "E-SOURCE-SELECT-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "低剧情等级不等于无电影功能，自动删除会造成时空不清、情绪断层或伏笔丢失。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-030",
     "conflict_pair": "公共场景需要普通人物生态 vs 主要可见人物最多3人/通用生成限制禁止额外角色",
-    "higher_priority_rule": "公共场景事实、源文忠实和可执行性",
     "decision": "THG-06只限制具名/主要可见人物最多3人；公共场景必须在环境动态和公共生态证据中保留已规划的地点匹配普通人物。把禁止额外角色改写为禁止未列明主要角色、复制人群、重复脸、同步动作和抢主角的群演，不得一刀切删除公共人物",
-    "reason": "通用负面词若直接禁止所有额外角色，会把街道、市场、酒楼等公共空间生成成不合剧情的空场。",
     "exception_allowed": true,
     "exception_condition": "剧情明确要求空场，且镜头同时写明可见空场状态和宵禁、闭市、封锁、疏散等原因。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "公共场景事实、源文忠实和可执行性",
     "linked_error_codes": [
       "E-PUBLIC-ECOLOGY-001",
       "E-PUBLIC-CROWD-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "通用负面词若直接禁止所有额外角色，会把街道、市场、酒楼等公共空间生成成不合剧情的空场。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-031",
     "conflict_pair": "旧版可选自然时间阶段/旧第五列表头/画幅仅存元数据/生产预填审计PASS vs R10-SPC-1严格单镜与THG门禁",
-    "higher_priority_rule": "R10-SPC-1当前输出契约",
     "decision": "旧成品只读保留；所有新生成、重建、修正和导出统一使用EP编号、集内累计、恰好三个一位小数标准时间阶段及第五列正式分镜母版；每镜生成限制、正式母版和GPT投影均显式写 `9:16竖屏`；生产导出的审计overlay只能是 `PENDING_AUDIT` 且不预填问题计数",
-    "reason": "可选或自然阶段无法稳定核验单镜闭合，旧表头会继续扩散，元数据画幅无法保证空白上下文单镜执行，生产预填审计结论又会造成假PASS。",
     "exception_allowed": true,
     "exception_condition": "只允许读取未进入新生产或修正流程的历史成品；一旦继续生产必须迁移为R10-SPC-1新版本。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "R10-SPC-1当前输出契约",
     "linked_error_codes": [
       "E-TIMELINE-001",
       "E-FIELDORDER-001",
       "E-LIGHT-001",
       "E-DEPRECATED-FIELD-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "可选或自然阶段无法稳定核验单镜闭合，旧表头会继续扩散，元数据画幅无法保证空白上下文单镜执行，生产预填审计结论又会造成假PASS。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
   {
     "conflict_id": "C-032",
     "conflict_pair": "作品氛围/象征/室外雾光提示词 vs 文生图单帧可见性、普通室内清透与真实光源",
-    "higher_priority_rule": "单帧可见证据、场景事实与光学物理",
     "decision": "保留能直接看见或由摄影参数控制的造型、材质、站位、机位、光色和负面限制；抽象情绪、声音、象征和未来信息先转成可见证据。普通室内优先空气清澈、背景可辨、前侧/侧面漫射明暗与门窗原状态，室外或剧情明确介质时才条件化使用雾光、侧逆光、光束和局部扩散",
-    "reason": "把‘最幸福的一刻、如梦似幻’或室外侧逆雾光整段复制进普通室内，会产生不可证明叙事、背景泛白、全屋烟雾和门窗被擅自打开。",
     "exception_allowed": false,
     "exception_condition": "无；单片剧情和具体预设只有在当前项目源文与场景条件明确匹配时才可作为事实使用。",
-    "user_authorization_required": false,
-    "output_status_if_violated": "fail_current",
+    "higher_priority_rule": "单帧可见证据、场景事实与光学物理",
     "linked_error_codes": [
       "E-T2I-001",
       "E-LIGHT-001"
     ],
+    "output_status_if_violated": "fail_current",
+    "reason": "把‘最幸福的一刻、如梦似幻’或室外侧逆雾光整段复制进普通室内，会产生不可证明叙事、背景泛白、全屋烟雾和门窗被擅自打开。",
+    "rule_revision": "0.5.24",
+    "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   }
 ]

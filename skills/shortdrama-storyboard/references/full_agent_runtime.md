@@ -26,7 +26,7 @@ Before any new full storyboard or complete scene/episode rebuild, execute the fi
 
 Grade the immutable first full draft before repair: overall correctness and direct usability must each be at least 98%, every episode at least 96%, and new local issues at most 2%; hard errors, major issues, known-issue recurrences, and systemic duplicate patterns must each equal zero. This threshold measures prevention quality and never suppresses an issue. A full preflight becomes commit-ready only after every detected issue is cleared. The independent audit remains a read-only omission defense and final release requires 100% pass across all eight layers with blocking, residual, and introduced issues all zero.
 
-Resolve these exact Library titles only for standalone skill operation, explicit shared-ledger work, system/rule architecture updates, or final archival synchronization:
+Resolve these exact Library titles only for standalone skill operation or explicit shared-ledger work. Plugin project ledgers remain unique per authenticated project_id; global archive summaries reference project events without creating duplicate operational facts. A rule update alone does not require rewriting shared project facts:
 
 - `分镜项目Agent_项目中枢.json`: current project state, work orders, change requests, deliverables, decisions, capability gaps, and version history.
 - `分镜项目Agent_问题台账.json`: audit events, issue recurrence, statistics, rule candidates, and sign-offs.
@@ -359,4 +359,4 @@ Default task reports:
 - Audit: use the concise formats in `agent_runtime.md`.
 - Blocked: `任务阻塞｜原因一句话｜下一步一句话`
 
-Keep detailed evidence, change matrices, and capability records in shared files unless the user asks for the full report.
+Keep detailed evidence, change matrices and capability records in the selected project's authoritative ledger and complete snapshot; shared global summaries reference event IDs only, unless an explicit standalone/shared route applies.

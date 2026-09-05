@@ -1,7 +1,7 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.23",
-  "description": "Chinese short-drama production with static-observable T2I prompts, scene-grounded lighting, fixed voice, N-1 continuity, and independent audit.",
+  "version": "0.5.24",
+  "description": "Chinese short-drama production with configurable speech timing, occurrence-safe dialogue, per-person performance, scene-grounded lighting, and independent audit.",
   "author": {
     "name": "Storyboard Project Agent"
   },
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 单镜契约执行短剧项目。0.5.23补齐普通烟雾、英文halation、卧房等场景别名、局部烟气来源及门窗状态的校验，并修正梦幻感与左后侧方向的误判。普通室内保持空气清澈、背景可辨和柔和漫射明暗；局部烟气必须有真实来源、受控范围且不遮挡背景；室外逆光与雾气分别按光源和介质条件选择。保留27个正式母版字段、结构化音色、叙述性会话还原、眼部表演、N−1连续性和独立审计；完整项目内容保存于ChatGPT Library，公共工具仍为19个。",
+    "longDescription": "按 R10.1 compact-master 与 R10-SPC-1 执行短剧项目。0.5.24统一规则注册、任意认证窗口执行和项目台账路由；单镜及章节使用同源语速配置，按发言、阶段和并行或先后事件核对时间，不再固定叠加呼吸、听者反应和镜尾等待。无匹配实测时普通中文对白采用候选5字/秒并明确未标定，软件通过不代表视频语速已验证。原句按出现身份与字符范围保护；逐人核对眼部、逐词绑定重音；普通室内分别验证清澈空气、可辨背景和正常曝光，物理光影保持连续。保留27字段、10列导出、三阶段、静态GPT投影、独立审计及19个公共工具；完整项目内容保存于ChatGPT Library。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [

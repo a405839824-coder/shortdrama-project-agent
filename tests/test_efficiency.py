@@ -81,13 +81,13 @@ def valid_storyboard() -> dict[str, Any]:
         )
         shot["起始状态"] = (
             "女主站在门外朝向桌面，右手已扶门框，视线尚未落到信件；"
-            "木门半开，桌面信件未移动。"
+            "木门半开，桌面信件未移动；女主双眼自然睁开，不处于半眨眼瞬间。"
         )
         shot["画面内容"] = (
-            "【0.0—0.8秒】女主推门进入画面，右手扶住门框；"
-            "【0.8—3.3秒】她停在桌前，肩膀缓慢落下，目光转向桌面信件，"
-            "嘴角自然放松，本镜无对白；"
-            "【3.3—4.0秒】她保持视线落点和稳定呼吸，手停在门框，动作收束。"
+            "【0.0—0.8秒】女主推门进入画面，右手扶住门框，视线从门框移向桌面信件，"
+            "眼球先轻微换焦，头部随后轻跟，上眼睑略微放松，在0.4秒换焦后自然眨眼一次；"
+            "【0.8—3.3秒】女主停在桌前，肩膀缓慢落下，嘴角自然放松，本镜无对白；"
+            "【3.3—4.0秒】女主视线最终落在桌面信件上并保持稳定呼吸，手停在门框，动作收束。"
         )
         shot["音色"] = "无对白，不适用。"
         shot["心理音轨"] = (
@@ -102,6 +102,8 @@ def valid_storyboard() -> dict[str, Any]:
         shot["色温倾向"] = "中性微暖晨光；肤色自然，衣料、木构与纸张保持低饱和本色。"
         shot["生成限制"] = (
             "9:16竖屏；单镜单一主机位、单一核心动作阶段；"
+            "眼神自然聚焦，保留轻微眼球焦点调整和眼睑松紧变化；"
+            "禁止无依据全程不眨眼；禁止僵直瞪视；禁止高频机械眨眼；"
             "禁止字幕、水印、额外配乐、现代物件、人物看镜头、同步反应、复制脸、"
             "上下黑边、无来源光、重HDR、塑料皮肤与海报摆拍。"
         )
@@ -523,6 +525,11 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(certificate["tests"]["public_scene_tests"]["test_pass_count"], 11)
         self.assertEqual(certificate["tests"]["agent_tests"]["test_pass_count"], 38)
         self.assertEqual(certificate["tests"]["project_agent_tests"]["test_pass_count"], 22)
+        upgraded = certificate["tests"]["rule_upgrade_tests"]
+        self.assertEqual(upgraded["status"], "pass")
+        self.assertEqual(upgraded["test_fail_count"], 0)
+        self.assertEqual(upgraded["test_count"], upgraded["test_pass_count"])
+        self.assertGreater(upgraded["test_count"], 0)
         persisted_certificate = self.service.store.get_project_record(
             self.namespace,
             project_id,

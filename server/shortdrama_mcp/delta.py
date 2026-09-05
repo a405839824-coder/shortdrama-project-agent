@@ -86,6 +86,18 @@ SCENE_STATE_TRIGGER_FIELDS = {
     "光源方向",
     "参考图锚定",
 }
+# Authored timing contains utterance/phase ranges, pause/action dependencies
+# and possibly audio spanning multiple shots. The bounded delta schema cannot
+# replace or independently revalidate that global dependency graph. A change
+# to any execution fact that may alter it therefore needs the full route.
+# Static lighting edits retain their existing scene-state/evidence checks.
+TIMING_TRIGGER_FIELDS = DELTA_EXECUTION_FIELDS - {
+    "累计时长",
+    "光影",
+    "光源来源",
+    "光源方向",
+    "色温倾向",
+}
 EVIDENCE_BLOCKS = {
     "shot_plan",
     "performance_chains",
@@ -170,6 +182,15 @@ def changed_shot_fields(before: dict[str, Any], after: dict[str, Any]) -> set[st
         if key not in SERVER_DERIVED_SHOT_FIELDS
         and stable_json_hash(before.get(key)) != stable_json_hash(after.get(key))
     }
+
+
+def _has_authored_timing(storyboard: dict[str, Any]) -> bool:
+    evidence = storyboard.get("prevention_evidence")
+    audio = evidence.get("audio_workflow") if isinstance(evidence, dict) else None
+    # Presence, not truthiness: empty or malformed authored timing may not
+    # evade invalidation. Its schema/content validity remains a full-preflight
+    # responsibility; the delta route never repairs a global timing block.
+    return isinstance(audio, dict) and "timing" in audio
 
 
 def _dialogue_signature(picture_content: Any) -> dict[str, list[tuple[str, str]] | list[str]]:
@@ -678,6 +699,17 @@ def merge_storyboard_delta(
             raise ValueError(
                 "delta_semantic_requires_full_commit: source, cognition, identity, or global mapping "
                 "fields changed: " + ", ".join(fields)
+            )
+        timing_fields = sorted(changed_fields & TIMING_TRIGGER_FIELDS)
+        if timing_fields and _has_authored_timing(migrated_base):
+            raise ValueError(
+                "delta_timing_evidence_requires_full_commit: "
+                f"{expected_display_id} changes timing-dependent fields "
+                + ", ".join(timing_fields)
+                + "; rebuild the affected complete scene/episode with fresh "
+                "audio_workflow.timing, cross-shot audio and source-fragment "
+                "dependencies, then run full production preflight in the current "
+                "window. Bounded delta cannot reuse or replace authored timing."
             )
         if uid in used_replacement_uids:
             raise ValueError(f"delta_replacement_invalid: duplicate replacement shot_uid {uid}")

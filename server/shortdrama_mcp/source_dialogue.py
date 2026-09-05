@@ -9,7 +9,7 @@ would make THG-05 circular.  This parser derives every audible occurrence from
 the imported source bytes (after deterministic extraction) or fails closed.
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 from pathlib import Path
@@ -18,6 +18,7 @@ from typing import Any, Iterable
 
 
 SOURCE_DIALOGUE_PARSER_VERSION = "source-dialogue-authority-v6"
+SOURCE_DIALOGUE_OCCURRENCE_CONTRACT = "source-dialogue-occurrence-ranges-v1"
 
 
 class SourceDialogueAuthorityError(ValueError):
@@ -31,6 +32,9 @@ class DialogueOccurrence:
     line_number: int
     char_offset: int
     kind: str
+    occurrence_id: str = ""
+    source_text_sha256: str = ""
+    source_ordinal: int = -1
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -2264,7 +2268,33 @@ def parse_source_dialogue_authority(
         line_offset += len(raw_line)
 
     rows.sort(key=lambda row: (row.char_offset, row.line_number, row.kind))
-    return rows
+    # This identity is derived only after the closed source parser completes.
+    # Include the complete normalized source, not merely the audible text: two
+    # identical utterances (or the same line in a different source revision)
+    # must never authorize each other. Offsets and ranges are Unicode codepoint
+    # indices, not UTF-8 bytes or UTF-16 code units.
+    source_text_sha256 = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    bound_rows: list[DialogueOccurrence] = []
+    for ordinal, row in enumerate(rows):
+        identity = {
+            "contract": SOURCE_DIALOGUE_OCCURRENCE_CONTRACT,
+            "source_text_sha256": source_text_sha256,
+            "source_role": normalized_role,
+            "source_ordinal": ordinal,
+            "char_offset": row.char_offset,
+            "speaker": row.speaker,
+            "text": row.text,
+        }
+        identity_sha256 = hashlib.sha256(json.dumps(
+            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")).hexdigest()
+        bound_rows.append(replace(
+            row,
+            occurrence_id=f"source-occurrence:{identity_sha256}",
+            source_text_sha256=source_text_sha256,
+            source_ordinal=ordinal,
+        ))
+    return bound_rows
 
 
 def candidate_protected_dialogue_claims(

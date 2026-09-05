@@ -17,6 +17,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+import timing_model
+from performance_checks import eye_contract_faults, emphasis_binding_faults
+from lighting_checks import lighting_context_faults, scene_lighting_continuity_faults
+from dialogue_occurrences import align_storyboard_dialogue
+
 VERSION = "V16.3-148-R10-StableRuntime"
 SCHEMA_VERSION = "R10.1"
 WORKFLOW_PROFILE = "R10-PG1"
@@ -292,18 +297,6 @@ START_RESULT_ACTION_PATTERNS = (
     (re.compile(r"已(?:经)?(?:揭盖|开盖|打开|开启)"), re.compile(r"揭盖|开盖|打开|开启"), "开启结果已在起始状态完成"),
     (re.compile(r"已(?:经)?(?:浅啜|饮下|喝下|喝完)"), re.compile(r"浅啜|饮下|喝下|喝茶|举杯"), "饮用结果已在起始状态完成"),
     (re.compile(r"已(?:经)?(?:落座|坐下|起身|站起|跨过|进入|离开|跪下|行礼)"), re.compile(r"落座|坐下|起身|站起|跨过|跨门槛|进入|离开|跪下|行礼"), "位移或姿态结果已在起始状态完成"),
-)
-ACTION_DURATION_PATTERNS = (
-    ("奉茶", re.compile(r"奉茶"), 0.8),
-    ("接杯", re.compile(r"接杯|接盏|接过[^；。]{0,8}(?:杯|盏)"), 0.8),
-    ("揭盖", re.compile(r"揭盖|开盖"), 0.5),
-    ("浅啜", re.compile(r"浅啜|饮茶|喝茶"), 1.0),
-    ("递交", re.compile(r"递交|递出|交接"), 0.8),
-    ("跨门槛", re.compile(r"跨(?:过)?门槛"), 1.0),
-    ("起落坐姿", re.compile(r"起身|坐下|落座|屈膝|跪下|行礼"), 0.8),
-    ("点头", re.compile(r"点头|颔首"), 0.35),
-    ("抬收手", re.compile(r"抬手|收手|指向"), 0.4),
-    ("头眼动作", re.compile(r"转头|抬眼|低头"), 0.3),
 )
 
 EXECUTION_SHOT_FIELDS = (
@@ -592,18 +585,8 @@ def load_runtime_rules(explicit: str | None = None) -> dict[str, Any]:
     for path in _candidate_rule_paths(explicit):
         if path.is_file():
             rules = json.loads(path.read_text(encoding="utf-8"))
-            # The standalone catalog is the canonical documentation source.
-            # Merge newly introduced codes so the functional validator returns
-            # their blocking and repair metadata even before a runtime-rule
-            # snapshot is regenerated.
-            catalog_path = path.parent / "error_catalog.json"
-            if catalog_path.is_file():
-                standalone = json.loads(catalog_path.read_text(encoding="utf-8"))
-                existing = {row.get("error_code") for row in rules.get("error_catalog", []) if isinstance(row, dict)}
-                rules.setdefault("error_catalog", []).extend(
-                    row for row in standalone
-                    if isinstance(row, dict) and row.get("error_code") not in existing
-                )
+            # Generated from rule_registry.json; never merge another editable
+            # catalog into this runtime view. Bootstrap verifies exact equality.
             return rules
     raise FileNotFoundError("storyboard_runtime_rules.json not found")
 
@@ -673,7 +656,10 @@ def _parse_voice_template(value: Any) -> tuple[dict[str, str], list[str], list[s
     return parsed, order, format_errors
 
 
-def _voice_template_errors(value: Any, dialogue: str) -> list[str]:
+def _voice_template_errors(
+    value: Any, dialogue: str,
+    dialogue_rows: list[tuple[str, str]] | None = None,
+) -> list[str]:
     """Return deterministic THG-15 failures for one dialogue shot."""
 
     text = str(value or "").strip()
@@ -710,11 +696,9 @@ def _voice_template_errors(value: Any, dialogue: str) -> list[str]:
             errors.append("当前表达缺少必要的潜在意图")
 
     emphasis = parsed.get("重音", "")
-    quoted = re.findall(r"[‘’“”\"「」『』]([^‘’“”\"「」『』]{1,24})[‘’“”\"「」『』]", emphasis)
-    if emphasis and not quoted:
-        errors.append("重音必须用引号明确标出本镜实际对白中的字或词")
-    elif quoted and not any(fragment in dialogue for fragment in quoted):
-        errors.append("重音引号中的字词未逐字出现在本镜实际对白中")
+    errors.extend(emphasis_binding_faults(
+        emphasis, dialogue_rows if dialogue_rows is not None else [("本镜说话人", dialogue)],
+    ))
     tail = parsed.get("尾音", "")
     if tail and not any(value in tail for value in VOICE_ALLOWED_TAILS):
         errors.append("尾音必须明确选择上抬、下压、截断、发虚、落稳或短收")
@@ -887,108 +871,11 @@ def _eye_contract_faults(
     duration: float,
     strict: bool,
 ) -> list[str]:
-    """Return hard eye-performance faults for one clearly visible face.
-
-    The contract deliberately validates authored, timed behavior rather than
-    accepting a generic "natural gaze" adjective.  A static keyframe receives
-    only an open/closed-eye state; the actual blink remains in 画面内容.
-    """
-
-    shot_type = str(shot.get("镜头类型") or "")
-    visible = str(shot.get("可见主体") or "")
-    picture = str(shot.get("画面内容") or "")
-    limits = str(shot.get("生成限制") or "")
-    start_state = str(shot.get("起始状态") or "")
-    visible_text = f"{shot_type} {visible}"
-    face_visible = (
-        duration >= 2.0
-        and (
-            _has_any(visible_text, EYE_VISIBLE_TERMS)
-            or _has_any(visible_text, EYE_VISIBLE_SHOT_SCALES)
-        )
-        and not (
-            _has_any(visible_text, INVISIBLE_SHOT_TERMS)
-            and not _has_any(visible, FACE_VISIBLE_TERMS)
-        )
-        and not re.search(r"面部(?:不可见|被遮挡)|眼睛(?:不可见|被遮挡)", visible_text)
+    """Validate each visible person, keeping the historical callable signature."""
+    return eye_contract_faults(
+        shot, duration=duration, strict=strict,
+        dialogue_rows=extract_dialogues(shot.get("画面内容")),
     )
-    if not face_visible:
-        return []
-
-    faults: list[str] = []
-    focus_ok = bool(EYE_FOCUS_RE.search(picture))
-    eyelid_ok = bool(EYELID_CHANGE_RE.search(picture))
-    if not GAZE_PATH_RE.search(picture):
-        faults.append("缺‘视线/眼球从起点移向目标’的可观察换焦路径")
-    if not EYES_LEAD_HEAD_RE.search(picture):
-        faults.append("缺眼球先动、头部随后轻跟或明确不跟随的先后关系")
-    if not focus_ok:
-        faults.append("缺轻微眼球换焦、位移或焦点调整")
-    if not eyelid_ok:
-        faults.append("缺上/下眼睑松紧变化")
-
-    timeline_rows = list(STRICT_TIMELINE_STAGE_RE.finditer(picture)) if strict else []
-    end_text = timeline_rows[-1].group("body") if timeline_rows else picture
-    if not re.search(r"视线|目光|眼神|眼球", end_text):
-        faults.append("镜尾阶段未写最终视线落点")
-
-    intentional_no_blink = bool(INTENTIONAL_NO_BLINK_RE.search(picture))
-    positive_blink_text = re.sub(
-        r"(?:本镜|全镜|本段|台词期间|重音期间|关键词期间)?[^。；]{0,12}不眨眼",
-        "",
-        picture,
-    )
-    has_blink = "眨" in positive_blink_text
-    if has_blink and not BLINK_TIMING_RE.search(picture):
-        faults.append("眨眼未绑定开口前、换焦、听后反应、换气或镜尾等具体时机")
-    if has_blink and parse_blink_range(picture) is None:
-        faults.append("眨眼未写明确次数")
-    if not has_blink and not intentional_no_blink:
-        faults.append("缺本镜逐人可执行的眨眼或有理由不眨眼决策")
-    if intentional_no_blink:
-        if not NO_BLINK_REASON_RE.search(picture):
-            faults.append("不眨眼缺高压、震惊、认出、警觉或重音等剧情理由")
-        if not (focus_ok and eyelid_ok and re.search(r"呼吸|气息|吸气|呼气", picture)):
-            faults.append("不眨眼缺眼球焦点、眼睑松紧和自然呼吸替代动态")
-
-    dialogue_rows = extract_dialogues(picture)
-    if dialogue_rows and re.search(r"重音|关键词|尾音|加重", picture) and not EMPHASIS_NO_BLINK_RE.search(picture):
-        faults.append("对白关键词、重音或决定性尾音期间未明确不眨眼")
-
-    multi_people = _is_multi_person_visible(visible)
-    if multi_people:
-        safe_scan = re.sub(
-            r"(?:禁止|不得|避免|不能|不可|不安排)(?:两人|二人|多人|双人)?(?:同步|同时|同频)眨眼",
-            "",
-            picture,
-        )
-        if re.search(r"(?:同步|同时|同频)眨眼", safe_scan):
-            faults.append("多人出现同步、同时或同频眨眼")
-        if not re.search(r"眨眼.{0,24}(?:错开|不同时)|(?:错开|不同时).{0,24}眨眼|先.{0,24}眨.{0,32}后.{0,24}眨|晚半拍.{0,24}眨", picture):
-            faults.append("多人未写眨眼错峰顺序")
-
-    if STIFF_GAZE_RE.search(picture) and not (focus_ok and eyelid_ok):
-        faults.append("使用‘目光锁住/保持凝视’等僵硬措辞却无眼球微调和眼睑变化")
-
-    limit_requirements = [
-        (r"眼神自然聚焦", "生成限制缺‘眼神自然聚焦’"),
-        (r"眼球.{0,12}(?:换焦|位移|焦点调整)", "生成限制缺眼球换焦/位移约束"),
-        (r"眼睑.{0,12}(?:松紧|变化)", "生成限制缺眼睑松紧变化约束"),
-        (r"禁止无依据全程不眨眼", "生成限制缺无依据全程不眨眼禁项"),
-        (r"禁止.{0,12}(?:僵直瞪视|目光僵死)", "生成限制缺僵直瞪视禁项"),
-        (r"禁止.{0,12}高频机械眨眼", "生成限制缺高频机械眨眼禁项"),
-    ]
-    if multi_people:
-        limit_requirements.append(
-            (r"禁止.{0,16}(?:同步|同时|同频)眨眼", "生成限制缺多人同步眨眼禁项")
-        )
-    for pattern, message in limit_requirements:
-        if not re.search(pattern, limits):
-            faults.append(message)
-
-    if strict and not (STATIC_OPEN_EYES_RE.search(start_state) or PLOT_CLOSED_EYES_RE.search(start_state)):
-        faults.append("起始状态未为静态GPT关键帧声明双眼自然睁开且避开半眨眼，亦无原文明确闭眼依据")
-    return faults
 
 
 def _has_any(text: str, terms: list[str]) -> bool:
@@ -1009,13 +896,6 @@ def _validate_punctuation(dialogue: str, delivery: str) -> list[str]:
         if triggered and not _has_any(delivery, expected):
             missing.append(label)
     return missing
-
-
-def _pause_budget(dialogue: str) -> float:
-    ellipses = dialogue.count("……") + dialogue.count("...")
-    dashes = dialogue.count("——") + dialogue.count("—")
-    explosive = dialogue.count("？！") + dialogue.count("?!") + dialogue.count("!?")
-    return 0.3 * (ellipses + dashes) + 0.2 * explosive
 
 
 def extract_dialogues(picture_content: Any) -> list[tuple[str, str]]:
@@ -1511,18 +1391,6 @@ def _prop_state_faults(value: Any, *, strict: bool = False) -> list[str]:
     return faults
 
 
-def _action_capacity_seconds(picture_content: Any) -> tuple[float, list[str]]:
-    text = str(picture_content or "")
-    text = re.sub(r"[\u3400-\u9fffA-Za-z·]{1,20}说道[：:]?\s*[“\"][^”\"\n]+[”\"]", "", text)
-    matched: list[str] = []
-    seconds = 0.0
-    for label, pattern, minimum in ACTION_DURATION_PATTERNS:
-        if pattern.search(text):
-            matched.append(label)
-            seconds += minimum
-    return seconds, matched
-
-
 def _keyframe_forbidden_hits(value: Any) -> list[str]:
     return sorted({match.group(0) for match in KEYFRAME_FORBIDDEN_RE.finditer(str(value or ""))})
 
@@ -1794,6 +1662,19 @@ def _strip_negative_music_clauses(value: Any) -> tuple[str, bool]:
     return cleaned, mentioned
 
 
+def _protected_dialogue_alignment(
+    obj: dict[str, Any], shots: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Recompute coverage from canonical utterances, never from counts."""
+    try:
+        return align_storyboard_dialogue(obj, shots, extract_dialogues)
+    except (TypeError, ValueError, KeyError) as exc:
+        return {
+            "status": "fail_current", "covered_utterances": [],
+            "issues": [{"code": "invalid_dialogue_mapping", "detail": str(exc)}],
+        }
+
+
 def _validate_protected_dialogue_alignment(
     obj: dict[str, Any],
     shots: list[dict[str, Any]],
@@ -1801,65 +1682,16 @@ def _validate_protected_dialogue_alignment(
     *,
     strict: bool = False,
 ) -> list[dict[str, Any]]:
-    protected_rows: list[dict[str, Any]] = []
-    if isinstance(obj.get("protected_dialogue"), list):
-        protected_rows.extend(row for row in obj["protected_dialogue"] if isinstance(row, dict))
-    source_ingestion = obj.get("source_ingestion")
-    if isinstance(source_ingestion, dict) and isinstance(source_ingestion.get("protected_dialogue"), list):
-        protected_rows.extend(
-            row
-            for row in source_ingestion["protected_dialogue"]
-            if isinstance(row, dict)
-            and (strict or row.get("mapped_shot_uids") or row.get("target_shots"))
-        )
-    if not protected_rows:
-        return []
-
-    by_key: dict[str, dict[str, Any]] = {}
-    for shot in shots:
-        for key in (shot.get("镜头编号"), shot.get("shot_uid")):
-            if key not in (None, ""):
-                by_key[str(key)] = shot
-    issues: list[dict[str, Any]] = []
-    for index, row in enumerate(protected_rows, 1):
-        speaker = str(row.get("speaker") or "").strip()
-        text = str(row.get("text") or "").strip()
-        targets = row.get("mapped_shot_uids") or row.get("target_shots")
-        if isinstance(targets, list) and targets:
-            target_shots = [by_key[str(key)] for key in targets if str(key) in by_key]
-            unknown = [str(key) for key in targets if str(key) not in by_key]
-        else:
-            target_shots = shots
-            unknown = []
-        location = f"protected_dialogue[{index}]"
-        if unknown:
-            issues.append(_issue(
-                catalog,
-                "E-SOURCE-SELECT-001",
-                location,
-                f"保护对白映射到不存在的镜头：{unknown}",
-                template_gate_id="THG-05",
-            ))
-            continue
-        actual = [item for shot in target_shots for item in extract_dialogues(shot.get("画面内容"))]
-        if (speaker, text) in actual:
-            continue
-        same_text_speakers = sorted({actual_speaker for actual_speaker, actual_text in actual if actual_text == text})
-        same_speaker_texts = [actual_text for actual_speaker, actual_text in actual if actual_speaker == speaker]
-        if same_text_speakers:
-            evidence = f"保护对白说话人={speaker!r}，实际说话人={same_text_speakers}，文本与标点={text!r}"
-        elif same_speaker_texts:
-            evidence = f"保护对白必须逐字逐标点为{text!r}，{speaker!r}实际对白={same_speaker_texts}"
-        else:
-            evidence = f"保护对白未覆盖：speaker={speaker!r}, text={text!r}, 实际={actual}"
-        issues.append(_issue(
-            catalog,
-            "E-SOURCE-SELECT-001",
-            location,
-            evidence,
+    result = _protected_dialogue_alignment(obj, shots)
+    return [
+        _issue(
+            catalog, "E-SOURCE-SELECT-001",
+            f"protected_dialogue[{fault.get('shot_id') or fault.get('occurrence_id') or index}]",
+            f"{fault['code']}: {fault['detail']}",
             template_gate_id="THG-05",
-        ))
-    return issues
+        )
+        for index, fault in enumerate(result["issues"])
+    ]
 
 
 def _validate_adapted_dialogue_audit(
@@ -1941,14 +1773,22 @@ def _validate_adapted_dialogue_audit(
     by_shot: dict[str, dict[str, Any]] = {}
     ordered_shot_ids: list[str] = []
     actual_dialogues: list[tuple[str, str, str]] = []
+    actual_dialogue_refs: list[tuple[str, int]] = []
     for shot in shots:
         shot_id = str(shot.get("镜头编号") or shot.get("shot_uid") or "").strip()
         if shot_id:
             ordered_shot_ids.append(shot_id)
             by_shot[shot_id] = shot
         if in_scope(shot_id):
-            for speaker, text in extract_dialogues(shot.get("画面内容")):
+            for dialogue_index, (speaker, text) in enumerate(extract_dialogues(shot.get("画面内容"))):
                 actual_dialogues.append((shot_id, speaker, text))
+                actual_dialogue_refs.append((shot_id, dialogue_index))
+
+    direct_coverage = _protected_dialogue_alignment(obj, shots)
+    direct_refs = {
+        (item["shot_id"], item["dialogue_index"])
+        for item in direct_coverage["covered_utterances"]
+    }
 
     protected_rows: list[dict[str, Any]] = []
     if isinstance(obj.get("protected_dialogue"), list):
@@ -2166,8 +2006,8 @@ def _validate_adapted_dialogue_audit(
         )
 
     actual_adapted = [
-        occurrence for occurrence in actual_dialogues
-        if occurrence not in protected_occurrences
+        occurrence for occurrence, ref in zip(actual_dialogues, actual_dialogue_refs)
+        if ref not in direct_refs
     ]
     if mapped_adapted != actual_adapted:
         add(
@@ -2636,7 +2476,6 @@ def _validate_chapter_intake(
     if not isinstance(protected, list):
         issues.append(_issue(catalog, "E-SOURCE-SELECT-001", "source_ingestion.protected_dialogue", "protected_dialogue必须是数组。"))
         protected = []
-    protected_required_seconds = 0.0
     for index, row in enumerate(protected, 1):
         location = f"source_ingestion.protected_dialogue[{index}]"
         row_missing = _missing_fields(row, ["source_unit_id", "speaker", "text", "functions", "target_beats"])
@@ -2648,10 +2487,18 @@ def _validate_chapter_intake(
             continue
         if str(row.get("source_unit_id")) not in treatment_unit_ids:
             issues.append(_issue(catalog, "E-SOURCE-SELECT-001", location, f"保护对白源文单元未进入取舍台账：{row.get('source_unit_id')!r}"))
-        dialogue_text = str(row.get("text"))
-        protected_required_seconds += cjk_len(dialogue_text) / 2.8 + _pause_budget(dialogue_text)
-
     budget = intake.get("adaptation_budget")
+    chapter_timing = timing_model.chapter_budget(
+        protected, rules=rules, project=obj,
+        budget=budget if isinstance(budget, dict) else None,
+    )
+    protected_required_seconds = chapter_timing["required_dialogue_seconds"]
+    for fault in chapter_timing["faults"]:
+        issues.append(_issue(
+            catalog, "E-CHAPTER-BUDGET-001",
+            fault.get("location", "source_ingestion.adaptation_budget"),
+            fault["message"],
+        ))
     budget_required = beat_policy.get("required_budget_fields", [])
     budget_missing = _missing_fields(budget, budget_required)
     if budget_missing:
@@ -2663,7 +2510,7 @@ def _validate_chapter_intake(
         transition_seconds = _as_number(budget.get("transition_seconds"), -1)
         shot_min = int(_as_number(budget.get("shot_count_min"), 0))
         shot_max = int(_as_number(budget.get("shot_count_max"), 0))
-        component_sum = dialogue_seconds + action_seconds + transition_seconds
+        component_sum = chapter_timing["required_total_seconds"]
         if target <= 0 or min(dialogue_seconds, action_seconds, transition_seconds) < 0 or component_sum > target + 1e-9:
             issues.append(_issue(catalog, "E-CHAPTER-BUDGET-001", "source_ingestion.adaptation_budget", f"目标={target:g}s，最低组成={component_sum:g}s，不可行。"))
         if dialogue_seconds + 1e-9 < protected_required_seconds:
@@ -3095,7 +2942,10 @@ def _validate_preventive_gates(
     return issues, metrics
 
 
-def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules_path: str | None = None) -> dict[str, Any]:
+def validate_project(
+    obj: dict[str, Any] | list[Any], mode: str = "audit", rules_path: str | None = None,
+    *, timing_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     rules = load_runtime_rules(rules_path)
     catalog = _catalog_map(rules)
     issues: list[dict[str, Any]] = []
@@ -3504,22 +3354,6 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                 template_gate_id="THG-13",
             ))
 
-        positive_blink_text = re.sub(
-            r"(?:本镜|全镜|本段|台词期间|重音期间|关键词期间)?[^。；]{0,12}不眨眼",
-            "",
-            combined_performance,
-        )
-        if "眨" in positive_blink_text:
-            blink_range = parse_blink_range(positive_blink_text)
-            if blink_range:
-                _, high = blink_range
-                if 3 <= duration <= 5 and high > 1:
-                    issues.append(_issue(catalog, "E-EXPRESSION-003", location, f"{duration}s镜头眨眼上限应为1次，当前写到{high}次。", template_gate_id="THG-13"))
-                elif 5 < duration <= 10 and high > 2:
-                    issues.append(_issue(catalog, "E-EXPRESSION-003", location, f"{duration}s镜头眨眼上限应为2次，当前写到{high}次。", template_gate_id="THG-13"))
-                elif duration < 3 and high > 1:
-                    issues.append(_issue(catalog, "E-EXPRESSION-003", location, f"短于3s镜头不应机械安排{high}次眨眼。", template_gate_id="THG-13"))
-
         camera = str(shot.get("机位", ""))
         if is_none_value(camera) or _has_any(camera, ["随便", "自然机位", "高级机位"]):
             issues.append(_issue(catalog, "E-CAMERA-001", f"{location}.机位", f"机位不可执行：{camera!r}"))
@@ -3568,7 +3402,10 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                 light_faults.append("色温倾向必须写定性暖冷关系及空间/肤色/材质本色")
             if color_temp.strip() in {"暖中性", "中性微暖", "偏暖", "偏冷", "冷暖对比", "电影感"}:
                 light_faults.append("色温倾向只有空泛色调标签")
-            light_faults.extend(_lighting_context_faults(shot))
+            light_faults.extend(lighting_context_faults(
+                shot, scene_anchors=obj.get("scene_anchors"),
+                legacy_checker=_lighting_context_faults,
+            ))
             if light_faults:
                 issues.append(_issue(
                     catalog,
@@ -3597,7 +3434,7 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                     template_gate_id="THG-15",
                 ))
             elif strict_contract:
-                voice_errors = _voice_template_errors(shot.get("音色"), dialogue)
+                voice_errors = _voice_template_errors(shot.get("音色"), dialogue, dialogue_rows)
                 if voice_errors:
                     issues.append(_issue(
                         catalog,
@@ -3631,9 +3468,6 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
             missing_punct = _validate_punctuation(dialogue, image_content)
             if missing_punct:
                 issues.append(_issue(catalog, "E-PUNCT-004", f"{location}.画面内容", f"对白标点语气未说明：{missing_punct}"))
-            min_duration = cjk_len(dialogue) / 2.8 + _pause_budget(dialogue)
-            if duration + 1e-9 < min_duration:
-                issues.append(_issue(catalog, "E-DIALOGUE-003", f"{location}.画面内容", f"{cjk_len(dialogue)}个对白汉字 + 停顿预算需至少{min_duration:.2f}s，镜头仅{duration:.2f}s。"))
             if strict_contract:
                 if "口型与对白一致" not in image_content:
                     issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容", "R10-SPC-1可见对白未写“口型与对白一致”。"))
@@ -3651,35 +3485,6 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
                 template_gate_id="THG-15",
             ))
 
-        if strict_contract:
-            action_seconds, action_units = _action_capacity_seconds(image_content)
-            dialogue_seconds = cjk_len(dialogue) / 2.8 + _pause_budget(dialogue) if dialogue_rows else 0.0
-            pre_speech_breath_seconds = 0.2 if dialogue_rows else 0.0
-            listener_seconds = 0.3 if dialogue_rows and len(_visible_character_names(visible)) > 1 else 0.0
-            end_hold_seconds = 0.2
-            required_seconds = (
-                dialogue_seconds
-                + pre_speech_breath_seconds
-                + action_seconds
-                + listener_seconds
-                + end_hold_seconds
-            )
-            if duration + 1e-9 < required_seconds:
-                issues.append(_issue(
-                    catalog,
-                    "E-BATCH-003",
-                    f"{location}.时长/画面内容",
-                    "镜头容量不足："
-                    f"对白={dialogue_seconds:.2f}s，说话前呼吸={pre_speech_breath_seconds:.2f}s，"
-                    f"动作={action_seconds:.2f}s({action_units})，"
-                    f"听者反应={listener_seconds:.2f}s，镜尾稳定={end_hold_seconds:.2f}s，"
-                    f"最低={required_seconds:.2f}s，当前={duration:.2f}s。",
-                    repair="延长镜头、删除非核心动作或按原子动作阶段拆镜。",
-                    severity="fail",
-                    blocking=True,
-                    template_gate_id="THG-10",
-                ))
-
         psych = str(shot.get("心理音轨", ""))
         if not is_none_value(psych):
             safety = f"{psych} {shot.get('生成限制', '')} {image_content}"
@@ -3691,6 +3496,34 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         scene_id = str(shot.get("场景连续性ID", ""))
         if scene_id:
             scene_groups[scene_id].append((index, shot))
+
+    # A server-owned scene projection retains the real cross-shot audio context.
+    # This argument is not a canonical field or an externally writable tool input.
+    timing_shots = normalized_shots
+    if timing_context is not None:
+        timing_shots = [
+            normalize_shot(row, aliases)[0]
+            for row in timing_context.get("shots", []) if isinstance(row, dict)
+        ]
+    timing_report = timing_model.validate_timing(
+        timing_context if timing_context is not None else obj, timing_shots, rules,
+    )
+    local_timing_ids = {str(row.get("镜头编号") or "") for row in normalized_shots}
+    for fault in timing_report["faults"]:
+        timing_issue = _issue(
+            catalog, fault["code"], fault.get("location", "timing"),
+            fault["message"], severity="fail", blocking=True,
+            template_gate_id="THG-10",
+            repair="按实际发言和事件重排所在阶段；并行只共用合理时段，先后依赖必须保留，禁止删改原句或擅自提高语速配置。",
+        )
+        if fault.get("shot_id"):
+            timing_issue["shot_ids"] = [fault["shot_id"]]
+        timing_issue["check_family"] = "timing"
+        if timing_context is not None:
+            timing_issue["timing_scope_decidable"] = bool(
+                fault.get("shot_id") in local_timing_ids
+            )
+        issues.append(timing_issue)
 
     issues.extend(_validate_protected_dialogue_alignment(
         obj,
@@ -3707,11 +3540,9 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
     for scene_id, items in scene_groups.items():
         if len(items) < 2:
             continue
-        directions = {str(shot.get("光源方向")) for _, shot in items if not is_none_value(shot.get("光源方向"))}
-        temperatures = {str(shot.get("色温倾向")) for _, shot in items if not is_none_value(shot.get("色温倾向"))}
-        sources = {str(shot.get("光源来源")) for _, shot in items if not is_none_value(shot.get("光源来源"))}
-        if len(directions) > 1 or len(temperatures) > 1 or len(sources) > 1:
-            issues.append(_issue(catalog, "E-LIGHT-002", f"scene:{scene_id}", f"连续镜光线不一致：光源={sorted(sources)}, 方向={sorted(directions)}, 色温={sorted(temperatures)}", severity="warning"))
+        continuity_faults = scene_lighting_continuity_faults(items, obj.get("scene_anchors"))
+        if continuity_faults:
+            issues.append(_issue(catalog, "E-LIGHT-002", f"scene:{scene_id}", "；".join(continuity_faults), severity="warning"))
 
     batch_by_id: dict[str, dict[str, Any]] = {}
 
@@ -3744,6 +3575,7 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
     chapter_issues, chapter_metrics = _validate_chapter_intake(obj, rules, catalog)
     issues.extend(chapter_issues)
     gate_metrics.update(chapter_metrics)
+    gate_metrics["timing"] = timing_report["metrics"]
 
     if mode == "archive":
         stage_evidence = obj.get("stage_evidence")
@@ -3769,6 +3601,7 @@ def validate_project(obj: dict[str, Any] | list[Any], mode: str = "audit", rules
         "error_count": fail_count,
         "warning_count": warning_count,
         "quality_metrics": gate_metrics,
+        "timing_advisories": timing_report["advisories"],
         "issues": issues,
     }
 

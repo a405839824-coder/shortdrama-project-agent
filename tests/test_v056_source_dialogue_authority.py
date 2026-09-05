@@ -38,6 +38,54 @@ def _pairs(text: str, *, role: str = "novel") -> list[tuple[str, str]]:
     ]
 
 
+def _author_actual_dialogue(
+    candidate: dict[str, object], expected: list[tuple[str, str]]
+) -> None:
+    """Give authority-positive fixtures actual speech, not just inventory.
+
+    ``expected`` is the test's independently authored source expectation. It
+    is never produced by the parser under test. These cases inspect source
+    authority and signed diagnostic records, not a complete production PASS;
+    every other content-quality gate remains active during full preflight.
+    """
+    if not expected:
+        return
+    shot = candidate["shots"][0]
+    utterances = "；".join(
+        f'{speaker}说道：“{text}”' for speaker, text in expected
+    )
+    assert "本镜无对白" in shot["画面内容"], "positive authority fixture lost its explicit speech insertion point"
+    shot["画面内容"] = shot["画面内容"].replace("本镜无对白", utterances, 1)
+
+
+def _expected_script_occurrence(
+    source: str, speaker: str, text: str, kind: str, ordinal: int
+) -> dict[str, object]:
+    """Independently compute the documented source-only identity contract."""
+    normalized = source.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    offset = normalized.index(text)
+    source_sha = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    identity = {
+        "contract": "source-dialogue-occurrence-ranges-v1",
+        "source_text_sha256": source_sha,
+        "source_role": "script",
+        "source_ordinal": ordinal,
+        "char_offset": offset,
+        "speaker": speaker,
+        "text": text,
+    }
+    identity_sha = hashlib.sha256(json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+    return {
+        "speaker": speaker, "text": text,
+        "line_number": normalized.count("\n", 0, offset) + 1,
+        "char_offset": offset, "kind": kind,
+        "occurrence_id": f"source-occurrence:{identity_sha}",
+        "source_text_sha256": source_sha, "source_ordinal": ordinal,
+    }
+
+
 class SourceDialogueParserV6Tests(unittest.TestCase):
     def test_parser_version_is_v6(self) -> None:
         self.assertEqual(SOURCE_DIALOGUE_PARSER_VERSION, "source-dialogue-authority-v6")
@@ -1572,6 +1620,7 @@ class SourceDialoguePreflightTests(unittest.TestCase):
                     {"speaker": speaker, "text": text}
                     for speaker, text in expected
                 ]
+                _author_actual_dialogue(candidate, expected)
 
                 manifest, issues = self.service._source_dialogue_authority_manifest(
                     self.namespace, project_id, candidate
@@ -1645,6 +1694,7 @@ class SourceDialoguePreflightTests(unittest.TestCase):
                     {"speaker": speaker, "text": text}
                     for speaker, text, _kind in expected
                 ]
+                _author_actual_dialogue(candidate, [(speaker, text) for speaker, text, _kind in expected])
 
                 manifest, issues = self.service._source_dialogue_authority_manifest(
                     self.namespace, project_id, candidate
@@ -1657,14 +1707,8 @@ class SourceDialoguePreflightTests(unittest.TestCase):
                 self.assertEqual(
                     manifest["occurrences"],
                     [
-                        {
-                            "speaker": speaker,
-                            "text": text,
-                            "line_number": 1,
-                            "char_offset": source.index(text),
-                            "kind": kind,
-                        }
-                        for speaker, text, kind in expected
+                        _expected_script_occurrence(source, speaker, text, kind, ordinal)
+                        for ordinal, (speaker, text, kind) in enumerate(expected)
                     ],
                 )
                 self._assert_no_formal_publication(project_id)
@@ -1735,6 +1779,7 @@ class SourceDialoguePreflightTests(unittest.TestCase):
         self._attach_source(project_id, "江氏说：“甲。”", role="novel")
         base = valid_storyboard()
         base["protected_dialogue"] = [{"speaker": "江氏", "text": "甲。"}]
+        _author_actual_dialogue(base, [("江氏", "甲。")])
         clean_manifest, clean_issues = self.service._source_dialogue_authority_manifest(
             self.namespace, project_id, base
         )
@@ -1887,6 +1932,7 @@ class SourceDialoguePreflightTests(unittest.TestCase):
         self._attach_source(project_id, "江氏说：“甲。”")
         candidate = valid_storyboard()
         candidate["protected_dialogue"] = [{"speaker": "江氏", "text": "甲。"}]
+        _author_actual_dialogue(candidate, [("江氏", "甲。")])
 
         result = self._full_preflight(
             project_id, work_order_id, session_id, candidate
