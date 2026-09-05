@@ -12,6 +12,7 @@ from typing import Any, Callable
 from run_golden_tests import inject_pg1_fixture_evidence, upgrade_fixture_to_compact
 from validate_storyboard import (
     COMPACT_MOTHER_COLUMNS,
+    _lighting_context_faults,
     project_export_row,
     validate_project,
 )
@@ -431,6 +432,44 @@ def main() -> int:
         ),
         None,
     )
+    # Exercise scene decisions separately from unrelated dialogue/continuity gates.
+    clean_room = {
+        "空间站位描述": "清晨卧房，左前木格窗关闭，窗纸完整。",
+        "起始状态": "女子坐在床边。",
+        "光影": "空气清澈，背景木构清晰可辨，不泛白、不雾化。",
+        "光源来源": "闭合窗纸透入天光，浅墙反射弱补光。",
+        "光源方向": "左前侧略亮，向背景平缓衰减，无可见光束。",
+        "色温倾向": "中性微暖，木墙保持本色。",
+    }
+    local_smoke = "仅香炉口上方一缕细烟，不扩散至人物和背景，背景木构清晰可辨。"
+    lighting_cases = [
+        ("CLEAN-ROOM", {}, False),
+        ("GENERIC-SMOKE", {"光影": "烟雾在人物身后弥漫，背景不泛白。"}, True),
+        ("ENGLISH-HALATION", {"光影": clean_room["光影"] + "极轻微halation使画面朦胧。"}, True),
+        ("LOCAL-SMOKE-WITHOUT-PROP", {"光影": local_smoke}, True),
+        ("SOURCE-AND-LOCAL-SMOKE", {"起始状态": "女子坐在床边，案上香炉已点燃。", "光影": local_smoke}, False),
+        ("LOCAL-SMOKE-PLUS-WHOLE-ROOM-HAZE", {"起始状态": "案上香炉已点燃。", "光影": local_smoke + "烟雾充满整个房间。"}, True),
+        ("CLEAR-COLOR-MOOD", {"光影": clean_room["光影"] + "如梦似幻由低饱和色彩、浅景深与人物浅笑表现。"}, False),
+        ("SMOKE-NEGATIVE-LIST", {"生成限制": "禁止薄雾、烟雾、细烟、镜头扩散、halation。"}, False),
+        ("NEGATIVE-THEN-POSITIVE-SMOKE", {"光影": "无烟雾，薄雾笼罩人物。背景可辨。"}, True),
+        ("LIGHT-CANNOT-OPEN-WINDOW", {"光源来源": "敞开木格窗的漫射天光。"}, True),
+        ("OPEN-DOOR-CANNOT-OPEN-CLOSED-WINDOW", {"空间站位描述": "清晨正厅，门敞开，窗户关闭。", "光源来源": "敞开木格窗的漫射天光。"}, True),
+        ("OPEN-DOOR-BACKLIGHT", {"空间站位描述": "清晨正厅，厅门敞开，女子门口现身。", "光源来源": "敞开厅门外的晨光，浅墙反射弱补面部。", "光源方向": "门外侧后方晨光形成侧逆光，亮度向厅内衰减。"}, False),
+        ("CLOSED-ROOM-BACKLIGHT", {"光源方向": "侧后方天光作为背光，向背景衰减。"}, True),
+        ("EXTERIOR-LEFT-REAR-SYNONYM", {"空间站位描述": "晴日书房门外廊下。", "光影": "发丝和肩部呈克制轮廓光，空气清澈，建筑可辨。", "光源来源": "晨光为主光，天空反射弱补面部。", "光源方向": "晨光从画面左后侧照向人物，廊下亮度衰减。"}, False),
+        ("ROOM-MENTION-IN-EXTERIOR", {"空间站位描述": "书房门外廊下，清晨。", "原文支撑句": "她准备进入书房。", "光源来源": "室外晨光和天空弱补光。", "光源方向": "画面左后方侧逆光，向石阶衰减。"}, False),
+        ("REAL-FIRE-NO-FULL-FRAME-DIFFUSION", {"起始状态": "屋角失火，局部火焰燃烧。", "光影": "自然镜头扩散覆盖整个室内，背景木构可辨。"}, True),
+        ("PRACTICAL-LOCAL-HALATION", {"空间站位描述": "夜晚卧房，窗户关闭。", "起始状态": "案上红烛燃着。", "光源来源": "红烛为主光，浅墙提供极弱反射光。", "光影": "空气清澈，背景木构可辨。仅烛火边缘出现局部极轻微halation。"}, False),
+    ]
+    for room_name in ("卧房", "书房", "账房", "厅堂"):
+        lighting_cases.append(("ROOM-ALIAS-" + room_name, {"空间站位描述": "清晨" + room_name + "，窗户闭合。", "光影": "薄雾弥漫，背景不泛白。"}, True))
+    for test_id, changes, should_fail in lighting_cases:
+        faults = _lighting_context_faults({**clean_room, **changes})
+        results.append({
+            "test_id": "SPC-THG17-" + test_id,
+            "passed": bool(faults) == should_fail,
+            "actual_faults": faults,
+        })
     run_code_test(
         "SPC-BGM-LITERAL-IN-EXECUTION-FIELD",
         lambda obj: obj["shots"][0].__setitem__("生成限制", "9:16竖屏；禁止BGM、字幕与水印。"),
