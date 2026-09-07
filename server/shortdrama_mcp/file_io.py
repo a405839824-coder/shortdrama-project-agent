@@ -562,6 +562,22 @@ def _parse_function_scene_cell(value: Any) -> tuple[str, str]:
         function = text
     if scene_match:
         scene = scene_match.group(1).strip()
+    elif not function_match and "场景连续性ID" not in text:
+        # Legacy ten-column workbooks also store this cell as
+        # "function / SCENE-ID". Recover only an unambiguous, explicitly
+        # written identifier. A full-width slash may be part of the function;
+        # prose, paths and multiple ASCII separators must not invent a scene.
+        legacy_parts = re.split(r"\s+/\s+", text)
+        if (
+            len(legacy_parts) == 2
+            and legacy_parts[0].strip()
+            and re.fullmatch(
+                r"[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)+",
+                legacy_parts[1],
+            )
+        ):
+            function = legacy_parts[0].strip()
+            scene = legacy_parts[1]
     return function, scene
 
 
