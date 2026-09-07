@@ -86,6 +86,7 @@ import project_agent  # noqa: E402
 import r10_bootstrap  # noqa: E402
 import storyboard_agent  # noqa: E402
 import validate_storyboard  # noqa: E402
+import repair_mode_advice  # noqa: E402
 from dialogue_occurrences import align_storyboard_dialogue, protected_dialogue_rows  # noqa: E402
 
 
@@ -663,6 +664,31 @@ def _release_consumption_claims_on_error(method: Any) -> Any:
             raise
         finally:
             _ACTIVE_CONSUMPTION_CLAIMS.reset(context_token)
+
+    return wrapped
+
+
+def _with_repair_mode_advice(method: Any) -> Any:
+    """Decorate every completed audit route, including read-only replay.
+
+    The signed report stays unchanged. Advice is a sibling response annex;
+    its failure cannot undo a successful one-consumer audit transaction.
+    """
+    @functools.wraps(method)
+    def wrapped(self: "StoryboardService", *args: Any, **kwargs: Any) -> Any:
+        response = method(self, *args, **kwargs)
+        try:
+            advice = repair_mode_advice.build_repair_mode_advice(
+                response.data.get("report") or {},
+                audit_status=response.status,
+                repair_package=response.data.get("repair_package"),
+            )
+        except Exception:
+            advice = repair_mode_advice.supplement_required(
+                "模式建议未能生成；按现有审计报告补充即可，原审计结论仍有效。"
+            )
+        response.data = {**response.data, "repair_mode_recommendation": advice}
+        return response
 
     return wrapped
 
@@ -4549,6 +4575,13 @@ class StoryboardService(WorkbookMigrationMixin):
         data: dict[str, Any] = {
             "plugin_version": __version__,
             "runtime_status": report.get("status"),
+            "audit_repair_mode_advice": {
+                "supported": True,
+                "contract": "audit-repair-mode-advice-v1",
+                "response_field": "repair_mode_recommendation",
+                "advisory_only": True,
+                "affects_audit_verdict": False,
+            },
             "runtime": report,
             "output_contract": STRICT_OUTPUT_CONTRACT,
             "target_model": "Seedance 2.5",
@@ -22512,6 +22545,7 @@ class StoryboardService(WorkbookMigrationMixin):
         )
         return response
 
+    @_with_repair_mode_advice
     @_fence_role_operation
     @_release_consumption_claims_on_error
     def audit_storyboard(
