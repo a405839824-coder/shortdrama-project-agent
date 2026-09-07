@@ -56,6 +56,8 @@ from .models import (
     ToolResponse,
 )
 from .storage import ProjectStore, sha256_bytes, slug_filename, utc_stamp
+from .workbook_migration import WORKBOOK_MIGRATION_TARGET
+from .workbook_migration_service import WorkbookMigrationMixin
 from .frozen_v053 import validate_storyboard as frozen_v053_validator
 from .source_dialogue import (
     SOURCE_ACTION_LEXICON_SHA256,
@@ -1418,7 +1420,7 @@ def _draft_quality_metrics(
     }
 
 
-class StoryboardService:
+class StoryboardService(WorkbookMigrationMixin):
     def __init__(self, settings: Settings):
         self.settings = settings
         self.store = ProjectStore(
@@ -4551,6 +4553,13 @@ class StoryboardService:
             "output_contract": STRICT_OUTPUT_CONTRACT,
             "target_model": "Seedance 2.5",
             "aspect_ratio": "9:16",
+            "controlled_workbook_migration": {
+                "target_version": WORKBOOK_MIGRATION_TARGET,
+                "supported": True,
+                "exact_source_authorization_required": True,
+                "scene_and_full_preflight_required": True,
+                "independent_audit_required": True,
+            },
             "project_count": len(projects),
             "projects": projects[:50],
             "execution_available": report.get("status") == "pass",
@@ -5644,11 +5653,17 @@ class StoryboardService:
         migration_id: str | None,
         request_session_id: str | None,
     ) -> ToolResponse:
-        """Plan, commit or CAS-rollback one control-state-only migration."""
+        """Route an exact approved workbook migration or control-state migration."""
 
         self._require_runtime()
         if action not in {"plan", "execute", "rollback"}:
             raise ValueError("migration action must be plan, execute, or rollback")
+        if target_version == WORKBOOK_MIGRATION_TARGET:
+            return self.migrate_workbook_canonical(
+                namespace, project_id=project_id, work_order_id=work_order_id,
+                action=action, expected_plan_sha256=expected_current_version,
+                migration_id=migration_id, request_session_id=request_session_id,
+            )
         if action in {"execute", "rollback"} and not expected_current_version:
             raise ValueError(
                 "expected_current_version is required for migration execute or rollback"
@@ -10878,6 +10893,9 @@ class StoryboardService:
         authority_session_fingerprint = authority_binding.get(
             "session_fingerprint"
         )
+        workbook_migration = self._validated_workbook_migration(
+            namespace, project_id, work_order, request_session_id
+        )
         runtime_certificate = self._require_runtime_test_certificate(namespace, project_id)
         profile = storyboard_agent.active_prevention_profile(ledger_snapshot)
         profile_sha = sha256_bytes(_stable_json_bytes(profile))
@@ -10889,6 +10907,7 @@ class StoryboardService:
         candidate: dict[str, Any]
         preparation_error: Exception | None = None
         try:
+            self._assert_workbook_migration_atoms(workbook_migration, storyboard)
             candidate, _identity = _prepare_compact_storyboard_for_commit(storyboard)
             _assert_r10_spc1_output_contract(candidate)
         except (TypeError, ValueError, AssertionError) as exc:
@@ -20113,6 +20132,24 @@ class StoryboardService:
         self._assert_work_order_session(
             namespace, work_order_snapshot, request_session_id
         )
+        workbook_migration = self._validated_workbook_migration(
+            namespace, project_id, work_order_snapshot, request_session_id
+        )
+        if workbook_migration is not None:
+            plan = workbook_migration["plan"]
+            if source_artifact_id != plan["source_artifact_id"]:
+                raise ValueError("workbook_migration_source_mismatch")
+            if not draft_preflight_id or successor_pending:
+                raise ValueError("workbook_migration_full_preflight_required")
+            self._assert_workbook_migration_atoms(workbook_migration, storyboard)
+            # The imported source is immutable lineage, never an audit repair base.
+            source_link_mode = "revision"
+            successor_metadata.update({
+                "workbook_migration_id": workbook_migration["workbook_migration_id"],
+                "workbook_migration_plan_sha256": workbook_migration["plan_sha256"],
+                "workbook_source_raw_sha256": plan["source_raw_sha256"],
+                "workbook_source_atoms_sha256": plan["proof"]["atom_sha256"],
+            })
         recovering_draft_commit = False
         draft_commit_payload_sha256: str | None = None
         recovering_repair_commit = False
@@ -21400,6 +21437,8 @@ class StoryboardService:
             raise ValueError(
                 "delta_work_order_invalid: use storyboard_regenerate or storyboard_change production work order"
             )
+        if work_order.get("workbook_migration_id") or work_order.get("workbook_migration_plan_sha256"):
+            raise ValueError("workbook_migration_full_commit_required: delta cannot change the approved migration")
         self._assert_work_order_session(namespace, work_order, request_session_id)
         self._ensure_can_execute(work_order)
         scope_target = str(scope_target or "").strip()
