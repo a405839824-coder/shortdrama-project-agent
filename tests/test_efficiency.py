@@ -385,6 +385,11 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(repeated_audit["data"]["audit_class"], "independent_audit")
             self.assertTrue(repeated_audit["data"]["cache_hit"])
             self.assertEqual(validator.call_count, 2, "same independent audit cache key must not validate twice")
+            for audited in (first_audit, repeated_audit):
+                self.assertEqual(
+                    audited["data"]["repair_mode_recommendation"]["status"],
+                    "no_repair",
+                )
 
     async def test_audit_cache_key_invalidates_on_every_quality_input(self) -> None:
         base = {

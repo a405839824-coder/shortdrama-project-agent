@@ -146,6 +146,10 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(self.audited["status"], "fail_current")
+        self.assertEqual(
+            self.audited["data"]["repair_mode_recommendation"]["recommended_effort"],
+            "xhigh",
+        )
         self.package = self.audited["data"]["repair_package"]
         self.package_id = str(self.package["repair_package_id"])
         self.original_audit_order = str(self.audited["data"]["audit_work_order_id"])
@@ -209,6 +213,9 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(final["status"], "pass")
+        self.assertEqual(
+            final["data"]["repair_mode_recommendation"]["status"], "no_repair"
+        )
 
     async def test_failed_repair_return_can_authorize_a_second_full_repair(
         self,
