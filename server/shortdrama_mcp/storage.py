@@ -36,6 +36,7 @@ PROJECT_RECORD_KINDS = {
     "draft_preflights",
     "migrations",
     "authority_continuations",
+    "workbook_migrations",
 }
 SIGNED_ONLY_PROJECT_RECORD_KINDS = PROJECT_RECORD_KINDS - {
     "handoffs",
@@ -52,6 +53,7 @@ PROJECT_RECORD_PRIMARY_ID_KEYS = {
     "draft_preflights": "draft_preflight_id",
     "migrations": "migration_id",
     "authority_continuations": "continuation_id",
+    "workbook_migrations": "workbook_migration_id",
 }
 DEFAULT_SUCCESSOR_LEASE_SECONDS = 300
 MAX_SUCCESSOR_LEASE_SECONDS = 86_400

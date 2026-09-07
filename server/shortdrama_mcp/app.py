@@ -237,10 +237,13 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
 
     @server.tool(
         name="migrate_project_state",
-        title="迁移项目控制状态或内容存储",
+        title="迁移项目控制状态、母本或内容存储",
         description=(
             "对旧项目Hub与问题台账执行可预演、签名快照、双哈希CAS和幂等恢复的0.5.5迁移。"
             "默认只更新控制状态与问题模式索引；绝不改写历史分镜、对白、canonical、XLSX、handoff或审计证书。"
+            "target_version=workbook-canonical-v1仅对明确批准且绑定源文件、SHA、能力缺口与全部集数的rule_improvement工单开放；"
+            "plan返回迁移计划SHA，execute以expected_current_version和migration_id核对该计划，建立专用生产身份；"
+            "原件不变，仍须逐场景和full预检、commit_storyboard创建PENDING_AUDIT新版及独立审计。"
             "storage_action可检查、登记、临时挂载、导出、提交或卸载ChatGPT Library项目快照；"
             "所有完整项目内容仅在系统临时目录处理，持久卷只保存签名Library指针。"
         ),

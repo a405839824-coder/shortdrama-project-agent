@@ -336,7 +336,7 @@
     "legacy_policy": "read_only_migration_to_compact_successor",
     "mother_template_column_count": 10,
     "output_contract": "R10-SPC-1",
-    "plugin_version": "0.5.24",
+    "plugin_version": "0.5.25",
     "production_audit_status": "PENDING_AUDIT",
     "required_per_shot_aspect_phrase": "9:16竖屏",
     "schema_version": "R10.1",
@@ -380,6 +380,16 @@
     "public_tool_count_change": 0,
     "unmount": "only_when_mounted_tree_equals_committed_pointer_tree",
     "writeback": "export_then_library_save_and_readback_then_monotonic_pointer_commit"
+  },
+  "controlled_workbook_migration": {
+    "all_27_fields_locked": true,
+    "authorization": "exact_source_gap_hash_episodes_rule_improvement",
+    "independent_audit_required": true,
+    "ordinary_pending_audit_gate_unchanged": true,
+    "phase": "legacy_workbook_canonical_migration",
+    "scene_and_full_preflight_required": true,
+    "source_immutable": true,
+    "target_version": "workbook-canonical-v1"
   },
   "execution_progress_policy": {
     "forbid_shared_or_unrelated_process_termination": true,
