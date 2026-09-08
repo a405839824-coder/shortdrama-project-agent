@@ -10,7 +10,7 @@ from mcp.client.stdio import stdio_client
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.5.26"
+EXPECTED_VERSION = "0.5.27"
 EXPECTED_TOOL_NAMES = {
     "get_agent_status",
     "migrate_project_state",
@@ -37,8 +37,13 @@ EXPECTED_TOOL_NAMES = {
 async def inspect_bundled_server() -> dict:
     config = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
     entry = config["mcpServers"]["shortdrama-project-agent"]
+    command = entry["command"]
+    # The checked-in manifest targets POSIX deployments. setup_local.ps1
+    # creates the equivalent virtual environment under Scripts on Windows.
+    if os.name == "nt" and command == "./.venv/bin/python":
+        command = str(PLUGIN_ROOT / ".venv" / "Scripts" / "python.exe")
     parameters = StdioServerParameters(
-        command=entry["command"],
+        command=command,
         args=entry.get("args", []),
         cwd=PLUGIN_ROOT / entry.get("cwd", "."),
         env={**os.environ, **entry.get("env", {})},

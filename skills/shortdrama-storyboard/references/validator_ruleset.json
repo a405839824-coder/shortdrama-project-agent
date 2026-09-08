@@ -7,7 +7,7 @@
     "module": "BOOTSTRAP",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "统一到R10并应用废弃映射",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-001",
     "version": "V16.3-148-R10-StableRuntime"
@@ -20,7 +20,7 @@
     "module": "SOURCE",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "补齐源文边界与逐镜证据",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-002",
     "version": "V16.3-148-R10-StableRuntime"
@@ -33,7 +33,7 @@
     "module": "TEMPLATE",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "按canonical_shot_fields重排",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-003",
     "version": "V16.3-148-R10-StableRuntime"
@@ -46,7 +46,7 @@
     "module": "TEMPLATE",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "补齐字段，无法填写时写无/不适用+原因",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-004",
     "version": "V16.3-148-R10-StableRuntime"
@@ -59,7 +59,7 @@
     "module": "STAT",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "复算并同步JSON",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-005",
     "version": "V16.3-148-R10-StableRuntime"
@@ -72,7 +72,7 @@
     "module": "VISIBILITY",
     "pass_condition": "具名/主要可见人物不超过3人（公共场景普通人物另层记录），主体与可见部位一致",
     "repair_action": "按主要人物拆镜、把必要普通人物降为背景生态，或删除不可见表演",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-006",
     "version": "V16.3-148-R10-StableRuntime"
@@ -85,7 +85,7 @@
     "module": "EXPRESSION",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "按嘴角/眼神/面部/手部/身体/视线拆解",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-007",
     "version": "V16.3-148-R10-StableRuntime"
@@ -98,7 +98,7 @@
     "module": "EXPRESSION",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "补到至少4类可观察细节",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "warning",
     "validator_rule_id": "V-R10-008",
     "version": "V16.3-148-R10-StableRuntime"
@@ -111,7 +111,7 @@
     "module": "EXPRESSION",
     "pass_condition": "时间轴含视线起点、眼球换焦、眼球先动/头部跟随关系、眼睑变化、具体眨眼或有理由不眨、镜尾视线；对白重音期不眨，多人错峰；生成限制和静态关键帧状态完整",
     "repair_action": "按完整眼部行为链重写画面时间轴、起始静帧和生成禁项",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-009",
     "version": "V16.3-148-R10-StableRuntime"
@@ -124,7 +124,7 @@
     "module": "CAMERA",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "明确机位高度、方向或视角",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-010",
     "version": "V16.3-148-R10-StableRuntime"
@@ -137,7 +137,7 @@
     "module": "MOTION",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "选择16种之一或明确无运镜",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-011",
     "version": "V16.3-148-R10-StableRuntime"
@@ -150,7 +150,7 @@
     "module": "MOTION",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "在运镜方式同一自然句中写清摄影机围绕或跟随的可见主体，不创建运镜主体字段或子标签",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-012",
     "version": "V16.3-148-R10-StableRuntime"
@@ -163,7 +163,7 @@
     "module": "MOTION",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "在运镜方式同一自然句中写明为什么移动及其叙事效果，不创建叙事功能子标签",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "warning",
     "validator_rule_id": "V-R10-013",
     "version": "V16.3-148-R10-StableRuntime"
@@ -176,7 +176,7 @@
     "module": "CINEMATIC",
     "pass_condition": "光影四项完整且时间、室内外、门窗、天气、真实光源、方向、受光效果、曝光材质和连续性闭合；普通室内空气清澈、背景可辨、不泛白不雾化，无雾烟/穿插光束/柔焦扩散/无依据逆光，负面禁词不误判为正向效果",
     "repair_action": "普通室内改用前侧/侧面漫射明暗，锁定门窗原状态与清晰背景；删除雾烟、穿插光束、柔焦扩散、强逆光和无依据轮廓光。室外或剧情介质按物理前提局部使用",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-014",
     "version": "V16.3-148-R10-StableRuntime"
@@ -189,7 +189,7 @@
     "module": "CINEMATIC",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "统一同一场景连续性字段",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "warning",
     "validator_rule_id": "V-R10-015",
     "version": "V16.3-148-R10-StableRuntime"
@@ -202,7 +202,7 @@
     "module": "VOICE",
     "pass_condition": "音色子标签顺序/唯一性/非空值、基础声线五项、言语行为、当前表达、六项发声方式、本镜实际对白重音、尾音方向、2—4项禁止语气及反向解析全部通过；画面内容无复制的固定音色子标签",
     "repair_action": "只在音色字段按fixed-voice-template-v1补齐；画面内容只保留对白时点、口型和可见表演，不恢复顶层发声方式字段",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-016",
     "version": "V16.3-148-R10-StableRuntime"
@@ -215,7 +215,7 @@
     "module": "PUNCT",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "在画面内容内按R10标点映射修正",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-017",
     "version": "V16.3-148-R10-StableRuntime"
@@ -228,7 +228,7 @@
     "module": "DIALOGUE",
     "pass_condition": "按timing_policy逐发言与逐阶段核对；先后依赖与并行占用真实，心理音轨完整，固定附加时间为禁用",
     "repair_action": "保持原文完整并调整事件时间轴；未标定候选须明确标识",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-018",
     "version": "V16.3-148-R10-StableRuntime"
@@ -241,7 +241,7 @@
     "module": "PSYCH",
     "pass_condition": "心理音轨同字段安全属性完整；另经timing_model核对实际发声时长、跨镜连续覆盖和声音重叠",
     "repair_action": "补不张嘴、不口型、不字幕、不计入",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-019",
     "version": "V16.3-148-R10-StableRuntime"
@@ -254,7 +254,7 @@
     "module": "COMPACT_SCHEMA",
     "pass_condition": "镜头只包含27个紧凑语义字段，使用角色说道：“对白”，干净的9:16竖屏保留且两条冗长旧短语零命中",
     "repair_action": "把动作、表演和对白并入画面内容，把旧发声参数保留到音色并标记待按固定子模板修订，把标点时点保留在画面内容；把运镜主体/功能并入运镜方式，删除退休顶层字段、旧标签及两条冗长旧9:16短语，保留9:16竖屏",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-020",
     "version": "V16.3-148-R10-StableRuntime"
@@ -267,7 +267,7 @@
     "module": "COMPACT_TIMELINE",
     "pass_condition": "恰好3个【0.0—x.x秒】一位小数阶段，从0.0开始，连续、不重叠，末段覆盖完整镜头时长",
     "repair_action": "修正为刺激/起始反应、核心动作/对白、镜尾反应/切点三个标准阶段",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-021",
     "version": "V16.3-148-R10-StableRuntime"
@@ -280,7 +280,7 @@
     "module": "GENERATION_DEDUP",
     "pass_condition": "canonical仅保存一次语义原子且转场结构只渲染一次，无；；、。。或归一化相邻重复",
     "repair_action": "删除持久化衍生字段与批次；从结构化transition只渲染一次并去重",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-022",
     "version": "V16.3-148-R10-StableRuntime"
@@ -293,7 +293,7 @@
     "module": "STAT",
     "pass_condition": "handler执行且未产生对应错误码",
     "repair_action": "复算并同步JSON",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-023",
     "version": "V16.3-148-R10-StableRuntime"
@@ -306,7 +306,7 @@
     "module": "ARCHIVE",
     "pass_condition": "知识、结构与预防证据计数精确，含11项compact_master_execution_evidence和THG规则镜像",
     "repair_action": "加载AGENTS/SKILL/R10_BOOTSTRAP，修正规则镜像或预期计数后重跑",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-024",
     "version": "V16.3-148-R10-StableRuntime"
@@ -319,7 +319,7 @@
     "module": "ARCHIVE",
     "pass_condition": "独立审计签发前审计overlay为PENDING_AUDIT/未签发结论且问题计数、audit_trace_id为空；签发后证书、trace、指纹与真实人工终审一致",
     "repair_action": "清除生产阶段预填PASS/0问题并恢复PENDING_AUDIT；完成独立审计与人工签核后再归档",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-025",
     "version": "V16.3-148-R10-StableRuntime"
@@ -332,7 +332,7 @@
     "module": "PREVENTIVE_GATES",
     "pass_condition": "workflow_profile=R10-PG1且范围锁、证据块与审计层顺序完整",
     "repair_action": "补齐R10-PG1门禁证据后重跑",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-026",
     "version": "V16.3-148-R10-StableRuntime"
@@ -345,7 +345,7 @@
     "module": "SOURCE",
     "pass_condition": "每镜进入源文台账，必含内容命中，删合压授权完整",
     "repair_action": "重建源文—对白—镜头映射",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-027",
     "version": "V16.3-148-R10-StableRuntime"
@@ -358,7 +358,7 @@
     "module": "CHANGE_LOCK",
     "pass_condition": "正式镜头对禁用内容零命中",
     "repair_action": "删除旧内容并做反向搜索",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-028",
     "version": "V16.3-148-R10-StableRuntime"
@@ -371,7 +371,7 @@
     "module": "COGNITION",
     "pass_condition": "人物已知、未知、关系、情感与禁项字段完整",
     "repair_action": "补认知矩阵并回查台词动作",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-029",
     "version": "V16.3-148-R10-StableRuntime"
@@ -384,7 +384,7 @@
     "module": "CONTINUITY",
     "pass_condition": "起始状态未预写结果；全部N-1对按canonical顺序唯一覆盖，逐对绑定左end/right start七项向量、边界类型、说明和双方状态SHA-256；同场闭合，跨场/跨集有明确说明；有序pair集合SHA-256一致",
     "repair_action": "按成片顺序重建全覆盖相邻组证明，闭合七项状态和道具交接，解释跨场跨集切换并重算哈希",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-030",
     "version": "V16.3-148-R10-StableRuntime"
@@ -397,7 +397,7 @@
     "module": "SHOT_GRANULARITY",
     "pass_condition": "每镜只有一个核心叙事/动作阶段、一个视角和一个摄影机位置",
     "repair_action": "按视角与核心阶段拆镜，各镜只保留一个主机位",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-031",
     "version": "V16.3-148-R10-StableRuntime"
@@ -410,7 +410,7 @@
     "module": "SHOT_GRANULARITY",
     "pass_condition": "特写承担剧情、信息或情绪功能",
     "repair_action": "补功能；无功能则合并或删除",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "warning",
     "validator_rule_id": "V-R10-PG1-032",
     "version": "V16.3-148-R10-StableRuntime"
@@ -423,7 +423,7 @@
     "module": "PERFORMANCE_CHAIN",
     "pass_condition": "刺激、观察/听话反应、视线、微表情、生态动作、身体呼吸、结束状态完整",
     "repair_action": "按可见性补齐演员反应链",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-033",
     "version": "V16.3-148-R10-StableRuntime"
@@ -436,7 +436,7 @@
     "module": "I2V_INDEPENDENCE",
     "pass_condition": "正式母版和GPT投影都不引用上一镜、关键帧或历史上下文",
     "repair_action": "从27字段原子从零重写正式母版和GPT静态投影的独立执行事实",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-034",
     "version": "V16.3-148-R10-StableRuntime"
@@ -449,7 +449,7 @@
     "module": "I2V_INDEPENDENCE",
     "pass_condition": "生成限制、正式母版和GPT各明确9:16竖屏；正式母版字段完整并可空白上下文执行",
     "repair_action": "补齐紧凑原子与逐镜9:16竖屏，从canonical重投影并做空白上下文测试",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-035",
     "version": "V16.3-148-R10-StableRuntime"
@@ -462,7 +462,7 @@
     "module": "AUDIO_WORKFLOW",
     "pass_condition": "正式母版和GPT投影的BGM字面量零命中，负面限制写禁止额外配乐；画面锁定后单独制作Cue",
     "repair_action": "把单镜提示中的BGM字面量改为额外配乐并保留禁止语义；音乐设计移入画面锁定后的独立Cue流程",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-036",
     "version": "V16.3-148-R10-StableRuntime"
@@ -475,7 +475,7 @@
     "module": "REGRESSION",
     "pass_condition": "残留数与修正新增数均为0",
     "repair_action": "按影响范围回归并重跑",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-037",
     "version": "V16.3-148-R10-StableRuntime"
@@ -488,7 +488,7 @@
     "module": "COMPACT_TIMELINE",
     "pass_condition": "GPT首行含画幅：9:16竖屏且只来自静态白名单字段，时间码、运镜、转场、对白、音频和过程词零命中",
     "repair_action": "从canonical静态白名单重新投影GPT关键帧",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-039",
     "version": "V16.3-148-R10-StableRuntime"
@@ -501,7 +501,7 @@
     "module": "SYSTEMIC_ESCALATION",
     "pass_condition": "第2轮根因修复；第3轮及以后回退上游重建",
     "repair_action": "停止重复局部补丁并执行升级动作",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-038",
     "version": "V16.3-148-R10-StableRuntime"
@@ -514,7 +514,7 @@
     "module": "CHAPTER_INTAKE",
     "pass_condition": "整章分块全部读完，前后边界、章节目标、事件因果、人物状态和歧义状态完整",
     "repair_action": "停止生成并重建章节读取与剧情地图证据",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-040",
     "version": "V16.3-148-R10-StableRuntime"
@@ -527,7 +527,7 @@
     "module": "SOURCE_SELECTION",
     "pass_condition": "每个源文单元有多轴等级与去向；删除证据成立；保护对白文字、标点、顺序/分句和说话人在canonical、正式母版与XLSX间精确一致",
     "repair_action": "重建无损取舍台账和对白节拍映射，从canonical重投影并做多行XLSX round-trip",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-041",
     "version": "V16.3-148-R10-StableRuntime"
@@ -540,7 +540,7 @@
     "module": "ADAPTATION_BUDGET",
     "pass_condition": "最低对白动作转场时长可行、镜头数范围有效、全部事件进入节拍",
     "repair_action": "重新取舍、调时长或重排节拍后再生成",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-042",
     "version": "V16.3-148-R10-StableRuntime"
@@ -553,7 +553,7 @@
     "module": "SOURCE_EXPANSION",
     "pass_condition": "new_plot_events为空；条件外化有源文映射且plot_change=false",
     "repair_action": "移除新增剧情并改用不改变剧情的可见细节",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-043",
     "version": "V16.3-148-R10-StableRuntime"
@@ -566,7 +566,7 @@
     "module": "GENERATION_DEDUP",
     "pass_condition": "THG-11：正式母版严格使用R10-SPC-1十列，第五列名为正式分镜母版，不含独立Seedance列；canonical→投影→XLSX→反向解析归一化哈希一致且多行对白不丢行",
     "repair_action": "迁移为R10-SPC-1十列紧凑母版，从canonical重投影并完成多行round-trip后再导出",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-044",
     "version": "V16.3-148-R10-StableRuntime"
@@ -579,7 +579,7 @@
     "module": "PUBLIC_SCENE_ECOLOGY",
     "pass_condition": "地点匹配普通人物可见，且生成限制未排除；或空场状态和剧情原因同时存在",
     "repair_action": "补公共人物生态，或补齐有因空场证据",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-045",
     "version": "V16.3-148-R10-StableRuntime"
@@ -592,7 +592,7 @@
     "module": "PUBLIC_SCENE_ECOLOGY",
     "pass_condition": "人流密度、地点角色、错峰动作和景别对应空间层次齐全",
     "repair_action": "把泛称人群改为可执行的密度、角色、动作和空间分布",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-046",
     "version": "V16.3-148-R10-StableRuntime"
@@ -605,7 +605,7 @@
     "module": "PUBLIC_SCENE_ECOLOGY",
     "pass_condition": "按景别具备两至三类具体声源与声场层次；对白镜明确环境声避让",
     "repair_action": "补具体近中远声源并写明对白优先",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-047",
     "version": "V16.3-148-R10-StableRuntime"
@@ -618,7 +618,7 @@
     "module": "PUBLIC_SCENE_ECOLOGY",
     "pass_condition": "声源有画内/可信画外依据，无匿名群演完整台词或时代错位声音，紧凑母版独立复现生态",
     "repair_action": "对齐空间站位、画面、环境动态与环境音效中的声画来源",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-048",
     "version": "V16.3-148-R10-StableRuntime"
@@ -631,7 +631,7 @@
     "module": "PUBLIC_SCENE_ECOLOGY",
     "pass_condition": "人流密度连续，或变化由涌入、散开、疏散、离开、时间推进等画面事实解释",
     "repair_action": "统一相邻镜生态或补可见过渡",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-049",
     "version": "V16.3-148-R10-StableRuntime"
@@ -644,7 +644,7 @@
     "module": "T2I_PROMPT",
     "pass_condition": "每个词组均为单帧可见事实或摄影可控参数，作者旁白、未来信息、象征结论、声音、时间过程和未决候选零命中",
     "repair_action": "把必要含义转为一个确定瞬间可见的表演、空间、道具、材质和有源光色，其余从关键帧删除",
-    "rule_revision": "0.5.26",
+    "rule_revision": "0.5.27",
     "severity": "fail",
     "validator_rule_id": "V-R10-PG1-050",
     "version": "V16.3-148-R10-StableRuntime"

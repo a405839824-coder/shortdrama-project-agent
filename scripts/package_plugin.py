@@ -30,6 +30,7 @@ EXCLUDED_TOP_LEVEL_PARTS = {"data", "dist"}
 # contain a Python environment and must not be presented as portable installs.
 SOURCE_DIRECTORIES = {
     ".codex-plugin",
+    ".github",
     "assets",
     "deploy",
     "docs",
@@ -43,6 +44,7 @@ SOURCE_TOP_LEVEL_FILES = {
     ".dockerignore",
     ".env.cloud.example",
     ".gitignore",
+    ".gitattributes",
     ".railwayignore",
     "Dockerfile",
     "LICENSE",

@@ -34,6 +34,7 @@ PROJECT_RECORD_KINDS = {
     "diagnostics",
     "repair_packages",
     "draft_preflights",
+    "draft_observations",
     "migrations",
     "authority_continuations",
     "workbook_migrations",
@@ -51,6 +52,7 @@ PROJECT_RECORD_PRIMARY_ID_KEYS = {
     "diagnostics": "diagnostic_run_id",
     "repair_packages": "repair_package_id",
     "draft_preflights": "draft_preflight_id",
+    "draft_observations": "observation_id",
     "migrations": "migration_id",
     "authority_continuations": "continuation_id",
     "workbook_migrations": "workbook_migration_id",
@@ -4320,6 +4322,32 @@ class ProjectStore:
             raise ValueError(f"unsupported project record kind: {kind}")
         return kind
 
+    def append_draft_observation(self, namespace, project_id, value):
+        """One project lock covers sequence assignment and immutable append."""
+        clean_id = safe_id(value["observation_id"], "record_id")
+        directory = self.project_dir(namespace, project_id)
+        with self.project_write_lock(namespace, project_id):
+            if not (directory / "hub.json").is_file():
+                raise ValueError(f"unknown project_id: {project_id}")
+            records = [r for r in self.list_project_records_strict(
+                namespace, project_id, kind="draft_observations")
+                if r.get("lineage_id") == value["lineage_id"]]
+            records.sort(key=lambda r: int(r["observation_index"]))
+            existing = next((r for r in records if r["observation_id"] == clean_id), None)
+            if existing is not None:
+                if existing["input_sha256"] != value["input_sha256"] or existing["candidate_snapshot"] != value["candidate_snapshot"]:
+                    raise ValueError("draft_observation_identity_conflict")
+                return existing
+            record = copy.deepcopy(value)
+            record.update({"record_id": clean_id, "project_id": project_id,
+                           "observation_index": len(records) + 1,
+                           "first_observation_id": records[0]["observation_id"] if records else clean_id,
+                           "previous_observation_id": records[-1]["observation_id"] if records else None})
+            record.setdefault("created_at", utc_stamp())
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(directory / "draft_observations" / f"{clean_id}.json", record)
+            return record
+
     def save_project_record(
         self,
         namespace: str,
@@ -4354,6 +4382,13 @@ class ProjectStore:
         record.setdefault("created_at", utc_stamp())
         path = directory / clean_kind / f"{clean_id}.json"
         with self.project_write_lock(namespace, project_id):
+            if clean_kind == "draft_observations" and path.exists():
+                existing = self.get_project_record(namespace, project_id, kind=clean_kind, record_id=clean_id)
+                left = {k: v for k, v in existing.items() if k != "integrity_hmac"}
+                right = {k: v for k, v in record.items() if k != "integrity_hmac"}
+                if left != right:
+                    raise ValueError("draft_observation_immutable: append a new observation")
+                return existing
             if (
                 clean_kind == "certificates"
                 and record.get("certificate_type")
