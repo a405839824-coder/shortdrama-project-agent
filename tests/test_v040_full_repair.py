@@ -178,6 +178,12 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(repaired["data"]["structural_repair"])
         self.assertEqual(repaired["data"]["repair_transaction_state"], "committed")
         self.assertEqual(repaired["data"]["repair_package"]["status"], "consumed")
+        canonical, _ = self.service._storyboard_from_artifact(
+            self.namespace, self.project_id, repaired["artifact_id"])
+        proof = canonical["prevention_evidence"]["repair_history"][-1]["repair_proof"]
+        self.assertTrue(proof["content_changed"])
+        self.assertEqual(proof["machine_regression"]["status"], "pass")
+        self.assertEqual(proof["semantic_closure"], "requires_independent_audit")
         self.assertEqual(
             repaired["data"]["return_to_audit_work_order_id"],
             self.original_audit_order,
@@ -550,6 +556,11 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(patched["status"], "production_preflight_pass")
         self.assertEqual(patched["data"]["base_artifact_id"], artifact_id)
         self.assertEqual(patched["data"]["repair_package"]["status"], "consumed")
+        canonical, _ = self.service._storyboard_from_artifact(
+            self.namespace, project_id, patched["artifact_id"])
+        proof = canonical["prevention_evidence"]["repair_history"][-1]["repair_proof"]
+        self.assertIn("shots[0].光源来源", proof["changed_paths"])
+        self.assertEqual(proof["machine_regression"]["status"], "pass")
         self.assertEqual(
             patched["data"]["handoff"]["handoff_type"], "repair_to_audit"
         )
@@ -746,6 +757,44 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
             [],
             "failed full validation must not export or create a repair handoff",
         )
+
+    async def test_failed_repairs_accumulate_across_work_orders_and_allow_real_fix(self):
+        invalid = copy.deepcopy(three_shot_storyboard())
+        invalid["shots"][0]["光源来源"] = ""
+        attempts = []
+        for index in range(3):
+            if index:
+                self.repair_order = await self.begin("storyboard_repair", mode="audit_and_repair",
+                    authorization="explicit_execute", window_key=f"retry-repair-{index}")
+            failed = await self.call("commit_storyboard", self.full_arguments(invalid))
+            self.assertEqual(failed["status"], "fail_current")
+            attempts.append(failed["data"]["repair_attempt"])
+            self.assertEqual(attempts[-1]["audit_round"], index + 1)
+        self.assertEqual(len({event["audit_cycle_id"] for event in attempts}), 1)
+        self.assertTrue(any(row["required_action"] == "rebuild_upstream"
+                            for row in attempts[-1]["repair_convergence"]))
+        self.repair_order = await self.begin("storyboard_repair", mode="audit_and_repair",
+            authorization="explicit_execute", window_key="retry-repair-fixed")
+        fixed = await self.call("commit_storyboard", self.full_arguments())
+        self.assertEqual(fixed["status"], "production_preflight_pass")
+        ledger = self.service.store.load_ledger(self.namespace, self.project_id)
+        saved = [event for event in ledger["events"]
+                 if event.get("repair_root_artifact_id") == attempts[0]["repair_root_artifact_id"]]
+        self.assertEqual(len(saved), 4)
+        self.assertEqual(saved[-1]["result"], "pass")
+        self.assertEqual(saved[-1]["audit_round"], 4)
+        self.assertEqual(saved[-1]["publication_status"], "not_yet_published")
+        scope = next(row for row in ledger["scope_states"] if row["scope_key"] == saved[-1]["scope_key"])
+        self.assertEqual(scope["closure_state"], "preflight_clean")
+        from shortdrama_mcp.service import storyboard_agent
+        ordinary = copy.deepcopy(saved[-1])
+        ordinary.pop("repair_root_artifact_id")
+        self.assertTrue(any("audit_round" in error for error in storyboard_agent.validate_event(ordinary)))
+        self.assertEqual(ledger["policy"]["max_auto_repair_rounds"], 3)
+        final = await self.call("audit_storyboard", {"project_id": self.project_id,
+            "artifact_id": fixed["artifact_id"], "work_order_id": self.original_audit_order,
+            "handoff_artifact_id": fixed["data"]["handoff"]["handoff_id"]})
+        self.assertEqual(final["status"], "pass")
 
     async def test_final_cas_failure_compensates_package_and_rejects_handoff(
         self,

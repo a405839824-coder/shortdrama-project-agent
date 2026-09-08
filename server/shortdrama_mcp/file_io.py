@@ -1283,6 +1283,10 @@ def extract_file(data: bytes, file_name: str, mime_type: str | None = None) -> d
 def _cell_value(value: Any) -> Any:
     if isinstance(value, (dict, list, tuple)):
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if isinstance(value, str):
+        # XML normalizes raw CR and LF independently with the stdlib writer.
+        # Normalize only the display cell; the canonical sidecar stays exact.
+        value = value.replace("\r\n", "\n").replace("\r", "\n")
     if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
         # Storyboard fields are prose, never formulas. Escape spreadsheet
         # formula prefixes to prevent execution when a generated XLSX is opened.

@@ -249,6 +249,10 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "production_preflight_pass")
         manifest = result["data"]["delta_manifest"]
         self.assertTrue(manifest["untouched_semantic_hashes_verified"])
+        proof = manifest["change_evidence"]
+        self.assertEqual(proof["changed_shot_uids"], arguments["affected_shot_uids"])
+        self.assertEqual(proof["machine_regression"]["status"], "pass")
+        self.assertEqual(proof["semantic_closure"], "requires_independent_audit")
         self.assertEqual(manifest["untouched_shot_count"], 2)
         self.assertEqual(manifest["materialization_stage"], "compact_canonical_only")
         self.assertEqual(manifest["model_authored_derived_chars"], 0)

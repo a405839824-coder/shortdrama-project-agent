@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import timing_model
+from continuity_checks import state_equal
 from performance_checks import eye_contract_faults, emphasis_binding_faults
 from lighting_checks import lighting_context_faults, scene_lighting_continuity_faults
 from dialogue_occurrences import align_storyboard_dialogue
@@ -2547,6 +2548,18 @@ def _validate_chapter_intake(
     return issues, metrics
 
 
+def dialogue_mouth_visible(speaker: str, shot: dict[str, Any]) -> bool:
+    """Only explicit, person-bound framing exempts a speaker from lip sync."""
+    name = re.escape(speaker)
+    framing = "；".join(str(shot.get(key) or "") for key in
+                       ("可见主体", "空间站位描述", "机位", "画面内容"))
+    framing = re.sub(r'[“"].*?[”"]', '', framing, flags=re.S)
+    boundary = r"(?:^|[；，。：:\n【】])\s*"
+    offscreen = re.search(rf"{boundary}{name}(?:[（(：:\s]*)(?:画外发言|画外音|画外[）)]|不入画)", framing)
+    cropped = re.search(rf"{boundary}{name}(?:的)?(?:嘴部|口部|口型)(?:完全)?不入画", framing)
+    return not bool(offscreen or cropped)
+
+
 def _validate_preventive_gates(
     obj: dict[str, Any],
     shots: list[dict[str, Any]],
@@ -2721,7 +2734,7 @@ def _validate_preventive_gates(
         mismatches = {
             field: [prior_end.get(field), current_start.get(field)]
             for field in state_fields
-            if prior_end.get(field) != current_start.get(field)
+            if not state_equal(prior_end.get(field), current_start.get(field))
         }
         pair_status = "closed"
         if left_row is None or right_row is None:
@@ -2740,7 +2753,7 @@ def _validate_preventive_gates(
                     catalog,
                     "E-CONTINUITY-001",
                     f"adjacent_pair:{pair_id}",
-                    f"同场景相邻镜头首尾状态必须逐字段精确闭合，说明不能替代切点状态：{mismatches}",
+                    f"同场景相邻镜头首尾状态必须逐字段闭合（仅接受封闭词表同义状态），说明不能替代切点状态：{mismatches}",
                     template_gate_id="THG-14",
                 ))
         else:
@@ -3469,9 +3482,10 @@ def validate_project(
             if missing_punct:
                 issues.append(_issue(catalog, "E-PUNCT-004", f"{location}.画面内容", f"对白标点语气未说明：{missing_punct}"))
             if strict_contract:
-                if "口型与对白一致" not in image_content:
+                visible_speakers = [name for name, _ in dialogue_rows if dialogue_mouth_visible(name, shot)]
+                if visible_speakers and "口型与对白一致" not in image_content:
                     issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容", "R10-SPC-1可见对白未写“口型与对白一致”。"))
-                if "不看镜头" not in image_content:
+                if visible_speakers and "不看镜头" not in image_content:
                     issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "R10-SPC-1对白人物未明确不看镜头。"))
                 visible_people = [part for part in re.split(r"[、，,；;]", visible) if part.strip()]
                 if len(visible_people) > 1 and not re.search(r"错开|晚约|随后|不抢反应|先.{0,20}再|依次|晚半拍|延迟", image_content):

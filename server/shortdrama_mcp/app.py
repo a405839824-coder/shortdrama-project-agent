@@ -606,6 +606,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "section/offset/limit分页可用automatic_bulk=false保持兼容。也可使用"
             "bulk_ranges一次获取最多16个段落、页面、行或字符范围，合并内容硬限制为16000字符。"
             "可传if_none_match避免重复返回未变化文件。"
+            "diagnose_storyboard=true时返回当前分镜只读机器诊断，可按diagnostic_episode_ids筛选；"
+            "共享或未定位问题单列，历史证据保留，不签发独立审计结论，不受其他批次待修工单阻止。"
         ),
         annotations=_annotations(read_only=True),
         meta=meta("正在读取文件…", "文件内容已读取"),
@@ -622,9 +624,16 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         max_chars: int = DEFAULT_BULK_RESPONSE_CHARS,
         if_none_match: str | None = None,
         automatic_bulk: bool = True,
+        diagnose_storyboard: bool = False,
+        diagnostic_episode_ids: list[str] | None = None,
     ) -> ToolResponse:
         namespace = request_namespace(settings)
         trace = WorkflowTrace()
+        if diagnose_storyboard:
+            return service.diagnose_storyboard_artifact(
+                namespace, project_id, artifact_id, diagnostic_episode_ids)
+        if diagnostic_episode_ids is not None:
+            raise ValueError("diagnostic_episode_ids requires diagnose_storyboard=true")
         record: dict[str, Any] | None = None
         if if_none_match is not None:
             with trace.stage("artifact-lookup"):

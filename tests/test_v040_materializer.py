@@ -235,12 +235,14 @@ class FullCommitCompactMasterIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.namespace, project_id, str(record["artifact_id"])
         )
         workbook = load_workbook(path, read_only=True, data_only=False)
+        self.addCleanup(workbook.close)
         self.assertIn("正式生产母版", workbook.sheetnames)
         self.assertEqual(
             [cell.value for cell in workbook["正式生产母版"][1]],
             EXPECTED_COMPACT_COLUMNS,
         )
         self.assertNotIn("生成批次", workbook.sheetnames)
+        workbook.close()
 
 
 if __name__ == "__main__":

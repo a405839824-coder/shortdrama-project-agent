@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -193,21 +194,11 @@ class SafePackageTests(unittest.TestCase):
             package(self.root, output, profile="source")
         self.assertFalse(output.exists())
 
-    def test_controlled_roots_sensitive_paths_and_symlinks(self) -> None:
+    def test_controlled_roots_and_sensitive_paths(self) -> None:
         protected_output = self.root / "overwrite.zip"
         with self.assertRaisesRegex(PackagingError, "inside the plugin must be under dist"):
             package(self.root, protected_output)
         self.assertFalse(protected_output.exists())
-
-        (self.root / "dist").mkdir()
-        default_output = self.root / "dist" / "shortdrama-project-agent-0.4.0.zip"
-        default_output.symlink_to(self.root / "README.md")
-        with self.assertRaisesRegex(PackagingError, "output cannot be a symbolic link"):
-            package(self.root)
-        self.assertEqual(
-            (self.root / "README.md").read_text(encoding="utf-8"), "test plugin\n"
-        )
-        default_output.unlink()
 
         (self.root / "unexpected.bin").write_bytes(b"canary")
         with self.assertRaisesRegex(PackagingError, "outside the controlled"):
@@ -221,12 +212,25 @@ class SafePackageTests(unittest.TestCase):
             package(self.root, Path(self.temporary.name) / "sensitive.zip")
         sensitive.unlink()
 
+    @unittest.skipIf(os.name == "nt", "Windows cannot create a filename containing a backslash")
+    def test_posix_backslash_filename_is_rejected(self) -> None:
         unsafe_name = self.root / "assets" / "..\\escape.svg"
         unsafe_name.write_text("unsafe\n", encoding="utf-8")
         with self.assertRaisesRegex(PackagingError, "unsafe package path"):
             package(self.root, Path(self.temporary.name) / "unsafe-name.zip")
         unsafe_name.unlink()
 
+    def test_input_and_output_symlinks_are_rejected(self) -> None:
+        (self.root / "dist").mkdir()
+        default_output = self.root / "dist" / "shortdrama-project-agent-0.4.0.zip"
+        try:
+            default_output.symlink_to(self.root / "README.md")
+        except (NotImplementedError, OSError):
+            self.skipTest("native symbolic links require unavailable OS privileges")
+        with self.assertRaisesRegex(PackagingError, "output cannot be a symbolic link"):
+            package(self.root)
+        self.assertEqual((self.root / "README.md").read_text(encoding="utf-8"), "test plugin\n")
+        default_output.unlink()
         outside = Path(self.temporary.name) / "outside.svg"
         outside.write_text("outside\n", encoding="utf-8")
         link = self.root / "assets" / "outside.svg"
