@@ -29,6 +29,7 @@ EXCLUDED_TOP_LEVEL_PARTS = {"data", "dist"}
 # server, deployment support and bundled stdio descriptor, but they do not
 # contain a Python environment and must not be presented as portable installs.
 SOURCE_DIRECTORIES = {
+    ".github",
     ".codex-plugin",
     "assets",
     "deploy",
@@ -39,6 +40,7 @@ SOURCE_DIRECTORIES = {
     "tests",
 }
 SOURCE_TOP_LEVEL_FILES = {
+    ".gitattributes",
     ".app.json.example",
     ".dockerignore",
     ".env.cloud.example",

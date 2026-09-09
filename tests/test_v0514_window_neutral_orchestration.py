@@ -4,6 +4,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from dataclasses import replace
 from typing import Any
 from unittest.mock import patch
 
@@ -190,7 +191,9 @@ class V0514WindowNeutralOrchestrationTests(unittest.TestCase):
             "protected_scope": [],
             "expected_outputs": ["正式分镜"],
         }
-        with patch.object(
+        # The HTTP OAuth gate is covered separately. This routing-only fixture
+        # uses a local principal rather than unauthenticated cloud access.
+        with patch.object(self.server.access, "settings", replace(self.settings, deployment_mode="local")), patch.object(
             self.service, "begin_task", return_value=response
         ) as mocked:
             asyncio.run(

@@ -61,7 +61,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_contracts_and_file_params(self) -> None:
         tools = await self.server.list_tools()
-        self.assertEqual(len(tools), 19)
+        self.assertEqual(len(tools), 20)
         by_name = {tool.name: tool.model_dump(by_alias=True, exclude_none=True) for tool in tools}
         self.assertEqual(by_name["get_agent_status"]["annotations"]["readOnlyHint"], False)
         self.assertEqual(by_name["get_agent_status"]["annotations"]["idempotentHint"], False)

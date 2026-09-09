@@ -1,4 +1,6 @@
-# 分镜项目 Agent 0.5.26
+# 分镜项目 Agent 0.5.28
+
+0.5.28 新增 Admin / Producer 账号权限：员工可生产、审计、修正和导出，服务端拒绝规则及系统维护。配置与使用见 [账号权限说明](docs/ACCOUNT_ACCESS.md)。
 
 这是一个“技能 + MCP 执行服务”的完整工具型插件。ChatGPT 负责理解、生成与改写内容，MCP 负责项目状态、文件导入、版本化提交、全表审计、修复回归、跨聊天问题台账和人工签核。没有真实工具调用时，插件规则禁止声称“已经执行”。
 
@@ -90,7 +92,7 @@ ChatGPT 不能直接访问普通的 `localhost`。先保持本地服务运行，
 1. ChatGPT → Settings → Security and login → 打开 Developer mode。
 2. 打开 ChatGPT Plugins，点加号。
 3. 选择 Tunnel，或填写完整 HTTPS 地址，例如 `https://你的测试域名/mcp`。
-4. 创建连接，确认能发现 19 个工具。
+4. 创建连接，确认 Admin 能发现 20 个工具，Producer 能发现 17 个工具。
 5. 从浏览器地址复制 `plugin_asdk_app...` 技术 ID。
 6. 在本目录运行：
 

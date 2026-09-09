@@ -17,8 +17,9 @@ from mcp.client.streamable_http import streamable_http_client
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.5.26"
+EXPECTED_VERSION = "0.5.28"
 EXPECTED_TOOL_NAMES = {
+    "manage_user_access",
     "get_agent_status",
     "migrate_project_state",
     "recover_storyboard_handoff",

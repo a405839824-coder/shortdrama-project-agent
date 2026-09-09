@@ -417,9 +417,9 @@ class V057PreflightEvidenceReissueTests(
         )
         return str(response.work_order_id)
 
-    async def test_tool_count_stays_nineteen_and_phase_is_advertised(self) -> None:
+    async def test_tool_count_and_phase_are_advertised(self) -> None:
         tools = await self.server.list_tools()
-        self.assertEqual(len(tools), 19)
+        self.assertEqual(len(tools), 20)
         recovery = next(
             tool.model_dump(mode="json", by_alias=True)
             for tool in tools
