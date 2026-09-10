@@ -201,7 +201,10 @@ class SafePackageTests(unittest.TestCase):
 
         (self.root / "dist").mkdir()
         default_output = self.root / "dist" / "shortdrama-project-agent-0.4.0.zip"
-        default_output.symlink_to(self.root / "README.md")
+        try:
+            default_output.symlink_to(self.root / "README.md")
+        except (NotImplementedError, OSError):
+            self.skipTest("symbolic links are unavailable")
         with self.assertRaisesRegex(PackagingError, "output cannot be a symbolic link"):
             package(self.root)
         self.assertEqual(

@@ -12,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from . import __version__
+from .access import ACCESS_CONTRACT, AccessControlledMCPServer, AccessStore
 from .auth import JwtTokenVerifier, request_namespace, security_schemes
 from .canonical import etag_matches, stable_json_hash
 from .config import Settings
@@ -110,7 +111,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             service_documentation_url=f"{settings.public_base_url}/",
             required_scopes=list(settings.oauth_scopes),
         )
-    server = MCPServer(
+    server = AccessControlledMCPServer(
         name="shortdrama-project-agent",
         title="分镜项目 Agent",
         description="R10.1 compact-master short-drama service with the R10-SPC-1 strict prompt/export contract, canonical delta commits, independent audit, conditional repair, and public-scene ecology",
@@ -144,6 +145,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         auth=auth_settings,
     )
     service = StoryboardService(settings)
+    server.access = AccessStore(settings)
+    server.storyboard_service = service
     external_storage = ExternalProjectStorage(service, settings)
     schemes = security_schemes(settings)
 
@@ -181,6 +184,16 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         full_self_test: bool = False,
     ) -> ToolResponse:
         namespace = request_namespace(settings)
+        principal = server.access.principal()
+        access_profile = {
+            "contract": ACCESS_CONTRACT,
+            "role": principal.role,
+            "subject": principal.subject,
+            "enabled": principal.enabled,
+            "account_role_restrictions": True,
+            "default_authenticated_role": "producer",
+            "bootstrap_admin_configured": bool(settings.admin_subjects),
+        }
         if (
             external_storage.mode == "library"
             and project_id is not None
@@ -194,6 +207,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                     project_id=project_id,
                     data={
                         "plugin_version": __version__,
+                        "account_access": access_profile,
                         "runtime_status": service.bootstrap.get("status"),
                         "content_storage": storage,
                         "required_action": (
@@ -210,6 +224,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                 project_id=project_id,
                 data={
                     "plugin_version": __version__,
+                    "account_access": access_profile,
                     "runtime_status": service.bootstrap.get("status"),
                     "content_storage": storage,
                     "required_action": "migrate_project_state.storage_action=mount_snapshot",
@@ -233,7 +248,25 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         response.data["execution_progress_policy"] = dict(
             EXECUTION_PROGRESS_POLICY
         )
+        response.data["account_access"] = access_profile
         return response
+
+    @server.tool(
+        name="manage_user_access",
+        title="管理账号权限",
+        description="仅Admin可调用。按精确OAuth subject设置Admin/Producer、停用账号，或读取权限和最近100条访问日志；不能变更自身及服务器配置的初始管理员。",
+        annotations=_annotations(read_only=False),
+        meta=meta("正在管理账号权限…", "账号权限已处理"),
+        structured_output=True,
+    )
+    async def manage_user_access(
+        action: Literal["list", "set", "audit"],
+        subject: str | None = None,
+        role: Literal["admin", "producer"] | None = None,
+        enabled: bool = True,
+    ) -> ToolResponse:
+        result = server.access.manage(server.access.principal(), action, subject, role, enabled)
+        return ToolResponse(status="ok", summary="账号权限已处理", data=result)
 
     @server.tool(
         name="migrate_project_state",
@@ -1109,6 +1142,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                 "service": "shortdrama-project-agent",
                 "version": __version__,
                 "mcp": "/mcp",
+                "account_access_contract": ACCESS_CONTRACT,
+                "account_role_restrictions": True,
+                "bootstrap_admin_configured": bool(settings.admin_subjects),
             }
         )
 

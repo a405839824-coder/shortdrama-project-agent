@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
+
+
+def _admin_subjects_from_env() -> tuple[str, ...]:
+    subjects = json.loads(os.getenv("SHORTDRAMA_ADMIN_SUBJECTS", "[]"))
+    if not isinstance(subjects, list):
+        raise ValueError("SHORTDRAMA_ADMIN_SUBJECTS must be a JSON array of OAuth subject strings")
+    return tuple(subjects)
 
 
 @dataclass(frozen=True)
@@ -20,6 +28,7 @@ class Settings:
     oauth_scopes: tuple[str, ...]
     allow_local_file_urls: bool
     max_file_bytes: int
+    admin_subjects: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -49,11 +58,17 @@ class Settings:
             oauth_scopes=oauth_scopes,
             allow_local_file_urls=os.getenv("ALLOW_LOCAL_FILE_URLS", "0") == "1",
             max_file_bytes=int(os.getenv("MAX_FILE_BYTES", str(50 * 1024 * 1024))),
+            admin_subjects=_admin_subjects_from_env(),
         )
         settings.validate()
         return settings
 
     def validate(self) -> None:
+        if not isinstance(self.admin_subjects, tuple) or any(
+            not isinstance(subject, str) or not subject.strip() or len(subject) > 512
+            for subject in self.admin_subjects
+        ):
+            raise ValueError("SHORTDRAMA_ADMIN_SUBJECTS must be a JSON array of OAuth subject strings")
         if self.deployment_mode not in {"local", "cloud"}:
             raise ValueError("SHORTDRAMA_DEPLOYMENT_MODE must be local or cloud")
         if self.auth_mode not in {"none", "oauth"}:

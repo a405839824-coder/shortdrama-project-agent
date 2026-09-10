@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
@@ -10,8 +11,9 @@ from mcp.client.stdio import stdio_client
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.5.26"
+EXPECTED_VERSION = "0.5.28"
 EXPECTED_TOOL_NAMES = {
+    "manage_user_access",
     "get_agent_status",
     "migrate_project_state",
     "recover_storyboard_handoff",
@@ -38,7 +40,9 @@ async def inspect_bundled_server() -> dict:
     config = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
     entry = config["mcpServers"]["shortdrama-project-agent"]
     parameters = StdioServerParameters(
-        command=entry["command"],
+        # The bundled descriptor targets the Linux deployment environment.
+        # Exercise the same server with this test's Python on Windows.
+        command=sys.executable if os.name == "nt" else entry["command"],
         args=entry.get("args", []),
         cwd=PLUGIN_ROOT / entry.get("cwd", "."),
         env={**os.environ, **entry.get("env", {})},

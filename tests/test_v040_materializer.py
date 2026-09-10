@@ -234,7 +234,7 @@ class FullCommitCompactMasterIntegrationTests(unittest.IsolatedAsyncioTestCase):
         _artifact, path = self.service.store.get_artifact(
             self.namespace, project_id, str(record["artifact_id"])
         )
-        workbook = load_workbook(path, read_only=True, data_only=False)
+        workbook = load_workbook(io.BytesIO(path.read_bytes()), read_only=True, data_only=False)
         self.assertIn("正式生产母版", workbook.sheetnames)
         self.assertEqual(
             [cell.value for cell in workbook["正式生产母版"][1]],
