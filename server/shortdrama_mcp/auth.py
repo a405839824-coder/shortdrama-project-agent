@@ -9,12 +9,14 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken
 
 from .config import Settings
+from .members import current_member, resolve_member
 
 
 class JwtTokenVerifier:
     """Verify access tokens issued by an external OAuth 2.1 provider."""
 
     def __init__(self, settings: Settings):
+        self.settings = settings
         if not settings.oauth_jwks_url or not settings.oauth_issuer or not settings.oauth_audience:
             raise ValueError("OAuth verifier is missing issuer, audience, or JWKS URL")
         # JWT issuer comparison is exact. Auth0 issuers conventionally end in
@@ -44,7 +46,7 @@ class JwtTokenVerifier:
                 scopes = []
             if self.required_scopes and not self.required_scopes.issubset(scopes):
                 return None
-            return AccessToken(
+            verified = AccessToken(
                 token=token,
                 client_id=str(claims.get("azp") or claims.get("client_id") or "chatgpt"),
                 scopes=scopes,
@@ -53,7 +55,12 @@ class JwtTokenVerifier:
                 subject=str(claims["sub"]),
                 claims={key: value for key, value in claims.items() if key not in {"nonce"}},
             )
-        except (jwt.PyJWTError, ValueError, TypeError):
+            if self.settings.member_connection_access:
+                member = resolve_member(self.settings, verified)
+                if not member.enabled:
+                    return None
+            return verified
+        except (jwt.PyJWTError, ValueError, TypeError, PermissionError):
             return None
 
     async def verify_token(self, token: str) -> AccessToken | None:
@@ -61,6 +68,11 @@ class JwtTokenVerifier:
 
 
 def request_namespace(settings: Settings) -> str:
+    if settings.member_connection_access:
+        member = current_member.get() or resolve_member(settings, get_access_token())
+        if not member.enabled:
+            raise PermissionError("account_disabled")
+        return member.namespace
     if settings.auth_mode == "none":
         return "local-single-user"
     access_token = get_access_token()
