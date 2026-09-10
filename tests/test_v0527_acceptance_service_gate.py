@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import closing
+from datetime import datetime
 from dataclasses import replace
 import hashlib
 import inspect
@@ -43,9 +45,43 @@ class AcceptanceServiceGateTests(unittest.TestCase):
         self.temp.cleanup()
         self.fixture.tearDown()
 
-    def snapshot(self):
+    def snapshot(self, *, without_access_audit=False):
         root = self.service.settings.data_dir
-        return {str(p.relative_to(root)): sha(p) for p in root.rglob("*") if p.is_file()}
+        # Only MCP failures append account-level started/error events. Direct
+        # service calls retain the original all-files byte comparison. SQLite
+        # sidecars or any other new files are deliberately not excluded.
+        audit_db = self.server.access.path
+        return {str(p.relative_to(root)): sha(p) for p in root.rglob("*")
+                if p.is_file() and not (without_access_audit and p == audit_db)}
+
+    def access_snapshot(self):
+        with closing(self.server.access.connect()) as db:
+            return {
+                "schema": [tuple(row) for row in db.execute(
+                    "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name")],
+                "roles": [tuple(row) for row in db.execute(
+                    "SELECT * FROM user_roles ORDER BY issuer,subject")],
+                "events": [dict(row) for row in db.execute("SELECT * FROM access_audit ORDER BY id")],
+            }
+
+    def assert_failed_mcp_logged(self, before, tool):
+        after = self.access_snapshot()
+        self.assertEqual(after["schema"], before["schema"])
+        self.assertEqual(after["roles"], before["roles"])
+        old_events = before["events"]
+        self.assertEqual(after["events"][:len(old_events)], old_events)
+        appended = after["events"][len(old_events):]
+        self.assertEqual(len(appended), 2)
+        last_id = old_events[-1]["id"] if old_events else 0
+        for offset, (event, outcome) in enumerate(zip(appended, ("started", "error")), 1):
+            self.assertEqual(event["id"], last_id + offset)
+            datetime.fromisoformat(event["occurred_at"])
+            self.assertEqual({k: v for k, v in event.items() if k not in {"id", "occurred_at"}}, {
+                "issuer": "local", "subject": "local-single-user", "role": "admin",
+                "tool": tool, "project_id": self.project, "outcome": outcome, "reason": "",
+            })
+        # Access logging proves that the handler failed, not why. The tests
+        # below separately assert the precise control error and frozen counters.
 
     def enable(self, *, operation="preflight_storyboard_draft", arguments=None, lease=True):
         args = arguments if arguments is not None else self.fixture.arguments()
@@ -98,10 +134,23 @@ class AcceptanceServiceGateTests(unittest.TestCase):
         self.assertEqual(len(list((self.fixture.records()[0] / "compiler_attempts").rglob("canonical.json"))), 1)
         self.assertFalse(response["data"]["commit_ready"])
         self.assertIsNone(response["data"]["authoring_attempt"]["semantic_accuracy_percent"])
-        before = self.snapshot()
-        with self.assertRaises(ToolError):
+        before = self.snapshot(without_access_audit=True)
+        access_before = self.access_snapshot()
+        control_before = self.controller.status("service-gate")
+        with self.assertRaisesRegex(ToolError, "Frozen operation budget is exhausted"):
             asyncio.run(self.server.call_tool("preflight_storyboard_draft", self.fixture.arguments()))
-        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.snapshot(without_access_audit=True), before)
+        self.assert_failed_mcp_logged(access_before, "preflight_storyboard_draft")
+        control_after = self.controller.status("service-gate")
+        self.assertEqual(control_after["state"], "stopped")
+        self.assertEqual(control_after["stop_reason"]["category"], "operation_budget_exhausted")
+        self.assertEqual(control_after["rounds"][-1]["state"], "interrupted")
+        expected_rounds = json.loads(json.dumps(control_before["rounds"]))
+        expected_rounds[-1]["state"] = "interrupted"
+        self.assertEqual(control_after["rounds"], expected_rounds)
+        for key in control_before:
+            if key not in {"state", "stop_reason", "rounds"}:
+                self.assertEqual(control_after[key], control_before[key], key)
         self.assertEqual(len(asyncio.run(self.server.list_tools())), 24)
 
     def test_changed_body_cannot_borrow_lease(self):
@@ -205,23 +254,30 @@ class AcceptanceServiceGateTests(unittest.TestCase):
 
     def test_external_storage_route_cannot_bypass_frozen_service(self):
         self.enable()
-        before = self.snapshot()
+        before = self.snapshot(without_access_audit=True)
+        control_before = self.controller.status("service-gate")
         for action in ("register_snapshot", "mount_snapshot", "export_snapshot", "commit_snapshot", "unmount_snapshot"):
             with self.subTest(action=action):
+                access_before = self.access_snapshot()
                 with self.assertRaisesRegex(ToolError, "acceptance_external_storage_mutation_not_supported"):
                     asyncio.run(self.server.call_tool("migrate_project_state", {
                         "project_id": self.project, "storage_action": action,
                     }))
-                self.assertEqual(self.snapshot(), before)
+                self.assertEqual(self.snapshot(without_access_audit=True), before)
+                self.assert_failed_mcp_logged(access_before, "migrate_project_state")
+                self.assertEqual(self.controller.status("service-gate"), control_before)
         for action in ("register_snapshot", "mount_snapshot", "commit_snapshot"):
             with self.subTest(import_compatibility=action):
+                access_before = self.access_snapshot()
                 with self.assertRaisesRegex(ToolError, "acceptance_external_storage_mutation_not_supported"):
                     asyncio.run(self.server.call_tool("import_source_file", {
                         "project_id": self.project, "work_order_id": self.fixture.order,
                         "source_role": "asset", "library_storage_action": action,
                         "file": {"file_id": "frozen-fixture", "download_url": "https://invalid.example/not-fetched"},
                     }))
-                self.assertEqual(self.snapshot(), before)
+                self.assertEqual(self.snapshot(without_access_audit=True), before)
+                self.assert_failed_mcp_logged(access_before, "import_source_file")
+                self.assertEqual(self.controller.status("service-gate"), control_before)
 
 
 if __name__ == "__main__":
