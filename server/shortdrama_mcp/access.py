@@ -24,6 +24,10 @@ PRODUCER_TOOLS = frozenset({
     "commit_storyboard", "commit_storyboard_delta", "commit_storyboard_patch",
     "audit_storyboard", "complete_task_validation", "record_capability_gap",
     "migrate_project_state",
+    # Narrative authoring/review uses the same account role as storyboard work;
+    # its service-owned production and audit authorities remain separate.
+    "preflight_narrative_plan", "review_narrative_artifact",
+    "record_narrative_attempt", "read_narrative_record",
 })
 PRODUCER_OPERATIONS = frozenset({
     "project_intake", "source_lock", "chapter_intake", "novel_analysis",
@@ -31,7 +35,7 @@ PRODUCER_OPERATIONS = frozenset({
     "character_arc", "scene_plan", "rewrite_plan", "script_create", "script_rewrite",
     "script_change", "dialogue_rewrite", "change_impact", "storyboard_plan",
     "storyboard_create", "storyboard_regenerate", "storyboard_change",
-    "storyboard_audit", "storyboard_repair", "storyboard_draft_preflight",
+    "storyboard_audit", "storyboard_repair", "storyboard_draft_preflight", "narrative_audit",
     "anchor_management", "keyframe_prompt", "keyframe_image", "audio_bgm",
     "voice_design", "format_convert", "production_batch", "statistics", "capability_gap",
 })

@@ -14,6 +14,7 @@ TEST_MODULES = (
     "test_dialogue_occurrences",
     "test_performance_checks",
     "test_lighting_checks",
+    "test_practical_light_negation",
     "test_rule_registry",
 )
 

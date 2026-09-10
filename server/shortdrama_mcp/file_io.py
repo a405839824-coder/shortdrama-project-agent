@@ -1286,6 +1286,7 @@ def _cell_value(value: Any) -> Any:
     if isinstance(value, str):
         # Normalize before XML serialization so Windows text-mode writers do
         # not expand an authored CRLF into CRCRLF and add blank lines.
+        # Only display cells are normalized; canonical sidecars remain exact.
         value = value.replace("\r\n", "\n").replace("\r", "\n")
     if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
         # Storyboard fields are prose, never formulas. Escape spreadsheet

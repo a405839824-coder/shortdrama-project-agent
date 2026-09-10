@@ -2,6 +2,15 @@
 
 Use this policy with `V16.3-148-R10-StableRuntime`, `R10-PG1`, and the issue policy in `agent_runtime.md`. The full-project profile is `R10-PROJECT-AGENT-1`.
 
+Release 0.5.29 exposes 24 Admin tools and 21 Producer tools: the historical 19,
+Admin-only `manage_user_access`, plus `preflight_narrative_plan`, `record_narrative_attempt`,
+`read_narrative_record`, and `review_narrative_artifact`. This count does not
+assert deployment to an existing GPT connection; verify the running tool list.
+For narrative plans, scripts, dialogue and their reviews, follow
+`narrative-production-constraints.md` first where older generic production or
+validation wording differs. Historical release counts and all historical
+handoff/recovery requirements below remain historical facts and scoped rules.
+
 ## Contents
 
 1. Shared project state
@@ -53,7 +62,7 @@ Do not call `record-validation` or transition a storyboard work order to `passed
 
 ## Preserve server-authority separation with window-neutral user access
 
-Plugin 0.5.14 gives every trusted ChatGPT window in the same authenticated namespace the same user orchestration capability. Do not ask the user to declare a window role, move to another chat, find an old window, or restore permission. The transport session proves an authenticated request source; it is not the production/audit/repair role principal. Keep exactly 19 public tools. Public `begin_project_task(action="create")` creates a window-neutral work order, and another authenticated window in the same namespace may continue it.
+Plugin 0.5.14 gives every trusted ChatGPT window in the same authenticated namespace the same user orchestration capability. Do not ask the user to declare a window role, move to another chat, find an old window, or restore permission. The transport session proves an authenticated request source; it is not the production/audit/repair role principal. The 0.5.14 release had 19 public tools; the current local development interface has 23 as described above. Public `begin_project_task(action="create")` creates a window-neutral work order, and another authenticated window in the same namespace may continue it.
 
 Plugin 0.5.22 may place the complete project directory in ChatGPT Library and use only an ephemeral server mount. When status is `mount_required`, use the exact signed Library pointer through `migrate_project_state.storage_action`; verify both bundle SHA-256 and the complete directory-tree SHA-256 before any content route. After a mutation, export, save and read back the new Library object, then atomically advance the pointer generation before unmounting. The persistent server allowlist is limited to rules, restart-stable integrity/download secrets, and signed Library IDs/hashes/status/generation. Preserve every project and handoff byte in Library; legacy persistent deletion is a separately confirmed final step.
 
@@ -109,7 +118,7 @@ Create a handoff manifest for `production_to_audit`, `audit_to_repair`, and `rep
 
 The receiving server authority atomically claims one exact handoff, verifies its type, status, workflow chain, artifact, fingerprints, destination authority and claim binding, then marks it consumed. The authenticated user window may vary. Missing, replayed, concurrently consumed or mismatched evidence is a blocker; never silently select another handoff or fall back to a stale project copy. A `repair_to_audit` handoff is valid only for the original audit authority and original signed audit cycle.
 
-Plugin 0.5.14 keeps exactly 19 public tools and retains the two guarded `recover_storyboard_handoff` phases. They require two different server-production work orders, each exactly `rule_improvement + execute + explicit_execute`, plus a current full-regression certificate. The user may request both from any authenticated window. Targets must exactly equal the registered gap, ordered handoff IDs and the corresponding `controlled_phase` token; omission or `null` phase may be inferred only after namespace/authority validation from one unique exact token. Missing, duplicate, multiple, unknown, drifted, mixed or extra targets fail before plan or mutation, and omission never defaults to recovery.
+Plugin 0.5.14 introduced a 19-tool interface and retains the two guarded `recover_storyboard_handoff` phases. They require two different server-production work orders, each exactly `rule_improvement + execute + explicit_execute`, plus a current full-regression certificate. The user may request both from any authenticated window. Targets must exactly equal the registered gap, ordered handoff IDs and the corresponding `controlled_phase` token; omission or `null` phase may be inferred only after namespace/authority validation from one unique exact token. Missing, duplicate, multiple, unknown, drifted, mixed or extra targets fail before plan or mutation, and omission never defaults to recovery.
 
 The ordinary backfill route still requires current validation to pass with zero issues. The sole historical-contract exception is `GAP-1bb91d83751b422f` and the exact ordered six IDs in `UPGRADE_0.5.12.md`. Its frozen report must be PASS/zero issue and exactly equal the signed original production report. For each real current FAIL, the service reruns the current validator and requires exact equality with that handoff's sealed canonical SHA, complete normalized current-report SHA-256, shot/error/warning counts, full error-code histogram, and current validator composite/full SHA-256. No category-level aspect-only predicate remains, profiles cannot cross handoffs, and any drift fails before mutation. The service preserves both reports and appends only a `historical_production_preflight_attestation` with `historical_contract_pass`; it never claims current production pass. Its `HISTCACHE` identity is not reusable as current-preflight or independent-audit evidence, and every recovered successor requires a full current independent audit. The internal workbook proof remains limited to exact signed 0.5.4/current projection or the exact frozen-0.5.3 baseline; it seals raw XLSX/canonical, old handoff/certificate, original production trace, projector and provenance, while general `extract_xlsx` stays strict.
 

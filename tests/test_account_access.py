@@ -82,7 +82,7 @@ class AccountAccessTests(unittest.IsolatedAsyncioTestCase):
         with patch("shortdrama_mcp.auth.get_access_token", return_value=token_for(self.settings)):
             self.assertEqual({t.name for t in await self.server.list_tools()}, PRODUCER_TOOLS)
         with patch("shortdrama_mcp.auth.get_access_token", return_value=token_for(self.settings, "auth0|owner")):
-            self.assertEqual(len(await self.server.list_tools()), 20)
+            self.assertEqual(len(await self.server.list_tools()), 24)
         for name in ("recover_storyboard_handoff", "signoff_task", "manage_user_access"):
             result = await self.call_as("auth0|employee", name, {})
             self.assertTrue(result.is_error, name)

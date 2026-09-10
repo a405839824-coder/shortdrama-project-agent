@@ -2128,6 +2128,7 @@
     },
     {
       "test_id": "G-R10-PG1-REPAIR-CLEAN-PASS",
+      "measure_current_repair": true,
       "fixture_id": "valid_base",
       "mode": "repair",
       "mutations": [

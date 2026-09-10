@@ -5,6 +5,8 @@ import json
 import re
 from typing import Any, Iterable
 
+from .written_payload import discover_current_written_payloads
+
 
 FORMAL_MERGED_FIELD = "正式分镜母版"
 LEGACY_FORMAL_MERGED_FIELD = "正式分镜母版·字段合并"
@@ -310,7 +312,7 @@ _ANY_ASPECT_TOKEN_RE = re.compile(
     r"(?P<height>\d+(?:\.\d+)?)(?!\d)"
 )
 _NEGATIVE_MUSIC_CLAUSE_RE = re.compile(
-    r"(?:禁止|不要|不得|不使用|不生成|无)(?:任何)?(?:让)?"
+    r"(?:禁止|不要|不得|不使用|不生成|没有|不加|无)(?:任何)?(?:让)?"
     r"(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)?\s*"
     r"(?:BGM|背景音乐|额外配乐|配乐|音乐)"
     r"(?:响起|播放|进入|渐入|切入|铺开|持续|开始)?",
@@ -479,17 +481,134 @@ def _normalized_prose(value: Any) -> str:
     ).casefold()
 
 
-def _protect_visual_text_fragments(value: Any) -> tuple[str, dict[str, str]]:
-    """Hide explicit still-visible labels while dialogue/audio text is scrubbed."""
-
+def _protect_visual_text_fragments(value: Any, *, field_name: str = "") -> tuple[str, dict[str, str]]:
+    """Protect written payloads, never adjacent action or quoted speech."""
     protected: dict[str, str] = {}
+    source_text = _text(value)
+    typed_quotes = {item.quote.start: item.quote.literal
+                    for item in discover_current_written_payloads(source_text, field_name)}
 
     def replace(match: re.Match[str]) -> str:
         token = f"\ue000VISUAL{len(protected)}\ue001"
         protected[token] = match.group(0)
         return token
 
-    return _PROTECTED_VISUAL_FRAGMENT_RE.sub(replace, _text(value)), protected
+    surface_re = re.compile(r"纸面|纸上|纸签|记录纸|账册|册页|书页|木牌|布告|标签|标题|题头|栏名|表头|简图|地图|示意图|页签|最后一行|门牌|匾额|牌匾|招牌|题字|可见文字|画内文字|道具文字")
+    marking_re = re.compile(r"写着|写有|写到|写好|已写的|刻着|刻有|印着|印有|标注|标记|现有|已有|可读|标签|标题|题头|栏名|表头|字样|文字|题字|清晰可见")
+    speaking_re = re.compile(
+        r"说道|说着|问道|答道|喊道|念道|朗读|朗诵|念出|念着|读出|读着|默读|"
+        r"低声|轻声|高声|开口|转述|口述|心理内声|内声|旁白|对白|台词|音轨|"
+        r"(?:说|问|答|喊|念|(?<!可)读)\s*[:：]?\s*$|"
+        r"(?:说|问|念|(?<!可)读)(?=纸面|纸上|册页|书页|文字)"
+    )
+    historical_re = re.compile(
+        r"昨日|昨天|前日|前一日|从前|以前|当年|当时|曾经|"
+        r"曾(?:写|有|刻|印)|回忆|记得|想起|原文|源文|历史引用"
+    )
+    enumeration_re = re.compile(r"[\s，,、；;:：]*(?:(?:以及|及|和|与)[\s，,、；;:：]*)?")
+    current_re = re.compile(r"现在|当前|此刻|眼下")
+    correction_re = re.compile(r"[\s，,]*而是(?:写着|写有|刻着|刻有|印着|印有|标注为)[\s:：]*")
+    column_intro_re = re.compile(r"栏|列|字段")
+    column_value_re = re.compile(
+        r'[\s，,、；;]+(?:(?:以及|及|和|与)\s*)?[^“"「『，,、；;:：=。！？!?\n]+?(?:为|是|[:：=])\s*'
+    )
+    column_break_re = re.compile(
+        r"随后|稍后|正在|将(?:要)?(?:写|改|标|刻|印|为|是)|(?:改|变)(?:成|为)|"
+        r"(?:不再|已不|不)(?:存在|可读|显示)|擦除|抹去|收起|移走"
+    )
+
+    # Keep the physical paper scope separate from the kind of its first
+    # value: a title can precede named columns without itself being a column.
+    paper_surface_re = re.compile(
+        r"纸面|纸上|纸签|记录纸|账册|册页|书页|"
+        r"(?:同一张|这张|该张|一张)纸(?:的(?:上部|下部|左侧|右侧|中部))?|"
+        r"纸的(?:上部|下部|左侧|右侧|中部)"
+    )
+    current_role_re = re.compile(
+        r'[\s，,、；;]+(?:(?:以及|及|和|与)\s*)?(?:现有|已有)'
+        r'(?:标题|题头|表头|栏名|栏目|字段|[^“"「『，,、；;:：=。！？!?\n]*?(?:栏|列))'
+        r'(?:为|是|[:：=])\s*'
+    )
+    negative_marking_re = re.compile(
+        r"(?:没有|未曾|从未|并未|尚未|不曾|不是|不|未)(?:写着|写有|标注|现有|已有)|不存在"
+    )
+
+    def protect_written_quotes(match: re.Match[str]) -> str:
+        clause = match.group(0)
+        end = 0
+        written = False
+        columns = False
+        paper_scope = False
+
+        def choose(quote: re.Match[str]) -> str:
+            nonlocal end, written, columns, paper_scope
+            prefix = clause[end:quote.start()]
+            end = quote.end()
+            typed_quote = typed_quotes.get(match.start() + quote.start()) == quote.group(0)
+            scope_break = bool(speaking_re.search(prefix) or historical_re.search(prefix)
+                               or column_break_re.search(prefix))
+            if scope_break:
+                paper_scope = False
+            if (paper_scope and current_role_re.fullmatch(prefix)
+                    and not scope_break and not negative_marking_re.search(prefix)):
+                written = True
+                columns = True
+                return replace(quote)
+            if written and correction_re.fullmatch(prefix):
+                # Preserve both the negated label and its positive correction;
+                # only this same-surface continuation may inherit the binding.
+                return replace(quote)
+            if (written and columns and column_value_re.fullmatch(prefix)
+                    and not speaking_re.search(prefix) and not historical_re.search(prefix)
+                    and not column_break_re.search(prefix)):
+                # Arbitrary column labels inherit this sentence's explicit
+                # current paper declaration. Only the value is masked; speech,
+                # state changes and other unquoted instructions remain visible.
+                return replace(quote)
+            if not enumeration_re.fullmatch(prefix):
+                # A new unquoted clause needs its own physical-text binding.
+                # In particular 可读 is a visibility property, not 读 speech.
+                local_prefix = re.split(r"[，,；;]", prefix)[-1]
+                scope_prefix = re.split(r"[；;]", prefix)[-1]
+                suffix = re.split(r'[“"「『，,。；;！？!?\n]', clause[end:], maxsplit=1)[0]
+                context = local_prefix + suffix
+                historical = list(historical_re.finditer(scope_prefix))
+                current = list(current_re.finditer(scope_prefix))
+                historical_only = bool(historical and not (current and current[-1].start() > historical[-1].start()))
+                written = bool(
+                    (surface_re.search(context) or paper_surface_re.search(context))
+                    and marking_re.search(context)
+                    and not speaking_re.search(scope_prefix)
+                    and not historical_only
+                )
+                paper_scope = bool(
+                    written and paper_surface_re.search(local_prefix)
+                    and not column_break_re.search(scope_prefix)
+                    and not negative_marking_re.search(scope_prefix)
+                )
+                columns = bool(written and column_intro_re.search(local_prefix)
+                               and re.search(r"现有|已有|现在|当前|此刻|眼下", scope_prefix)
+                               and not column_break_re.search(scope_prefix))
+            return replace(quote) if written or typed_quote else quote.group(0)
+
+        return _QUOTED_DIALOGUE_RE.sub(choose, clause)
+
+    # Sentence boundaries reset the binding; commas/semicolons may enumerate
+    # several payloads after one explicit paper-text declaration. Protect only
+    # the quotes, so a following actor/camera process still reaches the gate.
+    text = re.sub(r'(?:[“"「『][^”"」』\n]*[”"」』]|[^。！？!?\n])+', protect_written_quotes, source_text)
+
+    def protect_explicit(match: re.Match[str]) -> str:
+        fragment = match.group(0)
+        if "\ue000VISUAL" in fragment or re.search(r'[“"「『]', fragment):
+            # Only the explicit marker needs protection from bracketed-dialogue
+            # removal. The quoted payload is already protected, and a trailing
+            # body/environment action must remain visible to the static guard.
+            return re.sub(r"【(?:参考图锚点|可见文字|画内文字|道具文字|匾额(?:文字)?|牌匾(?:文字)?|招牌(?:文字)?|题字)】", replace, fragment)
+        return replace(match)
+
+    return _PROTECTED_VISUAL_FRAGMENT_RE.sub(protect_explicit, text), protected
+
 
 
 def _active_music_directive(value: Any) -> str:
@@ -509,62 +628,84 @@ def _active_music_directive(value: Any) -> str:
 
 
 def _strip_negative_music_clauses(value: Any) -> tuple[str, bool]:
-    """Remove only proven bans and preserve all other music semantics."""
-
-    text = _text(value)
+    """Remove proved music bans without editing quotes or borrowing negation."""
+    # A quoted statement is payload, not an instruction to this converter.
+    text, protected = _protect_visual_text_fragments(str(value or ""))
+    def protect_quote(match):
+        token = f"\ue010MUSICQUOTE{len(protected)}\ue011"
+        protected[token] = match.group(0)
+        return token
+    text = _QUOTED_DIALOGUE_RE.sub(protect_quote, text)
     mentioned = False
-    parts = re.split(r"([；;。！？!?\n]+)", text)
+    negative_start = re.compile(r"^\s*(?:禁止|不要|不得|不使用|不生成|没有|不加|无)(?:任何)?")
+    # These are known ban-list objects. An unfamiliar mixed list stays intact
+    # for the active/ambiguous-music gate rather than inheriting guessed polarity.
+    visual_item = re.compile(r"(?:字幕|水印|现代物件|现代元素|现代服饰|现代标识|现代logo|人物看镜头|塑料皮肤|过度锐化|雾化|烟雾|薄雾|柔焦|光晕|镜头扩散)", re.I)
+    music_item = re.compile(r"(?:任何)?(?:让)?(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)?\s*(?:BGM|背景音乐|额外配乐|配乐|音乐)(?:响起|播放|进入|渐入|切入|铺开|持续|开始)?", re.I)
+    connectors = re.compile(r"(?:以及|[、与和且及])")
+
+    def clean_atom(original):
+        nonlocal mentioned
+        clause = original.strip()
+        if not _MUSIC_TERM_RE.search(clause):
+            return original
+        # Matching the complete negative atom excludes 未禁止/不必没有 and
+        # arbitrary prefixes. A later affirmative music clause remains visible.
+        if _NEGATIVE_MUSIC_CLAUSE_RE.fullmatch(clause):
+            mentioned = True
+            return ""
+        prefix = negative_start.match(clause)
+        if prefix is None:
+            return original
+        rest = clause[prefix.end():]
+        items = [item.strip() for item in connectors.split(rest)]
+        if len(items) < 2 or not all(items):
+            return original
+        keep = []
+        removed = False
+        for item in items:
+            if music_item.fullmatch(item):
+                removed = True
+                continue
+            own_prefix = negative_start.match(item)
+            noun = item[own_prefix.end():] if own_prefix else item
+            if not visual_item.fullmatch(noun):
+                return original
+            keep.append(item)
+        if not removed:
+            return original
+        mentioned = True
+        if not keep:
+            return ""
+        retained = "、".join(keep)
+        return retained if negative_start.match(retained) else prefix.group(0).strip() + retained
+
+    parts = re.split(r"([；;。！？!?，,\n]+)", text)
     for index in range(0, len(parts), 2):
         original = parts[index]
-        if not _MUSIC_TERM_RE.search(original):
+        cleaned = clean_atom(original)
+        if cleaned != original or not _MUSIC_TERM_RE.search(original):
+            parts[index] = cleaned
             continue
-        negative_prefix = re.match(
-            r"^\s*(?:禁止|不要|不得|不使用|不生成|无)(?:任何)?",
-            original,
-            flags=re.I,
-        )
-        clause, direct_count = _NEGATIVE_MUSIC_CLAUSE_RE.subn("", original)
-        if direct_count:
-            mentioned = True
-            remainder = clause.strip(" 、，,与和且及以")
-            if remainder and negative_prefix and not re.match(
-                r"^\s*(?:禁止|不要|不得|不使用|不生成|无)",
-                remainder,
-                flags=re.I,
-            ):
-                clause = negative_prefix.group(0).strip() + remainder
-            else:
-                clause = remainder
-        if not _MUSIC_TERM_RE.search(clause):
-            parts[index] = clause
-            continue
-        if negative_prefix is None:
-            parts[index] = clause
-            continue
-        # A prohibition about another subject followed by an affirmative music
-        # command is not a negative music list item.
-        if _ACTIVE_MUSIC_DIRECTIVE_RE.search(clause):
-            parts[index] = clause
-            continue
-        clause = _MUSIC_TERM_RE.sub("", clause)
-        clause = re.sub(
-            r"(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)\s*",
-            "",
-            clause,
-            flags=re.I,
-        )
-        clause = clause.strip(" 、，,与和且及以")
-        if clause and not re.match(
-            r"^\s*(?:禁止|不要|不得|不使用|不生成|无)",
-            clause,
-            flags=re.I,
-        ):
-            clause = negative_prefix.group(0).strip() + clause
-        parts[index] = clause
-        mentioned = True
+        # Recognized noun enumeration was handled above. These conjunctions
+        # introduce separate assertions when that whole-list proof failed.
+        clauses = re.split(r"(但是|然而|不过|而且|并且|随后|然后|而后|接着|同时|但|却|且)", original)
+        if len(clauses) > 1:
+            atoms = [clean_atom(clauses[offset]) for offset in range(0, len(clauses), 2)]
+            if atoms != clauses[::2]:
+                retained = []
+                for ordinal, atom in enumerate(atoms):
+                    if not atom.strip():
+                        continue
+                    if retained and ordinal:
+                        retained.append(clauses[2 * ordinal - 1])
+                    retained.append(atom)
+                parts[index] = "".join(retained)
     cleaned = "".join(parts)
-    cleaned = re.sub(r"[、，,与和且及以]\s*(?=[；;。！？!?\n]|$)", "", cleaned)
-    cleaned = re.sub(r"([、，,])\s*[、，,]+", r"\1", cleaned)
+    # Restore quote placeholders before visual placeholders in case one wraps
+    # the other; no quoted words or internal punctuation are normalized.
+    for token, fragment in reversed(list(protected.items())):
+        cleaned = cleaned.replace(token, fragment)
     return cleaned, mentioned
 
 
@@ -649,7 +790,9 @@ def _normalize_generation_limits(value: Any) -> str:
 def _generation_limits_without_aspect(value: Any) -> str:
     """Return visual limits without duplicating the explicit GPT aspect line."""
 
-    remainder = _ASPECT_RATIO_PHRASE_RE.sub("", _text(value))
+    # Normalize each music prohibition before the visual scrubber removes audio.
+    # Otherwise "禁止配乐。禁止字幕" can be swallowed as one audio clause.
+    remainder = _ASPECT_RATIO_PHRASE_RE.sub("", _normalize_generation_limits(value))
     remainder = re.sub(r"\s*[；;]\s*", "；", remainder)
     return re.sub(r"；{2,}", "；", remainder).strip(" ；;，,。")
 
@@ -840,13 +983,223 @@ def _assert_active_timing_precision(shot: dict[str, Any]) -> None:
             )
 
 
-def _visual_only_text(value: str, *, strip_dialogue: bool = False) -> str:
+def _keyframe_environment_process_hits(value: Any) -> list[str]:
+    """Reject unambiguous environmental processes, preserving static results.
+
+    This bounded grammar supplements the existing camera/time/audio guard. It
+    never invents a still pose from a video instruction. Explicit visible text,
+    stopped results and scoped prohibitions are not motion instructions.
+    Keep this helper identical in the standalone validator and materializer.
+    """
+    text = _keyframe_instruction_text(value)
+    motion_re = re.compile(
+        r"位移|移动|摆动|晃动|摇动|摇曳|起伏|飘动|抖动|颤动|漂移|流动|闪烁|明灭|变化"
+    )
+    subject_re = re.compile(
+        r"衣摆|衣袖|袖口|袖摆|裙摆|下摆|布料|帘布|帘幕|窗帘|窗纱|窗纸|"
+        r"树叶|叶片|枝叶|枝条|树枝|烛焰|烛火|火焰|水面|水流|光斑|影子|树影"
+    )
+    temporal_re = re.compile(
+        r"随(?:着)?|受.{0,20}(?:动作|风)|产生|发生|持续|连续|不断|逐渐|渐渐|"
+        r"慢慢|正在|开始|继续|仍在|仍然|反复"
+    )
+    restart_re = re.compile(r"正在|开始|继续|持续|不断|逐渐|渐渐|仍在|仍然|产生|发生|允许")
+    negative_re = re.compile(
+        r"(?:禁止|不得|不要|避免|不再|没有|未曾|并未|未见|尚未|不(?!断|停|住)|无)"
+        r"[^，,；;。！？!?、\n]{0,16}$"
+    )
+    hits = []
+    for major in re.split(r"[；;。！？!?，,\n]|但是|然而|反而|但|却", text):
+        inherited_negative = False
+        for ordinal, part in enumerate(major.split("、")):
+            clause = part.strip()
+            if not clause:
+                continue
+            unlabeled = re.sub(r"^[^：:]{1,24}[：:]", "", clause).strip()
+            if ordinal == 0:
+                inherited_negative = bool(re.match(r"禁止|不得|不要|避免|没有|未见|无", unlabeled))
+            for match in motion_re.finditer(clause):
+                prefix, suffix = clause[:match.start()], clause[match.end():]
+                temporal = bool(temporal_re.search(prefix))
+                if not (subject_re.search(prefix) or temporal):
+                    continue
+                # Light/material variation can be a static appearance.
+                if match.group() == "变化" and not temporal:
+                    continue
+                not_stopped = bool(re.search(
+                    r"(?:没有|并未|未曾|尚未|未|不会|不)(?:停止|停下|停住)(?:了)?$", prefix
+                ))
+                if not not_stopped:
+                    if negative_re.search(prefix) or re.search(r"(?:停止|停下|停住)(?:了)?$", prefix):
+                        continue
+                    if inherited_negative and not restart_re.search(prefix):
+                        continue
+                # A completed movement followed by a concrete stopped result is
+                # still representable; a later positive movement is checked again.
+                if re.match(r"(?:后|之后)(?:已|已经)?(?:停在|停于|停稳|静止|定格在|固定在)", suffix):
+                    continue
+                # The stopped result can follow the motion noun as well as
+                # precede it. Require completion, not "尚未停止" or a question.
+                if re.match(
+                    r"(?:已经|已)(?:完全|彻底)?(?:停止|停下|停住|停)(?:了)?(?:$|在|于)",
+                    suffix,
+                ):
+                    continue
+                hits.append("environment_process=" + clause)
+    return sorted(set(hits))
+
+
+
+def _keyframe_instruction_text(value: Any) -> str:
+    """Ignore written quoted payloads, but still check surrounding directives."""
+    text, protected = _protect_visual_text_fragments(value)
+    for token, fragment in protected.items():
+        instruction = _QUOTED_DIALOGUE_RE.sub("", fragment)
+        if instruction == fragment:
+            literal = re.match(r"(?:【(?:可见文字|画内文字|道具文字|匾额(?:文字)?|牌匾(?:文字)?|招牌(?:文字)?|题字)】|(?:牌匾|匾额|门牌|招牌)?(?:可见文字|画内文字|道具文字)[:：])", fragment)
+            if literal:
+                instruction = literal.group(0)
+        text = text.replace(token, instruction)
+    return text
+
+
+def _keyframe_generation_limits(value: str) -> str:
+    """Remove only recognized video-eye policy from the static projection.
+
+    A matching sentence/list must consist entirely of the known policy. Mixed
+    or unfamiliar instructions are retained and rejected by the static guard;
+    we never guess how their negation should bind to a remaining visual item.
+    """
+    positive = {
+        "眼球轻微换焦与位移、眼睑松紧按画面内容执行",
+        "眼球轻微换焦与位移", "眼睑松紧按画面内容执行",
+        "保留轻微眼球焦点调整和眼睑松紧变化",
+        "眼球换焦或位移", "眼睑松紧变化",
+    }
+    negative = {
+        "禁止无依据全程不眨眼", "禁止高频机械眨眼", "禁止多人同步眨眼",
+    }
+    instruction, protected = _protect_visual_text_fragments(value)
+    parts = re.split(r"([。；;\n])", instruction)
+    for index in range(0, len(parts), 2):
+        clause = parts[index].strip()
+        video_policy = re.fullmatch(r"(?:视频|动态画面)中(?:的)?(.+?)按画面内容(?:所列时点)?执行", clause)
+        video_eye_items = {"换焦", "眼球换焦", "眼球位移", "眼睑", "眼睑变化", "眼睑松紧变化", "眨眼"}
+        video_only = bool(video_policy) and all(
+            item in video_eye_items for item in re.split(r"[、与和]", video_policy.group(1))
+        )
+        if clause in negative or clause in positive or video_only:
+            parts[index] = ""
+            continue
+        # The standard positive clause follows an independent static gaze.
+        for gaze in ("眼神自然聚焦", "人物眼神自然聚焦"):
+            if clause.startswith(gaze + "，") and clause[len(gaze + "，"):] in positive:
+                parts[index] = gaze
+    result = re.sub(r"[。；;\n]{2,}", "；", "".join(parts)).strip("。；;\n ")
+    for token, fragment in protected.items():
+        result = result.replace(token, fragment)
+    return result
+
+
+def _keyframe_eye_process_hits(value: Any) -> list[str]:
+    text = _keyframe_instruction_text(value)
+    motion = re.compile(
+        r"(?:眼球|视线|目光)[^，,。；;\n]{0,14}(?:换焦|位移|焦点调整|转移|扫视)|"
+        r"眼睑[^，,。；;\n]{0,14}(?:松紧|变化|开合)|"
+        r"眨眼|半眨(?:眼)?"
+    )
+    hits = []
+    if re.search(r"(?:视频|动态画面)中(?:的)?[^。；;\n]*按画面内容(?:所列时点)?执行", text):
+        hits.append("unprojected_video_policy")
+    for clause in re.split(r"[，,。；;\n]", text):
+        # A still can require open eyes and explicitly exclude a half blink.
+        # Such exclusion is not a command to animate eyelids.
+        if re.search(r"(?:避开|避免|不处于|不是|排除)(?:半眨眼?|闭眼)(?:瞬间|状态|中途|截帧)?", clause):
+            clause = re.sub(r"(?:避开|避免|不处于|不是|排除)(?:半眨眼?|闭眼)(?:瞬间|状态|中途|截帧)?", "", clause)
+        if motion.search(clause):
+            hits.append("eye_process=" + clause)
+    return sorted(set(hits))
+
+
+def _keyframe_authored_process_hits(value: Any) -> list[str]:
+    """Reject observed unprojectable body/audio processes without inventing a pose."""
+    text = _keyframe_instruction_text(value)
+    patterns = (
+        r"(?:站立|站姿|蹲姿|蹲下)(?:至|到|转为)(?:站姿|蹲姿|蹲下|站立)",
+        r"(?:蹲下|站起|转身|抬手)后(?:仍|再|才|将|留)",
+        r"(?:仍在|正在|正从|从|由)[^，,。；;\n]{0,36}(?:接近|随行|前行|行走)",
+        r"(?:沿|向)[^，,。；;\n]{0,18}(?:返院|返[^，,。；;\n]{1,8}(?:院|厅|房|殿))",
+        r"(?:在|跟在)[^，,。；;\n]{0,20}(?:随行|跟在[^，,。；;\n]{0,10}后方)",
+        r"正在(?:书写|落笔|抄写|换衣|走动|接取|递交)",
+        r"(?:将要|即将|将)(?:写有|写着|写下|刻有|标注)",
+        r"(?:能够|可以|能|已)?(?:听清|听见|听到)(?:低声|交代|话语|脚步|呼吸)?",
+        r"(?:说|问|答|喊)(?:道)?[:：]?$",
+    )
+    hits = []
+    # Only quoted written payloads have been masked above. Commas do not end
+    # a historical/narrated attribution. An explicit later current binding may
+    # coexist with removed historical quotation; otherwise no current readable
+    # inscription has been supplied for this static field. Fail closed instead
+    # of dropping neighboring camera/actor instructions or inventing contents.
+    for line in text.splitlines():
+        written = re.search(r"(?:纸面|纸上|纸签|记录纸|账册|册页|书页|木牌|标签|门牌)[^，,；;。\n]{0,32}(?:写着|写有|刻着|刻有|印着|印有|可读文字|现有文字)", line)
+        if not written:
+            continue
+        attribution = list(re.finditer(r"昨日|昨天|前日|前一日|从前|以前|当年|当时|曾经|回忆|旁白转述|旁白说明|旁白记述", line[:written.end()]))
+        current_bindings = []
+        for scope in re.finditer(r"[^；;]+", line):
+            part = scope.group()
+            if re.search(r"旁白|转述|心理内声|说道", part):
+                continue
+            for current in re.finditer(r"现在|当前|此刻|眼下", part):
+                if re.search(r"(?:纸面|纸上|纸签|记录纸|账册|册页|书页|木牌|标签|门牌)[^，,；;。\n]{0,32}(?:写着|写有|刻着|刻有|印着|印有|可读文字|现有文字)", part):
+                    current_bindings.append(scope.start() + current.start())
+        if attribution and not (current_bindings and current_bindings[-1] > attribution[-1].start()):
+            hits.append("written_scope_not_current=" + line)
+    for clause in re.split(r"[，,。；;\n]|但是|然而|但|却|随后|然后", text):
+        for pattern in patterns:
+            for match in re.finditer(pattern, clause):
+                before, after = clause[:match.start()], clause[match.end():]
+                # A prohibition can include the explicitly authored subject.
+                # Contrast/restart clauses above must not inherit its negation.
+                negated = re.search(r"(?:禁止|不要|不得|并未|没有|未曾|尚未)$", before)
+                subject_ban = re.search(r"(?:^|[:：])(?:禁止|不要|不得)([^，,。；;\n]{1,12})$", before.strip())
+                if subject_ban:
+                    # This must be a nominal prohibited subject, not a clause
+                    # about another predicate (禁止喧哗时暖轿由…).
+                    subject = subject_ban.group(1)
+                    if not re.search(r"的|时|之后|以前|以后|在|里|中|有|无|并|且|又|再", subject):
+                        negated = subject_ban
+                double_negative = re.search(r"(?:并非|并不是|不是|不再|不|没有)(?:没有|禁止|不要|不得)[^，,。；;\n]{0,16}$", before)
+                if negated and not double_negative:
+                    continue
+                stopped = re.search(r"(?:已|已经)(?:到达|站定|停稳|停止)", after)
+                if stopped and not re.search(r"又|再|继续", after):
+                    if not re.search(r"(?:并非|不是|没有|尚未)[^，,。；;\n]{0,6}$", after[:stopped.start()]):
+                        continue
+                hits.append("authored_process=" + clause)
+    return sorted(set(hits))
+
+
+def _visual_only_text(
+    value: str, *, strip_dialogue: bool = False,
+    strict_static_quotes: bool = False, field_name: str = "",
+) -> str:
     """Keep only visible still-frame semantics from any projected field."""
 
-    result = _TIMECODE_RE.sub("", value)
+    result = value
     protected_visual: dict[str, str] = {}
     if strip_dialogue:
-        result, protected_visual = _protect_visual_text_fragments(result)
+        result, protected_visual = _protect_visual_text_fragments(result, field_name=field_name)
+        if strict_static_quotes:
+            unbound = _QUOTED_DIALOGUE_RE.search(result)
+            if unbound:
+                raise ValueError(
+                    "keyframe_static_contract_violation: unbound_visual_text; "
+                    f"field={field_name or '<static>'}; masked_offset={unbound.start()}"
+                )
+    result = _TIMECODE_RE.sub("", result)
+    if strip_dialogue:
         result = _QUOTED_DIALOGUE_RE.sub("", result)
         result = _BRACKETED_DIALOGUE_RE.sub("", result)
         result = re.sub(r"【[^】\n]{1,40}】", "", result)
@@ -858,13 +1211,18 @@ def _visual_only_text(value: str, *, strip_dialogue: bool = False) -> str:
     visible_major: list[str] = []
     for major in re.split(r"[；;\n]", result):
         visible_minor: list[str] = []
-        for minor in re.split(r"[，,、]|并且|并伴随|同时伴随|并有", major):
+        minor_parts = re.split(r"([，,、]|并且|并伴随|同时伴随|并有)", major)
+        for minor_index in range(0, len(minor_parts), 2):
+            minor = minor_parts[minor_index]
             clause = minor.strip()
             if not clause:
                 continue
+            # A bare speech-verb suffix is not evidence of speech: "南门通道"
+            # must retain its final character. Ambiguous wording stays intact
+            # for the static contract guard instead of being silently shortened.
             clause = re.sub(
-                r"(?:低声|轻声|高声|平静地|克制地)?(?:开口)?"
-                r"(?:说|问|答|喊|道)\s*[:：]?\s*$",
+                r"(?:(?:低声|轻声|高声|平静地|克制地)(?:开口)?|开口)"
+                r"(?:说道|问道|答道|喊道|说|问|答|喊|道)\s*[:：]?\s*$",
                 "",
                 clause,
             ).strip()
@@ -876,15 +1234,26 @@ def _visual_only_text(value: str, *, strip_dialogue: bool = False) -> str:
                 continue
             if _AUDIO_SOURCE_CLAUSE_RE.search(clause):
                 continue
-            visible_minor.append(clause)
+            # Preserve enumeration scope. Turning 顿号 into a comma would make
+            # a later negative list item look like an independent assertion.
+            separator = "、" if minor_index and minor_parts[minor_index - 1] == "、" else "，"
+            visible_minor.append((separator if visible_minor else "") + clause)
         if visible_minor:
-            visible_major.append("，".join(visible_minor))
+            visible_major.append("".join(visible_minor))
     result = "；".join(visible_major)
     result = re.sub(r"\s+", " ", result)
     result = re.sub(r"([；;，,])\s*(?=[；;，,。])", "", result)
+    if strict_static_quotes:
+        missing = [token for token, fragment in protected_visual.items()
+                   if _QUOTED_DIALOGUE_RE.search(fragment) and token not in result]
+        if missing:
+            raise ValueError(
+                "keyframe_static_contract_violation: dropped_visual_text; "
+                f"field={field_name or '<static>'}; payload_count={len(missing)}"
+            )
     for token, fragment in protected_visual.items():
         result = result.replace(token, fragment)
-    return result.strip(" \n；;，,。:：”\"")
+    return result.strip(" \n；;，,。:：")
 
 
 def _visual_only_picture_content(value: str) -> str:
@@ -962,15 +1331,17 @@ def compile_gpt_keyframe_instruction(
         raise ValueError("materialization_shot_invalid: shot must be an object")
     compact = dict(shot) if assume_compact else migrate_legacy_shot(shot)
     normalized = dict(compact)
-    normalized["生成限制"] = _generation_limits_without_aspect(
+    normalized["生成限制"] = _keyframe_generation_limits(_generation_limits_without_aspect(
         compact.get("生成限制")
-    )
+    ))
     body = _labeled_lines(
         normalized,
         GPT_KEYFRAME_ATOMIC_FIELDS,
         transforms={
             field: (
-                lambda value: _visual_only_text(value, strip_dialogue=True)
+                lambda value, field=field: _visual_only_text(
+                    value, strip_dialogue=True, strict_static_quotes=True, field_name=field
+                )
             )
             for field in GPT_KEYFRAME_SCRUB_FIELDS
         },
@@ -980,13 +1351,17 @@ def compile_gpt_keyframe_instruction(
         lines.append(body)
     prompt = "\n".join(lines)
     _assert_projected_aspect_contract(prompt, projection="gpt_keyframe")
+    instruction_text = _keyframe_instruction_text(prompt)
     dynamic_hits = sorted(
-        {match.group(0) for match in KEYFRAME_FORBIDDEN_RE.finditer(prompt)}
+        {match.group(0) for match in KEYFRAME_FORBIDDEN_RE.finditer(instruction_text)}
+        | set(_keyframe_environment_process_hits(prompt))
+        | set(_keyframe_eye_process_hits(prompt))
+        | set(_keyframe_authored_process_hits(prompt))
     )
     unobservable_hits = sorted(
-        {match.group(0) for match in KEYFRAME_UNOBSERVABLE_RE.finditer(prompt)}
+        {match.group(0) for match in KEYFRAME_UNOBSERVABLE_RE.finditer(instruction_text)}
     )
-    context_hits = _contract_hits(prompt, BLANK_CONTEXT_FORBIDDEN_TERMS)
+    context_hits = _contract_hits(instruction_text, BLANK_CONTEXT_FORBIDDEN_TERMS)
     if dynamic_hits or context_hits or unobservable_hits:
         reasons = []
         if dynamic_hits:

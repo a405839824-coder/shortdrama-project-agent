@@ -47,6 +47,9 @@ STORYBOARD_PRODUCTION_OPERATIONS = {
     "storyboard_change",
     "storyboard_repair",
 }
+NARRATIVE_PRODUCTION_OPERATIONS = {
+    "script_create", "script_rewrite", "script_change", "dialogue_rewrite",
+}
 STATES = {
     "intake", "scope_locked", "proposal_ready", "awaiting_approval", "approved",
     "executing", "validating", "passed", "awaiting_signoff", "archived",
@@ -165,7 +168,8 @@ def new_hub(project_name: str, project_id: str | None = None, timestamp: str | N
             "first_draft_correctness_threshold_percent": 98.0,
             "first_draft_direct_usability_threshold_percent": 98.0,
             "max_new_local_issue_rate_percent": 2.0,
-            "minimum_episode_correctness_percent": 96.0,
+            "minimum_episode_correctness_percent": 98.0,
+            "minimum_episode_direct_usability_percent": 98.0,
             "known_issue_recurrence_tolerance": 0,
             "systemic_root_cause_tolerance": 0,
         },
@@ -336,7 +340,7 @@ def capability_map(hub: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def required_validation_gates(operation: str) -> list[str]:
     if operation.startswith("storyboard_") or operation == "production_batch":
         return STORYBOARD_GATES
-    if operation.startswith("script_") or operation in {"dialogue_rewrite", "episode_plan", "rewrite_plan"}:
+    if operation.startswith("script_") or operation in {"dialogue_rewrite", "narrative_audit", "episode_plan", "rewrite_plan"}:
         return SCRIPT_GATES
     if operation in {"anchor_management", "keyframe_prompt", "keyframe_image"}:
         return VISUAL_GATES
@@ -390,6 +394,13 @@ def validate_work_order_request(request: Any, hub: dict[str, Any]) -> list[str]:
     if request.get("mode") in {"execute", "audit_and_repair"} and request.get("authorization") == "read_only":
         errors.append("mutating mode cannot use read_only authorization")
     operation = request.get("operation")
+    if "verified_narrative_review_id" in request:
+        errors.append("verified_narrative_review_id is a service-owned field, not a work-order request claim")
+    if operation == "narrative_audit":
+        if request.get("mode") != "audit_only" or request.get("authorization") != "read_only":
+            errors.append("narrative_audit requires mode=audit_only and authorization=read_only")
+        if request.get("server_actor_role", "independent_audit") != "independent_audit":
+            errors.append("narrative_audit requires server_actor_role=independent_audit")
     if operation in STORYBOARD_AUTHORITY_MATRIX:
         expected_mode, expected_authorization = STORYBOARD_AUTHORITY_MATRIX[operation]
         # A pending production/repair request may be registered for explicit
@@ -421,7 +432,7 @@ def _initial_status(request: dict[str, Any], hub: dict[str, Any]) -> str:
 
 
 def _server_role_for_work_order(operation: str) -> str:
-    if operation == "storyboard_audit":
+    if operation in {"storyboard_audit", "narrative_audit"}:
         return "independent_audit"
     if operation == "storyboard_repair":
         return "repair"
@@ -621,6 +632,30 @@ def record_deliverable(hub: dict[str, Any], record: dict[str, Any]) -> dict[str,
     return {"status": "recorded", "deliverable_id": deliverable["deliverable_id"]}
 
 
+def _require_narrative_review(work_order: dict[str, Any]) -> None:
+    """Require the service-owned marker; its signature and binding are checked by the service.
+
+    This is a mutation gate, not a retroactive validity rule for historical hubs.
+    A validation record or a caller-supplied zero count cannot install the marker.
+    """
+    if work_order.get("operation") not in NARRATIVE_PRODUCTION_OPERATIONS:
+        return
+    review_id = work_order.get("verified_narrative_review_id")
+    if not isinstance(review_id, str) or not review_id.strip():
+        work_order["validation"]["status"] = "pending"
+        work_order["awaiting_narrative_review"] = True
+        raise ValueError(
+            "narrative_review_required: narrative production needs a service-verified narrative review"
+        )
+
+
+def _invalidate_narrative_review(work_order: dict[str, Any]) -> None:
+    if work_order.get("operation") in NARRATIVE_PRODUCTION_OPERATIONS:
+        work_order.pop("verified_narrative_review_id", None)
+        work_order["awaiting_narrative_review"] = True
+        work_order["validation"]["status"] = "pending"
+
+
 def record_validation(hub: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
     required = [
         "work_order_id", "timestamp", "result", "gate_results", "residual_issue_count",
@@ -647,6 +682,8 @@ def record_validation(hub: dict[str, Any], record: dict[str, Any]) -> dict[str, 
         and int(record["introduced_issue_count"]) == 0
         and not record["blockers"]
     )
+    if clean:
+        _require_narrative_review(work_order)
     if (
         clean
         and work_order.get("operation") in STORYBOARD_PRODUCTION_OPERATIONS
@@ -668,6 +705,8 @@ def record_validation(hub: dict[str, Any], record: dict[str, Any]) -> dict[str, 
     validation_record["clean"] = clean
     work_order["validation"]["records"].append(validation_record)
     work_order["validation"]["status"] = "pass" if clean else "fail"
+    if clean and work_order.get("operation") in NARRATIVE_PRODUCTION_OPERATIONS:
+        work_order["awaiting_narrative_review"] = False
     work_order["updated_at"] = record["timestamp"]
     hub["updated_at"] = record["timestamp"]
     return {
@@ -690,13 +729,20 @@ def transition_work_order(
     if target_state == "executing":
         if work_order["authorization"] not in {"explicit_execute", "plan_only", "read_only"}:
             raise ValueError("execution requires explicit authorization or a non-mutating mode")
-        if current == "failed_current" and work_order["internal_round"] >= hub["policy"]["max_internal_repair_rounds"]:
+        if (
+            current == "failed_current"
+            and work_order.get("operation") not in NARRATIVE_PRODUCTION_OPERATIONS
+            and work_order["internal_round"] >= hub["policy"]["max_internal_repair_rounds"]
+        ):
             raise ValueError("maximum internal repair rounds reached; upstream rebuild or new work order required")
+        _invalidate_narrative_review(work_order)
         work_order["internal_round"] += 1
     if target_state == "validating" and not work_order["deliverable_ids"]:
         raise ValueError("validation requires at least one recorded deliverable")
     if target_state == "passed" and work_order["validation"]["status"] != "pass":
         raise ValueError("passed state requires a clean validation record")
+    if target_state in {"passed", "awaiting_signoff"}:
+        _require_narrative_review(work_order)
     if (
         target_state == "passed"
         and work_order.get("operation") in STORYBOARD_PRODUCTION_OPERATIONS
@@ -728,6 +774,8 @@ def signoff_work_order(
     work_order = _find_work_order(hub, work_order_id)
     if work_order["status"] != "awaiting_signoff":
         raise ValueError("human sign-off requires awaiting_signoff state")
+    if decision == "approve":
+        _require_narrative_review(work_order)
     if (
         work_order.get("operation") in STORYBOARD_PRODUCTION_OPERATIONS
         and not str(
@@ -745,6 +793,7 @@ def signoff_work_order(
     else:
         prior = work_order["status"]
         work_order["status"] = "approved"
+        _invalidate_narrative_review(work_order)
         work_order["validation"]["status"] = "pending"
         work_order["state_history"].append({"timestamp": now, "from": prior, "to": "approved"})
     signoff = {"work_order_id": work_order_id, "decision": decision, "timestamp": now}
@@ -779,6 +828,8 @@ def _validate_first_draft_quality(value: Any, path: str) -> list[str]:
     errors: list[str] = []
     if not isinstance(value, dict):
         return [f"{path} must be an object or null"]
+    v2 = value.get("quality_contract") == "storyboard-quality-v2"
+    unknown = v2 and value.get("measurement_state") == "unavailable"
     required = [
         "grade", "checked_shot_count", "issue_point_count",
         "unique_affected_shot_count", "affected_shot_ids",
@@ -794,8 +845,10 @@ def _validate_first_draft_quality(value: Any, path: str) -> list[str]:
     for field in required:
         if field not in value:
             errors.append(f"{path} missing field: {field}")
-    if value.get("grade") not in {"A", "B", "C"}:
-        errors.append(f"{path}.grade must be A, B, or C")
+    if value.get("grade") not in ({"unavailable"} if unknown else {"A", "B", "C"}):
+        errors.append(f"{path}.grade must match its measurement state")
+    if unknown and any(value.get(key) is True for key in ("commit_eligible", "threshold_met", "final_audit_pass")):
+        errors.append(f"{path}: unavailable quality cannot claim acceptance")
     count_fields = [
         "checked_shot_count", "issue_point_count", "unique_affected_shot_count",
         "hard_or_major_issue_count", "global_blocking_issue_count",
@@ -812,6 +865,8 @@ def _validate_first_draft_quality(value: Any, path: str) -> list[str]:
     ]
     for field in percentage_fields:
         item = value.get(field)
+        if unknown and item is None and field != "final_independent_audit_required_percent":
+            continue
         if (
             isinstance(item, bool)
             or not isinstance(item, (int, float))
@@ -841,12 +896,28 @@ def _validate_first_draft_quality(value: Any, path: str) -> list[str]:
         for episode_id, rate in episode_rates.items():
             if not isinstance(episode_id, str) or not episode_id:
                 errors.append(f"{path}.episode_correctness_percent keys must be non-empty strings")
+            if unknown and rate is None:
+                continue
             if (
                 isinstance(rate, bool)
                 or not isinstance(rate, (int, float))
                 or not 0 <= float(rate) <= 100
             ):
                 errors.append(f"{path}.episode_correctness_percent[{episode_id!r}] is invalid")
+    if v2 and "episode_direct_usability_percent" in value:
+        usability = value["episode_direct_usability_percent"]
+        if not isinstance(usability, dict):
+            errors.append(f"{path}.episode_direct_usability_percent must be an object")
+        else:
+            for episode_id, rate in usability.items():
+                if not isinstance(episode_id, str) or not episode_id:
+                    errors.append(f"{path}.episode_direct_usability_percent keys must be non-empty strings")
+                if not (unknown and rate is None) and (isinstance(rate, bool) or not isinstance(rate, (int, float)) or not 0 <= rate <= 100):
+                    errors.append(f"{path}.episode_direct_usability_percent[{episode_id!r}] is invalid")
+    if v2 and "minimum_episode_direct_usability_percent" in value:
+        minimum = value["minimum_episode_direct_usability_percent"]
+        if not (unknown and minimum is None) and (isinstance(minimum, bool) or not isinstance(minimum, (int, float)) or not 0 <= minimum <= 100):
+            errors.append(f"{path}.minimum_episode_direct_usability_percent is invalid")
     if isinstance(value.get("affected_shot_ids"), list) and isinstance(
         value.get("unique_affected_shot_count"), int
     ) and value.get("unique_affected_shot_count") != len(value["affected_shot_ids"]):
@@ -1008,11 +1079,18 @@ def validate_hub(hub: Any) -> list[str]:
         "first_draft_correctness_threshold_percent": 98.0,
         "first_draft_direct_usability_threshold_percent": 98.0,
         "max_new_local_issue_rate_percent": 2.0,
-        "minimum_episode_correctness_percent": 96.0,
+        "minimum_episode_correctness_percent": 98.0,
+        "minimum_episode_direct_usability_percent": 98.0,
         "known_issue_recurrence_tolerance": 0,
         "systemic_root_cause_tolerance": 0,
     }
     for field, value in policy_expected.items():
+        # Read old policy metadata without rewriting its signed history. New
+        # projects and explicit migrations use both current 98% thresholds.
+        if (field in {"minimum_episode_correctness_percent", "minimum_episode_direct_usability_percent"}
+                and policy.get("minimum_episode_correctness_percent") == 96.0
+                and "minimum_episode_direct_usability_percent" not in policy):
+            continue
         if policy.get(field) != value:
             errors.append(f"policy.{field} must equal {value!r}")
     errors.extend(_validate_project_state(hub.get("project_state")))
@@ -1055,12 +1133,25 @@ def validate_hub(hub: Any) -> list[str]:
             expected_role = _server_role_for_work_order(str(work_order.get("operation")))
             if work_order.get("server_actor_role") != expected_role:
                 errors.append(f"work order {work_order_id} violates production/audit/repair role separation")
+        if work_order.get("operation") == "narrative_audit":
+            if (
+                work_order.get("mode") != "audit_only"
+                or work_order.get("authorization") != "read_only"
+                or work_order.get("server_actor_role") != "independent_audit"
+                or work_order.get("mutates_source") is not False
+            ):
+                errors.append(f"work order {work_order_id} violates narrative audit read-only role separation")
         if work_order.get("operation") == "storyboard_repair":
             if work_order.get("repair_activation_condition") != policy_expected["repair_activation_condition"]:
                 errors.append(f"work order {work_order_id} lacks conditional repair activation")
             if work_order.get("repair_return_role") != "independent_audit":
                 errors.append(f"work order {work_order_id} must return to independent_audit")
-        if not isinstance(work_order.get("internal_round"), int) or not 0 <= work_order.get("internal_round", -1) <= 3:
+        internal_round = work_order.get("internal_round")
+        if (
+            not isinstance(internal_round, int)
+            or internal_round < 0
+            or (work_order.get("operation") not in NARRATIVE_PRODUCTION_OPERATIONS and internal_round > 3)
+        ):
             errors.append(f"work order {work_order_id} has invalid internal_round")
         if work_order.get("status") == "archived":
             signed = any(item.get("work_order_id") == work_order_id and item.get("decision") == "approve" for item in hub.get("human_signoffs", []))

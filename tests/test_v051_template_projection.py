@@ -370,15 +370,23 @@ class V051TemplateProjectionTests(unittest.TestCase):
                 self.assertIn(value, prompt)
 
     def test_keyframe_scrubs_dialogue_and_environment_audio(self) -> None:
+        from shortdrama_mcp.materializer import _visual_only_text
+        from validate_storyboard import _visual_only_clauses, project_gpt_keyframe
+
         shot = copy.deepcopy(compact_storyboard()["shots"][0])
         shot["起始状态"] = '甲闭口站定；“母亲，请见谅。”；【甲】第二句。'
         shot["环境动态"] = "古琴声从院内传来；雨声持续；窗纸停在内弯瞬间"
-        prompt = compile_gpt_keyframe_instruction(shot, assume_compact=True)
-        self.assertNotIn("母亲，请见谅", prompt)
-        self.assertNotIn("第二句", prompt)
-        self.assertNotIn("古琴声", prompt)
-        self.assertNotIn("雨声", prompt)
-        self.assertIn("窗纸停在内弯瞬间", prompt)
+        for fn in (project_gpt_keyframe, lambda s: compile_gpt_keyframe_instruction(s, assume_compact=True)):
+            with self.assertRaisesRegex(ValueError, 'keyframe_static_contract_violation: unbound_visual_text'):
+                fn(shot)
+        # The legacy helper's explicit cleanup route retains its old contract.
+        for fn in (_visual_only_text, _visual_only_clauses):
+            prompt = fn(shot["起始状态"], strip_dialogue=True) + fn(shot["环境动态"], strip_dialogue=True)
+            self.assertNotIn("母亲，请见谅", prompt)
+            self.assertNotIn("第二句", prompt)
+            self.assertNotIn("古琴声", prompt)
+            self.assertNotIn("雨声", prompt)
+            self.assertIn("窗纸停在内弯瞬间", prompt)
 
     def test_keyframe_preserves_explicit_visual_labels_and_visible_text(self) -> None:
         shot = copy.deepcopy(compact_storyboard()["shots"][0])

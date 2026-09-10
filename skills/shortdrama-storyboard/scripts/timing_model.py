@@ -547,14 +547,19 @@ def chapter_budget(dialogues, rules=None, project=None, *, budget=None):
         if any(left["end"] > right["start"] + EPS for left, right in zip(spoken, spoken[1:])):
             fault("章节发言窗口重叠，不能用重叠规避完整对白容量")
             valid = False
-        from timing_events import MOUTH_ACTIONS, _positive
+        from timing_events import MOUTH_ACTIONS, _positive, _closed_mouth_action
         for action in entries.values():
-            if action["kind"] != "action" or not _positive(MOUTH_ACTIONS, action["basis"]):
+            # Unlike the legacy drinking basis, a closed-mouth interval must be
+            # explicitly declared as an action. "先闭唇后说话" in a longer basis
+            # is not a declaration that the entire action interval is silent.
+            closed_mouth = _closed_mouth_action(str(action.get("action") or ""))
+            if action["kind"] != "action" or not (closed_mouth or _positive(MOUTH_ACTIONS, action["basis"])):
                 continue
             if any(action.get("actor") == line.get("speaker")
                    and max(action["start"], line["start"]) < min(action["end"], line["end"]) - EPS
                    for line in spoken):
-                fault("章节时间轴将同一人物的喝水/吞咽与发声重叠")
+                state = "闭唇" if closed_mouth else "喝水/吞咽"
+                fault(f"章节时间轴将同一人物的{state}与发声重叠")
                 valid = False
         if [row["source_index"] for row in spoken] != list(range(len(amounts))):
             fault("章节时间轴未按原序完整覆盖每次保护对白")

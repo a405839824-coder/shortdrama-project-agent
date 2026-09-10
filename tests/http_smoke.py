@@ -17,8 +17,12 @@ from mcp.client.streamable_http import streamable_http_client
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.5.28"
+EXPECTED_VERSION = "0.5.29"
 EXPECTED_TOOL_NAMES = {
+    "preflight_narrative_plan",
+    "review_narrative_artifact",
+    "record_narrative_attempt",
+    "read_narrative_record",
     "manage_user_access",
     "get_agent_status",
     "migrate_project_state",

@@ -24,6 +24,7 @@ ROOM = r"室内|内景|屋内|内室|闺阁|厨房|灶房|灶间|伙房|浴室|�
 OUTDOOR = r"室外|户外|外景|门外|窗外|外廊|露天|街市|街道|庭院|院中|野外|林中|河边|山坡|城外"
 TRANSITION = r"过渡空间|半开放|门槛处|门洞内|廊檐下|回廊|廊下"
 NEGATION = re.compile(r"(?:禁止|不得|不要|避免|不使用|不生成|不出现|不存在|没有|尚未|并未|未见|无|不)(?:任何|明显|可见|强烈|额外|出现|产生|形成|使用|生成|造成)?[^；。！？!?，,、\n]{0,10}$")
+DOUBLE_NEGATION = re.compile(r"(?:并非|并不是|不是|并不|不再|不|没有)\s*(?:没有|无|不使用|不生成|禁止|不得|不要)[^；。！？!?，,、\n]{0,10}$")
 CLAUSE_SPLIT = re.compile(r"[；。！？!?，,\n]|但是|然而|反而|但|却")
 EFFECT_RE = re.compile(r"halation|高光晕染|镜头光晕|全画面光晕", re.I)
 SMOKE_RE = re.compile(r"薄雾|浓雾|雾气|烟雾|细烟|薄烟|轻烟|浓烟|烟气|烟尘|炊烟|空气颗粒|水汽|蒸汽|茶汽")
@@ -46,11 +47,17 @@ def affirmative_matches(pattern: re.Pattern[str], value: Any) -> list[re.Match[s
     for match in pattern.finditer(text):
         prefix = CLAUSE_SPLIT.split(text[:match.start()])[-1]
         item_prefix = prefix.rsplit("、", 1)[-1]
-        restart = re.search(r"使用|采用|允许|出现|形成|变得|变成|呈现|产生|笼罩|弥漫", item_prefix)
-        if NEGATION.search(item_prefix):
+        restart = re.search(r"改用|改为|使用|采用|允许|出现|生成|形成|变得|变成|呈现|产生|笼罩|弥漫|摆放|点燃", item_prefix)
+        double_negative = bool(DOUBLE_NEGATION.search(item_prefix))
+        if NEGATION.search(item_prefix) and not double_negative:
             continue
-        if "、" in prefix and not restart and re.match(r"\s*(?:禁止|不得|不要|避免|没有|无|不使用|不生成)", prefix):
-            continue
+        if "、" in prefix and not restart and not double_negative:
+            head = prefix.split("、", 1)[0]
+            head_match = pattern.search(head)
+            head_prefix = head[:head_match.start()] if head_match else ""
+            inherited = bool(NEGATION.search(head_prefix)) and not DOUBLE_NEGATION.search(head_prefix)
+            if inherited or re.match(r"\s*(?:禁止|不得|不要|避免|没有|无|不使用|不生成)", prefix):
+                continue
         result.append(match)
     return result
 

@@ -9,6 +9,7 @@ from typing import Any
 STAGES = re.compile(r"【(\d+\.\d)—(\d+\.\d)秒】(.*?)(?=【\d+\.\d—\d+\.\d秒】|\Z)", re.S)
 NEGATION = re.compile(r"(?:禁止|不得|避免|不能|不要|不必|无需|没有|不再|并未|未曾|不|无|未)[^，,；;。！？!?、\n]{0,6}$")
 MOUTH_ACTIONS = r"喝水|饮水|喝茶|饮茶|浅啜|啜饮|吞咽|咽下"
+CLOSED_MOUTH_ACTIONS = r"闭唇|合唇|闭嘴|(?:双唇|嘴唇)(?:保持)?(?:闭合|紧闭)"
 ACTION_GROUPS = (
     r"喝水|饮水", r"喝茶|饮茶|浅啜|啜饮", r"吞咽|咽下",
     r"点头|颔首", r"行礼|作揖|鞠躬", r"起身|站起", r"落座|坐下",
@@ -38,11 +39,59 @@ def _without_speech(picture: str) -> str:
     return re.sub(r'(说道|说)[：:]?\s*[“"][^”"\n]*[”"]', r"\1〈发言〉", picture)
 
 
-def _positive(pattern: str, text: str) -> bool:
-    return any(not NEGATION.search(text[max(0, match.start() - 16):match.start()]) for match in re.finditer(pattern, text))
+def _negated_before(text: str, position: int, actors: tuple[str, ...] = ()) -> bool:
+    prefix = text[:position]
+    # A declared actor's exact identity is a noun, not an action modifier.
+    # Keep offsets unchanged and retain every negation outside those names.
+    # Subject ownership is still checked separately against the original prose.
+    for actor in sorted(set(actors), key=len, reverse=True):
+        if actor:
+            name_at_subject = re.compile(
+                r"(?P<lead>(?:^|[，,；;。！？!?】\n]|〈发言〉)\s*(?:(?:在|于)?\d+(?:\.\d+)?秒)?\s*|"
+                r"(?:看着|观察|望着|看见))" + re.escape(actor)
+            )
+            prefix = name_at_subject.sub(lambda m: m.group("lead") + "\ufffc" * len(actor), prefix)
+    return bool(NEGATION.search(prefix[-16:]))
+
+
+def _positive(pattern: str, text: str, actors: tuple[str, ...] = ()) -> bool:
+    return any(not _negated_before(text, match.start(), actors) for match in re.finditer(pattern, text))
+
+
+def _closed_mouth_action(action: str) -> bool:
+    """An affirmative event action, not a quoted/conditional mention of it.
+
+    Only the explicit action owns the supplied interval. A basis paragraph can
+    describe closing then speaking without declaring that whole paragraph a
+    closed-mouth state; conversely it cannot shorten a declared action span.
+    """
+    text = re.sub(r'“[^”]*”|「[^」]*」|『[^』]*』|‘[^’]*’|"[^"\n]*"|\'[^\'\n]*\'',
+                  lambda match: " " * len(match.group()), action)
+    conditional = False
+    for clause in re.split(r"([，,；;。！？!?\n])", text):
+        if re.fullmatch(r"[；;。！？!?\n]", clause):
+            conditional = False
+            continue
+        if re.match(r"\s*(?:但|然而|不过|实际|当前|现在)", clause):
+            conditional = False
+        for match in re.finditer(CLOSED_MOUTH_ACTIONS, clause):
+            prefix, suffix = clause[:match.start()], clause[match.end():]
+            if re.search(r"如果|假如|倘若|若", prefix):
+                conditional = True
+            if conditional or _negated_before(clause, match.start()):
+                continue
+            if re.match(r"\s*(?:动作|状态)?\s*(?:并)?(?:不发生|未发生|不存在|不成立|取消)", suffix):
+                continue
+            return True
+        if re.search(r"如果|假如|倘若|若", clause):
+            conditional = True
+    return False
 
 
 def _action_pattern(action: str) -> str:
+    if _closed_mouth_action(action):
+        # Generic 保持 must not lend an unrelated hand/body hold to this state.
+        return CLOSED_MOUTH_ACTIONS
     for group in ACTION_GROUPS:
         if re.search(group, action):
             return group
@@ -69,17 +118,17 @@ def _basis_positions(event: dict[str, Any], shot: dict[str, Any]) -> list[int]:
     picture = _without_speech(str(shot.get("画面内容") or ""))
     basis = event["basis"]
     action = event["action"]
-    if basis not in picture or not _positive(_action_pattern(action), basis):
+    actor = event["actor"]
+    if basis not in picture or not _positive(_action_pattern(action), basis, (actor,)):
         return []
     # A source quote mentioning an action is not an event, and a label cannot
     # lend another person's physical action to this actor.
-    actor = event["actor"]
     position = picture.find(basis)
     positions = []
     while position >= 0:
         for match in re.finditer(_action_pattern(action), basis):
             absolute = position + match.start()
-            if _same_subject(picture, absolute, actor) and not NEGATION.search(picture[max(0, absolute - 16):absolute]):
+            if _same_subject(picture, absolute, actor) and not _negated_before(picture, absolute, (actor,)):
                 positions.append(absolute)
         position = picture.find(basis, position + 1)
     return positions
@@ -131,11 +180,12 @@ def _natural_serial_faults(index: dict[str, dict[str, Any]], speech_spans: list[
     faults = []
     for shot_id, shot in index.items():
         picture = _without_speech(str(shot.get("画面内容") or ""))
+        actors = tuple(str(span.get("speaker") or "") for span in speech_spans if str(span.get("shot_id") or "") == shot_id)
         phases = [(float(match.group(1)), float(match.group(2)), match.group(3)) for match in STAGES.finditer(picture)]
         if not phases:
             phases = [(0.0, float(shot.get("时长", shot.get("duration"))), picture)]
         for start, end, body in phases:
-            serial = [match for match in SERIAL.finditer(body) if not NEGATION.search(body[max(0, match.start() - 16):match.start()]) and _positive(re.escape(match.group("action")), match.group())]
+            serial = [match for match in SERIAL.finditer(body) if not _negated_before(body, match.start(), actors) and _positive(re.escape(match.group("action")), match.group(), actors)]
             if not serial:
                 continue
             spans = []
@@ -236,13 +286,15 @@ def validate_events(project: dict[str, Any], shots: Any, speech_spans: list[dict
                 faults.append(_fault(f"事件{event_id}依赖未知事件/发言{dependency}", shot_id))
             elif dependency == event_id or max(item["global_end"] for item in prior) > event["global_start"] + 1e-9:
                 faults.append(_fault(f"事件{event_id}在前置{dependency}结束前开始，串行依赖不成立", shot_id))
-        if re.search(MOUTH_ACTIONS, event["action"]):
+        closed_mouth = _closed_mouth_action(event["action"])
+        if closed_mouth or re.search(MOUTH_ACTIONS, event["action"]):
             for span in speech_spans:
                 if span.get("speaker") != event["actor"] or str(span.get("kind") or "dialogue") in {"psychological", "psych", "psychological_audio"}:
                     continue
                 bounds = _span_bounds(span, offsets)
                 if bounds and event["global_start"] < bounds[1] - 1e-9 and event["global_end"] > bounds[0] + 1e-9:
-                    faults.append(_fault(f"事件{event_id}的喝水/吞咽与同人发声{span.get('id')}重叠", shot_id))
+                    state = "闭唇" if closed_mouth else "喝水/吞咽"
+                    faults.append(_fault(f"事件{event_id}的{state}与同人发声{span.get('id')}重叠", shot_id))
         trigger = event.get("trigger")
         if event["kind"] == "reaction" and not isinstance(trigger, dict):
             faults.append(_fault(f"反应事件{event_id}缺发言字符触发点", shot_id))

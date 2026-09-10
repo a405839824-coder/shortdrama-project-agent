@@ -17,6 +17,7 @@ from .canonical import (
     stable_json_hash,
 )
 from .materializer import migrate_legacy_shot
+from .continuity import state_equal
 
 
 # The delta route is intentionally execution-only. These fields bind source,
@@ -267,7 +268,7 @@ def _build_adjacent_continuity_audit(
         transition_explanation = right_row.get("transition_explanation")
         if boundary_type == "same_scene":
             continuity_status = (
-                "closed" if left_end == right_start else "fail_current"
+                "closed" if state_equal(left_end, right_start) else "fail_current"
             )
         else:
             continuity_status = (

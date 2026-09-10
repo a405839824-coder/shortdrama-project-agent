@@ -1,7 +1,7 @@
 {
   "name": "shortdrama-project-agent",
-  "version": "0.5.28",
-  "description": "Chinese short-drama production with configurable speech timing, occurrence-safe dialogue, per-person performance, scene-grounded lighting, and independent audit.",
+  "version": "0.5.29",
+  "description": "Short-drama story and storyboard production with source-bound plans, immutable drafts, and independent review.",
   "author": {
     "name": "Storyboard Project Agent"
   },
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "分镜项目 Agent",
     "shortDescription": "生成、修改、审计并交付短剧剧本与分镜",
-    "longDescription": "0.5.28新增Admin/Producer账号权限、默认拒绝未知操作、服务端规则维护保护及账号操作日志。0.5.26在每次审计后给出本批修正模式建议：依据问题类型、明确程度和跨镜影响分级，用户可选其他模式，建议不改变审计结论。0.5.25新增经明确授权的旧工作簿母本迁移：逐字段核对原件，逐场景及全量预检后创建待审新版，独立审计签发正式结论。按 R10.1 compact-master 与 R10-SPC-1 执行短剧项目。0.5.24统一规则注册、任意认证窗口执行和项目台账路由；单镜及章节使用同源语速配置，按发言、阶段和并行或先后事件核对时间，不再固定叠加呼吸、听者反应和镜尾等待。无匹配实测时普通中文对白采用候选5字/秒并明确未标定，软件通过不代表视频语速已验证。原句按出现身份与字符范围保护；逐人核对眼部、逐词绑定重音；普通室内分别验证清澈空气、可辨背景和正常曝光，物理光影保持连续。保留27字段、10列导出、三阶段、静态GPT投影、独立审计；Admin可见20个工具、Producer可见17个工具；完整项目内容保存于ChatGPT Library。",
+    "longDescription": "0.5.29合并剧情生产约束：写正文前绑定原文、授权、事实与场景状态，计划及正文分别独立审查；首稿、失败与修订签名留档，依据变更使旧结论失效。代码与软件检查不代表真实首稿98%已验证；线上生效以部署版本为准。保留0.5.28的Admin/Producer账号权限、未知操作默认拒绝、服务端规则维护保护及账号日志。合入0.5.27的首次候选签名留档、内容与可用率分开统计、稳定镜头问题追踪、漏检/规则变化/待定归因和服务端修复差异证据；支持指定分集只读机器诊断，保留历史签名与未知值。真实首稿98%及两审收敛须另行实测。0.5.26在每次审计后给出本批修正模式建议：依据问题类型、明确程度和跨镜影响分级，用户可选其他模式，建议不改变审计结论。0.5.25新增经明确授权的旧工作簿母本迁移：逐字段核对原件，逐场景及全量预检后创建待审新版，独立审计签发正式结论。按 R10.1 compact-master 与 R10-SPC-1 执行短剧项目。0.5.24统一规则注册、任意认证窗口执行和项目台账路由；单镜及章节使用同源语速配置，按发言、阶段和并行或先后事件核对时间，不再固定叠加呼吸、听者反应和镜尾等待。无匹配实测时普通中文对白采用候选5字/秒并明确未标定，软件通过不代表视频语速已验证。原句按出现身份与字符范围保护；逐人核对眼部、逐词绑定重音；普通室内分别验证清澈空气、可辨背景和正常曝光，物理光影保持连续。保留27字段、10列导出、三阶段、静态GPT投影、独立审计；Admin可见24个工具、Producer可见21个工具；完整项目内容保存于ChatGPT Library。",
     "developerName": "Storyboard Project Agent",
     "category": "Productivity",
     "capabilities": [

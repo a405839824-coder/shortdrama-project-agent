@@ -1,6 +1,6 @@
-# Admin / Producer 账号权限（0.5.28）
+# Admin / Producer 账号权限（0.5.29，契约 admin-producer-v1）
 
-本版本基于已部署的 0.5.26 加入服务端账号权限。0.5.27 的另一项本地分镜质量改造不包含在本版本内；后续合并该改造时须保留这里的权限入口与版本契约。
+账号权限于 0.5.28 基于 0.5.26 加入。0.5.29 将此前独立开发的 0.5.27 分镜质量与剧情生产约束合入，同时保留权限入口与 `admin-producer-v1` 契约；实际线上版本须在部署后核实，不能由本说明推定。
 
 | 操作 | Admin | Producer |
 | --- | --- | --- |
@@ -32,7 +32,7 @@ SHORTDRAMA_ADMIN_SUBJECTS=["auth0|YOUR_EXISTING_OWNER_SUBJECT"]
 
 ## 管理和员工使用
 
-管理员连接现有 MCP 后调用 `get_agent_status`，确认 `data.account_access.role=admin`。Admin 发现 20 个工具，Producer 发现 17 个工具。Producer 即使手动调用隐藏的管理工具也会被服务端拒绝。
+管理员连接现有 MCP 后调用 `get_agent_status`，确认 `data.account_access.role=admin`。Admin 发现 24 个工具，Producer 发现 21 个工具。新增的 `preflight_narrative_plan`、`review_narrative_artifact`、`record_narrative_attempt`、`read_narrative_record` 均对 Producer 开放，但保留生产及独立审查的服务端身份门禁。Producer 即使手动调用隐藏的管理工具也会被服务端拒绝。
 
 `manage_user_access` 支持 `action=list`、`action=audit`，以及 `action=set` 搭配精确 `subject`、`role=admin|producer`、`enabled=true|false`。停用后同一旧 token 也无法继续使用工具。日志包含用户、角色、工具、项目、开始/成功/失败/拒绝和时间，不记录 token、原文、提示词或上传正文；更改角色与对应日志在同一个事务内写入。
 
@@ -40,9 +40,9 @@ SHORTDRAMA_ADMIN_SUBJECTS=["auth0|YOUR_EXISTING_OWNER_SUBJECT"]
 
 ## 上线顺序与验收
 
-1. 在 Auth0 Users 中核对现有所有者的精确 User ID，在 Railway 配置初始管理员环境变量。现有 0.5.26 不读取这个新变量。
+1. 从 0.5.28 升级时保留原 Auth0 配置、初始管理员环境变量及账号数据库；首次启用权限时才在 Auth0 Users 核对现有所有者的精确 User ID 并配置初始管理员。
 2. 完成权限专项测试、完整服务回归、运行时自检、HTTP/stdio 和源码打包检查，再合并并部署。
-3. `/health` 应报告 `version=0.5.28`、`account_access_contract=admin-producer-v1`、`account_role_restrictions=true`、`bootstrap_admin_configured=true`。
+3. `/health` 应报告 `version=0.5.29`、`account_access_contract=admin-producer-v1`、`account_role_restrictions=true`、`bootstrap_admin_configured=true`。
 4. 用现有管理员连接验证账号角色；用独立 Producer 账号验证正常生产调用成功以及 `source_role=rule`、维护操作、账号管理被拒绝。线上账号验收必须使用真实 OAuth 用户，不能以本地测试冒充。
 5. 升级改变规则版本指纹，已有项目后续写入前需刷新运行时自检证书；历史审计状态仍按原有签名和版本规则判断，不自动宣称重新通过。
 

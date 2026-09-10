@@ -1259,9 +1259,48 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         )
         self.assertEqual(len(records), 1)
         self.assertTrue(self.service.store.project_record_is_signed(records[0]))
+        observations = self.service.store.list_project_records_strict(
+            self.namespace, project_id, kind="draft_observations")
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["candidate_snapshot"], draft)
+        self.assertIsNone(observations[0]["raw_generation_quality"])
+        self.assertNotIn("candidate_snapshot", result.data["candidate_observation"])
+        self.assertTrue(self.service.store.project_record_is_signed(observations[0]))
+        changed = copy.deepcopy(observations[0])
+        changed["candidate_snapshot"]["shots"][0]["环境音效"] = "无"
+        with self.assertRaisesRegex(ValueError, "draft_observation_immutable"):
+            self.service.store.save_project_record(self.namespace, project_id,
+                kind="draft_observations", record_id=changed["observation_id"], value=changed)
         ledger = self.service.store.load_ledger(self.namespace, project_id)
         self.assertEqual(ledger["events"][-1]["task_type"], "production_draft_preflight")
         self.assertGreaterEqual(len(ledger["issues"]), 1)
+
+    def test_readonly_diagnostic_preserves_unknown_history_and_ignores_workflow_block(self):
+        project_id = self._project("readonly-scoped-diagnostic")
+        storyboard = valid_storyboard()
+        storyboard["shots"][0]["环境音效"] += "；BGM渐入"
+        foreign = copy.deepcopy(storyboard["shots"][0])
+        foreign.update({"episode_id": "EP36", "镜头编号": "EP36-001", "场景连续性ID": "EP36-SC01"})
+        storyboard["shots"].append(foreign)
+        storyboard["prevention_evidence"]["repair_history"] = [{"round": 1, "introduced_issue_count": None}]
+        record = self.service.store.save_artifact_bytes(self.namespace, project_id,
+            json.dumps(storyboard, ensure_ascii=False).encode("utf-8"), file_name="historical.json",
+            artifact_type="storyboard_json", version="historical-v1")
+        with self.service.store.mutate_project(self.namespace, project_id) as (hub, ledger):
+            hub["project_state"]["current_stage"] = "failed_current"
+        directory = self.service.store.project_dir(self.namespace, project_id)
+        before = {str(p.relative_to(directory)): hashlib.sha256(p.read_bytes()).hexdigest()
+                  for p in directory.rglob("*") if p.is_file()}
+        result = self.service.diagnose_storyboard_artifact(self.namespace, project_id,
+            record["artifact_id"], ["EP01"])
+        self.assertEqual(result.status, "diagnostic_completed")
+        self.assertEqual(result.data["formal_audit_status"], "not_performed")
+        self.assertFalse(result.data["certificate_created"])
+        self.assertTrue(result.data["outside_scope_issues"])
+        self.assertTrue(result.data["unscoped_or_dependency_issues"])
+        after = {str(p.relative_to(directory)): hashlib.sha256(p.read_bytes()).hexdigest()
+                 for p in directory.rglob("*") if p.is_file()}
+        self.assertEqual(before, after)
 
     def test_full_clean_preflight_is_signed_and_bound_to_exact_commit(self) -> None:
         project_id = self._project("full-draft-binding")
@@ -1546,6 +1585,16 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         passed_event = passed.data["draft_preflight"]["ledger_event"]
         self.assertEqual(passed_event["audit_cycle_id"], failed_event["audit_cycle_id"])
         self.assertEqual(passed_event["audit_round"], 2)
+        first_observation = failed.data["candidate_observation"]
+        self.assertEqual(passed.data["candidate_observation"]["first_observation_id"],
+                         first_observation["observation_id"])
+        original = self.service.store.get_project_record(self.namespace, project_id,
+            kind="draft_observations", record_id=first_observation["observation_id"])
+        self.assertEqual(original["candidate_snapshot"], broken)
+        reopened = self.service._observe_draft_candidate(self.namespace, project_id,
+            work_order_id="new-work-order", scope_kind="full", scope_id="EP01", storyboard=corrected,
+            quality=passed.data["quality"], report=passed.data["report"])
+        self.assertEqual(reopened["first_observation_id"], first_observation["observation_id"])
 
         ledger = self.service.store.load_ledger(self.namespace, project_id)
         draft_events = [

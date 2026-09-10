@@ -18,14 +18,14 @@ QUOTE_RE = re.compile(r'“([^”\n]+)”|‘([^’\n]+)’|"([^"\n]+)"|「([^�
 DIALOGUE_RE = re.compile(r'(?:^|[；;。！？!?，,、】])\s*(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})说道[：:]?\s*[“"](?P<line>[^”"\n]+)[”"]')
 FACE_SCALE_RE = re.compile(r"大特写|特写|近景|中近景|胸部以上|腰部以上")
 FACE_RE = re.compile(r"面部|眼睛|眼神|眼睑|眼球|眼眸|双眼|侧脸|人物反应")
-NON_PERSON_RE = re.compile(r"^(?:无|无人|无人物|不适用|书页|书上内容|桌面|账本|杯盏|茶杯|茶盏|信件|信封|木盒|礼匣|门窗|道具|场景|环境|远处行人|背景人群|普通人群|背景生态)$")
-HIDDEN_RE = re.compile(r"(?:面部|眼睛|双眼|眼部)(?:全程|始终)?(?:不可见|不在画面|被遮挡|完全遮挡)|(?:仅|只)(?:露出|拍到|可见)?(?:背影|后脑|双手|手部)|背向机位|(?:全程|始终)(?:背影|背对镜头)")
+NON_PERSON_RE = re.compile(r"^(?:无|无人|无人物|(?:无人物|无人|没有人物|没有人)入画|不适用|书页|书上内容|桌面|账本|杯盏|茶杯|茶盏|信件|信封|木盒|礼匣|门窗|道具|场景|环境|远处行人|背景人群|普通人群|背景生态)$")
+HIDDEN_RE = re.compile(r"(?:面部|眼睛|双眼|眼部)(?:(?:和|与)(?:面部|眼睛|双眼|眼部))?(?:全程|始终|均|都)?(?:不可见|不入画|不在画面|被遮挡|完全遮挡)|(?:仅|只)(?:露出|拍到|可见)?(?:背影|侧背|后脑|双手|手部|胸腹衣襟)|背向机位|(?:全程|始终)(?:背影|背对镜头)")
 VISIBLE_RE = re.compile(r"(?:面部|眼睛|双眼|眼部|侧脸)(?:清楚|清晰|完整)?可见")
 FOCUS_RE = re.compile(r"(?:眼球|视线|目光|焦点).{0,14}(?:换焦|位移|焦点调整|微调)|(?:轻微|细微)(?:调整|转动)眼球")
 EYELID_RE = re.compile(r"(?:上|下)?眼睑|眼皮|眼睫")
-EYELID_CHANGE_RE = re.compile(r"(?:眼睑|眼皮|眼睫).{0,18}(?:略压|轻压|下压|压低|收紧|放松|舒展|微抬|抬起|低垂|松紧|恢复|变化|松开)|(?:略压|轻压|下压|压低|收紧|放松|微抬).{0,8}(?:眼睑|眼皮)")
+EYELID_CHANGE_RE = re.compile(r"(?:眼睑|眼皮|眼睫)[^，,；;。！？!?\n]{0,18}?(?P<verb>略压|轻压|下压|压低|收紧|放松|舒展|微抬|抬起|低垂|松紧|恢复|变化|松开|由紧转松|由松转紧|放平|微提|轻提|轻收|略收)|(?P<preverb>略压|轻压|下压|压低|收紧|放松|微抬)[^，,；;。！？!?\n]{0,8}(?:眼睑|眼皮)")
 GAZE_RE = re.compile(r"(?:眼球|视线|目光|眼神).{0,32}(?:从|由).{1,28}(?:移向|转向|落向|扫向|回到|看向|落在).+")
-HEAD_RE = re.compile(r"(?:眼球|视线|目光).{0,20}先.{0,35}头部|头部.{0,20}(?:随后|再|轻微跟|保持不动|不跟随|不转|不动|不跟)")
+HEAD_RE = re.compile(r"(?:眼球|视线|目光).{0,20}先.{0,35}头部|头部.{0,20}(?:随后|再|轻微跟|保持不动|保持当前方向|不跟随|不转|不动|不跟)")
 END_GAZE_RE = re.compile(r"(?:视线|目光|眼神|眼球).{0,20}(?:落在|落向|停在|停留在|回到|看向|移向|转向|对准|聚焦于).+")
 GAZE_HOLD_RE = re.compile(r"保持(?:原有|当前|既定|此时的)?(?:视线|目光|注视方向)|(?:视线|目光)(?:仍|继续)?保持(?:不变|稳定)")
 GAZE_TARGET_RE = re.compile(r"(?:视线|目光|眼神|眼球)[^，,；;。！？!?\n]{0,36}?(?:落在|落向|停在|停留在|回到|看向|移向|转向|对准|聚焦于)(?P<target>[^，,；;。！？!?\n]+)")
@@ -42,7 +42,11 @@ STATIC_OPEN_RE = re.compile(r"双眼自然睁开.{0,32}(?:不处于|不生成|�
 PLOT_CLOSED_RE = re.compile(r"(?:原文|剧情|表演)(?:明确|要求|需要).{0,20}(?:闭眼|合眼|睡着|昏迷)")
 NEGATIVE_RE = re.compile(r"(?:禁止|不得|避免|不能|不可|不要|无需|没有|不再|并未|未曾|不|无|未)(?:让|安排|发生|出现|进行|做|有)?[^，,；;。！？!?、\n]{0,7}$")
 COLLECTIVE_RE = re.compile(r"^(?:镜尾|此时|随后|接着|同时|最后)?(?:三人|两人|二人|多人|众人|所有人|双方|各人|每人)")
-BODY_PART_PATTERN = r"面部|眼睛|双眼|眼部|侧脸|上半身|下半身|全身|双手|左手|右手|手部|手腕|手指|食指|肩缘|肩颈|肩背|肩部|脖颈|腰部|胸部|后脑|背影|轮廓"
+BODY_PART_PATTERN = r"面部|眼睛|双眼|眼部|侧脸|上半身|下半身|全身|双手|左手|右手|手部|手腕|手指|食指|肩缘|肩颈|肩背|肩部|脖颈|腰部|胸部|胸腹|后脑|背影|侧背|轮廓"
+FOCUS_ACTION_RE = re.compile(r"(?:眼球|视线|目光|焦点)[^，,；;。！？!?\n]{0,48}?(?P<verb>换焦|位移|焦点调整|微调)|(?P<preverb>(?:轻微|细微)(?:调整|转动))眼球")
+GAZE_PATH_RE = re.compile(r"(?:眼球|视线|目光|眼神)(?P<lead>[^，,；;。！？!?\n]{0,16}?)(?:从|由)(?P<origin>[^，,；;。！？!?\n]{1,36}?)(?P<verb>移向|转向|落向|扫向|回到|看向|落在|换焦至|换焦到|移焦至|移焦到)(?P<target>[^，,；;。！？!?\n]+)")
+ACTION_NEGATION_RE = re.compile(r"(?:禁止|不得|避免|不能|不可|不要|无需|没有|不再|并未|未曾|并非|并不|不是|不曾|未能|尚未|从未)(?:[^，,；;。！？!?\n]{0,16})$|(?:不|未)(?:再|曾|会|要|做|进行|发生|出现|轻微|微微|稍|稍稍|略微|自然|缓慢|逐渐|随后|轻)*$")
+TIME_SUBJECT_PREFIX = r"(?:(?:第|在|于)?\d+(?:\.\d+)?\s*(?:秒|s)(?:时|后|起)?[，,：:\s]*)"
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,139 @@ class Clause:
 def _positive(pattern: re.Pattern[str], text: str) -> list[re.Match[str]]:
     """Negation is local: it never swallows a later Chinese clause."""
     return [match for match in pattern.finditer(text) if not NEGATIVE_RE.search(text[max(0, match.start() - 18):match.start()])]
+
+
+def _action_matches(pattern: re.Pattern[str], text: str) -> list[re.Match[str]]:
+    """Check the actual predicate as well as a negation before its body part.
+
+    This is deliberately separate from state matching: ``眼睛不可见`` and
+    ``头部不跟`` are positive descriptions of legitimate states. Negated
+    movement cannot provide positive action evidence. Punctuation bounds scope.
+    """
+    result = []
+    for match in _positive(pattern, text):
+        verb = match.start('verb') if match.groupdict().get('verb') else match.start('preverb')
+        if not ACTION_NEGATION_RE.search(text[max(0, verb - 40):verb]):
+            result.append(match)
+    return result
+
+
+def _gaze_paths(text: str) -> list[re.Match[str]]:
+    result = []
+    for match in _action_matches(GAZE_PATH_RE, text):
+        # Negation before 从 can otherwise be arbitrarily far from 移向.
+        if ACTION_NEGATION_RE.search(match.group('lead')):
+            continue
+        origin = re.sub(r"(?:轻微|微微|缓慢|自然|逐渐|先|再|稍稍|稍)+$", "", match.group('origin')).strip()
+        target = match.group('target').strip()
+        # A route from a point to that same point is not a movement. Do not
+        # invent a different point, or treat a missing endpoint as resolved.
+        if not origin or not target or origin == target:
+            continue
+        if re.search(r"^(?:原处|原位置|同一位置|同一点|原目标)$", target):
+            continue
+        result.append(match)
+    return result
+
+
+def _eye_clauses(text: Any, names: Sequence[str], duration: float) -> list[Clause]:
+    """Quoted speech, thoughts and reported instructions are not eye actions."""
+    value = QUOTE_RE.sub(lambda m: '〈引文〉' + (m.group()[-2:-1] if m.group()[-2:-1] in '。！？!?' else ''), str(text or ''))
+    # A numeric location is an explicit target qualifier, not a second subject.
+    # Remove only the conventional coordinate prefix before clause splitting.
+    value = re.sub(r'位于x=[+-]?\d+(?:\.\d+)?[、，,\s]*y=[+-]?\d+(?:\.\d+)?米的', '', value)
+    return _clauses(value, names, duration)
+
+
+def _gaze_target_label(value: str) -> str | None:
+    value = re.sub(r'方向$', '', value.strip())
+    if (not value or re.search(r'或|某处|某个|原处|原目标|同一点|未知|待定|〈|〉|“|”', value)
+            or not re.fullmatch(r'[\u3400-\u9fffA-Za-z0-9·_-]{1,48}', value)):
+        return None
+    return value
+
+
+def _sequential_eye_path(clauses: Sequence[Clause]) -> tuple[bool, bool]:
+    """Recognize two explicit endpoints in a same-actor ordered action.
+
+    'Eyes first to the seal; then refocus on the list' and a head-led down/up
+    movement are complete paths without a literal 从. A single generic 微小换焦
+    or a final target alone is not. Callers pass only this actor's clauses.
+    """
+    move = re.compile(r'(?:眼球|视线|目光|眼神)[^，,；;。！？!?\n]{0,24}?(?P<verb>移向|落向|换焦到|换焦至|移焦到|移焦至)(?P<target>[^，,；;。！？!?\n]+)')
+    return_head = re.compile(r'^(?:抬头|低头|转头)后(?:重新|再次)?(?P<verb>落在|落向|回到)(?P<target>[^，,；;。！？!?\n]+)')
+    first = None
+    first_stage = None
+    head_led = False
+    for clause in clauses:
+        if first_stage != (clause.start, clause.end):
+            first = None
+            head_led = False
+        matches = _action_matches(move, clause.text)
+        returning = _action_matches(return_head, clause.text) if first and head_led else []
+        for match in matches + returning:
+            target = _gaze_target_label(match.group('target'))
+            if target is None:
+                continue
+            if first and target != first and (returning or re.search(r'随后|然后|再|接着', clause.text[:match.start()] + match.group())):
+                return True, head_led
+            leading = bool(re.search(r'先', clause.text[:match.end()]))
+            follows = bool(_action_matches(re.compile(r'眼球(?P<verb>随头|随头部)'), clause.text))
+            if leading or follows:
+                first, first_stage, head_led = target, (clause.start, clause.end), follows
+    return False, False
+
+
+def _same_target_eye_hold(clauses: Sequence[Clause], initial: Sequence[Clause]) -> bool:
+    """A named maintained target need not be rewritten as a fictitious shift.
+
+    The narrow head-tracking form also needs the same explicit initial, action
+    and final target. Fine focal adjustment on an explicitly maintained target
+    is not a target change; an unresolved shift still blocks this route.
+    """
+    body = '；'.join(c.text for c in clauses)
+    if _gaze_paths(body):
+        return False
+    hold = re.compile(r'(?:视线|目光|眼神)(?:持续|始终|继续)(?P<verb>落在|停在|聚焦于)(?P<target>[^，,；;。！？!?\n]+)')
+    held = [_gaze_target_label(m.group('target')) for c in clauses for m in _action_matches(hold, c.text)]
+    held = [target for target in held if target]
+    motion = re.compile(r'(?:眼球|视线|目光)(?P<verb>微移向|轻微移向)(?P<target>[^，,；;。！？!?\n]+)')
+    moves = [_gaze_target_label(m.group('target')) for c in clauses for m in _action_matches(motion, c.text)]
+    targets = [_gaze_target_label(m.group('target')) for c in clauses for m in _positive(GAZE_TARGET_RE, c.text)]
+    focus_clauses = [c for c in clauses if _action_matches(FOCUS_ACTION_RE, c.text)]
+    if focus_clauses:
+        # Only the bounded fine-adjustment predicate may coexist with a hold.
+        # A hold in another time window, another person, an unnamed target or
+        # an added destination cannot resolve an otherwise incomplete shift.
+        fine = r'(?:眼球|视线|目光|焦点)(?:轻微|细微)?(?:进行)?焦点调整'
+        for clause in focus_clauses:
+            owner = re.escape(clause.owner or '')
+            if not re.fullmatch(r'(?:' + owner + r')?(?:的)?' + fine, clause.text.strip()):
+                return False
+            local_holds = [m for other in clauses
+                           if (other.owner, other.start, other.end) == (clause.owner, clause.start, clause.end)
+                           for m in _action_matches(hold, other.text)]
+            if not local_holds or any(_gaze_target_label(m.group('target')) is None for m in local_holds):
+                return False
+        if any(target is None for target in targets):
+            return False
+        start_targets = [_gaze_target_label(m.group('target')) for c in initial
+                         for m in _positive(GAZE_TARGET_RE, c.text)]
+        if start_targets and (None in start_targets or len(set(start_targets + held + targets)) != 1):
+            return False
+    targets = [target for target in targets if target]
+    # General movement, a target departure or an unresolved change cannot be
+    # concealed by one hold elsewhere in the visible interval.
+    for clause in clauses:
+        if _positive(GAZE_CHANGE_RE, clause.text) and not _action_matches(motion, clause.text):
+            return False
+    if held and len(set(held + targets + moves)) == 1:
+        return True
+    start = [_gaze_target_label(m.group('target')) for c in initial for m in _positive(GAZE_TARGET_RE, c.text)]
+    start = [target for target in start if target]
+    tracking = any(_positive(re.compile(r'头部(?:只作)?(?:小幅|轻微|微小)(?:偏转|转动)'), c.text) for c in clauses)
+    return bool(start and targets and moves and all(moves) and tracking and
+                len(set([start[-1]] + targets + moves)) == 1)
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:
@@ -146,9 +283,52 @@ def emphasis_binding_faults(emphasis: Any, dialogue_rows: Sequence[tuple[str, st
     return emphasis_bindings(emphasis, dialogue_rows, speaker=speaker)[1]
 
 
+def visible_subject_tokens(value: Any) -> list[str]:
+    """Split a visible-subject list only outside matched role annotations.
+
+    Keep annotations with their person for visibility checks. Unmatched or
+    mismatched parentheses do not hide later names from the person-count gate.
+    This parses list punctuation, not narrative identities or face semantics.
+    """
+    text = str(value or "")
+    stack: list[tuple[str, int]] = []
+    spans: list[tuple[int, int]] = []
+    pairs = {")": "(", "）": "（"}
+    for index, char in enumerate(text):
+        if char in "(（":
+            stack.append((char, index))
+        elif char in pairs:
+            if stack and stack[-1][0] == pairs[char]:
+                _opening, start = stack.pop()
+                spans.append((start, index))
+            else:
+                stack.clear()
+    protected = {index for start, end in spans for index in range(start, end + 1)}
+    tokens: list[str] = []
+    start = 0
+    index = 0
+    while index < len(text):
+        char = text[index]
+        connector = "以及" if text.startswith("以及", index) else char
+        punctuation = char in "、，,；;+＋"
+        word_join = connector in {"以及", "和", "与", "及"}
+        # A leading 和 can be the surname in 和珅. Treat a word connector as
+        # a separator only after an actual left item, not at a name's start.
+        if index not in protected and (punctuation or word_join and text[start:index].strip()):
+            if text[start:index].strip():
+                tokens.append(text[start:index].strip())
+            index += len(connector) if word_join else 1
+            start = index
+            continue
+        index += 1
+    if text[start:].strip():
+        tokens.append(text[start:].strip())
+    return tokens
+
+
 def _people(visible: Any, explicit: Sequence[str] | None) -> tuple[list[str], dict[str, str]]:
     raw = str(visible or "")
-    tokens = [part.strip() for part in re.split(r"[、，,；;和与及+＋]", raw) if part.strip()]
+    tokens = visible_subject_tokens(raw)
     names = _dedupe(str(name).strip() for name in explicit if str(name).strip()) if explicit else []
     descriptions: dict[str, str] = {}
     owner: str | None = None
@@ -176,14 +356,34 @@ def _people(visible: Any, explicit: Sequence[str] | None) -> tuple[list[str], di
     return _dedupe(names), descriptions
 
 
+def visible_subject_annotation_faults(value: Any) -> list[str]:
+    """Reject the proven hidden-person annotation form without guessing names."""
+    faults = []
+    pattern = re.compile(r"[（(]\s*(?:与|和|以及|及)([^（）()]+?)(?:同框|一同入画|均可见)")
+    body_item = re.compile(r"(?:左侧|右侧|近侧|远侧)?(?:" + BODY_PART_PATTERN + r"|坐姿|站姿)(?:清楚|清晰|可见|可辨)?")
+    for match in pattern.finditer(str(value or "")):
+        items = [item.strip() for item in re.split(r"以及|[、，,与和及]", match.group(1)) if item.strip()]
+        if items and not all(body_item.fullmatch(item) for item in items):
+            faults.append("可见主体注释含额外共同入画者，须在顶层逐位列明后再判人数；不能把括号内名单视为当前人物的姿态注释")
+    return _dedupe(faults)
+
+
 def _subject(text: str, names: Sequence[str]) -> str | None:
-    prefix = r"^(?:(?:镜尾|此时|随后|接着|同时|最后|最终|开口前|听完后|换焦后|镜头开始时|起始时|前景|后景|中景)[，,：:\s]*)*"
+    prefix = r"^(?:(?:镜尾|此时|随后|接着|同时|最后|最终|开口前|听完后|换焦后|镜头开始时|起始时|前景|后景|中景|但是|然而|但)[，,：:\s]*|" + TIME_SUBJECT_PREFIX + r")*"
     for name in sorted(names, key=len, reverse=True):
         if re.match(prefix + re.escape(name), text):
+            clock = r"(?:(?:在|于|第)?\d+(?:\.\d+)?\s*(?:秒|s)(?:时)?)?"
+            # An observation is not the observer performing the observed
+            # action. Require an actual action/body predicate after the named
+            # observed person, so simply '甲观察乙' does not transfer ownership.
+            for observed in sorted(names, key=len, reverse=True):
+                if re.search(r"(?:观察|看着|看见|望着|注视)" + re.escape(observed) + r"(?:的)?" + clock +
+                             r"(?:眼球|视线|目光|眼神|双眼|眼睛|上眼睑|下眼睑|眼睑|双手|左手|右手|头部|轻点头|微点头|点头|摇头|颔首|抬眼|垂眼|转头|侧头|吸气|呼气|眨眼)", text):
+                    return observed
             # "甲观察乙眼球换焦" describes 乙's eyes, not 甲's.
             # The first possessive eye component also keeps an ordinary gaze
             # path (甲视线从袖口移向乙眼睛) assigned to its real owner 甲.
-            holders = [(match.start(), person) for person in names for match in re.finditer(re.escape(person) + r"(?:的)?(?:眼球|视线|目光|眼神|双眼|眼睛|上眼睑|下眼睑|眼睑)", text)]
+            holders = [(match.start(), person) for person in names for match in re.finditer(re.escape(person) + r"(?:的)?" + clock + r"(?:眼球|视线|目光|眼神|双眼|眼睛|上眼睑|下眼睑|眼睑)", text)]
             if holders:
                 return min(holders)[1]
             return name
@@ -213,6 +413,104 @@ def _clauses(text: Any, names: Sequence[str], duration: float) -> list[Clause]:
     return result
 
 
+def listener_reaction_faults(
+    shot: dict[str, Any], *, duration: float,
+    dialogue_rows: Sequence[tuple[str, str] | dict[str, Any]],
+) -> list[str]:
+    """Bind a visible listener's real response to the earlier speech.
+
+    A global '随后' (for example on window paper) is not listener evidence.
+    A numerical response time is supported without requiring a magic '错峰'
+    word, but must follow another person's actual speech start. This check
+    does not require eyes when the listener is only visible by hands/body.
+    """
+    names, _ = _people(shot.get('可见主体'), None)
+    rows = _rows(dialogue_rows)
+    if len(names) < 2 or not rows:
+        return []
+    clauses = _clauses(shot.get('画面内容'), names, duration)
+    speakers = {speaker for speaker, _ in rows}
+    speech_starts: dict[str, float] = {}
+    for clause in clauses:
+        if '说道' not in clause.text or '〈对白〉' not in clause.text or clause.owner not in speakers:
+            continue
+        times = [float(m.group('time')) for m in BLINK_TIME_RE.finditer(clause.text.split('说道', 1)[0])]
+        moment = times[0] if times else clause.start
+        if clause.start <= moment <= clause.end:
+            speech_starts.setdefault(clause.owner, moment)
+    reaction = re.compile(r"(?P<verb>(?:轻|微)?点头|摇头|颔首|抬眼|垂眼|转头|侧头|吸气|呼气|眨眼|收紧|松开|放松|轻收|微收|略收|微抬|略抬)")
+    stagger = re.compile(r"晚半拍|晚约\d+(?:\.\d+)?秒|随后|听(?:清|完|到)[^，,；;。！？!?\n]{0,16}后|尾音[^，,；;。！？!?\n]{0,8}后|(?:错开|延迟)[^，,；;。！？!?\n]{0,8}(?:反应|点头|抬眼)")
+    reacted: set[str] = set()
+    for index, clause in enumerate(clauses):
+        name = clause.owner
+        if name not in names or not _action_matches(reaction, clause.text):
+            continue
+        # Require the actor at this subject, or a directly adjacent body/action
+        # continuation of that actor. An inherited environment clause is not it.
+        subject = _subject(clause.text, names)
+        previous = clauses[index - 1] if index else None
+        continuation = bool(previous and previous.owner == name and
+                            (previous.start, previous.end) == (clause.start, clause.end) and
+                            _subject(previous.text, names) == name and
+                            re.match(r"^(?:其|他|她)?(?:(?:的)?(?:双手|左手|右手|手指|上眼睑|下眼睑|眼睑|视线|目光|头部)|轻点头|微点头|点头|摇头|颔首|轻吸气)", clause.text))
+        if subject != name and not continuation:
+            continue
+        earlier = [start for speaker, start in speech_starts.items() if speaker != name]
+        if not earlier:
+            continue
+        text = clause.text
+        if continuation:
+            text = previous.text + '；' + text
+        moments = [float(m.group('time')) for m in BLINK_TIME_RE.finditer(text)]
+        timed = bool(moments) and all(clause.start <= moment <= clause.end and moment > min(earlier) for moment in moments)
+        causal = bool(_positive(stagger, text)) and clause.end > min(earlier)
+        # An authored clock is stronger evidence than '随后'. A contradictory
+        # clock cannot fall back to untimed causality, including simultaneous
+        # onset, a response before speech, or an out-of-phase response.
+        response_valid = timed if moments else causal
+        if response_valid:
+            reacted.add(name)
+    listeners = [name for name in names if name not in speakers]
+    missing = [name for name in listeners if name not in reacted]
+    if listeners:
+        return [f"{name}未绑定实际听后动作与错峰时机" for name in missing]
+    return [] if reacted else ["可见发言者之间未绑定实际听后动作与错峰时机"]
+
+
+def _source_asserts_actor_closed(name: str, source: Any) -> bool:
+    def mask_quote(match: re.Match[str]) -> str:
+        payload = next(group for group in match.groups() if group is not None)
+        # Retain only the terminal sentence boundary, never quoted facts.
+        # Otherwise '乙说："...。"甲合眼' loses the new narrative subject.
+        boundary = payload[-1:] if payload[-1:] in '。！？!?' else ''
+        return '〈引文〉' + boundary
+
+    source = QUOTE_RE.sub(mask_quote, str(source or ''))
+    modifiers = r"(?:(?:已经|已|正|正在|缓缓|慢慢|轻轻|终于|仍|还|也|重新|自然|不由|疲倦地|疲惫地|因疲倦|因困倦))*"
+    location = r"(?:(?:在|于)[^，,；;。！？!?\n〈〉]{1,16}?(?:上|下|内|里|旁|边))?"
+    # Only a direct subject assertion can supply this narrow source exception.
+    # A location/adverb may intervene, but another actor's observed action or
+    # quoted statement cannot. Less explicit source syntax remains reviewable,
+    # rather than being author-certified through a 16-character wildcard.
+    source_closed = re.compile(r"(?:^|[，,；;。！？!?\n])\s*" + re.escape(name) + modifiers + location + modifiers + r"(?P<verb>合眼|闭眼|睡着|昏迷)")
+    return bool(_action_matches(source_closed, source))
+
+
+def _source_closed_throughout(name: str, shot: dict[str, Any], own: Sequence[Clause], start: Sequence[Clause]) -> bool:
+    """Narrow full-shot closed-eye applicability; never invent a reopening.
+
+    The source line and static field must both support closure, the actual
+    performance must explicitly keep it throughout, and a real reopening
+    invalidates the exemption. Source entailment remains independently audited.
+    """
+    static = '；'.join(c.text for c in start if c.owner == name)
+    body = '；'.join(c.text for c in own)
+    closed = re.compile(r"(?:全程|始终)(?P<verb>闭眼|合眼|合拢双眼)|(?:双眼|眼睛)(?:全程|始终)(?P<preverb>合拢|闭合|闭着)")
+    reopening = re.compile(r"(?:睁开|睁眼|张开双眼)")
+    return bool(_positive(PLOT_CLOSED_RE, static) and _source_asserts_actor_closed(name, shot.get('原文支撑句'))
+                and _action_matches(closed, body) and not _positive(reopening, body))
+
+
 def _merge(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:
     result: list[tuple[float, float]] = []
     for start, end in sorted(set(intervals)):
@@ -223,17 +521,56 @@ def _merge(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float]
     return result
 
 
+def eye_visibility_window_matches(text: str, subject: str, *, require_subject: bool = False) -> list[re.Match[str]]:
+    """The registered eye-window grammar, shared with macro-stage scanning.
+
+    Returned matches are assertions, never quoted words. The eye consumer may
+    inherit a known clause owner; the timeline caller must require that owner
+    explicitly rather than exempt an arbitrary bare numeric range.
+    """
+    actor = re.escape(subject) + r'(?:的)?'
+    if not require_subject:
+        actor = '(?:' + actor + ')?'
+    pattern = re.compile(r'(?:^|[；;，,。（(\n】])' + actor +
+                         r'(?:面部|眼睛|双眼|眼部)(?:清楚|清晰)?仅在\s*'
+                         r'(?P<start>\d+(?:\.\d+)?)\s*[—–-]\s*(?P<end>\d+(?:\.\d+)?)'
+                         r'\s*秒(?:清楚|清晰|完整)?(?:可见|露出)')
+    quoted = [(match.start(), match.end()) for match in QUOTE_RE.finditer(text)]
+    return [match for match in pattern.finditer(text)
+            if not any(begin < match.end() and end > match.start('start') for begin, end in quoted)]
+
+
+def eye_visibility_timeline_scan(text: str, *, duration: float, visible_subjects: str | None) -> str:
+    """Mask only recognized, bounded actor windows in a temporary scan copy.
+
+    The source body is unchanged. Real 【...】 stages are never masked, and an
+    invalid/unowned/quoted/negated range remains for the strict stage guard.
+    """
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
+        return text
+    names, _ = _people(visible_subjects, None)
+    ranges = []
+    for name in names:
+        for match in eye_visibility_window_matches(text, name, require_subject=True):
+            begin, end = float(match.group('start')), float(match.group('end'))
+            if 0 <= begin < end <= duration:
+                ranges.append((match.start('start'), match.end('end')))
+    result = list(text)
+    for begin, end in ranges:
+        result[begin:end] = ' ' * (end - begin)
+    return ''.join(result)
+
+
 def _visibility(name: str, descriptor: str, shot: dict[str, Any], clauses: list[Clause], duration: float) -> tuple[list[tuple[float, float]], list[str]]:
     shot_type = str(shot.get("镜头类型") or "")
     own = [clause for clause in clauses if clause.owner == name]
     own_text = descriptor + "；" + "；".join(clause.text for clause in own)
-    window_re = re.compile(r"(?:^|[；;，,。（(\n])(?:" + re.escape(name) + r"(?:的)?)?(?:面部|眼睛|双眼|眼部)(?:清楚|清晰)?仅在\s*(\d+(?:\.\d+)?)\s*[—–-]\s*(\d+(?:\.\d+)?)\s*秒(?:清楚|清晰|完整)?(?:可见|露出)")
-    windows = list(window_re.finditer(own_text))
+    windows = eye_visibility_window_matches(own_text, name)
     faults: list[str] = []
     if windows:
         intervals = []
         for window in windows:
-            start, end = float(window.group(1)), float(window.group(2))
+            start, end = float(window.group('start')), float(window.group('end'))
             if not (0 <= start < end <= duration):
                 faults.append(f"{name}眼部可见区间{start:g}—{end:g}秒越界或为空")
             else:
@@ -407,8 +744,8 @@ def eye_contract_faults(
             return _dedupe(identity_faults + ["可见人脸未绑定具体人物身份，不能执行逐人眼部检查"])
         return identity_faults
     picture = str(shot.get("画面内容") or "")
-    clauses = _clauses(picture, names, duration)
-    start_clauses = _clauses(shot.get("起始状态"), names, duration)
+    clauses = _eye_clauses(picture, names, duration)
+    start_clauses = _eye_clauses(shot.get("起始状态"), names, duration)
     raw_rows = dialogue_rows if dialogue_rows is not None else [(match.group("speaker"), match.group("line")) for match in DIALOGUE_RE.finditer(picture)]
     speakers = {name for name, _ in _rows(raw_rows)}
     limits = str(shot.get("生成限制") or "")
@@ -421,15 +758,24 @@ def eye_contract_faults(
         faults.extend(visibility_faults)
         own_all = [clause for clause in clauses if clause.owner == name]
         if not intervals:
-            if any(_positive(FOCUS_RE, clause.text) or _positive(EYELID_CHANGE_RE, clause.text) or _positive(BLINK_RE, clause.text) for clause in own_all):
+            if any(_action_matches(FOCUS_ACTION_RE, clause.text) or _action_matches(EYELID_CHANGE_RE, clause.text) or _positive(BLINK_RE, clause.text) for clause in own_all):
                 faults.append(f"{name}眼部不可见，不能安排可见眼球、眼睑或眨眼表演")
             continue
+        if _source_closed_throughout(name, shot, own_all, start_clauses):
+            if any(_action_matches(FOCUS_ACTION_RE, c.text) or _gaze_paths(c.text) or _positive(BLINK_RE, c.text) for c in own_all):
+                faults.append(f"{name}源文明确全程闭眼，却安排可见眼球换焦或眨眼表演")
+            # Closed eyelids can move, but visible iris paths, gaze targets and
+            # open-eye blinking are inapplicable throughout this narrow case.
+            continue
+        own_static = '；'.join(c.text for c in start_clauses if c.owner == name)
+        if PLOT_CLOSED_RE.search(own_static) and any(re.search(r"全程闭眼|全程合眼|双眼始终合拢", c.text) for c in own_all) and not _source_asserts_actor_closed(name, shot.get('原文支撑句')):
+            faults.append(f"{name}全程闭眼的原文主体或引用层次尚未明确绑定，待独立源文复核；本检查不要求擅自补写睁眼")
         visible_people.append(name)
         all_events[name], _ = _blink_events(own_all)
         faults.extend(_no_blink_conflicts(name, own_all, all_events[name]))
         for clause in own_all:
             if not any(clause.start < stop and clause.end > start for start, stop in intervals):
-                if _positive(FOCUS_RE, clause.text) or _positive(EYELID_CHANGE_RE, clause.text) or _positive(BLINK_RE, clause.text):
+                if _action_matches(FOCUS_ACTION_RE, clause.text) or _action_matches(EYELID_CHANGE_RE, clause.text) or _positive(BLINK_RE, clause.text):
                     faults.append(f"{name}在{clause.start:g}—{clause.end:g}秒眼部不可见，却安排了可见眼部表演")
             if _positive(BLINK_RE, clause.text):
                 times = [float(match.group("time")) for match in BLINK_TIME_RE.finditer(clause.text)]
@@ -449,13 +795,19 @@ def eye_contract_faults(
             body = "；".join(clause.text for clause in own)
             # Join only this actor's clauses. Other people and spoken words cannot
             # contribute any eye-chain component or no-blink exemption.
-            focus_ok = bool(_positive(FOCUS_RE, body))
-            eyelid_ok = bool(_positive(EYELID_CHANGE_RE, body))
-            if not _positive(GAZE_RE, body):
+            sequential_path, head_led = _sequential_eye_path(own)
+            path_ok = bool(_gaze_paths(body)) or sequential_path
+            hold_ok = _same_target_eye_hold(own, [c for c in start_clauses if c.owner == name])
+            explicit_head_led = bool(_action_matches(re.compile(r'眼球(?P<verb>随头部动作|随头向)'), body))
+            focus_ok = bool(_action_matches(FOCUS_ACTION_RE, body)) or sequential_path or (path_ok and explicit_head_led)
+            eyelid_ok = bool(_action_matches(EYELID_CHANGE_RE, body))
+            if not (path_ok or hold_ok):
                 faults.append(f"{label}缺视线从起点移向具体目标的换焦路径")
-            if not _positive(HEAD_RE, body):
+            hold_head = hold_ok and (bool(_positive(re.compile(r'头部(?:只作)?(?:小幅|轻微|微小)(?:偏转|转动)'), body)) or
+                                    bool(_action_matches(re.compile(r'眼球(?P<verb>随头部角度调整)继续对准'), body)))
+            if not (_positive(HEAD_RE, body) or head_led or (path_ok and explicit_head_led) or hold_head):
                 faults.append(f"{label}缺眼球先动、头部随后轻跟或明确不跟的关系")
-            if not focus_ok:
+            if not (focus_ok or hold_ok):
                 faults.append(f"{label}缺轻微眼球换焦、位移或焦点调整")
             if not eyelid_ok:
                 faults.append(f"{label}缺上/下眼睑松紧变化")
@@ -481,7 +833,7 @@ def eye_contract_faults(
                 reasons = "；".join(reason_parts)
                 if not NO_BLINK_REASON_RE.search(reasons):
                     faults.append(f"{label}不眨眼缺本人物高压、震惊、认出、警觉或重音等剧情理由")
-                if not (focus_ok and eyelid_ok and any(_positive(re.compile(r"呼吸|气息|吸气|呼气"), clause.text) for clause in own)):
+                if not ((focus_ok or hold_ok) and eyelid_ok and any(_positive(re.compile(r"呼吸|气息|吸气|呼气"), clause.text) for clause in own)):
                     faults.append(f"{label}不眨眼缺焦点调整、眼睑变化和自然呼吸替代动态")
             if name in speakers and not any(EMPHASIS_NO_BLINK_RE.search(clause.text) for clause in own):
                 faults.append(f"{label}说话者关键词、重音或决定性尾音期间未明确不眨眼")
