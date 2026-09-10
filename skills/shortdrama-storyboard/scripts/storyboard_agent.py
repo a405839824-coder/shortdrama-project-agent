@@ -52,6 +52,9 @@ ISSUE_STATUS_ALIASES = {
     "修正后残留": "residual",
     "introduced": "introduced",
     "修正新增": "introduced",
+    "missed_in_prior_audit": "missed_in_prior_audit",
+    "rule_changed": "rule_changed",
+    "attribution_pending": "attribution_pending",
 }
 
 INDEPENDENT_AUDIT_REQUIRED_FIELDS = (
@@ -476,7 +479,8 @@ def new_ledger(project_name: str, project_id: str | None = None, timestamp: str 
             "first_draft_correctness_threshold_percent": 98.0,
             "first_draft_direct_usability_threshold_percent": 98.0,
             "max_new_local_issue_rate_percent": 2.0,
-            "minimum_episode_correctness_percent": 96.0,
+            "minimum_episode_correctness_percent": 98.0,
+            "minimum_episode_direct_usability_percent": 98.0,
             "hard_major_known_systemic_tolerance": 0,
         },
         "counters": {
@@ -1021,7 +1025,17 @@ def validate_event(event: Any, max_rounds: int = 3) -> list[str]:
     if event.get("task_type") not in TASK_TYPES:
         errors.append(f"unsupported task_type: {event.get('task_type')!r}")
     round_value = event.get("audit_round")
-    if not isinstance(round_value, int) or isinstance(round_value, bool) or not 1 <= round_value <= max_rounds:
+    # A persisted machine observation is not another authorized automatic
+    # repair or an independent audit. Record the real count even when a later
+    # explicit repair succeeds after three failures; never reset the history.
+    repair_observation = (
+        event.get("assessment_contract") == "storyboard-quality-v2"
+        and event.get("audit_class") == "production_draft_preflight"
+        and event.get("task_type") == "production_draft_preflight"
+        and _is_canonical_identifier(event.get("repair_root_artifact_id"))
+    )
+    if (not isinstance(round_value, int) or isinstance(round_value, bool) or round_value < 1
+            or (not repair_observation and round_value > max_rounds)):
         errors.append(f"audit_round must be an integer from 1 to {max_rounds}")
     if event.get("result") not in RESULTS:
         errors.append(f"unsupported result: {event.get('result')!r}")
@@ -1161,10 +1175,15 @@ def validate_ledger(
         "first_draft_correctness_threshold_percent": 98.0,
         "first_draft_direct_usability_threshold_percent": 98.0,
         "max_new_local_issue_rate_percent": 2.0,
-        "minimum_episode_correctness_percent": 96.0,
+        "minimum_episode_correctness_percent": 98.0,
+        "minimum_episode_direct_usability_percent": 98.0,
         "hard_major_known_systemic_tolerance": 0,
     }
     for field, value in policy_expected.items():
+        if (field in {"minimum_episode_correctness_percent", "minimum_episode_direct_usability_percent"}
+                and policy.get("minimum_episode_correctness_percent") == 96.0
+                and "minimum_episode_direct_usability_percent" not in policy):
+            continue
         if policy.get(field) != value:
             errors.append(f"policy.{field} must equal {value!r}")
     errors.extend(_replay_checkpoint_errors(ledger, checkpoint_authorizer))
@@ -2243,7 +2262,7 @@ def _normalize_issue(issue: dict[str, Any]) -> dict[str, Any]:
 def _event_counts(event: dict[str, Any]) -> dict[str, int]:
     issues = event["issues"]
     shot_ids = {shot_id for issue in issues for shot_id in issue.get("shot_ids", [])}
-    return {
+    counts = {
         "checked_shot_count": int(event["checked_shot_count"]),
         "problem_shot_count": len(shot_ids),
         "total_error_points": len(issues),
@@ -2252,6 +2271,14 @@ def _event_counts(event: dict[str, Any]) -> dict[str, int]:
         "introduced_error_count": sum(issue["status"] == "introduced" for issue in issues),
         "blocking_error_count": sum(bool(issue.get("blocking")) for issue in issues),
     }
+    # Preserve byte-for-byte legacy replay projections for historical events.
+    if event.get("assessment_contract") == "storyboard-quality-v2":
+        counts.update({
+            "missed_error_count": sum(i["status"] == "missed_in_prior_audit" for i in issues),
+            "rule_changed_error_count": sum(i["status"] == "rule_changed" for i in issues),
+            "attribution_pending_count": sum(i["status"] == "attribution_pending" for i in issues),
+        })
+    return counts
 
 
 def _event_closure_state(event: dict[str, Any]) -> str:

@@ -83,7 +83,8 @@
         "first_draft_correctness_threshold_percent": {"const": 98.0},
         "first_draft_direct_usability_threshold_percent": {"const": 98.0},
         "max_new_local_issue_rate_percent": {"const": 2.0},
-        "minimum_episode_correctness_percent": {"const": 96.0},
+        "minimum_episode_correctness_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "minimum_episode_direct_usability_percent": {"const": 98},
         "known_issue_recurrence_tolerance": {"const": 0},
         "systemic_root_cause_tolerance": {"const": 0}
       }
@@ -137,7 +138,7 @@
         "final_audit_pass"
       ],
       "properties": {
-        "grade": {"enum": ["A", "B", "C"]},
+        "grade": {"enum": ["A", "B", "C", "unavailable"]},
         "checked_shot_count": {"type": "integer", "minimum": 0},
         "issue_point_count": {"type": "integer", "minimum": 0},
         "unique_affected_shot_count": {"type": "integer", "minimum": 0},
@@ -146,14 +147,26 @@
           "uniqueItems": true,
           "items": {"type": "string", "minLength": 1}
         },
-        "first_draft_correctness_percent": {"$ref": "#/$defs/quality_percentage"},
-        "direct_usability_percent": {"$ref": "#/$defs/quality_percentage"},
-        "new_local_issue_shot_rate_percent": {"$ref": "#/$defs/quality_percentage"},
+        "quality_contract": {"const": "storyboard-quality-v2"},
+        "measurement_state": {"enum": ["measured", "unavailable"]},
+        "content_affected_shot_ids": {"type": "array", "items": {"type": "string"}},
+        "contract_affected_shot_ids": {"type": "array", "items": {"type": "string"}},
+        "workflow_issue_count": {"type": "integer", "minimum": 0},
+        "advisory_count": {"type": "integer", "minimum": 0},
+        "unlocated_content_issue_count": {"type": "integer", "minimum": 0},
+        "first_draft_correctness_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "direct_usability_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "new_local_issue_shot_rate_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
         "episode_correctness_percent": {
           "type": "object",
-          "additionalProperties": {"$ref": "#/$defs/quality_percentage"}
+          "additionalProperties": {"type": ["number", "null"], "minimum": 0, "maximum": 100}
         },
-        "minimum_episode_correctness_percent": {"$ref": "#/$defs/quality_percentage"},
+        "episode_direct_usability_percent": {
+          "type": "object",
+          "additionalProperties": {"type": ["number", "null"], "minimum": 0, "maximum": 100}
+        },
+        "minimum_episode_correctness_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "minimum_episode_direct_usability_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
         "hard_or_major_issue_count": {"type": "integer", "minimum": 0},
         "global_blocking_issue_count": {"type": "integer", "minimum": 0},
         "known_recurrence_count": {"type": "integer", "minimum": 0},
@@ -189,7 +202,7 @@
       "properties": {
         "active": {"type": "boolean"},
         "reason": {"const": "first_draft_quality_below_threshold"},
-        "grade": {"enum": ["B", "C"]},
+        "grade": {"enum": ["B", "C", "unavailable"]},
         "artifact_id": {"type": "string", "minLength": 1},
         "audit_cycle_id": {"type": "string", "minLength": 1},
         "required_action": {"const": "repair_root_cause_and_revalidate_prevention_gate"},
@@ -292,8 +305,36 @@
         "server_actor_role": {"enum": ["production", "independent_audit", "repair"]},
         "server_window_binding_id": {"type": "string", "minLength": 1},
         "server_actor_binding_id": {"type": "string", "minLength": 1},
-        "transport_session_fingerprint": {"type": ["string", "null"]}
-      }
+        "transport_session_fingerprint": {"type": ["string", "null"]},
+        "verified_narrative_review_id": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Service-owned marker; signature, artifact and authority bindings require server verification. Not accepted in new work-order requests. Historical records may omit it; new narrative pass/sign-off mutations require it."
+        },
+        "awaiting_narrative_review": {"type": "boolean"},
+        "internal_round": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Four narrative production operations retain every attempt without the legacy three-round cap. Other operations retain their existing runtime policy."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["operation"],
+            "properties": {"operation": {"const": "narrative_audit"}}
+          },
+          "then": {
+            "required": ["mutates_source"],
+            "properties": {
+              "mode": {"const": "audit_only"},
+              "authorization": {"const": "read_only"},
+              "server_actor_role": {"const": "independent_audit"},
+              "mutates_source": {"const": false}
+            }
+          }
+        }
+      ]
     },
     "active_authority_binding": {
       "type": "object",

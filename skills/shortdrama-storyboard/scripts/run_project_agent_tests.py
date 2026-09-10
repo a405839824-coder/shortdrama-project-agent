@@ -271,6 +271,9 @@ def test_non_storyboard_clean_flow_requires_human_signoff() -> None:
     agent.transition_work_order(hub, "WO-001", "executing")
     agent.record_deliverable(hub, deliverable())
     agent.transition_work_order(hub, "WO-001", "validating")
+    # Simulate the service-owned binding for this low-level sign-off positive.
+    # Unverified narrative PASS claims have separate negative coverage.
+    hub["work_orders"][0]["verified_narrative_review_id"] = "SERVER-REVIEW-SYNTHETIC"
     agent.record_validation(hub, clean_validation(hub))
     agent.transition_work_order(hub, "WO-001", "passed")
     result = agent.transition_work_order(hub, "WO-001", "awaiting_signoff")

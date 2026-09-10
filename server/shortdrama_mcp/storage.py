@@ -34,9 +34,11 @@ PROJECT_RECORD_KINDS = {
     "diagnostics",
     "repair_packages",
     "draft_preflights",
+    "draft_observations",
     "migrations",
     "authority_continuations",
     "workbook_migrations",
+    "narrative_records",
 }
 SIGNED_ONLY_PROJECT_RECORD_KINDS = PROJECT_RECORD_KINDS - {
     "handoffs",
@@ -51,9 +53,11 @@ PROJECT_RECORD_PRIMARY_ID_KEYS = {
     "diagnostics": "diagnostic_run_id",
     "repair_packages": "repair_package_id",
     "draft_preflights": "draft_preflight_id",
+    "draft_observations": "observation_id",
     "migrations": "migration_id",
     "authority_continuations": "continuation_id",
     "workbook_migrations": "workbook_migration_id",
+    "narrative_records": "record_id",
 }
 DEFAULT_SUCCESSOR_LEASE_SECONDS = 300
 MAX_SUCCESSOR_LEASE_SECONDS = 86_400
@@ -172,6 +176,11 @@ RECOVERY_HANDOFF_AUDIT_MUTABLE_KEYS = frozenset(
 _ACTIVE_AUTHORITY_OPERATION: contextvars.ContextVar[dict[str, Any] | None] = (
     contextvars.ContextVar("shortdrama_active_authority_operation", default=None)
 )
+
+# A synchronous project transaction may use several existing storage methods.
+# Reuse an already held lock only in its owning thread and for the same absolute
+# path. Other threads and processes still acquire the cross-process FileLock.
+_HELD_STORAGE_LOCKS = threading.local()
 
 
 def utc_stamp() -> str:
@@ -644,8 +653,19 @@ class ProjectStore:
     def lock(self, name: str) -> Iterator[None]:
         lock_name = slug_filename(name, "state")
         lock_path = self.root / f".{lock_name}.lock"
-        with FileLock(str(lock_path)):
+        key = os.path.normcase(str(lock_path.resolve()))
+        held = getattr(_HELD_STORAGE_LOCKS, "paths", None)
+        if held is None:
+            held = _HELD_STORAGE_LOCKS.paths = set()
+        if key in held:
             yield
+            return
+        with FileLock(str(lock_path)):
+            held.add(key)
+            try:
+                yield
+            finally:
+                held.remove(key)
 
     def _assert_no_project_rollback_fence_unlocked(
         self,
@@ -4320,6 +4340,32 @@ class ProjectStore:
             raise ValueError(f"unsupported project record kind: {kind}")
         return kind
 
+    def append_draft_observation(self, namespace, project_id, value):
+        """One project lock covers sequence assignment and immutable append."""
+        clean_id = safe_id(value["observation_id"], "record_id")
+        directory = self.project_dir(namespace, project_id)
+        with self.project_write_lock(namespace, project_id):
+            if not (directory / "hub.json").is_file():
+                raise ValueError(f"unknown project_id: {project_id}")
+            records = [r for r in self.list_project_records_strict(
+                namespace, project_id, kind="draft_observations")
+                if r.get("lineage_id") == value["lineage_id"]]
+            records.sort(key=lambda r: int(r["observation_index"]))
+            existing = next((r for r in records if r["observation_id"] == clean_id), None)
+            if existing is not None:
+                if existing["input_sha256"] != value["input_sha256"] or existing["candidate_snapshot"] != value["candidate_snapshot"]:
+                    raise ValueError("draft_observation_identity_conflict")
+                return existing
+            record = copy.deepcopy(value)
+            record.update({"record_id": clean_id, "project_id": project_id,
+                           "observation_index": len(records) + 1,
+                           "first_observation_id": records[0]["observation_id"] if records else clean_id,
+                           "previous_observation_id": records[-1]["observation_id"] if records else None})
+            record.setdefault("created_at", utc_stamp())
+            record["integrity_hmac"] = self._record_integrity_hmac(record)
+            self.atomic_write_json(directory / "draft_observations" / f"{clean_id}.json", record)
+            return record
+
     def save_project_record(
         self,
         namespace: str,
@@ -4354,6 +4400,13 @@ class ProjectStore:
         record.setdefault("created_at", utc_stamp())
         path = directory / clean_kind / f"{clean_id}.json"
         with self.project_write_lock(namespace, project_id):
+            if clean_kind in {"draft_observations", "narrative_records"} and path.exists():
+                existing = self.get_project_record(namespace, project_id, kind=clean_kind, record_id=clean_id)
+                left = {k: v for k, v in existing.items() if k != "integrity_hmac"}
+                right = {k: v for k, v in record.items() if k != "integrity_hmac"}
+                if left != right:
+                    raise ValueError("draft_observation_immutable: append a new observation")
+                return existing
             if (
                 clean_kind == "certificates"
                 and record.get("certificate_type")
@@ -4417,6 +4470,8 @@ class ProjectStore:
         """
 
         clean_kind = self._project_record_kind(kind)
+        if clean_kind == "narrative_records":
+            raise ValueError("narrative_record_immutable: append a new narrative record")
         clean_id = safe_id(record_id, "record_id")
         path = self.project_dir(namespace, project_id) / clean_kind / f"{clean_id}.json"
         with self.project_write_lock(namespace, project_id):

@@ -5,7 +5,103 @@ description: "Operate a full-lifecycle Chinese short-drama project Agent with th
 
 # Short-drama storyboard R10
 
+## Produce, revise and review narrative artifacts
+
+Before a chapter analysis, story/adaptation/episode plan, character arc, script,
+dialogue rewrite, or a review of those artifacts, read
+`references/narrative-production-constraints.md`. Use its source/change-authority,
+scene-state, dependency, actual-text review, repair, reviewer-accountability,
+evidence-stage and first-attempt requirements. Source extraction can be wrong:
+bind claims to source locations, distinguish inference from established facts,
+and invalidate dependent plans and conclusions when the baseline changes.
+Respect user-authorized restructuring; source-preserving storyboard restrictions
+do not prohibit an explicitly authorized new narrative baseline.
+
+The narrative route uses `preflight_narrative_plan`, `record_narrative_attempt`,
+`read_narrative_record` and `review_narrative_artifact`; script/dialogue commits use the registered
+`narrative_candidate` envelope described in that reference. Verify that the
+running service exposes this route before claiming its checks were performed.
+If it is absent, preserve the actual draft and report the missing enforcement;
+do not substitute generic caller-authored PASS/zero counts or a storyboard
+certificate. A plan check, a corrected draft, a structural pass, independent
+content review and formal sign-off are separate evidence stages.
+
+Freeze the first complete narrative candidate before inspecting its result.
+Internal rewrites remain revisions even before the user sees the draft; keep
+rejected and incomplete attempts separately traceable. Software tests and a
+reviewer model's confidence never establish manuscript correctness or 98%
+first-batch usability. The server cannot observe unsubmitted chat drafts or
+private model reasoning: submit the complete original candidate as soon as it
+exists and disclose any earlier unrecorded revision instead of claiming an
+enforced first-generation score. Count hard defects, unresolved dependencies and optional
+style advice separately. Repair the actual dependency scope, including a larger
+authorized rewrite when necessary; do not impose a repair-round cap unless the
+user has explicitly set a still-active limit.
+
+## Produce from source facts and one action model
+
+For new storyboards within the supported physical model, read `references/source_decisions.md`,
+`references/production_decisions.md`, and `references/production_prevention.md`. Use the
+`production-decisions-v1` entry. In MCP, read `references/production_authoring_request.md`
+and pass its explicit envelope to the existing `preflight_storyboard_draft` tool using
+the authorized registered source graph artifact and its exact hash. Use the returned
+`data.compiled_storyboard` unchanged for later preflight/commit. The local CLI in
+`scripts/author_storyboard.py` accepts a separately frozen `--source-graph`. Record every
+submitted input, including rejected attempts. The source
+graph identifies subject, event, condition, polarity, occurrence, speech/writing content,
+and dependencies. Exact text spans prove source identity, not the correctness of the
+author's interpretation; retain independent source review.
+
+Construct ordinary source-preserving speech with
+`source_decisions.construct_source_spoken_use`: given words must have actual
+source spans, and conditions belonging to that spoken proposition must remain
+in its realized words. Unverified synonym rewrites are unsupported by this
+constructor; do not label them verified or silently drop their qualifiers.
+For physical source events, freeze `source_action_plans` in that same graph and
+schedule `source_step` references instead of rewriting action parameters in each
+shot. Build environmental decisions with `production_environment.environment_editorial`;
+the shared scene state and actual action IDs supply environmental fields and
+sound timing. Do not insert free effect prose as an alternative generation route.
+
+Author initial physical facts and actions once. Do not separately write endpoints,
+macro-phase prose, event basis, camera prose, or frame-zero paper text. Compile them from
+the same timeline. For unsupported physical effects, report the unsupported capability
+and its dependent unchecked outputs; do not silently switch to hand-filled passing
+evidence. The legacy typed interface remains available for existing artifacts and
+explicitly supported migrations, but does not demonstrate the new compiler's quality.
+
+Author eyelid, breath, focus adjustment and blink-restraint decisions explicitly when
+needed. They are direct performance decisions, not invented source facts. Keep a gaze
+on its actual named target when it does not change; do not invent a different target
+to satisfy a checker. Missing decisions remain missing, and emphasis restraint must
+bind the actual utterance and time window. Visibility changes affect the visible
+projection while preserving the underlying world action.
+
+Inspect the exact attempted input across all independent check families before revising.
+Record pass/fail/not_checked separately. After a fault, explain its originating decision,
+propagation path, and checker expectation; challenge the proposed repair with both a
+legal positive and an illegal negative case. Correct the originating decision or general
+compiler rule, then recompile dependent states and outputs together. Preserve frozen
+first drafts and old audit records. A new revision is never another first draft.
+
+Run the existing full validator and inspect actual formal/GPT outputs after compilation.
+The production binding invalidates stale content, source obligations, and compiler/rule
+versions. It is not a semantic signature: submit the current artifact through the existing
+independent audit service, including all source-decision IDs and their actual field
+references. Existing source-unit, protected/adapted dialogue, spatial, and other audit
+requirements still apply. Report software controls, manuscript accuracy, and formal
+sign-off separately; do not claim 95%/98% or one-to-two-round convergence from synthetic
+tests or from a structurally rendered candidate alone.
+
 ## Lock the runtime first
+
+For storyboard production, audit or repair, read `references/first_draft_quality_v2.md` and apply the authoritative `runtime.first_draft_quality_v2` contract. Plan complete source events, conditions, causality and conversations before drafting; preserve first candidate observations; report first delivery separately; repair all dependent representations; never claim 98% or two-audit convergence without real batch evidence.
+
+For fresh storyboards and repairs that change blocking, camera, gaze, props or timing, also read `references/production_state_binding.md`. Resolve those decisions together for each actual phase and cut before rendering the canonical fields; collect the complete audit findings before freezing the next repair candidate. This authoring procedure supports the existing gates and does not certify their outcome or change any quality threshold.
+
+For repair-history gates, read `references/current_repair_observation.md`. Keep the source-owned failed history and bind a fresh complete current check; an appended zero or a stale result cannot close the gate. Machine observations do not sign the independent semantic audit.
+
+Before repeating common eye, indoor-light, psychological-audio or transition clauses across a new batch, read `references/authoring_contract_blocks.md` and use its supported explicit fragments. Keep the actual pose, light source, speech and timing decisions separate. For a genuine unsupported case, validate one synthetic ingredient through the real formal and GPT paths before repeating it; retain the first complete candidate before its full preflight. Component tests do not count as fresh-storyboard accuracy or independent audit evidence.
 
 1. When the R10 MCP plugin is available, call `get_agent_status(full_self_test=false)` once at the start of a new chat. Use its fingerprint-bound runtime-test certificate for an ordinary content task only when the service also advertises `output_contract=R10-SPC-1`. A valid older certificate may still support project-state reads, but it does not certify a storyboard commit or workbook export against this contract; reject the old export, use the verified deterministic R10-SPC-1 adapter when the canonical is available, and otherwise record a capability gap instead of delivering the old format.
 2. Call `get_agent_status(full_self_test=true)` only after a runtime/rule/schema/script/dependency change, or when the certificate is missing or invalid. Stop on failure; never replace a machine failure with model self-assessment.
@@ -13,9 +109,17 @@ description: "Operate a full-lifecycle Chinese short-drama project Agent with th
 4. When the plugin is unavailable and this skill runs standalone, run `python scripts/r10_bootstrap.py --self-test`. If it reports a project root, read that project's `R10_BOOTSTRAP.md`, runtime, schema, conflict crosswalk, and task cards in their declared load order; otherwise use the bundled references.
 5. Always require `workflow_revision=R10-PG1`. Stop with `E-BOOTSTRAP-001` when the applicable status/bootstrap check fails.
 
-The active runtime is `V16.3-148-R10-StableRuntime`, rule revision `0.5.26`. `references/rule_registry.json` is the sole editable current rule source; runtime, error, validator, conflict, atomic and task-card views are deterministically generated by `scripts/rule_registry.py`. Run its read-only `--check` at bootstrap and after changes; any missing/duplicate/dangling ID, content, applicability, parameter or revision drift blocks publication. Treat R1–R9 and retired rules as read-only history.
+The active runtime is `V16.3-148-R10-StableRuntime`, rule revision `0.5.27`. `references/rule_registry.json` is the sole editable current rule source; runtime, error, validator, conflict, atomic and task-card views are deterministically generated by `scripts/rule_registry.py`. Run its read-only `--check` at bootstrap and after changes; any missing/duplicate/dangling ID, content, applicability, parameter or revision drift blocks publication. Treat R1–R9 and retired rules as read-only history.
+
+## Finite acceptance under an explicit user limit
+
+Load `references/finite_acceptance_control.md` only when the user has explicitly chosen a still-active limit on this task's test or repair rounds. A general upgrade request does not impose a two-round/one-repair cap, and an earlier closed acceptance record does not control a later user-authorized repair. Preserve closed records; never rename a task to evade an active user limit. Apply any current explicit host contract within its scope, and do not present its budget checks as production-quality improvements. The production constraints below operate on source realization, action plans and shared scene state; they do not ration fixes.
 
 ## Enforce the plugin 0.5.24 unified rule and timing contract
+
+This section governs storyboard realization against its registered source. A
+user-authorized narrative rewrite establishes a new reviewed source baseline;
+it is not silently reclassified as source-preserving dialogue adaptation.
 
 In every R10-SPC-1 shot, keep the 27 top-level fields unchanged and make `音色` the sole complete delivery specification. Dialogue shots must use the exact ordered nested labels `基础声线、言语行为、当前表达、发声方式、音量、语速与节奏、呼吸、停顿、重音、尾音、禁止语气`; `发声方式` is an empty nested group heading, never a top-level field. Baseline voice covers age feel, register, thickness, brightness/depth and stable traits; emphasis quotes exact words from the actual shot dialogue; tail direction is explicit; prohibited tone has two to four items. No-dialogue shots use `无对白，不适用。`. Reject free-form one-line voice, missing/reordered labels and the generic neutral suffix. Independent audit must cite every dialogue shot's `field:shot_id.音色` in canonical order under the audio layer.
 
@@ -56,13 +160,13 @@ For every new full storyboard or complete scene/episode rebuild in plugin mode, 
 5. Call `commit_storyboard(..., draft_preflight_id=...)` only with that exact full-scope, commit-ready certificate. Never reconstruct, guess, or reuse a certificate from another draft.
 6. Send the immutable production handoff to the separate `independent_audit` authority and require the exact clean independent certificate before archive/sign-off.
 
-The immutable first-draft quality target is: overall correctness at least `98%`, direct usability at least `98%`, every episode at least `96%`, and new local issue rate at most `2%`; hard errors, major issues, known-issue recurrence, and systemic duplicate patterns must each equal `0`. These thresholds grade the authored first draft and expose whether prevention worked; they do not waive a validator. A full preflight is commit-ready only when no issue remains. Final independent audit remains `100%` across all eight layers with blocking, residual, and introduced issues all `0`.
+The immutable storyboard first-draft quality target is: overall correctness at least `98%`, direct usability at least `98%`, every episode's correctness and direct usability each at least `98%`, and new local issue rate at most `2%`; hard errors, major issues, known-issue recurrence, and systemic duplicate patterns must each equal `0`. Compare unrounded counts with the thresholds. These thresholds grade an actually evidenced first draft; an empty issue list without complete checking is not first-generation evidence. They do not waive a validator. A full preflight is commit-ready only when no issue remains. Final independent storyboard audit remains `100%` across all eight layers with blocking, residual, and introduced issues all `0`. For narrative artifacts, use the separately frozen scene/requirement denominator in `references/narrative-production-constraints.md`; do not reinterpret software-test counts as content quality.
 
 Keep responsibilities separate: production authors and repairs the canonical before commit; deterministic code projects outputs, enforces gates, binds hashes/certificates, and records every failed draft; independent audit reads the committed immutable artifact and searches for omissions without generating or repairing content. Audit is a second defense against missed semantic defects, not the primary cleaner for known template, schema, continuity, timing, or projection errors.
 
 ## Bind dialogue only to the imported source
 
-For novel/script production and audit, treat only the server-registered source file whose payload SHA, Hub authority entry and artifact-metadata source role cross-bind as authority for audible dialogue occurrences and speakers. Use `source-dialogue-authority-v6` with the closed grammar `source-dialogue-closed-grammar-v6.3`. The authority manifest SHA in the preflight report and signed draft-preflight record directly binds the source fingerprint, role, complete occurrences and grammar SHA; the grammar SHA transitively binds the implementation-source SHA, while artifact metadata references the signed record through `draft_preflight_id`. Candidate storyboard inventory, `source_lock`, issue ledger, cognition/anchor data and candidate speaker names are claims to check, never inputs that may teach the parser what the source says.
+For source-preserving storyboard production from a novel/script and its storyboard audit, treat only the server-registered source file whose payload SHA, Hub authority entry and artifact-metadata source role cross-bind as authority for audible dialogue occurrences and speakers. Use `source-dialogue-authority-v6` with the closed grammar `source-dialogue-closed-grammar-v6.3`. The authority manifest SHA in the preflight report and signed draft-preflight record directly binds the source fingerprint, role, complete occurrences and grammar SHA; the grammar SHA transitively binds the implementation-source SHA, while artifact metadata references the signed record through `draft_preflight_id`. Candidate storyboard inventory, `source_lock`, issue ledger, cognition/anchor data and candidate speaker names are claims to check, never inputs that may teach the parser what the source says. For user-authorized story restructuring, first establish and review the new narrative baseline through `references/narrative-production-constraints.md`; never pretend the change was already asserted by the old source.
 
 Extract every audible occurrence with exact text and punctuation, including role-colon/newline script forms, multiple speakers on one line, quoted/unquoted speech and cross-sentence read-aloud cues. Its source offset begins at the first audible content character after authorized wrapper/delivery stripping. After consuming a cue, parse every remaining role/visual marker run in source-offset order. Exclude screen/UI/subtitle/note/sound/letter text unless the source proves it is audibly read. Strip only grammar-authorized speech actions/adverbs from a speaker; never guess an unknown residue, a marker fused without a legal boundary, or a name token containing stage/visual structural terms. If the closed grammar cannot uniquely classify an occurrence, speaker, separator, quote boundary or read-aloud object, fail the complete preflight. That failure may write diagnostic/learning evidence only and must create no artifact, version, XLSX, projection, successor or handoff.
 
@@ -126,7 +230,7 @@ A failure cannot become PASS by re-auditing the same bytes. The legal closure is
 2. In plugin mode, use the exact authenticated `project_id` ledger as the sole operational authority and preserve its complete snapshot. Only for standalone or explicit shared-ledger work resolve the exact shared title `分镜项目Agent_问题台账.json`, create only if absent, replay-validate and replace the same identity. Global aggregation references project event IDs and never double-counts or independently rewrites those events. Bind sign-off/reopen actions to exact basis event IDs rather than timestamps; any rejection must leave serialized ledger bytes unchanged. A legacy pass/sign-off remains non-authoritative until a new complete independent audit clears its quality block.
 3. Treat exact ledger events as the only source for exact occurrence counts. Import older chat summaries only as unquantified historical patterns; never invent shot-level counts or claim that inaccessible windows were collected.
 4. Record one structured event for every audit, repair, and regression with `scripts/storyboard_agent.py`. Keep the full evidence in the ledger and the user-facing report brief.
-5. Prefer two internal repair rounds and enforce a hard maximum of three. Keep `can_advance=false` after `fail_current`; after a clean pass, wait for explicit human sign-off.
+5. Keep `can_advance=false` after `fail_current`. Repair the demonstrated root cause and all affected dependencies; do not impose a two/three-round content-repair cap. If an explicitly active user limit or a legacy service lifecycle prevents continuation, preserve its history and report that exact boundary rather than resetting the first draft or inventing a clean result. Formal archival sign-off remains separate from a clean content check.
 6. On a two-round recurrence, require root-cause repair and create a rule candidate. On a three-round recurrence, require upstream rebuild.
 7. Never let the ledger mutate formal rules. Require a deterministic validator change, positive/negative/regression tests, conflict validation, all test suites passing, and explicit human approval before a separate intentional skill update can promote a candidate.
 8. If the ledger or snapshot required by the selected route cannot be read or written, preserve a local pending event and report the exact unsynchronized route; an unused global ledger is not a blocker for an ordinary plugin task.
@@ -145,7 +249,7 @@ A failure cannot become PASS by re-auditing the same bytes. The legal closure is
 10. Generate each shot once in this exact 27-field order: `镜头编号｜时长｜累计时长｜功能类型｜场景连续性ID｜镜头类型｜可见主体｜空间站位描述｜起始状态｜机位｜运镜方式｜画面内容｜音色｜心理音轨｜环境音效｜环境动态｜光影｜光源来源｜光源方向｜色温倾向｜生成限制｜转场类型｜切镜/转场提示词｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`. Load `references/strict_prompt_contract.md` for every new storyboard write, rewrite, repair or ten-column export. New display IDs use `EP##-###`, cumulative time resets per episode, and `source_lock` records `output_contract=R10-SPC-1`, `target_model=Seedance 2.5`, and `aspect_ratio=9:16`. Every shot's `生成限制` must contain the exact self-contained phrase `9:16竖屏` and use `禁止额外配乐` instead of the literal token `BGM`. `画面内容` is the only place for visible actions, expressions, exact dialogue, dialogue timing, lip-sync, visible breath/pause, emphasis-period performance, listener reaction, end state, and the required three Seedance 2.5 stages. `音色` is the only complete delivery specification and must use the fixed nested template `基础声线→言语行为→当前表达→发声方式（音量、语速与节奏、呼吸、停顿、重音、尾音）→禁止语气`; render `音色：` followed by a blank line and the complete block. `发声方式` is legal only as that empty nested group heading; never write it as a top-level shot field. Never write the removed standalone fields `人物调度、动作与表演、台词、发声方式、标点语气、心理音轨属性、生成批次`, and never add a top-level `batches` object.
 11. Export exactly ten columns in this order: `分镜序号｜时长｜累计时长｜功能类型/场景连续性ID｜正式分镜母版｜GPT关键帧生成指令｜参考图锚定｜覆盖原文｜原文依据类型｜原文支撑句`. The formal cell starts with `镜头序号：EP##-###（x.xs；累计x.xs）`, uses the exact paragraph order in `references/strict_prompt_contract.md`, and remains the only blank-context single-shot execution master. Preserve `空间站位描述`, `起始状态`, `音色`, and all four independent lighting fields: `光影、光源来源、光源方向、色温倾向`. `GPT关键帧生成指令` begins with `画幅：9:16竖屏` and is a deterministic export-only static visual projection from a field whitelist; strip timing, dialogue, lip-sync, psychological audio, environment audio, all audio directions, camera-movement processes, transition commands, and temporal phrases. There is no Seedance column, no generated-batch sheet, and no 4–15-second batch-packaging stage. The service must not pre-generate or persist Seedance text in production, audit, repair, cache warm-up, or background jobs.
 12. For a Seedance 2.5 target, load both `references/jimeng_timing_policy.md` and `references/strict_prompt_contract.md`. Every `画面内容` has exactly three `【0.0—x.x秒】` stages with one-decimal boundaries: stimulus/start reaction → core action/dialogue → end reaction/cut state. These are semantic roles, not mandatory silence: speech may begin in the first stage and continue through the last, linked by one utterance identity and character ranges without repeating its original text. They are contiguous, non-overlapping and close on the declared shot duration. Unknown/legacy targets may remain natural-phase read-only inputs, but every new Agent output is migrated to `R10-SPC-1`. GPT/keyframe projection strips all timing, dialogue, lip-sync and audio instructions. Run the chapter coverage audit before the shot-level audit when `source_ingestion.mode=chapter_to_storyboard`. Recompute exactly eight audit layers: source/dialogue → camera/visibility → spatial continuity → performance chain → shot rhythm → compact-master independent execution → prohibitions/public-scene people/audio ecology → statistics. Under `semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting`, the spatial layer must list every `pair:left->right` in canonical order, bind `reviewed_adjacent_pair_count=N-1`, and submit the matching ordered-pair SHA-256; the performance layer explicitly audits the eye-chain rules; the prohibitions/audio layer must include `field:shot_id.音色` for every dialogue shot in canonical order; the source/dialogue layer must include `field:shot_id.画面内容` for every fact-conversion dialogue target; the camera/visibility layer must include every shot's `光影`, `光源来源`, `光源方向`, and `色温倾向` field evidence in canonical field order and verify the ordinary-interior clarity or justified atmospheric exception.
-13. Validate JSON with `python scripts/validate_storyboard.py INPUT.json --mode audit`; use `--mode repair` after corrections. Before commit or export, require all seventeen `THG-01`–`THG-17` template hard gates in `references/strict_prompt_contract.md`: the original twelve gates plus THG-13 eye/gaze/eyelid/blink/static-keyframe naturalness, THG-14 complete N-1 adjacent-pair continuity proof, THG-15 fixed structured voice template with actual-shot emphasis, THG-16 full in-scope narrative-unit classification plus conversation-scene dialogue restoration proof, and THG-17 still-visible text-to-image semantics plus scene-grounded lighting physics. Regress the defined impact scope. A second consecutive recurrence requires root-cause repair; a third requires upstream rebuild.
+13. Validate JSON with `python scripts/validate_storyboard.py INPUT.json --mode audit`; use `--mode repair` after corrections. Before commit or export, require all seventeen `THG-01`–`THG-17` template hard gates in `references/strict_prompt_contract.md`: the original twelve gates plus THG-13 eye/gaze/eyelid/blink/static-keyframe naturalness, THG-14 complete N-1 adjacent-pair continuity proof, THG-15 fixed structured voice template with actual-shot emphasis, THG-16 full in-scope narrative-unit classification plus conversation-scene dialogue restoration proof, and THG-17 still-visible text-to-image semantics plus scene-grounded lighting physics. Regress the defined impact scope. Repeated defects require tracing the source decision, propagation and checker; rebuild the affected upstream plan when that evidence requires it, rather than choosing the repair scope from the round number alone.
 14. After any rule or validator change, run `python scripts/run_golden_tests.py`, `python scripts/test_strict_prompt_contract.py`, and `python scripts/test_public_scene_ecology.py`; require every bundled functional test to pass.
 15. In Agent mode, also run `python scripts/run_agent_tests.py`; require every safety and lifecycle test to pass.
 16. In full-project Agent mode, run `python scripts/run_project_agent_tests.py`; require every work-order, change-propagation, and sign-off test to pass.
@@ -154,6 +258,11 @@ A failure cannot become PASS by re-auditing the same bytes. The legal closure is
 Steps 14–16 are change-triggered regression suites, not per-content-task work. For an unchanged runtime in an ordinary content task, verify the matching full-test certificate and continue with all content gates and eight audit layers; never use a certificate to reuse a content-quality conclusion.
 
 ## Close internally and report briefly
+
+The eight-layer, canonical/XLSX and storyboard-authority requirements below apply
+to storyboard artifacts. Narrative plans, scripts and dialogue use the narrative
+review scope and evidence stages in `references/narrative-production-constraints.md`;
+do not require camera/three-phase fields for prose or reuse a storyboard PASS for it.
 
 - When the user requests audit plus repair, keep one workflow chain with separate server authority roots and actor bindings: original independent audit root → immutable repair package → conditional repair authority creates a new version → impact regression → return to the original audit root for final verification. The user may request every step from one window; never let the production authority, repair authority, or another audit root sign the final verdict.
 - When the user requests audit only, finish all eight layers before reporting and do not repair. If they later request repair, perform the repair and the complete internal regression before delivery.
@@ -164,7 +273,10 @@ Steps 14–16 are change-triggered regression suites, not per-content-task work.
 
 ## Enforce the single conflict order
 
-Use this priority without reordering:
+For source-preserving storyboard realization, use this priority without reordering.
+For narrative restructuring, first resolve the user's authorized changes and
+establish the applicable baseline under the narrative contract; this order does
+not authorize retaining an obsolete source fact against that approved change:
 
 `安全合规 > 源文忠实 > 分集边界 > 台词容量 > 统计闭合 > 可见性 > 图生视频可执行性 > 节奏留存 > 美学细节`
 
@@ -183,6 +295,7 @@ Always enforce these resolved rules:
 
 ## Load references selectively
 
+- Read `references/narrative-production-constraints.md` for narrative analysis, story/adaptation/episode planning, script/dialogue creation or revision, and review of those artifacts or proposed fixes. It defines the narrative tool route and the distinction between source facts, authorized changes, review evidence and first-attempt metrics.
 - Read `references/four_source_methods.md` for expression, 16 movements, shot-size/light design, punctuation, and voice templates.
 - Read `references/songyun_humanist_cinematography.md` before every ancient-costume live-action visual prompt. Treat it as the mandatory visual master for real-camera texture, sourced-light decisions, restrained color, optical depth, lens selection, candid humanist composition, prompt structure, and negative restrictions. Adapt its concrete palette to the scene facts; do not omit the master because the scene is night, interior, dangerous, rainy, or non-Song.
 - Read `references/text_to_image_visual_prompt_decision.md` for every GPT keyframe, text-to-image/scene-frame prompt, or lighting-selection question. Use its three-way prompt classification, scene-grounded lighting order, physical-precondition checks, Song wedding-morning conditional preset, and explicit still-frame exclusions.

@@ -67,7 +67,8 @@
         "first_draft_correctness_threshold_percent": {"const": 98.0},
         "first_draft_direct_usability_threshold_percent": {"const": 98.0},
         "max_new_local_issue_rate_percent": {"const": 2.0},
-        "minimum_episode_correctness_percent": {"const": 96.0},
+        "minimum_episode_correctness_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "minimum_episode_direct_usability_percent": {"const": 98},
         "hard_major_known_systemic_tolerance": {"const": 0}
       }
     },
@@ -166,7 +167,7 @@
         "root_cause": {"type": "string"},
         "repair_action": {"type": "string", "minLength": 1},
         "impact_scope": {"type": "array", "items": {"type": "string"}},
-        "status": {"enum": ["initial", "residual", "introduced"]}
+        "status": {"enum": ["initial", "residual", "introduced", "missed_in_prior_audit", "rule_changed", "attribution_pending"]}
       }
     },
     "audit_event": {
@@ -225,7 +226,7 @@
             "eight_layers_completed": {"type": "boolean"}
           }
         },
-        "audit_round": {"type": "integer", "minimum": 1, "maximum": 3},
+        "audit_round": {"type": "integer", "minimum": 1},
         "result": {"enum": ["pass", "fail_current", "blocked"]},
         "checked_shot_count": {"type": "integer", "minimum": 0},
         "scope_key": {"$ref": "#/$defs/identifier"},
@@ -235,6 +236,18 @@
         "issues": {"type": "array", "items": {"$ref": "#/$defs/event_issue"}}
       },
       "allOf": [
+        {
+          "if": {
+            "required": ["assessment_contract", "audit_class", "task_type", "repair_root_artifact_id"],
+            "properties": {
+              "assessment_contract": {"const": "storyboard-quality-v2"},
+              "audit_class": {"const": "production_draft_preflight"},
+              "task_type": {"const": "production_draft_preflight"},
+              "repair_root_artifact_id": {"$ref": "#/$defs/identifier"}
+            }
+          },
+          "else": {"properties": {"audit_round": {"maximum": 3}}}
+        },
         {
           "if": {"properties": {"result": {"const": "pass"}}, "required": ["result"]},
           "then": {
@@ -459,7 +472,7 @@
             "blocking_error_count": {"type": "integer", "minimum": 0},
             "old_content_hit_count": {"type": "integer", "minimum": 0},
             "cross_context_term_count": {"type": "integer", "minimum": 0},
-            "shot_pass_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "shot_pass_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
             "residual_issue_count": {"type": "integer", "minimum": 0},
             "introduced_issue_count": {"type": "integer", "minimum": 0},
             "adjacent_pair_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100}
@@ -580,6 +593,11 @@
             "artifact_raw_sha256"
           ],
           "properties": {
+            "quality_contract": {"const": "storyboard-quality-v2"},
+            "missed_issue_count": {"type": "integer", "minimum": 0},
+            "rule_changed_issue_count": {"type": "integer", "minimum": 0},
+            "attribution_pending_count": {"type": "integer", "minimum": 0},
+            "introduced_count_complete": {"type": "boolean"},
             "initial_issue_count": {"type": "integer", "minimum": 0},
             "residual_issue_count": {"type": "integer", "minimum": 0},
             "introduced_issue_count": {"type": "integer", "minimum": 0},
@@ -613,16 +631,25 @@
                 "final_audit_pass"
               ],
               "properties": {
-                "grade": {"enum": ["A", "B", "C"]},
+                "grade": {"enum": ["A", "B", "C", "unavailable"]},
                 "checked_shot_count": {"type": "integer", "minimum": 0},
                 "issue_point_count": {"type": "integer", "minimum": 0},
                 "unique_affected_shot_count": {"type": "integer", "minimum": 0},
                 "affected_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-                "first_draft_correctness_percent": {"type": "number", "minimum": 0, "maximum": 100},
-                "direct_usability_percent": {"type": "number", "minimum": 0, "maximum": 100},
-                "new_local_issue_shot_rate_percent": {"type": "number", "minimum": 0, "maximum": 100},
-                "episode_correctness_percent": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 100}},
-                "minimum_episode_correctness_percent": {"type": "number", "minimum": 0, "maximum": 100},
+                "quality_contract": {"const": "storyboard-quality-v2"},
+                "measurement_state": {"enum": ["measured", "unavailable"]},
+                "content_affected_shot_ids": {"type": "array", "items": {"type": "string"}},
+                "contract_affected_shot_ids": {"type": "array", "items": {"type": "string"}},
+                "workflow_issue_count": {"type": "integer", "minimum": 0},
+                "advisory_count": {"type": "integer", "minimum": 0},
+                "unlocated_content_issue_count": {"type": "integer", "minimum": 0},
+                "first_draft_correctness_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                "direct_usability_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                "new_local_issue_shot_rate_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                "episode_correctness_percent": {"type": "object", "additionalProperties": {"type": ["number", "null"], "minimum": 0, "maximum": 100}},
+                "episode_direct_usability_percent": {"type": "object", "additionalProperties": {"type": ["number", "null"], "minimum": 0, "maximum": 100}},
+                "minimum_episode_correctness_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                "minimum_episode_direct_usability_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
                 "hard_or_major_issue_count": {"type": "integer", "minimum": 0},
                 "global_blocking_issue_count": {"type": "integer", "minimum": 0},
                 "known_recurrence_count": {"type": "integer", "minimum": 0},
@@ -1233,8 +1260,8 @@
               "first_position": {"type": "integer", "minimum": 1},
               "last_position": {"type": "integer", "minimum": 1},
               "event_count": {"type": "integer", "minimum": 1},
-              "first_round": {"type": "integer", "minimum": 1, "maximum": 3},
-              "last_round": {"type": "integer", "minimum": 1, "maximum": 3},
+              "first_round": {"type": "integer", "minimum": 1},
+              "last_round": {"type": "integer", "minimum": 1},
               "last_event_id": {"$ref": "#/$defs/identifier"}
             },
             "additionalProperties": false
@@ -1270,7 +1297,7 @@
         "audit_cycle_id": {"$ref": "#/$defs/identifier"},
         "last_event_id": {"$ref": "#/$defs/identifier"},
         "last_result": {"enum": ["pass", "fail_current", "blocked"]},
-        "last_audit_round": {"type": "integer", "minimum": 1, "maximum": 3},
+        "last_audit_round": {"type": "integer", "minimum": 1},
         "open_issue_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}},
         "closure_state": {"enum": ["open", "preflight_clean", "awaiting_human_signoff", "human_signed_off", "reopened_by_human", "reopened_by_independent_reaudit", "legacy_signoff_requires_reaudit", "legacy_resolution_requires_reaudit"]},
         "can_advance": {"type": "boolean"},

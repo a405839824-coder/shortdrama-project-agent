@@ -638,6 +638,8 @@ def main() -> int:
             apply_mutation(obj, mutation)
         if not test.get("skip_fixture_upgrade"):
             upgrade_fixture_to_compact(obj)
+        if test.get("measure_current_repair"):
+            obj = validator.bind_current_repair_check(obj, rules_path=args.rules)
         report = validator.validate_project(obj, mode=test.get("mode", "audit"), rules_path=args.rules)
         codes = [issue["error_code"] for issue in report["issues"]]
         expected_status = test["expected_status"]

@@ -33,6 +33,7 @@ from .canonical import (
     compact_storyboard_canonical,
 )
 from .config import Settings
+from .acceptance_service import controlled_acceptance_operation
 from .delta import (
     changed_shot_fields,
     ensure_shot_uids,
@@ -56,8 +57,13 @@ from .models import (
     ToolResponse,
 )
 from .storage import ProjectStore, sha256_bytes, slug_filename, utc_stamp
+from .quality import (
+    QUALITY_CONTRACT, assessment_context, annotate_attempt_event, bind_issue_identity,
+    convergence_evidence, finding_origin, machine_issue_map, repair_diff, measure_quality,
+)
 from .workbook_migration import WORKBOOK_MIGRATION_TARGET
 from .workbook_migration_service import WorkbookMigrationMixin
+from .narrative_service import NarrativeGuardMixin, NARRATIVE_OPERATIONS, NARRATIVE_TYPES
 from .frozen_v053 import validate_storyboard as frozen_v053_validator
 from .source_dialogue import (
     SOURCE_ACTION_LEXICON_SHA256,
@@ -1327,7 +1333,7 @@ def _scene_scoped_report(
     return report, scoped_candidate
 
 
-def _draft_quality_metrics(
+def _legacy_draft_quality_metrics(
     storyboard: dict[str, Any],
     issues: list[dict[str, Any]],
     *,
@@ -1446,8 +1452,24 @@ def _draft_quality_metrics(
     }
 
 
-class StoryboardService(WorkbookMigrationMixin):
+def _draft_quality_metrics(storyboard, issues, *, project_id="quality", known_pattern_keys=None):
+    def pattern(issue):
+        normalized = {
+            "error_code": issue.get("error_code"),
+            "field": str(issue.get("field") or str(issue.get("location") or "全表").rsplit(".", 1)[-1]),
+            "issue_type": issue.get("issue_type") or issue.get("template_gate_id")
+                or _issue_category(str(issue.get("error_code") or "")),
+            "root_cause": issue.get("root_cause"),
+            "category": issue.get("semantic_layer") or _issue_category(str(issue.get("error_code") or "")),
+        }
+        return storyboard_agent.issue_pattern_key(project_id, normalized)
+    return measure_quality(storyboard, issues, resolve_ids=_issue_shot_ids,
+                           pattern_key=pattern, known_pattern_keys=known_pattern_keys)
+
+
+class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     def __init__(self, settings: Settings):
+        settings.validate_acceptance_control()
         self.settings = settings
         self.store = ProjectStore(
             settings.data_dir,
@@ -2243,7 +2265,7 @@ class StoryboardService(WorkbookMigrationMixin):
 
     @staticmethod
     def _work_order_role(operation: str, mode: str) -> str:
-        if operation == "storyboard_audit" and mode == "audit_only":
+        if operation in {"storyboard_audit", "narrative_audit"} and mode == "audit_only":
             return "independent_audit"
         if operation == "storyboard_repair":
             return "repair"
@@ -2907,7 +2929,8 @@ class StoryboardService(WorkbookMigrationMixin):
 
         StoryboardService._ensure_can_execute(work_order)
         status = str(work_order.get("status") or "")
-        if status not in WRITE_READY_WORK_ORDER_STATUSES:
+        if (status not in WRITE_READY_WORK_ORDER_STATUSES
+                and not (status == "validating" and work_order.get("operation") in NARRATIVE_OPERATIONS)):
             raise ValueError(
                 f"work_order_write_forbidden: work order cannot persist from {status or 'unknown'}"
             )
@@ -3139,6 +3162,47 @@ class StoryboardService(WorkbookMigrationMixin):
                     shot_by_ref[reference] = row
         shot_refs = set(shot_by_ref)
 
+        source_limit_review = validate_storyboard.inspect_source_content_limits(
+            storyboard, shots,
+            protected_alignment=validate_storyboard._protected_dialogue_alignment(storyboard, shots),
+        )
+        if source_limit_review["issues"]:
+            raise ValueError(
+                "semantic_audit_source_content_limit_invalid: "
+                + "; ".join(source_limit_review["issues"])
+            )
+        source_limit_obligations = source_limit_review["obligations"]
+        expected_source_limit_ids = [row["evidence_id"] for row in source_limit_obligations]
+        expected_source_limit_fields = list(dict.fromkeys(
+            ref for row in source_limit_obligations for ref in row["field_evidence_ids"]
+        ))
+
+        # Recompile the recorded source/action derivation; submitted review
+        # IDs and author-side pending/PASS metadata are not its authority.
+        # Import at the consumer boundary to avoid a renderer/service cycle.
+        from production_derivation import inspect_derivation
+
+        source_decision_review = inspect_derivation(storyboard)
+        if source_decision_review["present"] and not source_decision_review["valid"]:
+            raise ValueError(
+                "semantic_audit_source_decision_derivation_invalid: "
+                + "; ".join(
+                    f"{row['path']}: {row['message']}"
+                    for row in source_decision_review["faults"]
+                )
+            )
+        source_decision_obligations = (
+            source_decision_review["source_obligations"]
+            if source_decision_review["present"] else []
+        )
+        expected_source_decision_ids = [
+            row["evidence_id"] for row in source_decision_obligations
+        ]
+        expected_source_decision_fields = list(dict.fromkeys(
+            ref for row in source_decision_obligations
+            for ref in row["field_evidence_ids"]
+        ))
+
         def validate_evidence_id(evidence_id: str) -> None:
             kind, value = evidence_id.split(":", 1)
             kind = kind.strip().casefold()
@@ -3147,10 +3211,20 @@ class StoryboardService(WorkbookMigrationMixin):
                 raise ValueError(
                     "semantic_audit_evidence_invalid: evidence references must use non-empty kind:id"
                 )
-            if kind not in {"shot", "field", "canonical", "pair", "source-unit"}:
+            if kind not in {"shot", "field", "canonical", "pair", "source-unit", "source-limit", "source-decision"}:
                 raise ValueError(
                     "semantic_audit_evidence_invalid: evidence kind must be one of "
-                    "shot, field, canonical, pair, or source-unit"
+                    "shot, field, canonical, pair, source-unit, source-limit, or source-decision"
+                )
+            if kind == "source-decision" and evidence_id not in expected_source_decision_ids:
+                raise ValueError(
+                    "semantic_audit_source_decision_binding_mismatch: source-decision must match "
+                    "the recompiled current source, decided expression, carrier and actual output"
+                )
+            if kind == "source-limit" and evidence_id not in expected_source_limit_ids:
+                raise ValueError(
+                    "semantic_audit_source_content_limit_binding_mismatch: source-limit must match "
+                    "the exact current source partition, scope, entries and actual output"
                 )
             if kind == "shot" and value not in shot_refs:
                 raise ValueError(
@@ -3175,6 +3249,43 @@ class StoryboardService(WorkbookMigrationMixin):
         for row in layer_rows:
             for evidence_id in row["evidence_ids"]:
                 validate_evidence_id(str(evidence_id))
+                if str(evidence_id).startswith("source-limit:") and row["layer"] != "源文对白":
+                    raise ValueError("semantic_audit_source_content_limit_layer_mismatch")
+                if str(evidence_id).startswith("source-decision:") and row["layer"] != "源文对白":
+                    raise ValueError("semantic_audit_source_decision_layer_mismatch")
+
+        submitted_source_decision_ids = [
+            ref for ref in layer_by_name["源文对白"]["evidence_ids"]
+            if str(ref).startswith("source-decision:")
+        ]
+        source_layer_evidence = set(layer_by_name["源文对白"]["evidence_ids"])
+        missing_source_decision_fields = [
+            ref for ref in expected_source_decision_fields
+            if ref not in source_layer_evidence
+        ]
+        if (submitted_source_decision_ids != expected_source_decision_ids
+                or missing_source_decision_fields):
+            raise ValueError(
+                "semantic_audit_source_decision_pending: each source use needs its exact current "
+                "source-decision evidence and actual fields in the independent source layer; "
+                "author declarations cannot close this review"
+            )
+
+        submitted_source_limit_ids = [
+            ref for ref in layer_by_name["源文对白"]["evidence_ids"]
+            if str(ref).startswith("source-limit:")
+        ]
+        submitted_source_limit_fields = [
+            ref for ref in layer_by_name["源文对白"]["evidence_ids"]
+            if ref in set(expected_source_limit_fields)
+        ]
+        if (submitted_source_limit_ids != expected_source_limit_ids
+                or submitted_source_limit_fields != expected_source_limit_fields):
+            raise ValueError(
+                "semantic_audit_source_content_limit_pending: each limited event needs independent "
+                "exact source-limit evidence plus its objective narration and actual action fields; "
+                "author-side unknown or pending declarations cannot sign a pass"
+            )
 
         dialogue_shot_refs = [
             str(row.get("镜头编号") or row.get("shot_uid") or "").strip()
@@ -3377,6 +3488,8 @@ class StoryboardService(WorkbookMigrationMixin):
                 )
             for evidence_id in issue_evidence:
                 validate_evidence_id(evidence_id)
+                if evidence_id.startswith("source-decision:") and issue["layer"] != "源文对白":
+                    raise ValueError("semantic_audit_source_decision_layer_mismatch")
             pair_issue_evidence = sorted(
                 evidence_id
                 for evidence_id in issue_evidence
@@ -3624,6 +3737,34 @@ class StoryboardService(WorkbookMigrationMixin):
                 "source_layer_status": layer_matrix["源文对白"]["status"],
             },
         }
+        if source_limit_obligations:
+            enriched["independent_evidence_matrix"]["source_content_limit_coverage"] = {
+                "contract": "source-content-limit-v1",
+                "expected_count": len(source_limit_obligations),
+                "reviewed_count": len(submitted_source_limit_ids),
+                "evidence_ids": expected_source_limit_ids,
+                "actual_field_evidence_ids": expected_source_limit_fields,
+                "binding_sha256": [row["binding_sha256"] for row in source_limit_obligations],
+                "source_layer_status": layer_matrix["源文对白"]["status"],
+                "state": "verified_event_only" if layer_matrix["源文对白"]["status"] == "pass" else "fail_current",
+                "unprovided_content_certified": False,
+            }
+        if source_decision_review["present"]:
+            enriched["independent_evidence_matrix"]["source_decision_coverage"] = {
+                "contract": "source-decision-independent-review-v1",
+                "expected_count": len(source_decision_obligations),
+                "reviewed_count": len(submitted_source_decision_ids),
+                "evidence_ids": expected_source_decision_ids,
+                "actual_field_evidence_ids": expected_source_decision_fields,
+                "source_graph_sha256": source_decision_review["source_graph_sha256"],
+                "derivation_sha256": source_decision_review["derivation_sha256"],
+                "canonical_sha256": canonical_hash,
+                "semantic_audit_sha256": submission_hash,
+                "source_layer_status": layer_matrix["源文对白"]["status"],
+                "state": "verified_source_uses" if layer_matrix["源文对白"]["status"] == "pass" else "fail_current",
+                "canonical_source_status_unchanged": True,
+                "unprovided_content_certified": False,
+            }
         enriched["status"] = "pass" if clean else "fail_current"
         return enriched
 
@@ -4562,6 +4703,7 @@ class StoryboardService(WorkbookMigrationMixin):
             "open_issue_ids": sorted(open_issue_ids),
         }
 
+    @controlled_acceptance_operation
     def agent_status(
         self,
         namespace: str,
@@ -4574,6 +4716,13 @@ class StoryboardService(WorkbookMigrationMixin):
         projects = self.store.list_projects(namespace)
         data: dict[str, Any] = {
             "plugin_version": __version__,
+            "finite_acceptance_control": {
+                "enabled": self.settings.acceptance_control_enabled,
+                "profile": "host_controlled" if self.settings.acceptance_control_enabled else "legacy_uncontrolled",
+                "scope": "frozen_service_calls_and_runner_steps",
+                "os_permission_isolation": False,
+                "manuscript_accuracy_proven": False,
+            },
             "runtime_status": report.get("status"),
             "audit_repair_mode_advice": {
                 "supported": True,
@@ -5131,6 +5280,7 @@ class StoryboardService(WorkbookMigrationMixin):
             "warnings": warnings,
         }
 
+    @controlled_acceptance_operation
     @_fence_role_operation
     def mark_performance_stage(
         self,
@@ -5400,6 +5550,7 @@ class StoryboardService(WorkbookMigrationMixin):
         )
 
 
+    @controlled_acceptance_operation
     def create_project(self, namespace: str, project_name: str) -> ToolResponse:
         self._require_runtime()
         project_name = project_name.strip()
@@ -5674,6 +5825,7 @@ class StoryboardService(WorkbookMigrationMixin):
         ):
             raise ValueError("migration_record_authority_conflict")
 
+    @controlled_acceptance_operation
     def migrate_project_state(
         self,
         namespace: str,
@@ -10402,6 +10554,7 @@ class StoryboardService(WorkbookMigrationMixin):
             idempotent_replay=True,
         )
 
+    @controlled_acceptance_operation
     def recover_storyboard_handoff(
         self,
         namespace: str,
@@ -10899,6 +11052,172 @@ class StoryboardService(WorkbookMigrationMixin):
             "missing_scenes": missing,
         }
 
+    @controlled_acceptance_operation
+    def diagnose_storyboard_artifact(self, namespace, project_id, artifact_id, episode_ids=None):
+        """Read-only current diagnostics, independent of formal workflow readiness."""
+        storyboard, record = self._storyboard_from_artifact(
+            namespace, project_id, artifact_id, persist_recovered_canonical=False,
+            require_bound_projection=False,
+        )
+        report = validate_storyboard.validate_project(storyboard, mode="audit")
+        selected = set(episode_ids or [])
+        shots = [s for s in storyboard.get("shots", []) if isinstance(s, dict)
+                 and (not selected or str(s.get("episode_id") or "") in selected)]
+        found = {str(s.get("episode_id") or "") for s in shots}
+        ids = {str(s.get("镜头编号") or s.get("shot_uid") or "") for s in shots}
+        scoped, unscoped, outside = [], [], []
+        for issue in report.get("issues", []):
+            affected = set(_issue_shot_ids(storyboard, issue))
+            if not affected:
+                unscoped.append(issue)
+            elif affected & ids:
+                scoped.append(issue)
+            else:
+                outside.append(issue)
+        return ToolResponse(status="diagnostic_completed", summary=(
+            f"只读机器诊断｜当前范围{len(shots)}镜｜范围内{len(scoped)}项｜未定位/共享依赖{len(unscoped)}项｜未签发审计结论"),
+            project_id=project_id, artifact_id=artifact_id, data={
+                "read_only": True, "artifact_fingerprint": record.get("fingerprint"),
+                "quality_contract": QUALITY_CONTRACT,
+                "requested_episode_ids": sorted(selected), "missing_episode_ids": sorted(selected - found),
+                "checked_shot_count": len(shots), "issues": scoped,
+                "unscoped_or_dependency_issues": unscoped,
+                "outside_scope_issues": outside,
+                "formal_audit_status": "not_performed", "source_coverage_status": "not_independently_verified",
+                "historical_evidence_repaired": False, "certificate_created": False,
+                "raw_generation_quality": None,
+                "ruleset_version": self._ruleset_version, "validator_version": self._validator_version(),
+            })
+
+    def _quality_assessment_context(self, storyboard):
+        return assessment_context(
+            storyboard, rules=getattr(self, "_ruleset_fingerprint", "unknown"),
+            validator=getattr(self, "_validator_fingerprint", "unknown"),
+            runtime=getattr(self, "_runtime_fingerprint", "unknown"),
+        )
+
+    def _observe_draft_candidate(self, namespace, project_id, *, work_order_id,
+                                 scope_kind, scope_id, storyboard, quality, report):
+        """Append immutable observations; reopening a work order never resets them.
+
+        This is the first server-observed candidate, not proof of the model's
+        first generation. The complete input is retained before normalization.
+        """
+        lineage = sha256_bytes(_stable_json_bytes({
+            "project_id": project_id, "scope_kind": scope_kind, "scope_id": scope_id,
+        }))
+        raw_sha = sha256_bytes(_stable_json_bytes(storyboard))
+        observation_id = "OBS-" + sha256_bytes(_stable_json_bytes([lineage, raw_sha]))[:24]
+        existing = self.store.append_draft_observation(namespace, project_id, {
+                        "observation_id": observation_id, "project_id": project_id,
+                        "lineage_id": lineage,
+                        "work_order_id": work_order_id, "scope_kind": scope_kind, "scope_id": scope_id,
+                        "created_at": utc_stamp(), "input_sha256": raw_sha,
+                        "candidate_snapshot": copy.deepcopy(storyboard),
+                        "ruleset_version": self._ruleset_version, "validator_version": self._validator_version(),
+                        "quality_contract": QUALITY_CONTRACT,
+                        "evaluated_candidate_quality": copy.deepcopy(quality),
+                        "report_sha256": sha256_bytes(_stable_json_bytes(report)),
+                        "measurement_basis": "prepared_candidate_machine_preflight",
+                        "raw_generation_quality": None, "raw_generation_state": "generation_provenance_unverified",
+                        "model_settings_state": "not_observed_by_server",
+                    })
+        # Keep the large private input out of the tool's context; IDs and hashes
+        # permit exact retrieval and comparison without duplicating each draft.
+        return {k: copy.deepcopy(v) for k, v in existing.items() if k != "candidate_snapshot"}
+
+    def _compile_production_authoring_request(
+        self, namespace: str, project_id: str, *, work_order_id: str,
+        request: dict[str, Any], authority_session_fingerprint: str | None,
+        runtime_certificate_id: str,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        """Record and compile after the public caller has checked authority.
+
+        Project artifact bytes identify the source graph; they do not certify
+        its interpretation. Every admitted invocation has an immutable folder,
+        including graph/shape/compiler failures. No publication artifact is made.
+        """
+        from author_storyboard import record_attempt
+
+        request_id = "AUR-" + uuid.uuid4().hex
+        directory = self.store.project_dir(namespace, project_id) / "authoring_requests" / request_id
+        directory.mkdir(parents=True, exist_ok=False)
+
+        def write_once(name: str, value: Any = None, *, raw: bytes | None = None) -> bytes:
+            payload = raw if raw is not None else (
+                json.dumps(value, ensure_ascii=True, allow_nan=False, indent=2) + "\n"
+            ).encode("utf-8")
+            with (directory / name).open("xb") as stream:
+                stream.write(payload)
+            return payload
+
+        original = write_once("request.original.json", request)
+        write_once("request_context.json", {
+            "project_id": project_id, "work_order_id": work_order_id,
+            "session_fingerprint": authority_session_fingerprint,
+            "runtime_test_certificate_id": runtime_certificate_id,
+            "created_at": utc_stamp(), "request_sha256": sha256_bytes(original),
+        })
+        summary: dict[str, Any] = {
+            "contract": "production-authoring-request-v1", "request_id": request_id,
+            "request_sha256": sha256_bytes(original), "status": "rejected",
+            "input_sha256": None, "source_graph_sha256": None,
+            "canonical_sha256": None, "compiler_attempt_id": None,
+            "semantic_accuracy_percent": None, "commit_eligible": False,
+            "canonical_created": False, "artifact_created": False,
+            "source_graph_authority": "artifact_bytes_identity_only; semantic_review_required",
+        }
+        candidate = None
+        try:
+            if set(request) != {"contract", "decisions", "source_graph_artifact_id", "source_graph_sha256"}:
+                raise ValueError("production_authoring_request_shape: requires exactly contract, decisions, source_graph_artifact_id and source_graph_sha256")
+            raw_input = write_once("decisions.original.json", request["decisions"])
+            summary["input_sha256"] = sha256_bytes(raw_input)
+            if (not isinstance(request["decisions"], dict)
+                    or request["decisions"].get("contract") != "production-decisions-v1"):
+                raise ValueError("production_authoring_input_contract: decisions must use production-decisions-v1")
+            expected_graph = request["source_graph_sha256"]
+            if not isinstance(expected_graph, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_graph):
+                raise ValueError("production_authoring_graph_hash: requires exact lowercase SHA256")
+            artifact_id = request["source_graph_artifact_id"]
+            if not isinstance(artifact_id, str) or not artifact_id:
+                raise ValueError("production_authoring_graph_artifact: requires an existing project artifact ID")
+            record, graph_path = self.store.get_artifact(namespace, project_id, artifact_id)
+            if record.get("artifact_type") not in {"source:reference", "storyboard_plan"}:
+                raise ValueError("production_authoring_graph_artifact: use an imported source:reference or storyboard_plan JSON artifact")
+            graph_bytes = graph_path.read_bytes()
+            write_once("source_graph.original.json", raw=graph_bytes)
+            actual_graph = sha256_bytes(graph_bytes)
+            summary.update(source_graph_artifact_id=artifact_id, source_graph_sha256=actual_graph)
+            if actual_graph != record.get("fingerprint") or actual_graph != expected_graph:
+                raise ValueError("production_authoring_graph_identity: current project artifact bytes do not match the requested SHA256")
+            attempt = record_attempt(
+                directory / "decisions.original.json", directory / "compiler_attempts",
+                source_graph_path=directory / "source_graph.original.json",
+                source_graph_sha256=expected_graph,
+            )
+            summary.update(
+                compiler_attempt_id=attempt["attempt_id"], status=attempt["status"],
+                findings=copy.deepcopy(attempt.get("findings", [])),
+                checks_completed=attempt.get("checks_completed"),
+                checks_not_run=attempt.get("checks_not_run"),
+            )
+            if attempt["status"] == "rendered_pending_preflight":
+                raw_candidate = Path(attempt["canonical_path"]).read_bytes()
+                if sha256_bytes(raw_candidate) != attempt["canonical_sha256"]:
+                    raise ValueError("production_authoring_candidate_identity: recorded canonical bytes changed")
+                candidate = json.loads(raw_candidate)
+                summary.update(canonical_created=True,
+                               canonical_sha256=canonical_storyboard_sha256(candidate),
+                               canonical_raw_sha256=attempt["canonical_sha256"])
+        except (TypeError, ValueError, KeyError, OSError, UnicodeError) as exc:
+            candidate = None
+            summary.update(status="rejected", canonical_created=False,
+                           findings=[{"path": "production_authoring_request", "message": f"{type(exc).__name__}: {exc}"}])
+        write_once("bridge_result.json", summary)
+        return candidate, summary
+
+    @controlled_acceptance_operation
     @_fence_role_operation
     def preflight_storyboard_draft(
         self,
@@ -10930,6 +11249,25 @@ class StoryboardService(WorkbookMigrationMixin):
             namespace, project_id, work_order, request_session_id
         )
         runtime_certificate = self._require_runtime_test_certificate(namespace, project_id)
+        authoring_attempt = None
+        if isinstance(storyboard, dict) and storyboard.get("contract") == "production-authoring-request-v1":
+            compiled, authoring_attempt = self._compile_production_authoring_request(
+                namespace, project_id, work_order_id=work_order_id, request=storyboard,
+                authority_session_fingerprint=authority_session_fingerprint,
+                runtime_certificate_id=str(runtime_certificate["certificate_id"]),
+            )
+            if compiled is None:
+                return ToolResponse(
+                    status="authoring_rejected",
+                    summary="生成决定未通过｜原始请求与可读取来源已留痕｜未形成可审分镜",
+                    project_id=project_id, work_order_id=work_order_id,
+                    data={"authoring_attempt": authoring_attempt, "compiled_storyboard": None,
+                          "quality": None, "commit_ready": False, "artifact_created": False,
+                          "version_created": False, "xlsx_created": False, "handoff_created": False},
+                )
+            # Observations and all existing scope/quality gates use the actual
+            # canonical, never the request envelope or a fabricated shot count.
+            storyboard = compiled
         profile = storyboard_agent.active_prevention_profile(ledger_snapshot)
         profile_sha = sha256_bytes(_stable_json_bytes(profile))
         known_patterns = {
@@ -11154,6 +11492,10 @@ class StoryboardService(WorkbookMigrationMixin):
             project_id=project_id,
             known_pattern_keys=known_patterns,
         )
+        observation = self._observe_draft_candidate(
+            namespace, project_id, work_order_id=work_order_id, scope_kind=scope_kind,
+            scope_id=scope_id, storyboard=storyboard, quality=quality, report=report,
+        )
         commit_ready = bool(scope_kind == "full" and quality["commit_eligible"])
         scene_coverage_generation_sha = sha256_bytes(
             _stable_json_bytes(
@@ -11333,12 +11675,9 @@ class StoryboardService(WorkbookMigrationMixin):
                     event_issue["field"],
                     tuple(sorted(event_issue["shot_ids"])),
                 )
-                if audit_round > 1:
-                    event_issue["status"] = (
-                        "residual"
-                        if signature in previous_issue_signatures
-                        else "introduced"
-                    )
+                draft_context = self._quality_assessment_context(scoped_candidate)
+                event_issue = bind_issue_identity(event_issue, draft_context)
+                event_issue["status"] = finding_origin(event_issue, prior_draft_events, draft_context)
                 event_issues.append(event_issue)
             event = {
                 "event_id": f"EVT-{preflight_key[:20]}",
@@ -11350,6 +11689,8 @@ class StoryboardService(WorkbookMigrationMixin):
                 "audit_cycle_id": draft_cycle_id,
                 "task_type": "production_draft_preflight",
                 "audit_class": "production_draft_preflight",
+                "assessment_contract": QUALITY_CONTRACT,
+                "assessment_context": self._quality_assessment_context(scoped_candidate),
                 "audit_round": audit_round,
                 "result": "pass" if not issues else "fail_current",
                 "checked_shot_count": len(scoped_shots),
@@ -11391,6 +11732,7 @@ class StoryboardService(WorkbookMigrationMixin):
                 ],
                 "scope_sha256": sha256_bytes(_stable_json_bytes(scoped_shots)),
                 "candidate_sha256": candidate_sha,
+                "candidate_observation": observation,
                 "ruleset_version": self._ruleset_version,
                 "validator_version": self._validator_version(),
                 "source_dialogue_authority_sha256": source_dialogue_authority_sha,
@@ -11483,14 +11825,17 @@ class StoryboardService(WorkbookMigrationMixin):
                 else (
                     f"草稿预检通过｜{scope_kind}:{scope_id}｜仅可继续场景内循环"
                     if not issues
-                    else f"草稿预检未通过｜问题{len(issues)}项｜未生成文件或交接"
+                    else f"草稿预检未通过｜问题{len(issues)}项｜未生成交付文件或交接"
                 )
             ),
             project_id=project_id,
             work_order_id=work_order_id,
             trace_id=preflight_id,
             data={
+                **({"authoring_attempt": authoring_attempt,
+                    "compiled_storyboard": copy.deepcopy(candidate)} if authoring_attempt is not None else {}),
                 "draft_preflight": record,
+                "candidate_observation": observation,
                 "report": report,
                 "quality": quality,
                 "commit_ready": commit_ready,
@@ -12631,6 +12976,7 @@ class StoryboardService(WorkbookMigrationMixin):
             },
         )
 
+    @controlled_acceptance_operation
     def begin_task(
         self,
         namespace: str,
@@ -12838,6 +13184,7 @@ class StoryboardService(WorkbookMigrationMixin):
             },
         )
 
+    @controlled_acceptance_operation
     def import_source_file(
         self,
         namespace: str,
@@ -13123,6 +13470,7 @@ class StoryboardService(WorkbookMigrationMixin):
         elif work_order["status"] != "executing":
             raise ValueError(f"work order cannot execute from {work_order['status']}")
 
+    @controlled_acceptance_operation
     @_fence_role_operation
     def plan_change(
         self,
@@ -13187,6 +13535,7 @@ class StoryboardService(WorkbookMigrationMixin):
             data={"change_id": request["change_id"], **result},
         )
 
+    @controlled_acceptance_operation
     def commit_artifact(
         self,
         namespace: str,
@@ -13201,6 +13550,7 @@ class StoryboardService(WorkbookMigrationMixin):
         source_artifact_id: str | None,
         change_summary: str,
         request_session_id: str | None = None,
+        narrative_candidate: dict[str, Any] | None = None,
     ) -> ToolResponse:
         self._require_runtime()
         allowed_types = PLAN_ARTIFACT_TYPES | PRODUCTION_ARTIFACT_TYPES
@@ -13219,6 +13569,13 @@ class StoryboardService(WorkbookMigrationMixin):
             artifact_type,
             request_session_id,
         )
+        if artifact_type in NARRATIVE_TYPES or work_order.get("operation") in NARRATIVE_OPERATIONS:
+            return self._commit_narrative_artifact(
+                namespace, project_id=project_id, work_order_id=work_order_id,
+                artifact_type=artifact_type, output_format=output_format, file_name=file_name,
+                content_text=content_text, structured_data=structured_data,
+                source_artifact_id=source_artifact_id, change_summary=change_summary,
+                narrative_candidate=narrative_candidate, request_session_id=request_session_id)
         if output_format == "json":
             if structured_data is None:
                 raise ValueError("structured_data is required for JSON output")
@@ -13598,9 +13955,11 @@ class StoryboardService(WorkbookMigrationMixin):
         prior_events: list[dict[str, Any]],
         audit_round: int,
         known_pattern_keys: set[str] | None = None,
+        assessment_contract: str | None = QUALITY_CONTRACT,
     ) -> dict[str, Any]:
         """Build the deterministic, authoritative content of one audit event."""
 
+        context = self._quality_assessment_context(storyboard) if assessment_contract == QUALITY_CONTRACT else None
         prior_keys: set[tuple[str, str, tuple[str, ...]]] = set()
         for prior_event in prior_events[-1:]:
             for prior_issue in prior_event.get("issues", []):
@@ -13647,6 +14006,9 @@ class StoryboardService(WorkbookMigrationMixin):
                     else "introduced"
                 )
             )
+            if context is not None:
+                bound_identity = bind_issue_identity({**issue, "field": field, "shot_ids": shot_ids}, context)
+                status = finding_origin(bound_identity, prior_events, context)
             severity = str(issue.get("severity") or "fail")
             if severity == "warning":
                 severity = "warn"
@@ -13688,6 +14050,16 @@ class StoryboardService(WorkbookMigrationMixin):
                     "status": status,
                 }
             )
+            if context is not None:
+                # Keep source-level identity evidence in the signed event. A
+                # report number or a generic field cannot distinguish two
+                # missing requirements on the same shot.
+                for identity_field in ("evidence_ids", "source_sentence", "source_occurrence_id",
+                                       "requirement_id", "subject_id"):
+                    if identity_field in issue:
+                        issues[-1][identity_field] = copy.deepcopy(issue[identity_field])
+                issues[-1] = bind_issue_identity(issues[-1], context)
+                issues[-1]["finding_fingerprint"] = bound_identity["finding_fingerprint"]
         if audit_round == 1:
             initial_issue_count = len(issues)
         else:
@@ -13715,6 +14087,14 @@ class StoryboardService(WorkbookMigrationMixin):
             "blocking_issue_count": blocking_issue_count,
             "final_status": "pass" if not issues else "fail_current",
         }
+        if context is not None:
+            audit_summary.update({
+                "quality_contract": QUALITY_CONTRACT,
+                "missed_issue_count": sum(i["status"] == "missed_in_prior_audit" for i in issues),
+                "rule_changed_issue_count": sum(i["status"] == "rule_changed" for i in issues),
+                "attribution_pending_count": sum(i["status"] == "attribution_pending" for i in issues),
+                "introduced_count_complete": not any(i["status"] == "attribution_pending" for i in issues),
+            })
         first_draft_quality: dict[str, Any] | None = None
         if audit_class == AUDIT_CLASS_INDEPENDENT:
             if audit_round == 1:
@@ -13727,7 +14107,8 @@ class StoryboardService(WorkbookMigrationMixin):
                     }
                 else:
                     known_patterns = set(known_pattern_keys)
-                first_draft_quality = _draft_quality_metrics(
+                quality_function = _draft_quality_metrics if context is not None else _legacy_draft_quality_metrics
+                first_draft_quality = quality_function(
                     storyboard,
                     issues,
                     project_id=project_id,
@@ -13736,7 +14117,9 @@ class StoryboardService(WorkbookMigrationMixin):
                 first_draft_quality["threshold_met"] = (
                     first_draft_quality["grade"] == "A"
                 )
-                first_draft_quality["final_audit_pass"] = not issues
+                first_draft_quality["final_audit_pass"] = (
+                    not issues and first_draft_quality.get("measurement_state") != "unavailable"
+                )
             elif prior_events:
                 first_draft_quality = copy.deepcopy(
                     prior_events[0].get("first_draft_quality")
@@ -13787,6 +14170,15 @@ class StoryboardService(WorkbookMigrationMixin):
             content["first_draft_quality"] = copy.deepcopy(
                 first_draft_quality
             )
+        if context is not None:
+            content["assessment_contract"] = QUALITY_CONTRACT
+            content["assessment_context"] = context
+            content["repair_convergence"] = convergence_evidence(issues, prior_events)
+            # The first independent audit measures the first *delivery*. Raw
+            # generation must be read from the signed candidate observations.
+            content["first_delivery_quality"] = copy.deepcopy(first_draft_quality)
+            content["raw_generation_quality"] = None
+            content["raw_generation_quality_state"] = "requires_first_candidate_evidence"
         return content
 
     def _record_audit(
@@ -15101,6 +15493,7 @@ class StoryboardService(WorkbookMigrationMixin):
             known_pattern_keys=self._known_prevention_pattern_keys_before_event(
                 ledger, event_index
             ),
+            assessment_contract=event.get("assessment_contract"),
         )
         raw_expected_issues = copy.deepcopy(expected_content["issues"])
         expected_content["issues"] = [
@@ -17956,6 +18349,14 @@ class StoryboardService(WorkbookMigrationMixin):
                     "repair_package_target_conflict: explicit shot_ids and location disagree"
                 )
             shot_ids = explicit_shot_ids or location_shot_ids
+            if (not shot_ids and str(issue.get("error_code")) in {
+                    "E-GATE-001", "E-REGRESSION-001", "E-REGRESSION-002", "E-SYSTEMIC-001"}
+                    and re.fullmatch(r"(?:prevention_evidence\.)?repair_history(?:\[\d+\]|\.current_check)?", location)):
+                # History is candidate-wide evidence. Rebind it for the exact
+                # audited artifact, not an invented single faulty shot. This
+                # routing does not classify every shot as a content failure.
+                shot_ids = set(shot_reference_to_id.values())
+                field = "prevention_evidence.repair_history"
             if bool(issue.get("blocking", True)) and not shot_ids:
                 raise ValueError(
                     "repair_package_target_required: every blocking audit issue must authorize a concrete shot"
@@ -20076,6 +20477,7 @@ class StoryboardService(WorkbookMigrationMixin):
         response.summary = "完整结构修复已提交｜全表生产预检通过｜已单次消费修复包｜返回原独立审计"
         return response
 
+    @controlled_acceptance_operation
     @_fence_role_operation
     @_release_consumption_claims_on_error
     def commit_storyboard(
@@ -20469,25 +20871,23 @@ class StoryboardService(WorkbookMigrationMixin):
         if work_order.get("operation") not in STORYBOARD_OPERATIONS:
             raise ValueError("work order operation cannot commit a storyboard")
         self._ensure_can_execute(work_order)
-        prior_issue_keys: set[tuple[str, str]] = set()
+        prior_issue_keys: set[str] = set()
         is_repair_link = bool(source_artifact_id and source_link_mode == "repair")
+        repair_root_artifact_id = None
         if is_repair_link:
             _prior_storyboard, prior_record = self._storyboard_from_artifact(namespace, project_id, source_artifact_id)
-            serialized_keys = prior_record.get("metadata", {}).get("issue_signatures", [])
-            for item in serialized_keys:
-                if isinstance(item, list) and len(item) == 2:
-                    prior_issue_keys.add((str(item[0]), str(item[1])))
-            if not prior_issue_keys:
-                prior_report = validate_storyboard.validate_project(_prior_storyboard, mode="audit")
-                prior_issue_keys = {
-                    (str(issue.get("error_code")), str(issue.get("location")))
-                    for issue in prior_report.get("issues", [])
-                }
+            prior_validation = validate_storyboard.validate_project(_prior_storyboard, mode="audit")
+            # Compare the frozen source under the same current checker. Stored
+            # display positions and old-rule signatures cannot prove origin.
+            prior_issue_keys = set(machine_issue_map(
+                _prior_storyboard, prior_validation.get("issues", []), _issue_shot_ids))
+            repair_root_artifact_id = self._root_artifact_id(namespace, project_id, source_artifact_id)
             evidence = storyboard.setdefault("prevention_evidence", {})
-            history = evidence.setdefault("repair_history", [])
+            # The immutable source artifact owns history, not the repair input.
+            history = copy.deepcopy(_prior_storyboard.get("prevention_evidence", {}).get("repair_history", []))
             if not isinstance(history, list):
                 history = []
-                evidence["repair_history"] = history
+            evidence["repair_history"] = history
             history.append(
                 {
                     "round": len(history) + 1,
@@ -20498,6 +20898,8 @@ class StoryboardService(WorkbookMigrationMixin):
                     "action": "unified_full_chain_repair",
                     "source_artifact_id": source_artifact_id,
                     "recorded_by": "shortdrama-project-agent",
+                    "repair_proof": repair_diff(_prior_storyboard, storyboard),
+                    "semantic_closure": "requires_independent_audit",
                 }
             )
         if prevalidated_report is not None:
@@ -20509,20 +20911,84 @@ class StoryboardService(WorkbookMigrationMixin):
                 storyboard, mode="repair" if is_repair_link else "audit"
             )
         if is_repair_link:
-            current_issue_keys = {
-                (str(issue.get("error_code")), str(issue.get("location")))
-                for issue in report.get("issues", [])
-                if not str(issue.get("location", "")).startswith("repair_history[")
-            }
+            current_issue_keys = set(machine_issue_map(
+                storyboard, report.get("issues", []), _issue_shot_ids))
             repair_row = storyboard["prevention_evidence"]["repair_history"][-1]
             repair_row["residual_issue_count"] = len(current_issue_keys & prior_issue_keys)
-            repair_row["introduced_issue_count"] = len(current_issue_keys - prior_issue_keys)
+            prior_history_is_current = (
+                len(history) > 1 and isinstance(history[-2], dict)
+                and isinstance(history[-2].get("current_check"), dict)
+                and not validate_storyboard.repair_observations.check_faults(
+                    _prior_storyboard, prior_validation.get("issues", []),
+                    validate_storyboard.load_runtime_rules())
+            )
+            previous_counts = (history[-2].get("issue_repeat_counts", {})
+                               if prior_history_is_current else {})
+            if not isinstance(previous_counts, dict):
+                previous_counts = {}
+            repeat_counts = {key: (previous_counts.get(key) if
+                             type(previous_counts.get(key)) is int and previous_counts[key] >= 1 else 1) + 1
+                             for key in current_issue_keys & prior_issue_keys}
+            repair_row["repeat_count_basis"] = (
+                "same_checker_bound_history" if prior_history_is_current else
+                "current_checker_prior_and_candidate_only")
+            repair_row["issue_repeat_counts"] = repeat_counts
+            newly_detected = len(current_issue_keys - prior_issue_keys)
+            repair_row["newly_detected_machine_issue_count"] = newly_detected
+            # A previously failing check run may have hidden downstream checks.
+            # Do not call those newly detected faults proven repair side effects.
+            uncertain_origin = bool(newly_detected and prior_validation.get("issues"))
+            repair_row["introduced_issue_count"] = None if uncertain_origin else newly_detected
+            repair_row["introduced_count_state"] = "attribution_pending" if uncertain_origin else "machine_checks_only"
             if repair_row["residual_issue_count"]:
-                repair_row["repeat_rounds"] = 2
-                repair_row["action"] = "root_cause_repair"
+                repair_row["repeat_rounds"] = max(repeat_counts.values())
+                # A requirement is not proof it happened. Keep the real action.
+                repair_row["required_action"] = (
+                    "rebuild_upstream" if repair_row["repeat_rounds"] >= 3 else "root_cause_repair")
+            repair_row["repair_proof"]["machine_regression"] = {
+                "status": "pass" if not current_issue_keys else "fail_current",
+                "remaining_issue_count": len(current_issue_keys),
+                "scope": "complete_candidate", "validator_fingerprint": self._validator_fingerprint,
+            }
+            # Copy the source-owned history, then bind the new row to a fresh
+            # full run. Old failures stay visible without becoming permanent
+            # current blockers; a submitted zero or stale proof has no authority.
+            storyboard = validate_storyboard.bind_current_repair_check(storyboard)
+            history = storyboard["prevention_evidence"]["repair_history"]
+            repair_row = history[-1]
             report = validate_storyboard.validate_project(storyboard, mode="repair")
         validated_ns = time.perf_counter_ns()
         zero_issue = not report.get("issues")
+        if zero_issue and is_repair_link:
+            # Close only this machine-preflight lineage. This does not sign an
+            # independent audit or erase any failed attempt, even if export/CAS
+            # subsequently fails. A clean observation also breaks a recurrence
+            # streak so a later unrelated repair does not inherit old rounds.
+            with self.store.mutate_project(namespace, project_id) as (attempt_hub, attempt_ledger):
+                candidate_hash = canonical_storyboard_sha256(storyboard)
+                prior_attempts = [event for event in attempt_ledger.get("events", [])
+                                  if event.get("repair_root_artifact_id") == repair_root_artifact_id
+                                  and event.get("audit_cycle_id") == f"REPAIR-DRAFT-{repair_root_artifact_id}"]
+                event_key = sha256_bytes(_stable_json_bytes({
+                    "work_order_id": work_order_id, "candidate": candidate_hash,
+                    "report": report, "class": "production_draft_preflight"}))
+                clean_event = annotate_attempt_event({
+                    "event_id": f"EVT-{event_key[:20]}", "timestamp": utc_stamp(),
+                    "episode_id": prior_attempts[0]["episode_id"] if prior_attempts else str(
+                        storyboard.get("source_lock", {}).get("episode_id") or "全项目"),
+                    "file_name": f"repair-preflight-{repair_root_artifact_id}",
+                    "file_fingerprint": candidate_hash, "source_version": "draft-candidate",
+                    "audit_cycle_id": f"REPAIR-DRAFT-{repair_root_artifact_id}",
+                    "task_type": "production_draft_preflight", "audit_class": "production_draft_preflight",
+                    "result": "pass", "checked_shot_count": len(storyboard.get("shots", [])),
+                    "issues": [], "quality": _draft_quality_metrics(storyboard, []),
+                    "commit_ready": False, "publication_status": "not_yet_published",
+                    "repair_root_artifact_id": repair_root_artifact_id,
+                    "repair_base_artifact_id": source_artifact_id, "work_order_id": work_order_id,
+                    "repair_proof": copy.deepcopy(repair_row["repair_proof"]),
+                }, prior_attempts, self._quality_assessment_context(storyboard))
+                storyboard_agent.ingest_event(attempt_ledger, clean_event,
+                    checkpoint_authorizer=self._ledger_checkpoint_authorizer(namespace, project_id))
         if not zero_issue:
             candidate_hash = canonical_storyboard_sha256(storyboard)
             with self.store.mutate_project(namespace, project_id) as (hub, ledger):
@@ -20589,9 +21055,7 @@ class StoryboardService(WorkbookMigrationMixin):
                             "status": "initial",
                         }
                     )
-                storyboard_agent.ingest_event(
-                    ledger,
-                    {
+                failed_event = {
                         "event_id": f"EVT-{event_key[:20]}",
                         "timestamp": utc_stamp(),
                         "episode_id": str(
@@ -20610,7 +21074,23 @@ class StoryboardService(WorkbookMigrationMixin):
                         "issues": event_issues,
                         "quality": quality,
                         "commit_ready": False,
-                    },
+                    }
+                if repair_root_artifact_id:
+                    failed_event["audit_cycle_id"] = f"REPAIR-DRAFT-{repair_root_artifact_id}"
+                    failed_event["file_name"] = f"repair-preflight-{repair_root_artifact_id}"
+                    failed_event["repair_root_artifact_id"] = repair_root_artifact_id
+                    failed_event["repair_base_artifact_id"] = source_artifact_id
+                    failed_event["work_order_id"] = work_order_id
+                    failed_event["repair_proof"] = copy.deepcopy(repair_row["repair_proof"])
+                    prior_attempts = [event for event in ledger.get("events", [])
+                                      if event.get("repair_root_artifact_id") == repair_root_artifact_id
+                                      and event.get("audit_cycle_id") == failed_event["audit_cycle_id"]]
+                    if prior_attempts:
+                        failed_event["episode_id"] = prior_attempts[0]["episode_id"]
+                    failed_event = annotate_attempt_event(
+                        failed_event, prior_attempts, self._quality_assessment_context(storyboard))
+                storyboard_agent.ingest_event(
+                    ledger, failed_event,
                     checkpoint_authorizer=self._ledger_checkpoint_authorizer(
                         namespace, project_id
                     ),
@@ -20652,6 +21132,7 @@ class StoryboardService(WorkbookMigrationMixin):
                     "xlsx_created": False,
                     "handoff_created": False,
                     "quality": quality,
+                    "repair_attempt": copy.deepcopy(failed_event) if is_repair_link else None,
                     "telemetry": telemetry,
                 },
             )
@@ -21421,6 +21902,7 @@ class StoryboardService(WorkbookMigrationMixin):
             },
         )
 
+    @controlled_acceptance_operation
     @_fence_role_operation
     def commit_storyboard_delta(
         self,
@@ -21629,6 +22111,12 @@ class StoryboardService(WorkbookMigrationMixin):
         prepared_identity_manifest = storyboard_identity_manifest(merged)
         merged_ns = time.perf_counter_ns()
         report = validate_storyboard.validate_project(merged, mode="audit")
+        delta_manifest["change_evidence"] = repair_diff(storyboard, merged)
+        delta_manifest["change_evidence"]["machine_regression"] = {
+            "status": "fail_current" if report.get("issues") else "pass",
+            "scope": "complete_candidate", "remaining_issue_count": len(report.get("issues", [])),
+            "validator_fingerprint": self._validator_fingerprint,
+        }
         validated_ns = time.perf_counter_ns()
         materialize_ms = float(
             delta_manifest.get("internal_stage_ms", {}).get("materialize", 0.0)
@@ -21911,6 +22399,7 @@ class StoryboardService(WorkbookMigrationMixin):
                 return str(item)
         return None
 
+    @controlled_acceptance_operation
     @_fence_role_operation
     def commit_storyboard_patch(
         self,
@@ -22545,6 +23034,7 @@ class StoryboardService(WorkbookMigrationMixin):
         )
         return response
 
+    @controlled_acceptance_operation
     @_with_repair_mode_advice
     @_fence_role_operation
     @_release_consumption_claims_on_error
@@ -23322,7 +23812,7 @@ class StoryboardService(WorkbookMigrationMixin):
                 audit_event = audit_result.get("event", {})
                 if (
                     audit_event.get("audit_round") == 1
-                    and first_quality.get("grade") in {"B", "C"}
+                    and first_quality.get("grade") in {"B", "C", "unavailable"}
                 ):
                     hub["project_state"]["production_quality_block"] = {
                         "active": True,
@@ -24026,6 +24516,7 @@ class StoryboardService(WorkbookMigrationMixin):
             },
         )
 
+    @controlled_acceptance_operation
     @_fence_role_operation
     def complete_validation(
         self,
@@ -24066,6 +24557,8 @@ class StoryboardService(WorkbookMigrationMixin):
                 and introduced_issue_count == 0
                 and not blockers
             )
+            if clean_requested and work_order.get("operation") in NARRATIVE_OPERATIONS:
+                self._verified_narrative_review(namespace, project_id, hub, work_order)
             result = project_agent.record_validation(
                 hub,
                 {
@@ -24083,6 +24576,9 @@ class StoryboardService(WorkbookMigrationMixin):
             if clean:
                 for deliverable in hub.get("deliverables", []):
                     if deliverable.get("work_order_id") == work_order_id:
+                        if (work_order.get("operation") in NARRATIVE_OPERATIONS
+                                and deliverable.get("deliverable_id") != work_order.get("narrative_current_artifact_id")):
+                            continue
                         deliverable["status"] = "validated"
                         hub["project_state"]["latest_artifacts"][deliverable["artifact_type"]] = {
                             "deliverable_id": deliverable["deliverable_id"],
@@ -24099,6 +24595,7 @@ class StoryboardService(WorkbookMigrationMixin):
             data=result,
         )
 
+    @controlled_acceptance_operation
     def record_capability_gap(
         self,
         namespace: str,
@@ -24403,6 +24900,7 @@ class StoryboardService(WorkbookMigrationMixin):
             raise ValueError("independent_audit_required: audit trace binding mismatch")
         return certificate
 
+    @controlled_acceptance_operation
     @_fence_role_operation
     def signoff_task(
         self,
@@ -24435,6 +24933,8 @@ class StoryboardService(WorkbookMigrationMixin):
                     "order's server-bound production or repair authority"
                 )
             independent_certificate = None
+            if decision == "approve" and operation in NARRATIVE_OPERATIONS:
+                self._verified_narrative_review(namespace, project_id, hub, work_order)
             if decision == "approve" and work_order.get("operation") in STORYBOARD_OPERATIONS:
                 independent_certificate = self._clean_independent_certificate_for_work_order(
                     namespace,
@@ -24443,7 +24943,13 @@ class StoryboardService(WorkbookMigrationMixin):
                     work_order_id,
                 )
             if work_order["status"] == "passed":
-                project_agent.transition_work_order(hub, work_order_id, "awaiting_signoff")
+                if decision == "reopen" and operation in NARRATIVE_OPERATIONS:
+                    work_order["status"] = "awaiting_signoff"
+                    work_order.setdefault("state_history", []).append({
+                        "timestamp": utc_stamp(), "from": "passed", "to": "awaiting_signoff",
+                        "reason": "reopen_requested_without_asserting_current_approval"})
+                else:
+                    project_agent.transition_work_order(hub, work_order_id, "awaiting_signoff")
             result = project_agent.signoff_work_order(hub, work_order_id, decision)
             hub["human_signoffs"][-1]["signer"] = signer.strip()
             if independent_certificate is not None:
@@ -24475,6 +24981,9 @@ class StoryboardService(WorkbookMigrationMixin):
             if decision == "approve":
                 for deliverable in hub.get("deliverables", []):
                     if deliverable.get("work_order_id") == work_order_id:
+                        if (operation in NARRATIVE_OPERATIONS
+                                and deliverable.get("deliverable_id") != work_order.get("narrative_current_artifact_id")):
+                            continue
                         deliverable["status"] = "final"
                 hub["project_state"]["current_stage"] = "archived"
             else:

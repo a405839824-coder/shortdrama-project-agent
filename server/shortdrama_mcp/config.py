@@ -29,6 +29,9 @@ class Settings:
     allow_local_file_urls: bool
     max_file_bytes: int
     admin_subjects: tuple[str, ...] = ()
+    acceptance_control_enabled: bool = False
+    acceptance_registry_dir: Path | None = None
+    acceptance_lease_id: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -40,6 +43,9 @@ class Settings:
         public_base_url = os.getenv("PUBLIC_BASE_URL", f"http://127.0.0.1:{port}").rstrip("/")
         deployment_mode = os.getenv("SHORTDRAMA_DEPLOYMENT_MODE", "local").strip().lower()
         auth_mode = os.getenv("SHORTDRAMA_AUTH_MODE", "none").strip().lower()
+        acceptance_flag = os.getenv("SHORTDRAMA_ACCEPTANCE_CONTROL", "0").strip().lower()
+        if acceptance_flag not in {"0", "1", "false", "true"}:
+            raise ValueError("SHORTDRAMA_ACCEPTANCE_CONTROL must be 0/1 or false/true")
         oauth_scopes = tuple(
             item.strip()
             for item in os.getenv("OAUTH_SCOPES", "storyboard:read,storyboard:write").split(",")
@@ -59,9 +65,21 @@ class Settings:
             allow_local_file_urls=os.getenv("ALLOW_LOCAL_FILE_URLS", "0") == "1",
             max_file_bytes=int(os.getenv("MAX_FILE_BYTES", str(50 * 1024 * 1024))),
             admin_subjects=_admin_subjects_from_env(),
+            acceptance_control_enabled=acceptance_flag in {"1", "true"},
+            acceptance_registry_dir=(Path(os.environ["SHORTDRAMA_ACCEPTANCE_REGISTRY"]).expanduser().resolve()
+                                     if os.getenv("SHORTDRAMA_ACCEPTANCE_REGISTRY") else None),
+            acceptance_lease_id=os.getenv("SHORTDRAMA_ACCEPTANCE_LEASE") or None,
         )
         settings.validate()
         return settings
+
+    def validate_acceptance_control(self) -> None:
+        if not isinstance(self.acceptance_control_enabled, bool):
+            raise ValueError("acceptance_control_enabled must be boolean")
+        if self.acceptance_control_enabled and self.acceptance_registry_dir is None:
+            raise ValueError("controlled acceptance requires a host-configured registry directory")
+        if not self.acceptance_control_enabled and (self.acceptance_registry_dir or self.acceptance_lease_id):
+            raise ValueError("acceptance settings require SHORTDRAMA_ACCEPTANCE_CONTROL=1; refusing silent fallback")
 
     def validate(self) -> None:
         if not isinstance(self.admin_subjects, tuple) or any(
@@ -69,6 +87,7 @@ class Settings:
             for subject in self.admin_subjects
         ):
             raise ValueError("SHORTDRAMA_ADMIN_SUBJECTS must be a JSON array of OAuth subject strings")
+        self.validate_acceptance_control()
         if self.deployment_mode not in {"local", "cloud"}:
             raise ValueError("SHORTDRAMA_DEPLOYMENT_MODE must be local or cloud")
         if self.auth_mode not in {"none", "oauth"}:

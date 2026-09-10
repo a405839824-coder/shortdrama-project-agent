@@ -33,7 +33,7 @@ class PackagingTests(unittest.IsolatedAsyncioTestCase):
     async def test_manifest_paths_and_cloud_security_schemes(self) -> None:
         manifest = json.loads((PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "shortdrama-project-agent")
-        self.assertEqual(__version__, "0.5.28")
+        self.assertEqual(__version__, "0.5.29")
         self.assertEqual(manifest["version"], __version__)
         runtime_rules = json.loads(
             (
@@ -84,7 +84,7 @@ class PackagingTests(unittest.IsolatedAsyncioTestCase):
             local.validate()
             server, _service = create_mcp(local)
             tools = await server.list_tools()
-            self.assertEqual(len(tools), 20)
+            self.assertEqual(len(tools), 24)
             for tool in tools:
                 descriptor = tool.model_dump(by_alias=True, exclude_none=True)
                 self.assertEqual(descriptor["_meta"]["securitySchemes"][0]["type"], "oauth2")

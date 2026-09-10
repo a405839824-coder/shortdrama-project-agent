@@ -3,6 +3,8 @@ data/
 __pycache__/
 *.pyc
 .pytest_cache/
+.acceptance-host/
+.acceptance-results/
 dist/
 .app.json
 .env.cloud

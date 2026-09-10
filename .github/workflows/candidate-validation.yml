@@ -1,0 +1,56 @@
+name: Candidate validation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Linux tests ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install runtime dependencies
+        run: bash scripts/setup_local.sh
+      - name: Run complete discovery shard
+        env:
+          PYTHONUTF8: '1'
+        run: .venv/bin/python scripts/run_test_shard.py ${{ matrix.shard }} --count 4
+
+  runtime:
+    name: Linux runtime and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install runtime dependencies
+        run: bash scripts/setup_local.sh
+      - name: Check runtime, transports and source package
+        env:
+          PYTHONPATH: server
+          PYTHONUTF8: '1'
+        run: |
+          .venv/bin/python -m compileall -q server tests scripts/run_test_shard.py
+          .venv/bin/python skills/shortdrama-storyboard/scripts/r10_bootstrap.py --self-test
+          .venv/bin/python server/main.py --self-test
+          .venv/bin/python tests/stdio_smoke.py
+          .venv/bin/python tests/http_smoke.py
+          .venv/bin/python scripts/package_plugin.py --profile source

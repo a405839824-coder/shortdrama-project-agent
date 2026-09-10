@@ -11,8 +11,12 @@ from mcp.client.stdio import stdio_client
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.5.28"
+EXPECTED_VERSION = "0.5.29"
 EXPECTED_TOOL_NAMES = {
+    "preflight_narrative_plan",
+    "review_narrative_artifact",
+    "record_narrative_attempt",
+    "read_narrative_record",
     "manage_user_access",
     "get_agent_status",
     "migrate_project_state",
@@ -39,10 +43,13 @@ EXPECTED_TOOL_NAMES = {
 async def inspect_bundled_server() -> dict:
     config = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
     entry = config["mcpServers"]["shortdrama-project-agent"]
+    command = entry["command"]
+    # The bundled descriptor targets POSIX. Use the test interpreter for
+    # its default Python command on Windows, including isolated release trees.
+    if os.name == "nt" and command == "./.venv/bin/python":
+        command = sys.executable
     parameters = StdioServerParameters(
-        # The bundled descriptor targets the Linux deployment environment.
-        # Exercise the same server with this test's Python on Windows.
-        command=sys.executable if os.name == "nt" else entry["command"],
+        command=command,
         args=entry.get("args", []),
         cwd=PLUGIN_ROOT / entry.get("cwd", "."),
         env={**os.environ, **entry.get("env", {})},

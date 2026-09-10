@@ -2,6 +2,14 @@
 
 本项目使用 Railway 托管 MCP、Railway Volume 持久化 `/data`、Auth0 提供 OAuth。Railway 自动域名即可，不需要自有域名。当前文件存储实现必须保持单副本。
 
+## 已有服务升级到 0.5.29
+
+已有线上 0.5.28 服务应使用合并后的 0.5.29 发布树，保留 Admin / Producer 权限、Auth0 配置、原 `/data` 卷与现有域名。不要用未合并的 0.5.27 开发树覆盖，也不要为升级重复创建项目或卷。源码版本号不等于线上已部署；发布后必须读取线上 `/health` 与认证后的工具目录核实。
+
+0.5.29 的当前目录为 Admin 24 个工具、Producer 21 个工具。新增剧情工具与 `manage_user_access` 同时存在；Producer 仍不可见或调用 `manage_user_access`、`recover_storyboard_handoff`、`signoff_task`。详见 [升级说明](UPGRADE_0.5.29.md)。
+
+下列创建项目步骤仅用于首次安装。
+
 ## 1. 创建空服务和域名
 
 1. 登录 Railway，新建项目 `shortdrama-project-agent`。
@@ -58,7 +66,7 @@ railway up
 
 验收必须同时满足：
 
-- `/health` 返回 `status=pass`
+- `/health` 返回 `status=pass`、`version=0.5.29`，且账号权限契约仍为 `admin-producer-v1`
 - 未登录调用 `/mcp` 返回 401 或 403
 - 响应包含 Bearer OAuth challenge
 - Railway 重启服务后，`/data` 中的项目仍存在
@@ -67,7 +75,7 @@ railway up
 
 1. ChatGPT → Settings → Apps & Connectors → Advanced settings，打开 Developer mode。
 2. 创建自定义 MCP 连接，URL 为 `https://你的服务.up.railway.app/mcp`。
-3. 完成 Auth0 登录，刷新连接，确认发现 19 个精确名称匹配的工具。
+3. 完成 Auth0 登录，刷新连接，确认 Admin 发现 24 个工具、Producer 发现 21 个工具，并核对新增剧情工具及原权限隔离。
 4. 复制浏览器地址中的 `plugin_asdk_app...` ID，运行：
 
 ```bash

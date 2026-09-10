@@ -104,6 +104,11 @@
             "scene_classification_count": {"type": "integer", "minimum": 0},
             "coverage_percent": {"const": 100},
             "ordered_entry_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "source_content_partitions": {
+              "type": "array", "minItems": 1,
+              "description": "仅采用来源未给内容例外的父段必须完整连续分割；不是作者可自签的来源/语义证明。",
+              "items": {"$ref": "#/$defs/source_content_partition"}
+            },
             "entries": {
               "type": "array",
               "items": {
@@ -117,6 +122,10 @@
                   "speech_necessity_basis"
                 ],
                 "properties": {
+                  "treatment": {"enum": ["原文直接对白", "原文事实转化对白", "可视动作", "心理音轨", "合并压缩", "不转对白", "来源未给内容的客观叙述"]},
+                  "dialogue_affordance": {"enum": ["必须转对白", "建议转对白", "不宜转对白", "仅未给内容不转对白"]},
+                  "entailment_status": {"enum": ["entailed_by_source", "source_event_only_pending_independent"]},
+                  "source_content_limit": {"$ref": "#/$defs/source_content_limit"},
                   "scene_semantics": {"enum": ["叙述性会话场景", "混合会话场景", "非会话叙述"]},
                   "communication_functions": {
                     "type": "array",
@@ -124,7 +133,21 @@
                   },
                   "exchange_participants": {"type": "array", "items": {"type": "string"}},
                   "speech_necessity_basis": {"type": "string", "minLength": 1}
-                }
+                },
+                "allOf": [{
+                  "if": {"properties": {"treatment": {"const": "来源未给内容的客观叙述"}}, "required": ["treatment"]},
+                  "then": {
+                    "required": ["source_content_limit"],
+                    "properties": {
+                      "dialogue_affordance": {"const": "仅未给内容不转对白"},
+                      "entailment_status": {"const": "source_event_only_pending_independent"},
+                      "scene_semantics": {"enum": ["叙述性会话场景", "混合会话场景"]},
+                      "speaker": {"const": ""}, "adapted_text": {"const": ""},
+                      "target_shots": {"type": "array", "minItems": 1, "maxItems": 1}
+                    }
+                  },
+                  "else": {"not": {"required": ["source_content_limit"]}}
+                }]
               }
             }
           }
@@ -236,6 +259,60 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "source_content_partition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["partition_id", "source_text", "source_text_sha256", "segments"],
+      "properties": {
+        "partition_id": {"type": "string", "minLength": 1},
+        "source_text": {"type": "string", "minLength": 1},
+        "source_text_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "segments": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["source_ledger_index", "source_unit_id", "char_range", "kind"],
+          "properties": {
+            "source_ledger_index": {"type": "integer", "minimum": 1},
+            "source_unit_id": {"type": "string", "minLength": 1},
+            "char_range": {"$ref": "#/$defs/char_range"},
+            "kind": {"enum": ["given_dialogue", "protected_dialogue", "event_only", "non_dialogue"]},
+            "adaptation_id": {"type": "string", "minLength": 1},
+            "protected_occurrence_id": {"type": "string", "minLength": 1}
+          },
+          "allOf": [{
+            "if": {"properties": {"kind": {"const": "protected_dialogue"}}},
+            "then": {"required": ["protected_occurrence_id"], "not": {"required": ["adaptation_id"]}},
+            "else": {"required": ["adaptation_id"], "not": {"required": ["protected_occurrence_id"]}}
+          }]
+        }}
+      }
+    },
+    "source_content_limit": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract", "partition_id", "source_text_sha256", "unprovided_content_kind", "narration", "action"],
+      "properties": {
+        "contract": {"const": "source-content-limit-v1"},
+        "partition_id": {"type": "string", "minLength": 1},
+        "source_text_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "unprovided_content_kind": {"enum": ["instruction_contents_unstated", "answer_contents_unstated", "apology_contents_unstated", "instruction_receipt_contents_unstated"]},
+        "narration": {
+          "type": "object", "additionalProperties": false,
+          "required": ["shot_id", "field", "text", "field_sha256"],
+          "properties": {
+            "shot_id": {"type": "string", "pattern": "^EP\\d{2,}-\\d{3,}$"},
+            "field": {"const": "心理音轨"}, "text": {"type": "string", "minLength": 1},
+            "field_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+          }
+        },
+        "action": {
+          "type": "object", "additionalProperties": false,
+          "required": ["shot_id", "field", "field_sha256"],
+          "properties": {
+            "shot_id": {"type": "string", "pattern": "^EP\\d{2,}-\\d{3,}$"},
+            "field": {"const": "画面内容"},
+            "field_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+          }
+        }
+      }
+    },
     "char_range": {
       "type": "array", "minItems": 2, "maxItems": 2,
       "items": {"type": "integer", "minimum": 0}
