@@ -32,6 +32,7 @@ class Settings:
     acceptance_control_enabled: bool = False
     acceptance_registry_dir: Path | None = None
     acceptance_lease_id: str | None = None
+    member_connection_access: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -44,6 +45,9 @@ class Settings:
         deployment_mode = os.getenv("SHORTDRAMA_DEPLOYMENT_MODE", "local").strip().lower()
         auth_mode = os.getenv("SHORTDRAMA_AUTH_MODE", "none").strip().lower()
         acceptance_flag = os.getenv("SHORTDRAMA_ACCEPTANCE_CONTROL", "0").strip().lower()
+        member_flag = os.getenv("SHORTDRAMA_MEMBER_CONNECTION_ACCESS", "0").strip().lower()
+        if member_flag not in {"0", "1", "false", "true"}:
+            raise ValueError("SHORTDRAMA_MEMBER_CONNECTION_ACCESS must be 0/1 or false/true")
         if acceptance_flag not in {"0", "1", "false", "true"}:
             raise ValueError("SHORTDRAMA_ACCEPTANCE_CONTROL must be 0/1 or false/true")
         oauth_scopes = tuple(
@@ -69,6 +73,7 @@ class Settings:
             acceptance_registry_dir=(Path(os.environ["SHORTDRAMA_ACCEPTANCE_REGISTRY"]).expanduser().resolve()
                                      if os.getenv("SHORTDRAMA_ACCEPTANCE_REGISTRY") else None),
             acceptance_lease_id=os.getenv("SHORTDRAMA_ACCEPTANCE_LEASE") or None,
+            member_connection_access=member_flag in {"1", "true"},
         )
         settings.validate()
         return settings
@@ -82,6 +87,10 @@ class Settings:
             raise ValueError("acceptance settings require SHORTDRAMA_ACCEPTANCE_CONTROL=1; refusing silent fallback")
 
     def validate(self) -> None:
+        if type(self.member_connection_access) is not bool:
+            raise ValueError("member_connection_access must be boolean")
+        if self.member_connection_access and self.auth_mode != "oauth":
+            raise ValueError("member connections require OAuth")
         if not isinstance(self.admin_subjects, tuple) or any(
             not isinstance(subject, str) or not subject.strip() or len(subject) > 512
             for subject in self.admin_subjects

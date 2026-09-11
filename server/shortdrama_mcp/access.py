@@ -13,6 +13,7 @@ from mcp.types import CallToolResult, TextContent
 
 from . import auth
 from .config import Settings
+from .members import MemberIdentity, current_member, load_registry, resolve_member
 
 
 ACCESS_CONTRACT = "admin-producer-v1"
@@ -60,9 +61,12 @@ class Principal:
     role: str
     enabled: bool = True
     bootstrap: bool = False
+    member: MemberIdentity | None = None
 
     @property
     def namespace(self) -> str:
+        if self.member is not None:
+            return self.member.namespace
         return "local-single-user" if self.issuer == "local" else f"{self.issuer}|{self.subject}"
 
 
@@ -96,6 +100,10 @@ class AccessStore:
         return db
 
     def principal(self) -> Principal:
+        if self.settings.member_connection_access:
+            member = current_member.get() or resolve_member(self.settings, auth.get_access_token())
+            return Principal(member.issuer, f"member:{member.member_id}", member.role,
+                             member.enabled, member=member)
         if self.settings.auth_mode == "none":
             if self.settings.deployment_mode != "local":
                 raise PermissionError("authentication_required")
@@ -139,6 +147,13 @@ class AccessStore:
         if not actor.enabled or actor.role != "admin":
             raise PermissionError("admin_required")
         issuer = actor.issuer
+        if self.settings.member_connection_access:
+            if action == "list":
+                return {"members": load_registry(self.settings)["members"],
+                        "unassigned_authenticated_user_role": "denied",
+                        "management": "host member_connections.json"}
+            if action != "audit":
+                raise ValueError("member_changes_require_host_configuration; OAuth subject grants are inactive")
         with closing(self.connect()) as db, db:
             if action == "list":
                 rows = [dict(row) for row in db.execute(
@@ -211,7 +226,7 @@ class AccessControlledMCPServer(MCPServer):
         try:
             principal = self.access.principal()
         except PermissionError:
-            return tools
+            return [] if self.access.settings.member_connection_access else tools
         if not principal.enabled:
             return []
         return tools if principal.role == "admin" else [tool for tool in tools if tool.name in PRODUCER_TOOLS]
@@ -227,11 +242,14 @@ class AccessControlledMCPServer(MCPServer):
             return CallToolResult(is_error=True, content=[TextContent(
                 type="text", text=f"Permission denied: {exc}")])
         self.access.audit(principal, name, arguments.get("project_id"), "started")
+        identity_context = current_member.set(principal.member)
         try:
             result = await super().call_tool(name, arguments, context)
         except Exception:
             self.access.audit(principal, name, arguments.get("project_id"), "error")
             raise
+        finally:
+            current_member.reset(identity_context)
         self.access.audit(principal, name, arguments.get("project_id"),
                           "error" if getattr(result, "is_error", False) else "success")
         return result
