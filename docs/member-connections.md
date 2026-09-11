@@ -1,6 +1,6 @@
 # 小团队共用 Google 的成员连接方案
 
-状态：候选实现。启用开关默认关闭；不能把代码检查通过当成已部署或员工已接入。
+适用版本：0.5.30。启用开关默认关闭；不能把代码检查通过或代码部署成功当成员工已接入。
 
 员工各自使用自己的 ChatGPT，授权时可以选择同一个 Google。管理员为每位成员建立一个独立的 Auth0 confidential OAuth application，将它的 Client ID 和 Client Secret 只配置到该成员自己的 ChatGPT 插件连接。你的管理员连接使用另一套凭据。服务端按签名 access token 的 `iss + azp` 和允许的 `sub` 查找成员，再决定角色及项目空间。
 
@@ -26,7 +26,7 @@
 3. 从 Auth0 用户页面核对 Google 的真实 `user_id`，作为 `allowed_subjects`。使用共享 Google 的不同成员可以填同一个值，但 Client ID 必须各不相同。新 Google 未经绑定不能进入已有成员的项目空间。
 4. 按下面的 JSON 建立成员清单。不要把 Client Secret、密码或 Auth0 Management API token 写进去。
 5. 在目标服务环境中使用 `scripts/configure_member_connections.py` 安装清单。它先读取 Auth0 的实际客户端配置，检查 confidential、授权类型与回调地址，再原子写入持久卷根部 `member_connections.json`。需要短期 `AUTH0_MANAGEMENT_TOKEN`，权限只需 `read:clients`；通过受保护的环境变量传入，完成后移除。不要把 token 放在命令行、聊天或 Git 中。
-6. 启用 `SHORTDRAMA_MEMBER_CONNECTION_ACCESS=1` 并部署候选代码。保留 `SHORTDRAMA_ADMIN_SUBJECTS` 仅用于核对历史 owner namespace，新模式下它不再授予管理员权限。新代码若发现成员文件存在但开关关闭，会拒绝启动，避免意外回退为共享 Google 管理员。
+6. 启用 `SHORTDRAMA_MEMBER_CONNECTION_ACCESS=1` 并部署 0.5.30 或后续兼容版本。保留 `SHORTDRAMA_ADMIN_SUBJECTS` 仅用于核对历史 owner namespace，新模式下它不再授予管理员权限。新代码若发现成员文件存在但开关关闭，会拒绝启动，避免意外回退为共享 Google 管理员。
 7. 用你的新管理员连接和员工连接完成下一节的验收后，再配置其他员工。旧连接若没有登记，会被拒绝，必须使用分配给自己的新凭据重新连接。
 
 ```json
