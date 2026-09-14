@@ -11,6 +11,8 @@ from picture_presentation import (
     separate_picture_clock, separate_shot_clock, timed_picture,
 )
 from timing_model import validate_timing
+from timing_events import validate_events
+from performance_checks import eye_contract_faults, listener_reaction_faults
 from validate_storyboard import project_formal_master, validate_project
 from shortdrama_mcp.materializer import compile_formal_merged_field
 from shortdrama_mcp.file_io import storyboard_to_xlsx, extract_xlsx
@@ -22,12 +24,19 @@ from test_v051_template_projection import compact_storyboard
 class UntimedPictureTests(unittest.TestCase):
     def test_clock_spellings_are_removed_and_roundtrip_exactly(self):
         for clock in ("【0.0—0.4秒】", "[0.0-0.4s]", "【0—1秒】  ",
-                      "于0.4—3.4秒", "在第0.2秒", "0.2秒", "约半秒", "t=0.2s"):
+                      "于0.4—3.4秒", "在第0.2秒", "0.2秒", "约半秒", "t=0.2s",
+                      "0.0–0.4秒：", "【0.0—0.4秒】： ", "0.2秒: "):
             with self.subTest(clock=clock):
                 text = clock + "甲抬眼。"
                 shot = separate_shot_clock({"画面内容": text})
                 self.assertEqual(shot["画面内容"], "甲抬眼。")
                 self.assertEqual(timed_picture(shot), text)
+
+    def test_bounded_visibility_remains_limited_and_reversible(self):
+        text = "甲眼睛仅在0.0—1.2秒清楚可见。"
+        shot = separate_shot_clock({"画面内容": text})
+        self.assertEqual(shot["画面内容"], "甲眼睛一度清楚可见。")
+        self.assertEqual(timed_picture(shot), text)
 
     def test_relative_order_is_retained_without_seconds(self):
         text = "三秒后，甲看向门口。"
@@ -65,6 +74,24 @@ class UntimedPictureTests(unittest.TestCase):
             display_picture(candidate["shots"][0])
         self.assertTrue(any("binding" in issue["message"]
                             for issue in validate_timing(candidate, candidate["shots"])["faults"]))
+
+    def test_direct_performance_consumers_read_clocks_and_reject_stale_bindings(self):
+        from test_v0527_dynamic_eye_decisions import compile_shot
+        result, raw = compile_shot()
+        plain = separate_shot_clock(raw)
+        project = {"prevention_evidence": {"audio_workflow": {"timing": {"events": result["events"]}}}}
+        before = copy.deepcopy(plain)
+        self.assertEqual(eye_contract_faults(plain, duration=4),
+                         eye_contract_faults(raw, duration=4))
+        self.assertEqual(validate_events(project, [plain], []),
+                         validate_events(project, [raw], []))
+        self.assertEqual(plain, before)
+        plain["画面内容"] += "甲抬手。"
+        self.assertTrue(any("binding" in item for item in eye_contract_faults(plain, duration=4)))
+        self.assertTrue(any("binding" in item for item in listener_reaction_faults(
+            plain, duration=4, dialogue_rows=[])))
+        self.assertTrue(any("binding" in item["message"]
+                            for item in validate_events(project, [plain], [])["faults"]))
 
     def test_annotation_cannot_insert_a_new_action(self):
         shot = separate_shot_clock({"画面内容": "【0.0—0.4秒】甲抬眼。"})

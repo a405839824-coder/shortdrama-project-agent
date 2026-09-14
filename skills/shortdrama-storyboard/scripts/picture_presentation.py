@@ -21,7 +21,9 @@ _POINT = rf"{_NUMBER}\s*{_UNIT}"
 # seconds outside literal payloads are production clock annotations in this
 # explicit output format. A literal countdown belongs in a quoted payload.
 CLOCK_RE = re.compile(
-    rf"(?<![A-Za-z0-9_.])(?:[【\[]\s*{_RANGE}\s*[】\]][ \t]*|"
+    rf"(?<![A-Za-z0-9_.])(?:仅(?:在|于){_RANGE}|"
+    rf"[【\[]\s*{_RANGE}\s*[】\]][ \t]*(?:[:：][ \t]*)?|"
+    rf"(?:{_RANGE}|{_POINT})[ \t]*[:：][ \t]*|"
     rf"(?:于|在)?(?:第|约|t\s*=\s*)?(?:{_RANGE}|{_POINT})(?:左右)?(?:之后|之前|后|前|时|处|内)?)"
 )
 _LITERAL_RE = re.compile(r'“[^”]*”|「[^」]*」|『[^』]*』|"(?:[^"\\]|\\.)*"')
@@ -36,6 +38,8 @@ def _digest(text):
 
 
 def _replacement(token):
+    if token.startswith(("仅在", "仅于")):
+        return "一度"
     if token.endswith(("之后", "后")):
         return "随后"
     if token.endswith(("之前", "前")):

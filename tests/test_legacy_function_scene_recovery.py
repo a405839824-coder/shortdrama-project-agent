@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import unittest
 
 from openpyxl import load_workbook
@@ -66,6 +67,14 @@ class LegacyFunctionSceneRecoveryTests(unittest.TestCase):
         payload = storyboard_to_xlsx(source, {"issues": []})
         book = load_workbook(io.BytesIO(payload))
         del book[CANONICAL_SIDECAR_SHEET]
+        # Pin the actual legacy timed field instead of deriving old input from
+        # today's untimed export. Recovery must still preserve every old atom.
+        formal = book["正式生产母版"]["E2"].value
+        match = re.search(r"(?ms)(^画面内容：)(.*?)(?=^音色：)", formal)
+        self.assertIsNotNone(match)
+        book["正式生产母版"]["E2"] = (
+            formal[:match.start(2)] + shot["画面内容"] + "\n\n" + formal[match.end(2):]
+        )
         book["正式生产母版"]["D2"] = "接上集／问清打算 / SHY-N3-HALL"
         output = io.BytesIO()
         book.save(output)

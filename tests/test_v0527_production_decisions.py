@@ -13,6 +13,7 @@ from author_storyboard import _render_decisions
 from staging_text_bindings import bind_fields
 from performance_checks import eye_contract_faults, listener_reaction_faults
 from timing_model import validate_timing
+from picture_presentation import timed_picture
 from test_v0527_authoring_serializer import decisions
 import test_v0527_source_decisions as source_controls
 source_fixture = source_controls.fixture
@@ -272,7 +273,7 @@ class ProductionDecisionTests(unittest.TestCase):
         event = result["typed_decisions"]["shots"][0]["events"][0]
         self.assertIn("乙在3.2秒", event["basis"])
         self.assertIn("于甲本句发言结束后", event["basis"])
-        self.assertIn(event["basis"], shot["画面内容"])
+        self.assertIn(event["basis"], timed_picture(shot))
         self.assertEqual((event["start"], event["end"], event["after"]), (3.2, 3.4, ["voice"]))
         data["shots"][0]["actions"].pop()
         shot = _render_decisions(lower_production_decisions(data, source_compilation=source)["typed_decisions"])["shots"][0]

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import math
 import re
 from typing import Any, Iterable, Sequence
+from picture_presentation import timing_view, PictureTimingError
 
 
 STAGE_RE = re.compile(r"【(?P<start>\d+\.\d)—(?P<end>\d+\.\d)秒】(?P<body>.*?)(?=【\d+\.\d—\d+\.\d秒】|\Z)", re.S)
@@ -424,6 +425,10 @@ def listener_reaction_faults(
     word, but must follow another person's actual speech start. This check
     does not require eyes when the listener is only visible by hands/body.
     """
+    try:
+        shot = timing_view(shot)
+    except PictureTimingError as exc:
+        return [str(exc)]
     names, _ = _people(shot.get('可见主体'), None)
     rows = _rows(dialogue_rows)
     if len(names) < 2 or not rows:
@@ -734,6 +739,10 @@ def eye_contract_faults(
     can be authored as ``甲眼睛仅在0.0—1.5秒清楚可见``. An unbounded claim of
     "可见1秒" cannot waive a four-second visible-face contract.
     """
+    try:
+        shot = timing_view(shot)
+    except PictureTimingError as exc:
+        return [str(exc)]
     if not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
         return ["眼部检查需要有效正数镜头时长"]
     visible = str(shot.get("可见主体") or "")

@@ -135,6 +135,7 @@ def _basis_positions(event: dict[str, Any], shot: dict[str, Any]) -> list[int]:
 
 
 def _shot_index(shots: Any) -> tuple[dict[str, dict[str, Any]], dict[str, float], list[dict[str, Any]]]:
+    from picture_presentation import timing_view, PictureTimingError
     rows = list(shots.values()) if isinstance(shots, dict) else shots
     index: dict[str, dict[str, Any]] = {}
     offsets: dict[str, float] = {}
@@ -149,7 +150,11 @@ def _shot_index(shots: Any) -> tuple[dict[str, dict[str, Any]], dict[str, float]
         if not shot_id or shot_id in index or duration is None or duration <= 0:
             faults.append(_fault("动作事件引用的镜头身份重复/缺失，或镜长不是有限正数", shot_id))
             continue
-        index[shot_id] = shot
+        try:
+            index[shot_id] = timing_view(shot)
+        except PictureTimingError as exc:
+            faults.append(_fault(str(exc), shot_id))
+            continue
         offsets[shot_id] = elapsed
         elapsed += duration
     return index, offsets, faults
