@@ -29,6 +29,8 @@ class EmployeeWorkflowBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temp.cleanup)
         self.settings = settings_for(self.temp.name)
         self.server, self.service = create_mcp(self.settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(self.service)
         self.namespace = self.settings.oauth_issuer + "|auth0|employee"
         self.project = (await self.ok("create_project", {
             "project_name": "员工分镜内容与流程权限验证",

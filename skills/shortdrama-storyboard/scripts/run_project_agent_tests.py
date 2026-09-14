@@ -192,20 +192,15 @@ def test_invalid_transition_rejected() -> None:
         raise AssertionError("direct archive must fail")
 
 
-def test_max_three_internal_rounds() -> None:
+def test_round_count_does_not_abandon_unresolved_work() -> None:
     hub = fresh()
     agent.create_work_order(hub, task())
     agent.transition_work_order(hub, "WO-001", "executing")
-    for _ in range(2):
+    for _ in range(4):
         agent.transition_work_order(hub, "WO-001", "failed_current")
         agent.transition_work_order(hub, "WO-001", "executing")
-    agent.transition_work_order(hub, "WO-001", "failed_current")
-    try:
-        agent.transition_work_order(hub, "WO-001", "executing")
-    except ValueError as exc:
-        assert_true("maximum internal repair rounds" in str(exc), "fourth round must be blocked")
-    else:
-        raise AssertionError("fourth round must fail")
+    assert_true(hub["work_orders"][0]["internal_round"] == 5, "rounds remain recorded")
+    assert_true(not agent.validate_hub(hub), "later rounds remain readable")
 
 
 def test_validation_requires_deliverable() -> None:
@@ -401,7 +396,7 @@ TESTS: list[tuple[str, Callable[[], None]]] = [
     ("destructive_change_without_approval_waits", test_destructive_change_without_approval_waits),
     ("duplicate_task_is_idempotent", test_duplicate_task_is_idempotent),
     ("invalid_transition_rejected", test_invalid_transition_rejected),
-    ("max_three_internal_rounds", test_max_three_internal_rounds),
+    ("round_count_is_not_repair_permission", test_round_count_does_not_abandon_unresolved_work),
     ("validation_requires_deliverable", test_validation_requires_deliverable),
     ("dirty_validation_cannot_pass", test_dirty_validation_cannot_pass),
     ("bare_storyboard_pass_stays_pending_audit", test_bare_storyboard_pass_stays_pending_audit),

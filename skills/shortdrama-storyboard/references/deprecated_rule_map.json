@@ -43,7 +43,7 @@
     },
     {
       "deprecated": "同一问题无限局部补丁",
-      "reason": "第2轮根因修复，第3轮及以后回退对应上游产物重建",
+      "reason": "实际根因和依赖决定修复范围，取消轮数触发的强制重建",
       "replacement": "R10-PG1.SYSTEMIC_ESCALATION"
     },
     {
@@ -58,7 +58,7 @@
     },
     {
       "deprecated": "4—15秒Seedance生成批次包装",
-      "reason": "正式镜按自身剧情时长执行；R10-SPC-1 Seedance 2.5恰好3段并覆盖单镜时长，不再为4秒下限重复包装",
+      "reason": "内部事件计时与实际阶段闭合；对外不显示数字制作时码，不为模板虚构动作或等待。",
       "replacement": "R10.1.SINGLE_SHOT_DURATION"
     },
     {

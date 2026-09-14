@@ -5,7 +5,7 @@
 合同：storyboard-production-prevention-v1
 计划：storyboard-production-plan-v1
 
-新MCP生产请求与官方生产CLI必须带先冻结的production_plan；低层兼容输入显式未受本计划验证，不能冒充新生产。
+所有新生产、重建和改写必须重放冻结的结构化production_plan，完整集另需episode_contract。旧稿审计修复与验签工作簿迁移保留明确历史入口，不能认证为新首稿；无生产环境兼容开关。
 
 规则通过、首稿准确率、独立内容审计及正式交付分开；未知不是通过；不限制修正轮数。
 

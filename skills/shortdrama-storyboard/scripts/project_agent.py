@@ -153,7 +153,7 @@ def new_hub(project_name: str, project_id: str | None = None, timestamp: str | N
             "plan_only_never_mutates": True,
             "preserve_previous_version": True,
             "explicit_scope_required_for_destructive_change": True,
-            "max_internal_repair_rounds": 3,
+            "max_internal_repair_rounds": None,
             "impact_regression_required": True,
             "human_signoff_required_for_archive": True,
             "formal_rule_auto_mutation": False,
@@ -729,12 +729,9 @@ def transition_work_order(
     if target_state == "executing":
         if work_order["authorization"] not in {"explicit_execute", "plan_only", "read_only"}:
             raise ValueError("execution requires explicit authorization or a non-mutating mode")
-        if (
-            current == "failed_current"
-            and work_order.get("operation") not in NARRATIVE_PRODUCTION_OPERATIONS
-            and work_order["internal_round"] >= hub["policy"]["max_internal_repair_rounds"]
-        ):
-            raise ValueError("maximum internal repair rounds reached; upstream rebuild or new work order required")
+        # A round count is evidence, not permission to abandon unresolved work.
+        # Authorization, dependency regression and independent sign-off remain
+        # enforced separately, including when reading an old three-round hub.
         _invalidate_narrative_review(work_order)
         work_order["internal_round"] += 1
     if target_state == "validating" and not work_order["deliverable_ids"]:
@@ -1064,7 +1061,7 @@ def validate_hub(hub: Any) -> list[str]:
         "plan_only_never_mutates": True,
         "preserve_previous_version": True,
         "explicit_scope_required_for_destructive_change": True,
-        "max_internal_repair_rounds": 3,
+        "max_internal_repair_rounds": None,
         "impact_regression_required": True,
         "human_signoff_required_for_archive": True,
         "formal_rule_auto_mutation": False,
@@ -1085,6 +1082,8 @@ def validate_hub(hub: Any) -> list[str]:
         "systemic_root_cause_tolerance": 0,
     }
     for field, value in policy_expected.items():
+        if field == "max_internal_repair_rounds" and policy.get(field) == 3:
+            continue  # Read historical metadata without rewriting signed history.
         # Read old policy metadata without rewriting its signed history. New
         # projects and explicit migrations use both current 98% thresholds.
         if (field in {"minimum_episode_correctness_percent", "minimum_episode_direct_usability_percent"}
@@ -1150,7 +1149,6 @@ def validate_hub(hub: Any) -> list[str]:
         if (
             not isinstance(internal_round, int)
             or internal_round < 0
-            or (work_order.get("operation") not in NARRATIVE_PRODUCTION_OPERATIONS and internal_round > 3)
         ):
             errors.append(f"work order {work_order_id} has invalid internal_round")
         if work_order.get("status") == "archived":

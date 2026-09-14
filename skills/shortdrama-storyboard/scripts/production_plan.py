@@ -35,8 +35,20 @@ def runtime_context():
 
 def model_production_contract():
     p = policy()
+    from episode_rules import policy as episode_policy
     return {'contract': p['contract'], 'plan_contract': CONTRACT,
-            'required_for': ['new_mcp_production_authoring', 'official_production_cli'],
+            'required_for': ['new_mcp_production_authoring', 'direct_canonical_new_production', 'official_production_cli'],
+            'episode_contract': episode_policy(),
+            'episode_contract_shape': {
+                'contract':'episode-production-contract-v1','profile_id':'mother-episode-90-180-v1',
+                'scope':'fragment | complete_episodes | complete_series', 'source_kind':'novel | script | original',
+                'episodes':'[{episode_id,core_actor,ending:hook|finale,beat_events,source_functions}]',
+                'beat_events':'[{id,kind,shot_id,source_ids,delivery:{field,quote},start,end}] local seconds',
+                'source_functions':'[{source_id,kind:plot|montage|detail|description,shot_ids,micro_elements?,baseline_seconds?}]',
+                'series_episode_ids':'required exact set only for complete_series',
+                'reference':'references/episode_rule_contract.md; strict schema in storyboard_schema.json'},
+            'borrow_authorization':'Before authoring a borrowed source, declare source_id/source_sha256/origin_episode/target_episode/next_source_id/authorization_basis in begin_project_task.borrow_permissions. Use the returned authorization_id in the source and borrow ledgers; candidate text cannot mint it.',
+            'episode_contract_location':'project.prevention_evidence.episode_contract; freeze as an owned source-plan partition; full/episode requires complete_episodes or complete_series',
             'plan_location': 'separately frozen source graph.production_plan',
             'context': runtime_context(), 'statuses': p['statuses'],
             'rules': [{k:r[k] for k in ('id','title','prevention','exceptions','limits')} for r in p['rules']],
@@ -61,7 +73,7 @@ def model_production_contract():
             'visibility_kinds': p['visibility_kinds'],
             'plan_reference': 'references/production_plan_contract.md',
             'semantic_status': 'pending_independent_review', 'semantic_accuracy_percent': None,
-            'compatibility': 'legacy canonical and low-level renderers do not establish production-plan compliance'}
+            'compatibility': 'only historical audit/repair and signed workbook migration retain compatibility; new production cannot bypass the replayed plan'}
 
 
 class ProductionPlanError(ValueError):
@@ -101,6 +113,11 @@ def registry(rows, id_key, path):
 def decision_values(payload):
     """Complete, non-overlapping authored ownership partitions; never fill values."""
     result = {}
+    evidence=payload.get('project',{}).get('prevention_evidence',{})
+    for name in ('episode_contract','borrow_ledger'):
+        if name in evidence: result['/project/prevention_evidence/'+name]=evidence[name]
+    for name in ('source_ingestion','chapter_intake'):
+        if name in payload.get('project',{}): result['/project/'+name]=payload['project'][name]
     def escape(token): return str(token).replace('~', '~0').replace('/', '~1')
     for kind in ('scenes', 'actors', 'props', 'points'):
         for identity, value in payload['initial_world'][kind].items():

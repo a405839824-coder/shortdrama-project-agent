@@ -28,6 +28,8 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
         os.environ["SHORTDRAMA_AUTH_MODE"] = "none"
         self.settings = Settings.from_env()
         self.server, self.service = create_mcp(self.settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(self.service)
         self.namespace = request_namespace(self.settings)
         await self._prepare_failed_audit_chain()
 
@@ -771,7 +773,7 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
             attempts.append(failed["data"]["repair_attempt"])
             self.assertEqual(attempts[-1]["audit_round"], index + 1)
         self.assertEqual(len({event["audit_cycle_id"] for event in attempts}), 1)
-        self.assertTrue(any(row["required_action"] == "rebuild_upstream"
+        self.assertTrue(any(row["required_action"] == "root_cause_repair"
                             for row in attempts[-1]["repair_convergence"]))
         self.repair_order = await self.begin("storyboard_repair", mode="audit_and_repair",
             authorization="explicit_execute", window_key="retry-repair-fixed")

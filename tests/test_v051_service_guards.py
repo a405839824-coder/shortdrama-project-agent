@@ -44,6 +44,8 @@ class V051ServiceGuardTests(unittest.TestCase):
             max_file_bytes=50 * 1024 * 1024,
         )
         _server, self.service = create_mcp(self.settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(self.service)
 
     def tearDown(self) -> None:
         self.temp.cleanup()

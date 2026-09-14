@@ -343,7 +343,7 @@
     "legacy_policy": "read_only_migration_to_compact_successor",
     "mother_template_column_count": 10,
     "output_contract": "R10-SPC-1",
-    "plugin_version": "0.5.33",
+    "plugin_version": "0.5.34",
     "production_audit_status": "PENDING_AUDIT",
     "required_per_shot_aspect_phrase": "9:16竖屏",
     "schema_version": "R10.1",
@@ -590,5 +590,59 @@
     "semantic_accuracy_percent": null,
     "source_semantics": "independent_review_required"
   },
-  "production_prevention_contract": "storyboard-production-prevention-v1"
+  "production_prevention_contract": "storyboard-production-prevention-v1",
+  "episode_rule_contract": {
+    "contract": "episode-production-contract-v1",
+    "profile_id": "mother-episode-90-180-v1",
+    "min_seconds": 90,
+    "max_seconds": 180,
+    "opening_face_seconds": 3,
+    "opening_face_area_min_percent": 30,
+    "opening_hook_seconds": 5,
+    "advance_gap_max_seconds": 25,
+    "ending_window_seconds": 12,
+    "dialogue_min_percent": 35,
+    "short_under_1_percent": 8,
+    "short_under_2_percent": 15,
+    "carryover_max_shots": 2,
+    "carryover_max_seconds": 5,
+    "montage_shot_percent_max": 20,
+    "montage_time_percent_max": 15,
+    "montage_shots_per_source_max": 2,
+    "description_shots_per_source_max": 3,
+    "description_seconds_per_source_max": 8,
+    "description_run_time_percent_max": 15,
+    "detail_elements_per_shot_max": 3,
+    "detail_duration_multiplier_max": 1.5,
+    "beat_kinds": [
+      "opening_hook",
+      "advance",
+      "ending_hook",
+      "closure",
+      "carryover"
+    ],
+    "scope": "90–180 seconds is the active new-production profile. Fragment diagnostics never certify complete episodes. Historical 60-second minimum and 7200-second series target are not global defaults.",
+    "exceptions": "A source conflict or natural low-dialogue story needs an explicit scoped rule amendment; a producer cannot silently override thresholds, add plot, or self-authorize an exemption.",
+    "semantic_limits": "Source entailment, hook quality, meaningful short cuts, face area/readability and measured AV are independently reviewed; labels, visible eye landmarks and software PASS are not semantic certificates.",
+    "style_advice": {
+      "fixed_camera_percent": [
+        65,
+        75
+      ],
+      "complex_motion_percent_max": 5,
+      "enforcement": "advisory, never force unnecessary cuts or actions"
+    },
+    "retirements": {
+      "fixed_105_seconds": "source-grounded 90–180 range",
+      "series_7200_seconds": "project-specific historical target; no global total",
+      "complexity_score_3": "typed action resources, state transitions and camera constraints; engine calibration still required",
+      "forced_reaction_blinks_or_holds": "actual events and justified concurrent timing only",
+      "visible_three_timecodes": "internal event clock; no visible numeric picture timecodes"
+    },
+    "source_refs": [
+      "S10 lines510-517/1192/1347",
+      "S01 chapters18/19/80/85",
+      "latest user requested 90–180; audit correction authorized 2026-09-14"
+    ]
+  }
 }

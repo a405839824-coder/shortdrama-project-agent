@@ -222,7 +222,7 @@ class QualityContractTests(unittest.TestCase):
                 "work_order_id": f"different-order-{index}", "issues": [defect()]}, events, context)
             events.append(event)
         self.assertEqual(events[-1]["audit_round"], 3)
-        self.assertEqual(events[-1]["repair_convergence"][0]["required_action"], "rebuild_upstream")
+        self.assertEqual(events[-1]["repair_convergence"][0]["required_action"], "root_cause_repair")
         self.assertFalse(events[-1]["repair_convergence"][0]["resolved"])
         repeated = annotate_attempt_event(events[-1], events, context)
         self.assertEqual(repeated, events[-1])

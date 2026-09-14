@@ -580,6 +580,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         resume_work_order_id: str | None = None,
         expected_plan_sha256: str | None = None,
         confirmation: str | None = None,
+        borrow_permissions: list[dict[str, str]] | None = None,
     ) -> ToolResponse:
         return service.begin_task(
             request_namespace(settings),
@@ -602,6 +603,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             resume_work_order_id=resume_work_order_id,
             expected_plan_sha256=expected_plan_sha256,
             confirmation=confirmation,
+            borrow_permissions=borrow_permissions,
         )
 
     @server.tool(

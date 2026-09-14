@@ -53,6 +53,8 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             max_file_bytes=50 * 1024 * 1024,
         )
         self.server, self.service = create_mcp(self.settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(self.service)
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -512,6 +514,8 @@ class V055QualityAndMigrationTests(unittest.TestCase):
                     ),
                 ):
                     _server, before_service = create_mcp(case_settings)
+                    from historical_entry_fixture import freeze_legacy_entry
+                    freeze_legacy_entry(before_service)
                     project_id = str(
                         before_service.create_project(
                             self.namespace, f"ruleset-digest-{index}"
@@ -561,6 +565,8 @@ class V055QualityAndMigrationTests(unittest.TestCase):
                     target = skill_copy / relative_path
                     target.write_bytes(target.read_bytes() + b"\n")
                     _server, after_service = create_mcp(case_settings)
+                    from historical_entry_fixture import freeze_legacy_entry
+                    freeze_legacy_entry(after_service)
                     self.assertNotEqual(
                         after_service._ruleset_version, old_ruleset_version
                     )
@@ -2070,6 +2076,8 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             max_file_bytes=50 * 1024 * 1024,
         )
         _server, cloud = create_mcp(cloud_settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(cloud)
         project_id = str(
             cloud.create_project(self.namespace, "cloud-migration-and-preflight").project_id
         )
@@ -2570,6 +2578,8 @@ class V055QualityAndMigrationTests(unittest.TestCase):
             deployment_mode="cloud",
         )
         _server, cloud = create_mcp(cloud_settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(cloud)
         project_id = str(
             cloud.create_project(
                 self.namespace, "migration-plan-cloud-session"

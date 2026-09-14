@@ -27,6 +27,7 @@ def decisions():
     """Small explicitly authored data to exercise structural rendering only."""
     fields = {field: "测试字段内容。" for field in FIELDS if field not in COMPUTED}
     fields.update({"场景连续性ID": "SC-TEST", "生成限制": "9:16竖屏；禁止额外配乐。",
+                   "机位": "平视50mm。",
                    "起始状态": "甲双手放在桌边，信纸平放桌面。", "音色": "无对白，不适用。",
                    "心理音轨": "无。", "原文支撑句": "甲坐在桌旁，信纸留在桌上。"})
     state = {"人物位置": {"甲": "桌南侧坐姿"}, "身体朝向": {"甲": "朝北"},

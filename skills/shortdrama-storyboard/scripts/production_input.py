@@ -131,6 +131,11 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256, requ
     else:
         c.add("production_contract")
 
+    # Sum the authored shot clock before rendering any prose. Source-grounded
+    # semantics and actual voice occupation are checked after compilation.
+    from episode_rules import inspect_planned_budget
+    c.add("episode_planned_budget", inspect_planned_budget(raw))
+
     try:
         c.absorb(inspect_production_editorial(raw, renderer=author))
     except (TypeError, ValueError, KeyError, AttributeError) as exc:

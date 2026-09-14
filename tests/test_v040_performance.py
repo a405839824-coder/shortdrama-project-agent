@@ -42,6 +42,8 @@ class CompactMasterPerformanceContracts(unittest.IsolatedAsyncioTestCase):
         os.environ.pop("ALLOW_LOCAL_FILE_URLS", None)
         self.settings = Settings.from_env()
         self.server, self.service = create_mcp(self.settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(self.service)
         self.namespace = request_namespace(self.settings)
 
     async def asyncTearDown(self) -> None:

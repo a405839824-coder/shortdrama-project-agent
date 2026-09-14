@@ -35,6 +35,7 @@ from .canonical import (
 from .config import Settings
 from .field_content import model_field_contract
 from .production_plan import model_production_contract
+from .production_route import require_current_production
 from .acceptance_service import controlled_acceptance_operation
 from .delta import (
     changed_shot_fields,
@@ -1277,7 +1278,7 @@ def _scene_scoped_report(
 
     scoped_candidate = _scene_candidate_for_validation(candidate, scoped_shots)
     raw_report = validate_storyboard.validate_project(
-        scoped_candidate, mode="audit", timing_context=candidate,
+        scoped_candidate, mode="audit", timing_context=candidate, episode_fragment=True,
     )
     raw_issues = [
         copy.deepcopy(row)
@@ -1764,6 +1765,16 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         )
 
     @staticmethod
+    def _require_current_production(candidate, **kwargs):
+        return require_current_production(candidate, **kwargs)
+
+    def _project_borrow_permissions(self, namespace, project_id):
+        hub=self.store.load_hub(namespace, project_id)
+        return [permission for order in hub.get('work_orders',[])
+                if order.get('authorization')=='explicit_execute'
+                for permission in (order.get('source_lock') or {}).get('borrow_permissions',[])]
+
+    @staticmethod
     def _boundary_hash(storyboard: dict[str, Any]) -> str:
         chapter_intake = storyboard.get("chapter_intake")
         if not isinstance(chapter_intake, dict):
@@ -1776,6 +1787,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             "previous_boundary": chapter_intake.get("previous_chapter_boundary"),
             "next_boundary": chapter_intake.get("next_chapter_boundary"),
         }
+        if "source_ingestion" in storyboard:
+            boundary_payload["source_ingestion"] = storyboard["source_ingestion"]
+        evidence = storyboard.get("prevention_evidence") or {}
+        for key in ("episode_contract", "borrow_ledger"):
+            if isinstance(evidence, dict) and key in evidence:
+                boundary_payload[key] = evidence[key]
         return sha256_bytes(_stable_json_bytes(boundary_payload))
 
     def _source_fingerprint(
@@ -3204,6 +3221,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             ref for row in source_decision_obligations
             for ref in row["field_evidence_ids"]
         ))
+        from episode_rules import review_obligations
+        episode_obligations = review_obligations(storyboard)
+        episode_by_id = {row['evidence_id']: row for row in episode_obligations}
 
         def validate_evidence_id(evidence_id: str) -> None:
             kind, value = evidence_id.split(":", 1)
@@ -3213,11 +3233,13 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 raise ValueError(
                     "semantic_audit_evidence_invalid: evidence references must use non-empty kind:id"
                 )
-            if kind not in {"shot", "field", "canonical", "pair", "source-unit", "source-limit", "source-decision"}:
+            if kind not in {"shot", "field", "canonical", "pair", "source-unit", "source-limit", "source-decision", "episode-review"}:
                 raise ValueError(
                     "semantic_audit_evidence_invalid: evidence kind must be one of "
                     "shot, field, canonical, pair, source-unit, source-limit, or source-decision"
                 )
+            if kind == 'episode-review' and evidence_id not in episode_by_id:
+                raise ValueError('semantic_audit_episode_binding_mismatch: episode evidence is missing or stale')
             if kind == "source-decision" and evidence_id not in expected_source_decision_ids:
                 raise ValueError(
                     "semantic_audit_source_decision_binding_mismatch: source-decision must match "
@@ -3255,6 +3277,16 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     raise ValueError("semantic_audit_source_content_limit_layer_mismatch")
                 if str(evidence_id).startswith("source-decision:") and row["layer"] != "源文对白":
                     raise ValueError("semantic_audit_source_decision_layer_mismatch")
+                if str(evidence_id).startswith('episode-review:') and row['layer'] != episode_by_id[evidence_id]['layer']:
+                    raise ValueError('semantic_audit_episode_layer_mismatch')
+
+        for layer, layer_row in layer_by_name.items():
+            expected = [r for r in episode_obligations if r['layer'] == layer]
+            actual = [ref for ref in layer_row['evidence_ids'] if ref.startswith('episode-review:')]
+            if actual != [r['evidence_id'] for r in expected] or any(
+                ref not in layer_row['evidence_ids'] for r in expected for ref in r['field_evidence_ids']
+            ):
+                raise ValueError('semantic_audit_episode_review_pending: complete current episode questions and actual field references are required; numeric PASS is not a semantic review')
 
         submitted_source_decision_ids = [
             ref for ref in layer_by_name["源文对白"]["evidence_ids"]
@@ -3539,7 +3571,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         ]
         issues = machine_issues + normalized_semantic_issues
         enriched["issues"] = issues
-        chapter_mode = isinstance(storyboard.get("chapter_intake"), dict)
+        chapter_mode = validate_storyboard.chapter_required(storyboard)
         evidence_prefix = (
             f"machine:{self._validator_fingerprint[:12]}:"
             f"{canonical_hash[:12]}"
@@ -11133,7 +11165,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     def _compile_production_authoring_request(
         self, namespace: str, project_id: str, *, work_order_id: str,
         request: dict[str, Any], authority_session_fingerprint: str | None,
-        runtime_certificate_id: str,
+        runtime_certificate_id: str, scope_kind: str = "scene",
     ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         """Record and compile after the public caller has checked authority.
 
@@ -11160,6 +11192,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             "project_id": project_id, "work_order_id": work_order_id,
             "session_fingerprint": authority_session_fingerprint,
             "runtime_test_certificate_id": runtime_certificate_id,
+            "scope_kind": scope_kind,
             "created_at": utc_stamp(), "request_sha256": sha256_bytes(original),
         })
         summary: dict[str, Any] = {
@@ -11195,6 +11228,24 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             summary.update(source_graph_artifact_id=artifact_id, source_graph_sha256=actual_graph)
             if actual_graph != record.get("fingerprint") or actual_graph != expected_graph:
                 raise ValueError("production_authoring_graph_identity: current project artifact bytes do not match the requested SHA256")
+            project_input=request['decisions'].get('project') or {}
+            if not isinstance(project_input,dict):
+                raise ValueError('production_authoring_project_invalid: project must be an object')
+            evidence=project_input.get('prevention_evidence') or {}
+            if not isinstance(evidence,dict):
+                raise ValueError('production_authoring_project_invalid: prevention_evidence must be an object')
+            episode=evidence.get('episode_contract')
+            if scope_kind in {'full','episode'} and (not isinstance(episode,dict)
+                    or episode.get('contract')!='episode-production-contract-v1'
+                    or episode.get('scope') not in {'complete_episodes','complete_series'}):
+                raise ValueError('episode_contract_required: declare complete episodes before generating a full/episode candidate; fragments use scene preflight')
+            selected_source=self._selected_dialogue_source_entry(self.store.load_hub(namespace,project_id))
+            if selected_source and str(selected_source.get('source_role') or '').removeprefix('source:')=='novel':
+                intake=project_input.get('source_ingestion') or {}
+                if not isinstance(episode,dict) or episode.get('source_kind')!='novel' or not isinstance(intake,dict) or intake.get('mode')!='chapter_to_storyboard':
+                    raise ValueError('chapter_source_scope_required: server-selected novel source requires novel episode scope and chapter intake; candidate labels cannot downgrade the imported source')
+            from .production_route import check_borrow_permissions
+            check_borrow_permissions(project_input,self._project_borrow_permissions(namespace,project_id))
             attempt = record_attempt(
                 directory / "decisions.original.json", directory / "compiler_attempts",
                 source_graph_path=directory / "source_graph.original.json",
@@ -11261,6 +11312,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 namespace, project_id, work_order_id=work_order_id, request=storyboard,
                 authority_session_fingerprint=authority_session_fingerprint,
                 runtime_certificate_id=str(runtime_certificate["certificate_id"]),
+                scope_kind=scope_kind,
             )
             if compiled is None:
                 return ToolResponse(
@@ -11287,6 +11339,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             self._assert_workbook_migration_atoms(workbook_migration, storyboard)
             candidate, _identity = _prepare_compact_storyboard_for_commit(storyboard)
             _assert_r10_spc1_output_contract(candidate)
+            self._require_current_production(candidate, work_order=work_order, scope_kind=scope_kind,
+                                       workbook_migration=workbook_migration,
+                                       source_kind=str((self._selected_dialogue_source_entry(hub) or {}).get('source_role') or '').removeprefix('source:'),
+                                       borrow_permissions=self._project_borrow_permissions(namespace, project_id))
         except (TypeError, ValueError, AssertionError) as exc:
             preparation_error = exc
             candidate = copy.deepcopy(storyboard) if isinstance(storyboard, dict) else {}
@@ -13018,9 +13074,13 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         resume_work_order_id: str | None = None,
         expected_plan_sha256: str | None = None,
         confirmation: str | None = None,
+        borrow_permissions: list[dict[str, str]] | None = None,
     ) -> ToolResponse:
         self._require_runtime()
         create_actions = {"create", "create_window_neutral"}
+        if borrow_permissions is not None and (action not in create_actions or mode not in {'execute','audit_and_repair'}
+                or authorization != 'explicit_execute' or operation not in STORYBOARD_OPERATIONS):
+            raise ValueError('borrow_permission_authority_invalid: use an explicit executable storyboard task')
         if action not in create_actions:
             return self._continue_role_authority(
                 namespace,
@@ -13106,6 +13166,21 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 namespace, request_session_id
             ),
         }
+        if borrow_permissions is not None:
+            fields={'source_id','source_sha256','origin_episode','target_episode','next_source_id','authorization_basis'}
+            if not isinstance(borrow_permissions,list) or len(borrow_permissions)>64:
+                raise ValueError('borrow_permission_invalid: at most 64 explicit source permissions')
+            grants=[];seen=set()
+            for row in borrow_permissions:
+                if (not isinstance(row,dict) or set(row)!=fields
+                    or any(not isinstance(v,str) or not v.strip() or len(v)>2000 for v in row.values())
+                    or not re.fullmatch(r'[a-f0-9]{64}',row['source_sha256'])
+                    or row['source_id'] in seen or row['origin_episode']==row['target_episode']
+                    or row['source_id']==row['next_source_id']):
+                    raise ValueError('borrow_permission_invalid: exact unique source hash, origin, target, next source and authorization basis required')
+                seen.add(row['source_id'])
+                grants.append({**row,'authorization_id':_new_id('BORROW')})
+            request['source_lock']['borrow_permissions']=grants
         if window_neutral:
             request["window_access_contract"] = WINDOW_NEUTRAL_ACCESS_CONTRACT
             request["window_access_scope"] = "authenticated_namespace"
@@ -13199,6 +13274,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "window_access_contract", "legacy_window_bound"
                 ),
                 "active_prevention_profile": prevention_profile,
+                "borrow_permissions": request['source_lock'].get('borrow_permissions',[]),
             },
         )
 
@@ -20603,6 +20679,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "workbook_source_raw_sha256": plan["source_raw_sha256"],
                 "workbook_source_atoms_sha256": plan["proof"]["atom_sha256"],
             })
+        self._require_current_production(storyboard, work_order=work_order_snapshot, scope_kind='full',
+                                   workbook_migration=workbook_migration,
+                                   source_kind=str((self._selected_dialogue_source_entry(hub_snapshot) or {}).get('source_role') or '').removeprefix('source:'),
+                                   borrow_permissions=self._project_borrow_permissions(namespace, project_id))
         recovering_draft_commit = False
         draft_commit_payload_sha256: str | None = None
         recovering_repair_commit = False
@@ -20961,8 +21041,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             if repair_row["residual_issue_count"]:
                 repair_row["repeat_rounds"] = max(repeat_counts.values())
                 # A requirement is not proof it happened. Keep the real action.
-                repair_row["required_action"] = (
-                    "rebuild_upstream" if repair_row["repeat_rounds"] >= 3 else "root_cause_repair")
+                repair_row["required_action"] = "root_cause_repair"
             repair_row["repair_proof"]["machine_regression"] = {
                 "status": "pass" if not current_issue_keys else "fail_current",
                 "remaining_issue_count": len(current_issue_keys),
@@ -21766,9 +21845,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
             status = PRODUCTION_PREFLIGHT_PASS
         else:
-            summary = f"未通过｜问题{len(report.get('issues', []))}项｜第{internal_round}/3轮"
-            if internal_round >= 3:
-                summary += "｜需要上游重建"
+            summary = f"未通过｜问题{len(report.get('issues', []))}项｜已记录第{internal_round}轮｜按根因和依赖范围修正"
             status = "fail_current"
         stages_ms = dict(telemetry_prestages_ms or {})
         stages_ms.setdefault(
@@ -21916,7 +21993,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                         "quality": bound_draft_preflight.get("quality"),
                     }
                 ),
-                "next_action": "independent_audit" if zero_issue else ("upstream_rebuild" if internal_round >= 3 else "repair_all_issues_then_recommit"),
+                "next_action": "independent_audit" if zero_issue else "repair_all_issues_then_recommit",
             },
         )
 
