@@ -90,7 +90,7 @@ class GenerationLimitProjectionTests(unittest.TestCase):
                 standalone = project_gpt_keyframe(shot)
                 server = compile_gpt_keyframe_instruction(shot, assume_compact=True)
                 self.assertEqual(standalone, server)
-                self.assertIn("空间站位描述：" + expected, server)
+                self.assertIn("场景与站位：" + expected, server)
 
     def test_explicit_speech_delivery_cue_is_removed_without_losing_static_clause(self):
         for speech in ("低声说道", "轻声问道", "开口说"):
@@ -105,7 +105,7 @@ class GenerationLimitProjectionTests(unittest.TestCase):
         shot["起始状态"] = "苏清柳说道：“母亲。”"
         for compiler in (project_gpt_keyframe,
                          lambda item: compile_gpt_keyframe_instruction(item, assume_compact=True)):
-            with self.assertRaisesRegex(ValueError, "keyframe_static_contract_violation"):
+            with self.assertRaisesRegex(ValueError, "(?:field_content_violation|keyframe_static_contract_violation)"):
                 compiler(shot)
 
 

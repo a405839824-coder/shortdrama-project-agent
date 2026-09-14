@@ -131,9 +131,9 @@ class CanonicalXlsxRoundtripTests(unittest.TestCase):
             self.assertTrue(payload.startswith(CANONICAL_SIDECAR_PAYLOAD_PREFIX))
             self.assertFalse(payload.startswith(("=", "+", "-", "@")))
 
-        mother_headers = [cell.value for cell in workbook["正式生产母版"][1]]
+        mother_headers = [cell.value for cell in workbook["正式分镜母版"][1]]
         self.assertEqual(mother_headers, MOTHER_TEMPLATE_COLUMNS)
-        merged_value = str(workbook["正式生产母版"].cell(2, 5).value)
+        merged_value = str(workbook["正式分镜母版"].cell(2, 5).value)
         self.assertFalse(merged_value.startswith(("=", "+", "-", "@")))
         self.assertIn("画面内容：=HYPERLINK", merged_value)
         self.assertNotIn("分镜", workbook.sheetnames)

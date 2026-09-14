@@ -157,7 +157,7 @@ class CompactMasterArchitectureTests(unittest.IsolatedAsyncioTestCase):
                 "must_keep": ["未影响剧情、对白、认知、声画与光影"],
                 "must_remove": [],
                 "protected_scope": protected_scope or [],
-                "expected_outputs": ["正式分镜", "正式生产母版", "生产审计交接"],
+                "expected_outputs": ["正式分镜", "正式分镜母版", "生产审计交接"],
                 "window_key": f"production-{operation}",
             },
         )

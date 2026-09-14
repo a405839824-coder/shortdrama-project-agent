@@ -185,7 +185,7 @@ class V057PreflightEvidenceReissueTests(
             artifact_id,
         )
         workbook = load_workbook(artifact_path, data_only=False)
-        formal_sheet = workbook["正式生产母版"]
+        formal_sheet = workbook["正式分镜母版"]
         self.assertEqual(
             [cell.value for cell in formal_sheet[1]],
             list(MOTHER_TEMPLATE_COLUMNS),
@@ -202,6 +202,8 @@ class V057PreflightEvidenceReissueTests(
         sidecar = workbook[CANONICAL_SIDECAR_SHEET]
         self.assertEqual(sidecar.sheet_state, "veryHidden")
         sidecar.delete_cols(9, 3)
+        from historical_workbook_fixtures import use_previous_layout
+        use_previous_layout(workbook)
         payload_buffer = io.BytesIO()
         workbook.save(payload_buffer)
         workbook.close()
@@ -1409,7 +1411,7 @@ class V057PreflightEvidenceReissueTests(
             self.namespace, self.project_id, artifact_id
         )
         workbook = load_workbook(path)
-        workbook["正式生产母版"].cell(row=2, column=5).value = (
+        workbook["正式分镜母版"].cell(row=2, column=5).value = (
             "tampered visible projection"
         )
         workbook.save(path)

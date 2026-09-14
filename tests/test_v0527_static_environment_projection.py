@@ -13,9 +13,9 @@ from validate_storyboard import project_formal_master, project_gpt_keyframe
 
 
 class StaticEnvironmentProjectionTests(unittest.TestCase):
-    def project_both(self, value, field="环境动态"):
+    def project_both(self, value, field="空间站位描述"):
         shot = copy.deepcopy(compact_storyboard()["shots"][0])
-        shot[field] = value
+        shot[field] = ("文字造型锚：" + value) if field == "参考图锚定" else value
         before = copy.deepcopy(shot)
         results = []
         for compiler in (project_gpt_keyframe,
@@ -153,7 +153,7 @@ class StaticEnvironmentProjectionTests(unittest.TestCase):
             with self.subTest(value=value):
                 status, detail = self.project_both(value, "生成限制")
                 self.assertEqual(status, "returned", detail)
-                self.assertIn("生成限制：" + visual, detail)
+                self.assertIn("视觉限制：" + visual, detail)
                 self.assertNotIn("禁止" + visual, detail)
                 shot = copy.deepcopy(compact_storyboard()["shots"][0])
                 shot["生成限制"] = value

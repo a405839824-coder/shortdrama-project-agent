@@ -22,7 +22,7 @@ class StaticWrittenTextAndEyesTests(unittest.TestCase):
 
     def reject(self, shot):
         for fn in (project_gpt_keyframe, lambda s: compile_gpt_keyframe_instruction(s, assume_compact=True)):
-            with self.assertRaisesRegex(ValueError, 'keyframe_static_contract_violation'):
+            with self.assertRaisesRegex(ValueError, '(?:field_content_violation|keyframe_static_contract_violation)'):
                 fn(shot)
 
     def test_actual_three_paper_label_shapes_keep_all_quotes(self):
@@ -67,7 +67,7 @@ class StaticWrittenTextAndEyesTests(unittest.TestCase):
         shot = self.shot()
         shot['起始状态'] = '记录人手按纸面标签，低声说道：“快回来。”'
         for fn in (project_gpt_keyframe, lambda s: compile_gpt_keyframe_instruction(s, assume_compact=True)):
-            with self.assertRaisesRegex(ValueError, 'keyframe_static_contract_violation: unbound_visual_text'):
+            with self.assertRaisesRegex(ValueError, '(?:field_content_violation|keyframe_static_contract_violation: unbound_visual_text)'):
                 fn(shot)
         for fn in (_visual_only_text, _visual_only_clauses):
             result = fn(shot['起始状态'], strip_dialogue=True)

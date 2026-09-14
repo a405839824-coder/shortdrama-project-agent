@@ -9,6 +9,7 @@ from unittest import mock
 from openpyxl import load_workbook
 
 import shortdrama_mcp.file_io as file_io
+from historical_workbook_fixtures import previous_workbook, use_previous_layout
 from shortdrama_mcp.file_io import (
     extract_xlsx,
     extract_xlsx_for_controlled_handoff_revalidation,
@@ -75,7 +76,15 @@ def _compact_storyboard() -> dict:
     }
 
 
+def _master_sheet(workbook):
+    return workbook["正式分镜母版"] if "正式分镜母版" in workbook.sheetnames else workbook["正式生产母版"]
+
+
 def _saved_workbook(workbook) -> bytes:
+    if file_io.CANONICAL_SIDECAR_SHEET in workbook.sheetnames:
+        sidecar = workbook[file_io.CANONICAL_SIDECAR_SHEET]
+        if sidecar.max_column < 9 or sidecar.cell(2, 9).value != file_io.CURRENT_PROJECTION_CONTRACT:
+            use_previous_layout(workbook)
     stream = io.BytesIO()
     workbook.save(stream)
     return stream.getvalue()
@@ -236,7 +245,7 @@ class V051XlsxGuardTests(unittest.TestCase):
             assume_compact=True,
         )
         workbook = load_workbook(io.BytesIO(payload), data_only=False)
-        sheet = workbook["正式生产母版"]
+        sheet = _master_sheet(workbook)
         formal_column = list(MOTHER_TEMPLATE_COLUMNS).index(FORMAL_MERGED_FIELD) + 1
         actual_formal = sheet.cell(2, formal_column).value
 
@@ -343,7 +352,7 @@ class V051XlsxGuardTests(unittest.TestCase):
             _compact_storyboard(), {"issues": []}, assume_compact=True
         )
         workbook = load_workbook(io.BytesIO(payload), data_only=False)
-        formal_sheet = workbook["正式生产母版"]
+        formal_sheet = _master_sheet(workbook)
         formal_column = list(MOTHER_TEMPLATE_COLUMNS).index(FORMAL_MERGED_FIELD) + 1
         formal_sheet.cell(1, formal_column).value = "正式分镜母版·字段合并"
         legacy_row = legacy_v050_mother_template_rows(_compact_storyboard())[0]
@@ -363,7 +372,7 @@ class V051XlsxGuardTests(unittest.TestCase):
             _compact_storyboard(), {"issues": []}, assume_compact=True
         )
         workbook = load_workbook(io.BytesIO(payload), data_only=False)
-        formal_sheet = workbook["正式生产母版"]
+        formal_sheet = _master_sheet(workbook)
         transitional_row = legacy_v053_mother_template_rows(
             _compact_storyboard()
         )[0]
@@ -429,7 +438,7 @@ class V051XlsxGuardTests(unittest.TestCase):
             _compact_storyboard(), {"issues": []}, assume_compact=True
         )
         workbook = load_workbook(io.BytesIO(payload), data_only=False)
-        formal_sheet = workbook["正式生产母版"]
+        formal_sheet = _master_sheet(workbook)
         formal_sheet.cell(1, 5).value = LEGACY_FORMAL_MERGED_FIELD
         formal_sheet.cell(2, 5).value = legacy_v050_mother_template_rows(
             _compact_storyboard()
@@ -447,7 +456,7 @@ class V051XlsxGuardTests(unittest.TestCase):
     def test_controlled_revalidation_accepts_signed_v054_projection_only(
         self,
     ) -> None:
-        payload = storyboard_to_xlsx(
+        payload = previous_workbook(
             _compact_storyboard(), {"issues": []}, assume_compact=True
         )
         workbook = load_workbook(io.BytesIO(payload), data_only=False)
@@ -484,7 +493,7 @@ class V051XlsxGuardTests(unittest.TestCase):
         transitional_row = legacy_v053_mother_template_rows(
             _compact_storyboard()
         )[0]
-        formal_sheet = workbook["正式生产母版"]
+        formal_sheet = _master_sheet(workbook)
         for column, header in enumerate(MOTHER_TEMPLATE_COLUMNS, 1):
             formal_sheet.cell(2, column).value = transitional_row.get(
                 header
@@ -502,7 +511,7 @@ class V051XlsxGuardTests(unittest.TestCase):
             _compact_storyboard(), {"issues": []}, assume_compact=True
         )
         workbook = load_workbook(io.BytesIO(payload), data_only=False)
-        formal_sheet = workbook["正式生产母版"]
+        formal_sheet = _master_sheet(workbook)
         formal_column = list(MOTHER_TEMPLATE_COLUMNS).index(FORMAL_MERGED_FIELD) + 1
         formal_sheet.cell(1, formal_column).value = "正式分镜母版·字段合并"
         legacy_row = legacy_v050_mother_template_rows(_compact_storyboard())[0]

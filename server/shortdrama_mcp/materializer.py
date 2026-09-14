@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 from .written_payload import discover_current_written_payloads, context_instruction_text
 from .picture_presentation import display_picture
+from .field_content import assert_field_content, r5_keyframe_sections
 
 
 FORMAL_MERGED_FIELD = "正式分镜母版"
@@ -1074,6 +1075,7 @@ def _keyframe_generation_limits(value: str) -> str:
     we never guess how their negation should bind to a remaining visual item.
     """
     positive = {
+        "单镜单一主机位、单一核心动作阶段",
         "眼球轻微换焦与位移、眼睑松紧按画面内容执行",
         "眼球轻微换焦与位移", "眼睑松紧按画面内容执行",
         "保留轻微眼球焦点调整和眼睑松紧变化",
@@ -1322,6 +1324,7 @@ def compile_formal_merged_field(
             "formal_master_context_violation: cross-shot references are "
             "forbidden: " + ", ".join(context_hits)
         )
+    assert_field_content(compact, mask=context_instruction_text)
     return formal
 
 
@@ -1335,26 +1338,34 @@ def compile_gpt_keyframe_instruction(
     if not isinstance(shot, dict):
         raise ValueError("materialization_shot_invalid: shot must be an object")
     compact = dict(shot) if assume_compact else migrate_legacy_shot(shot)
+    assert_field_content(compact, mask=context_instruction_text)
+    _assert_projected_aspect_contract(
+        ASPECT_RATIO_TOKEN + "\n" + _text(compact.get("参考图锚定")),
+        projection="reference_anchor",
+    )
     normalized = dict(compact)
     normalized["生成限制"] = _keyframe_generation_limits(_generation_limits_without_aspect(
         compact.get("生成限制")
     ))
-    body = _labeled_lines(
-        normalized,
-        GPT_KEYFRAME_ATOMIC_FIELDS,
-        transforms={
-            field: (
-                lambda value, field=field: _visual_only_text(
-                    value, strip_dialogue=True, strict_static_quotes=True, field_name=field
-                )
-            )
-            for field in GPT_KEYFRAME_SCRUB_FIELDS
-        },
-    )
-    lines = ["GPT关键帧生成指令", f"画幅：{ASPECT_RATIO_TOKEN}"]
-    if body:
-        lines.append(body)
-    prompt = "\n".join(lines)
+    values = {field: _visual_only_text(_text(normalized.get(field)),
+                strip_dialogue=True, strict_static_quotes=True, field_name=field)
+              for field in ("空间站位描述", "起始状态", "机位")}
+    values.update({field: _text(normalized.get(field)) for field in
+                   ("镜头类型", "可见主体", "光影", "光源来源", "光源方向", "色温倾向")})
+    from .field_content import appearance_anchor_text, assert_static_text_preserved
+    for field in ("空间站位描述", "起始状态", "机位"):
+        assert_static_text_preserved(_text(normalized.get(field)), values[field], field)
+    appearance = appearance_anchor_text(_text(compact.get("参考图锚定")))
+    if appearance:
+        original_appearance = appearance
+        appearance = _visual_only_text(appearance, strip_dialogue=True,
+                                      strict_static_quotes=True, field_name="参考图锚定")
+        assert_static_text_preserved(original_appearance, appearance, "参考图锚定.文字造型锚")
+    limits = _visual_only_text(normalized["生成限制"], strip_dialogue=True,
+                              strict_static_quotes=True, field_name="生成限制")
+    sections = r5_keyframe_sections(values, aspect=ASPECT_RATIO_TOKEN,
+                                   visual_limits=limits, appearance_anchor=appearance)
+    prompt = "\n".join(["GPT关键帧生成指令"] + [f"{label}：{value}" for label, value in sections])
     _assert_projected_aspect_contract(prompt, projection="gpt_keyframe")
     instruction_text = _keyframe_instruction_text(prompt)
     dynamic_hits = sorted(

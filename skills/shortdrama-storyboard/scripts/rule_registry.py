@@ -47,6 +47,8 @@ def render_views(registry):
         "version": registry["runtime_version"],
         "items": copy.deepcopy(runtime["deprecated_rules"]),
     }
+    if "field_content_policy" in runtime:
+        result["field_content_contract.md"] = render_field_contract(runtime["field_content_policy"])
     conflicts = {row["conflict_id"]: row for row in registry["conflicts"]}
     gate_ids = [row["gate_id"] for row in runtime["gates"]["template_hard_gates"]]
     for filename, (key, _) in VIEW_KEYS.items():
@@ -65,6 +67,30 @@ def render_views(registry):
                 row["required_template_gate_ids"] = gate_ids.copy()
         result[filename] = rows
     return result
+
+
+def render_field_contract(policy):
+    lines = ["# 字段内容合同", "", "由 rule_registry.json 生成；不得单独编辑。",
+             "", "合同：" + policy["contract"], "",
+             "生产决定按字段类型输入，母版/GPT由程序投影。历史原件保留；结构和已支持错列检查不能自签来源或表演语义。",
+             "字段正文不得嵌入其他字段或音色子项标题；真实对白和当前可见道具文字保留字面含义。",
+             "", "| 字段 | 允许内容 | 关联与禁止内容 |", "|---|---|---|"]
+    for field, spec in policy["fields"].items():
+        lines.append(f"| {field} | {spec['allows']} | {spec['requires']} |")
+    lines += ["", "## 音色子项", "", "| 子项 | 允许内容 | 禁止内容 |", "|---|---|---|"]
+    for field, spec in policy["voice_subfields"].items():
+        lines.append(f"| {field} | {spec['allows']} | {spec['requires']} |")
+    lines += ["", "## GPT起始帧段落", "", "| 段落 | 来源 | 适用性 |", "|---|---|---|"]
+    for row in policy["keyframe_sections"]:
+        lines.append(f"| {row['label']} | {'、'.join(row['sources']) or '对应的受控画幅／造型／视觉政策'} | {'按可见对象适用' if row.get('optional') else '固定段落'} |")
+    lines += ["", "真实对白、原文和当前可见道具文字逐字保留；仅加引号不能将执行指令伪装为字面内容。",
+              "全局生成限制不塞入画面内容；剧情否定和局部禁止语气、心理音轨安全属性留在各自字段。",
+              "缺依据不补造、不自动搬列；修正权威决定后同步依赖与所有展示。", "",
+              "## 其他历史问题的针对方案", ""]
+    for key, value in policy["remaining_problem_plan"].items():
+        if isinstance(value, str):
+            lines.append(f"- {key}：{value}")
+    return "\n".join(lines) + "\n"
 
 
 def _resolve_release_declarations(value, version):
@@ -119,6 +145,35 @@ def check_registry_definition(registry):
         failures.append("template gates: complete THG-01..THG-17 set differs")
     if len(runtime["canonical_shot_fields"]) != 27 or len(set(runtime["canonical_shot_fields"])) != 27:
         failures.append("canonical field identity set/order contract must retain 27 distinct fields")
+    fields = runtime.get("field_content_policy")
+    if fields is None:
+        failures.append("field content contract: required authoritative policy is missing")
+    else:
+        if fields.get("contract") != "storyboard-field-content-v1" or list(fields.get("fields", {})) != runtime["canonical_shot_fields"]:
+            failures.append("field content contract: missing, reordered or unknown canonical field")
+        labels = [row["label"] for row in fields.get("keyframe_sections", [])]
+        if len(labels) != 11 or len(set(labels)) != 11 or sum(bool(row.get("optional")) for row in fields["keyframe_sections"]) != 1:
+            failures.append("field content contract: requires ten fixed keyframe sections and one optional anchor")
+        if list(fields.get("voice_subfields", {})) != ["基础声线", "言语行为", "当前表达", "发声方式", "音量", "语速与节奏", "呼吸", "停顿", "重音", "尾音", "禁止语气"]:
+            failures.append("field content contract: requires the eleven existing voice labels")
+        expected_sources = {"画幅": [], "场景与站位": ["空间站位描述"],
+            "镜头类型及可见主体": ["镜头类型", "可见主体"], "静态姿态": ["起始状态"],
+            "机位": ["机位"], "光影": ["光影"], "光源来源": ["光源来源"],
+            "光源方向": ["光源方向"], "色温倾向": ["色温倾向"], "文字造型锚": [], "视觉限制": []}
+        if labels != list(expected_sources) or any(row.get("sources") != expected_sources.get(row["label"])
+            or bool(row.get("optional")) != (row["label"] == "文字造型锚") for row in fields.get("keyframe_sections", [])):
+            failures.append("field content contract: keyframe routing does not match field ownership")
+        for spec in [*fields.get("fields", {}).values(), *fields.get("voice_subfields", {}).values()]:
+            if not spec.get("allows") or not spec.get("requires"):
+                failures.append("field content contract: missing content boundary")
+            if set(spec.get("forbidden_roles", [])) - set(fields.get("role_patterns", {})):
+                failures.append("field content contract: unknown semantic role")
+        for expressions in fields.get("role_patterns", {}).values():
+            for expression in expressions:
+                try:
+                    re.compile(expression)
+                except re.error:
+                    failures.append("field content contract: invalid role expression")
     for field in ("runtime", "capabilities"):
         if registry[field]["compact_master_contract"]["plugin_version"] != revision:
             failures.append(f"{field}: plugin revision differs")
@@ -225,7 +280,7 @@ def validate_registry(reference_root=None):
                 failures.append(f"missing generated view: {filename}")
                 continue
             text = path.read_text(encoding="utf-8")
-            actual = [json.loads(line) for line in text.splitlines() if line.strip()] if filename.endswith(".jsonl") else json.loads(text)
+            actual = text if filename.endswith(".md") else ([json.loads(line) for line in text.splitlines() if line.strip()] if filename.endswith(".jsonl") else json.loads(text))
             if actual != expected:
                 if filename in VIEW_KEYS:
                     identity = VIEW_KEYS[filename][1]
@@ -255,8 +310,11 @@ def write_views(reference_root=None):
     if failures:
         raise ValueError("; ".join(failures))
     for filename, value in render_views(registry).items():
-        content = "\n".join(json.dumps(row, ensure_ascii=False) for row in value) if filename.endswith(".jsonl") else json.dumps(value, ensure_ascii=False, indent=2)
-        (root / filename).write_text(content + "\n", encoding="utf-8")
+        if filename.endswith(".md"):
+            content = value
+        else:
+            content = ("\n".join(json.dumps(row, ensure_ascii=False) for row in value) if filename.endswith(".jsonl") else json.dumps(value, ensure_ascii=False, indent=2)) + "\n"
+        (root / filename).write_text(content, encoding="utf-8")
 
 
 def main():

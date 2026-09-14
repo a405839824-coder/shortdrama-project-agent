@@ -53,7 +53,7 @@ class WrittenColumnScopeTests(unittest.TestCase):
             self.assertIn('甲随后说道',masked)
         for fn in (validate_storyboard.project_gpt_keyframe,
                    lambda s:materializer.compile_gpt_keyframe_instruction(s,assume_compact=True)):
-            with self.assertRaisesRegex(ValueError,'keyframe_static_contract_violation'):fn(shot(text))
+            with self.assertRaisesRegex(ValueError,'(?:field_content_violation|keyframe_static_contract_violation)'):fn(shot(text))
 
     def test_explicit_future_writing_keeps_existing_public_rejection(self):
         text='纸面现有两栏：姓名为“甲”，纸面将写有条件：“已复核”；字迹位置预留。'
@@ -64,7 +64,7 @@ class WrittenColumnScopeTests(unittest.TestCase):
             self.assertIn('纸面将写有条件',masked)
         for fn in (validate_storyboard.project_gpt_keyframe,
                    lambda s:materializer.compile_gpt_keyframe_instruction(s,assume_compact=True)):
-            with self.assertRaisesRegex(ValueError,'keyframe_static_contract_violation'):fn(shot(text))
+            with self.assertRaisesRegex(ValueError,'(?:field_content_violation|keyframe_static_contract_violation)'):fn(shot(text))
 
     def test_narration_is_not_a_column_key(self):
         text='纸面现有两栏：姓名为“甲”，旁白转述，条件为“昨日已交付”。'

@@ -1,12 +1,14 @@
 # Railway 部署执行单
 
+本轮按 0.5.32 已通过 CI 的发布树升级；保持原生产环境、服务、/data 卷、Auth0、Admin/Producer、成员清单与 Library 指针。上线后验证当前字段合同、实际 XLSX 和历史回读，不能只核对版本号。
+
 本项目使用 Railway 托管 MCP、Railway Volume 持久化 `/data`、Auth0 提供 OAuth。Railway 自动域名即可，不需要自有域名。当前文件存储实现必须保持单副本。
 
-## 已有服务升级到 0.5.31
+## 已有服务升级到 0.5.32
 
-使用合并且通过完整 Linux CI 的 0.5.31 发布树，保留当前 Admin / Producer、成员连接、Auth0、原 /data 卷和域名。已有成员模式及成员清单不得在升级时重置。不要重复创建项目或卷，不覆盖旧项目、Library 指针和签名密钥。
+使用合并且通过完整 Linux CI 的 0.5.32 发布树，保留当前 Admin / Producer、成员连接、Auth0、原 /data 卷和域名。已有成员模式及成员清单不得在升级时重置。不要重复创建项目或卷，不覆盖旧项目、Library 指针和签名密钥。
 
-Admin / Producer 工具目录仍为 24 / 21 个。本次不改认证模式和公共工具参数；画面正文计时改为内部绑定，历史输入保持原义。发布后核对 /health、认证工具版本和真实部署代码的 XLSX 输出及回读，不能只看本地版本号。见 [0.5.31 升级说明](UPGRADE_0.5.31.md)。
+Admin / Producer 工具目录仍为 24 / 21 个。本次不改认证模式和公共工具参数；执行字段合同与 R5 输出，画面正文计时保留内部绑定，历史输入保持原义。发布后核对 /health、认证工具版本和真实部署代码的 XLSX 输出及回读，不能只看本地版本号。见 [0.5.32 升级说明](UPGRADE_0.5.32.md)。
 
 下列创建项目步骤仅用于首次安装。
 
@@ -66,7 +68,7 @@ railway up
 
 验收必须同时满足：
 
-- `/health` 返回 `status=pass`、`version=0.5.31`，且账号权限契约仍为 `admin-producer-v1`；成员配置启用后还须 `member_connection_access=true`
+- `/health` 返回 `status=pass`、`version=0.5.32`，且账号权限契约仍为 `admin-producer-v1`；成员配置启用后还须 `member_connection_access=true`
 - 未登录调用 `/mcp` 返回 401 或 403
 - 响应包含 Bearer OAuth challenge
 - Railway 重启服务后，`/data` 中的项目仍存在

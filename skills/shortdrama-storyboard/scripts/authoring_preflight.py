@@ -170,9 +170,10 @@ def inspect_typed_decisions(decisions: Any, *, renderer=None) -> dict:
             c.run(name('voice'), voice, requires=(name('fields'), name('speech')), path=name('fields.音色'))
             def punctuation():
                 picture, dialogue_rows = c.values[name('speech')]
-                faults = a._validate_punctuation(''.join(t for _, t in dialogue_rows), picture) if dialogue_rows else []
-                a._check(not faults, name('phases'), 'PUNCT: ' + '、'.join(faults))
-            c.run(name('punctuation'), punctuation, requires=(name('speech'),), path=name('phases'))
+                faults = a._validate_punctuation(''.join(t for _, t in dialogue_rows),
+                    str(row['fields'].get('音色') or '')) if dialogue_rows else []
+                a._check(not faults, name('fields.音色'), 'PUNCT: ' + '、'.join(faults))
+            c.run(name('punctuation'), punctuation, requires=(name('speech'), name('fields')), path=name('fields.音色'))
         parts.append({'row': row, 'prefix': prefix})
 
     endpoint_checks = tuple(f'shots[{i}].{side}' for i in range(len(decisions['shots']))

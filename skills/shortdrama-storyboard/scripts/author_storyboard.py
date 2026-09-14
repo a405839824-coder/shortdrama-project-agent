@@ -313,8 +313,8 @@ def _render_decisions(decisions: dict[str, Any]) -> dict[str, Any]:
             if dialogue_rows:
                 voice_faults = _voice_template_errors(fields["音色"], dialogue, dialogue_rows)
                 _check(not voice_faults, where + ".fields.音色", "; ".join(voice_faults))
-                punctuation_faults = _validate_punctuation(dialogue, picture)
-                _check(not punctuation_faults, where + ".phases",
+                punctuation_faults = _validate_punctuation(dialogue, str(fields.get("音色") or ""))
+                _check(not punctuation_faults, where + ".fields.音色",
                        "PUNCT: " + "、".join(punctuation_faults))
             else:
                 _check(bool(VOICE_NO_DIALOGUE_RE.fullmatch(str(fields["音色"]).strip())),
@@ -360,6 +360,14 @@ def _render_decisions(decisions: dict[str, Any]) -> dict[str, Any]:
     # authored picture field itself is plain action/dialogue prose.
     from picture_presentation import separate_shot_clock
     candidate["shots"] = [separate_shot_clock(shot) for shot in candidate["shots"]]
+    from field_content import field_content_findings
+    from written_payload import context_instruction_text
+    ownership_faults = []
+    for index, shot in enumerate(candidate["shots"]):
+        for fault in field_content_findings(shot, mask=context_instruction_text):
+            ownership_faults.append({**fault, "path": f"shots[{index}].{fault['path']}"})
+    if ownership_faults:
+        raise RejectedDecisions(ownership_faults)
     return candidate
 
 

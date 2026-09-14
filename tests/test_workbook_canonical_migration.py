@@ -28,7 +28,7 @@ def legacy_bytes(candidate=None, edit=None):
     candidate = candidate or valid_storyboard()
     book = load_workbook(io.BytesIO(storyboard_to_xlsx(candidate, {"issues": []}, assume_compact=True)))
     del book[CANONICAL_SIDECAR_SHEET]
-    sheet = book["正式生产母版"]
+    sheet = book["正式分镜母版"]
     for row, shot in enumerate(candidate["shots"], 2):
         # This fixture represents the earlier workbook with visible clocks.
         # New exports deliberately omit those clocks; pin the legacy source

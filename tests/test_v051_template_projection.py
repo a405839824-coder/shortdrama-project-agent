@@ -159,13 +159,12 @@ class V051TemplateProjectionTests(unittest.TestCase):
         for term in KEYFRAME_FORBIDDEN_DYNAMIC_TERMS:
             self.assertNotIn(term, gpt)
         for retained in (
-            "镜头类型：双人中近景",
-            "可见主体：苏清柳、邹氏",
-            "空间站位描述：",
-            "起始状态：",
+            "镜头类型及可见主体：双人中近景；苏清柳、邹氏",
+            "场景与站位：",
+            "静态姿态：",
             "机位：",
             "光源来源：",
-            "参考图锚定：",
+            "视觉限制：",
         ):
             self.assertIn(retained, gpt)
 
@@ -176,7 +175,7 @@ class V051TemplateProjectionTests(unittest.TestCase):
                 shot["起始状态"] = f"人物保持站位，{term}进入下一状态。"
                 with self.assertRaisesRegex(
                     ValueError,
-                    "keyframe_static_contract_violation",
+                    "(?:field_content_violation|keyframe_static_contract_violation)",
                 ):
                     compile_gpt_keyframe_instruction(shot, assume_compact=True)
 
@@ -354,7 +353,7 @@ class V051TemplateProjectionTests(unittest.TestCase):
             with self.subTest(value=value):
                 shot = copy.deepcopy(compact_storyboard()["shots"][0])
                 shot["起始状态"] = value
-                with self.assertRaisesRegex(ValueError, "keyframe_static_contract_violation"):
+                with self.assertRaisesRegex(ValueError, "(?:field_content_violation|keyframe_static_contract_violation)"):
                     compile_gpt_keyframe_instruction(shot, assume_compact=True)
 
         allowed = (
@@ -390,10 +389,10 @@ class V051TemplateProjectionTests(unittest.TestCase):
 
     def test_keyframe_preserves_explicit_visual_labels_and_visible_text(self) -> None:
         shot = copy.deepcopy(compact_storyboard()["shots"][0])
-        shot["参考图锚定"] = "【参考图锚点】绛红衣饰固定；声线固定。"
-        shot["环境动态"] = (
+        shot["参考图锚定"] = "文字造型锚：绛红衣饰固定。\n素材绑定：CHAR-A。"
+        shot["空间站位描述"] = (
             "画内匾额“香雅院”清晰可见；"
-            "【匾额】音乐坊；牌匾可见文字：音乐坊；古琴声压低"
+            "【匾额】音乐坊；牌匾可见文字：音乐坊"
         )
 
         service_prompt = compile_gpt_keyframe_instruction(
@@ -404,7 +403,7 @@ class V051TemplateProjectionTests(unittest.TestCase):
 
         self.assertEqual(service_prompt, validator_prompt)
         for visible in (
-            "【参考图锚点】绛红衣饰固定",
+            "文字造型锚：绛红衣饰固定",
             "画内匾额“香雅院”清晰可见",
             "【匾额】音乐坊",
             "牌匾可见文字：音乐坊",

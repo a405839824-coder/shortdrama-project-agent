@@ -145,14 +145,14 @@ class CompactMasterMaterializerTests(unittest.TestCase):
         workbook = load_workbook(io.BytesIO(workbook_bytes), read_only=True, data_only=False)
 
         self.assertEqual(MOTHER_TEMPLATE_COLUMNS, EXPECTED_COMPACT_COLUMNS)
-        self.assertIn("正式生产母版", workbook.sheetnames)
-        headers = [cell.value for cell in workbook["正式生产母版"][1]]
+        self.assertIn("正式分镜母版", workbook.sheetnames)
+        headers = [cell.value for cell in workbook["正式分镜母版"][1]]
         self.assertEqual(headers, EXPECTED_COMPACT_COLUMNS)
         self.assertNotIn("分镜", workbook.sheetnames)
         self.assertNotIn("生成批次", workbook.sheetnames)
         row = formal_mother_template_rows(storyboard)[0]
-        self.assertEqual(workbook["正式生产母版"].cell(2, 4).value, row["功能类型/场景连续性ID"])
-        self.assertEqual(workbook["正式生产母版"].cell(2, 5).value, row[FORMAL_MERGED_FIELD])
+        self.assertEqual(workbook["正式分镜母版"].cell(2, 4).value, row["功能类型/场景连续性ID"])
+        self.assertEqual(workbook["正式分镜母版"].cell(2, 5).value, row[FORMAL_MERGED_FIELD])
         canonical = extract_xlsx(workbook_bytes)["canonical_storyboard"]
         self.assertEqual(canonical, storyboard)
         self.assertNotIn(FORMAL_MERGED_FIELD, canonical["shots"][0])
@@ -210,7 +210,7 @@ class FullCommitCompactMasterIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 "must_keep": ["剧情、表演、对白、声光语义"],
                 "must_remove": ["重复长字段与Seedance批次"],
                 "protected_scope": [],
-                "expected_outputs": ["正式分镜", "正式生产母版"],
+                "expected_outputs": ["正式分镜", "正式分镜母版"],
                 "window_key": "production-compact-master",
             },
         )
@@ -237,9 +237,9 @@ class FullCommitCompactMasterIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         workbook = load_workbook(io.BytesIO(path.read_bytes()), read_only=True, data_only=False)
         self.addCleanup(workbook.close)
-        self.assertIn("正式生产母版", workbook.sheetnames)
+        self.assertIn("正式分镜母版", workbook.sheetnames)
         self.assertEqual(
-            [cell.value for cell in workbook["正式生产母版"][1]],
+            [cell.value for cell in workbook["正式分镜母版"][1]],
             EXPECTED_COMPACT_COLUMNS,
         )
         self.assertNotIn("生成批次", workbook.sheetnames)

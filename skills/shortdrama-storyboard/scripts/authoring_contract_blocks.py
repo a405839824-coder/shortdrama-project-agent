@@ -231,9 +231,9 @@ def interior_lighting_blocks(*, source: dict[str, Any], screen_side: str,
     fill = f"{reflector}提供较弱反射补光。" if reflector else ""
     dark = f"暗侧由{reflector}弱反射补光。" if reflector else "暗侧保留自然明暗层次。"
     fields = {
-        "光影": f"{receivers}呈现自然明暗层次。曝光正常，高光不过曝，暗部保留材质灰阶；空气清澈，背景结构清晰可辨，不泛白、不雾化。",
-        "光源来源": origin + fill,
-        "光源方向": f"场景{world}侧主光位于画面{screen}侧，光源离地{height:g}米，落向{receivers}；亮度沿可见表面与空间纵深衰减。" + dark,
+        "光影": f"{receivers}呈现自然明暗层次。曝光正常，高光不过曝，暗部保留材质灰阶；空气清澈，背景结构清晰可辨，不泛白、不雾化。亮度沿可见表面与空间纵深衰减。" + dark,
+        "光源来源": origin + f"光源离地{height:g}米。" + fill,
+        "光源方向": f"场景{world}侧主光位于画面{screen}侧，落向{receivers}。",
         "色温倾向": f"主光{main}，暗侧{shadow}；可见材质的{material}本色保持自然，不作整幅染色。",
     }
     return {"spatial_state_append": physical, "lighting_fields": fields,

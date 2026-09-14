@@ -20,6 +20,8 @@ from typing import Any
 import timing_model
 from written_payload import discover_current_written_payloads, context_instruction_text
 import repair_observations
+from field_content import (assert_field_content, field_content_findings,
+                           voice_content_findings, r5_keyframe_sections)
 from continuity_checks import state_equal
 from performance_checks import eye_contract_faults, emphasis_binding_faults, visible_subject_tokens, visible_subject_annotation_faults, listener_reaction_faults
 from lighting_checks import affirmative_matches, lighting_context_faults, scene_lighting_continuity_faults
@@ -727,6 +729,9 @@ def _voice_template_errors(
     generic_count = sum(clause in text for clause in GENERIC_NEUTRAL_VOICE_CLAUSES)
     if generic_count >= 3:
         errors.append("个性化音色后不得追加统一中性发声模板")
+    errors.extend(f"{row['path']}: {row['message']} [{row['excerpt']}]"
+                  for row in voice_content_findings(text, dialogue_rows=dialogue_rows or [],
+                                                    mask=context_instruction_text))
     return list(dict.fromkeys(errors))
 
 
@@ -906,7 +911,7 @@ def _validate_punctuation(dialogue: str, delivery: str) -> list[str]:
         (("……" in dialogue or "..." in dialogue), ["停顿", "卡住", "断续"], "省略号停顿/卡住"),
         (("——" in dialogue or "—" in dialogue), ["转折", "打断", "强调", "断裂"], "破折号转折/打断"),
         (("？！" in dialogue or "!?" in dialogue or "?!" in dialogue), ["质问", "爆发", "加重", "重音"], "问叹号质问/爆发"),
-        (("？" in dialogue or "?" in dialogue), ["上扬", "试探", "质问", "疑问", "收住"], "问号尾音/意图"),
+        (("？" in dialogue or "?" in dialogue), ["上扬", "上抬", "下压", "落稳", "短收", "发虚", "截断", "试探", "质问", "疑问", "询问", "反问", "收住"], "问号尾音/意图"),
         (("！" in dialogue or "!" in dialogue), ["重音", "加强", "爆发", "警告", "兴奋"], "感叹号情绪/重音"),
         (("～" in dialogue or "~" in dialogue), ["拉长", "轻快", "柔软", "放柔"], "波浪号尾音"),
     ]
@@ -1193,6 +1198,7 @@ def project_formal_master(shot: dict[str, Any]) -> str:
             "formal_master_context_violation: cross-shot references are "
             "forbidden: " + ", ".join(context_hits)
         )
+    assert_field_content(projected, mask=context_instruction_text)
     return formal
 
 
@@ -1412,6 +1418,7 @@ def _keyframe_generation_limits(value: str) -> str:
     we never guess how their negation should bind to a remaining visual item.
     """
     positive = {
+        "单镜单一主机位、单一核心动作阶段",
         "眼球轻微换焦与位移、眼睑松紧按画面内容执行",
         "眼球轻微换焦与位移", "眼睑松紧按画面内容执行",
         "保留轻微眼球焦点调整和眼睑松紧变化",
@@ -1597,50 +1604,36 @@ def _visual_only_clauses(
 
 def project_gpt_keyframe(shot: dict[str, Any]) -> str:
     """Compile the visual-only sixth-column projection from the same canonical."""
-    fields = (
-        "镜头类型",
-        "可见主体",
-        "空间站位描述",
-        "起始状态",
-        "机位",
-        "环境动态",
-        "光影",
-        "光源来源",
-        "光源方向",
-        "色温倾向",
-        "参考图锚定",
-        "生成限制",
+    assert_field_content(shot, mask=context_instruction_text)
+    _assert_projected_aspect_contract(
+        REQUIRED_ASPECT_RATIO_PHRASE + "\n" + _projection_text(shot.get("参考图锚定")),
+        projection="reference_anchor",
     )
-    scrubbed_fields = {
-        "空间站位描述",
-        "起始状态",
-        "机位",
-        "环境动态",
-        "参考图锚定",
-        "生成限制",
-    }
-    lines = ["GPT关键帧生成指令", f"画幅：{REQUIRED_ASPECT_RATIO_PHRASE}"]
-    for field in fields:
-        value = _projection_text(shot.get(field))
-        if field == "生成限制":
-            value = re.sub(
-                r"(?<!\d)9\s*[:：]\s*16(?![\d.])\s*(?:"
-                r"竖屏真人古装短剧(?:截图质感|单帧)?|"
-                r"真人古装短剧(?:截图质感|单帧)?|竖屏)?",
-                "",
-                _normalize_generation_limits(value),
-                flags=re.I,
-            )
-            value = re.sub(r"\s*[；;]\s*", "；", value)
-            value = re.sub(r"；{2,}", "；", value).strip(" ；;，,。")
-            value = _keyframe_generation_limits(value)
-        if field in scrubbed_fields:
-            value = _visual_only_clauses(
-                value, strip_dialogue=True, strict_static_quotes=True, field_name=field
-            )
-        if value:
-            lines.append(f"{field}：{value}")
-    prompt = "\n".join(lines)
+    from field_content import appearance_anchor_text, assert_static_text_preserved
+    fields = ("空间站位描述", "起始状态", "机位", "镜头类型", "可见主体",
+              "光影", "光源来源", "光源方向", "色温倾向")
+    values = {field: _projection_text(shot.get(field)) for field in fields}
+    for field in ("空间站位描述", "起始状态", "机位"):
+        values[field] = _visual_only_clauses(values[field], strip_dialogue=True,
+                                           strict_static_quotes=True, field_name=field)
+        assert_static_text_preserved(_projection_text(shot.get(field)), values[field], field)
+    appearance = appearance_anchor_text(_projection_text(shot.get("参考图锚定")))
+    if appearance:
+        original_appearance = appearance
+        appearance = _visual_only_clauses(appearance, strip_dialogue=True,
+                                         strict_static_quotes=True, field_name="参考图锚定")
+        assert_static_text_preserved(original_appearance, appearance, "参考图锚定.文字造型锚")
+    limits = re.sub(r"(?<!\d)9\s*[:：]\s*16(?![\d.])\s*(?:"
+                    r"竖屏真人古装短剧(?:截图质感|单帧)?|"
+                    r"真人古装短剧(?:截图质感|单帧)?|竖屏)?", "",
+                    _normalize_generation_limits(shot.get("生成限制")), flags=re.I)
+    limits = re.sub(r"\s*[；;]\s*", "；", limits)
+    limits = re.sub(r"；{2,}", "；", limits).strip(" ；;，,。")
+    limits = _visual_only_clauses(_keyframe_generation_limits(limits), strip_dialogue=True,
+                                strict_static_quotes=True, field_name="生成限制")
+    sections = r5_keyframe_sections(values, aspect=REQUIRED_ASPECT_RATIO_PHRASE,
+                                   visual_limits=limits, appearance_anchor=appearance)
+    prompt = "\n".join(["GPT关键帧生成指令"] + [f"{label}：{value}" for label, value in sections])
     _assert_projected_aspect_contract(prompt, projection="gpt_keyframe")
     instruction_text = _keyframe_instruction_text(prompt)
     forbidden_hits = sorted(set(_keyframe_forbidden_hits(prompt)) | set(_keyframe_eye_process_hits(prompt)) | set(_keyframe_authored_process_hits(prompt)))
@@ -3419,6 +3412,13 @@ def _validate_preventive_gates(
     independent_fields = ["空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "环境音效", "环境动态", "光影"]
     for index, shot in enumerate(shots, 1):
         location = f"shots[{index}]"
+        for finding in field_content_findings(
+            shot, mask=context_instruction_text,
+            dialogue_rows=extract_dialogues(str(shot.get("画面内容") or "")),
+        ):
+            issues.append(_issue(catalog, finding["code"], location + "." + finding["path"],
+                                 finding["message"] + "：" + finding["excerpt"],
+                                 repair=finding["repair"], template_gate_id="THG-17"))
         missing = _missing_fields(shot, independent_fields)
         if missing:
             issues.append(_issue(catalog, "E-I2V-INDEP-002", location, f"紧凑母版无法空白上下文独立执行，缺字段：{missing}"))
@@ -4026,11 +4026,12 @@ def validate_project(
                     issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容/音色", f"核心情绪对白的发声说明只覆盖 {len(dimensions)}/6 项：{dimensions}"))
                 elif len(dimensions) < 4:
                     issues.append(_issue(catalog, "E-VOICE-002", f"{location}.画面内容/音色", f"普通对白的发声说明只覆盖 {len(dimensions)}/6 项：{dimensions}", severity="warning"))
-            if re.search(r"标点(?:语气|效果|按[^：:]{0,30}表现)[：:]\s*(?:无|不适用)", image_content):
-                issues.append(_issue(catalog, "E-PUNCT-001", f"{location}.画面内容", "带对白镜在画面内容中明确取消了标点语气。"))
-            missing_punct = _validate_punctuation(dialogue, image_content)
+            punctuation_delivery = str(shot.get("音色") or "")
+            if re.search(r"标点(?:语气|效果|按[^：:]{0,30}表现)[：:]\s*(?:无|不适用)", punctuation_delivery):
+                issues.append(_issue(catalog, "E-PUNCT-001", f"{location}.音色", "带对白镜在音色中明确取消了标点语气。"))
+            missing_punct = _validate_punctuation(dialogue, punctuation_delivery)
             if missing_punct:
-                issues.append(_issue(catalog, "E-PUNCT-004", f"{location}.画面内容", f"对白标点语气未说明：{missing_punct}"))
+                issues.append(_issue(catalog, "E-PUNCT-004", f"{location}.音色", f"对白标点语气未说明：{missing_punct}"))
             if strict_contract:
                 visible_speakers = [name for name, _ in dialogue_rows if dialogue_mouth_visible(name, shot)]
                 if visible_speakers and "口型与对白一致" not in image_content:

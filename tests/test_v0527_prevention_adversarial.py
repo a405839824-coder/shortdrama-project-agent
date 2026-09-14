@@ -29,7 +29,8 @@ class EnvironmentAdversarialTests(unittest.TestCase):
                 world = environment_world(light_state=state)
                 fields, evidence = render_environment(editorial, initial_world=world,
                     final_world=copy.deepcopy(world), scene_id="ROOM", actions=[])
-                self.assertIn(expected, fields["环境动态"])
+                self.assertEqual(fields["环境动态"], "无环境动态。")
+                self.assertEqual(world["scenes"]["ROOM"]["light"]["state"], state)
                 self.assertEqual(fields["环境音效"], "无额外环境音效。")
                 self.assertEqual(evidence["semantic_status"], "pending_independent_review")
 

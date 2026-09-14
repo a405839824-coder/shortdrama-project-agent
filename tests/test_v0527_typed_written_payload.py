@@ -27,11 +27,16 @@ class TypedWrittenPayloadTests(unittest.TestCase):
                     self.assertIn(quote.group(), result)
                 results.append(result)
             else:
-                with self.assertRaisesRegex(ValueError, "keyframe_static_contract_violation: (?:unbound_visual_text|dynamic=authored_process)"):
+                with self.assertRaisesRegex(ValueError, "(?:field_content_violation|keyframe_static_contract_violation: (?:unbound_visual_text|dynamic=authored_process))"):
                     fn(value)
         if results:
             self.assertEqual(results[0], results[1])
         self.assertEqual(value, original)
+        if '旁白：' in value['起始状态']:
+            for formal in (validate_storyboard.project_formal_master, lambda s: materializer.compile_formal_merged_field(s, assume_compact=True)):
+                with self.assertRaisesRegex(ValueError, 'field_content_violation: 起始状态'):
+                    formal(value)
+            return
         self.assertEqual(validate_storyboard.project_formal_master(value),
                          materializer.compile_formal_merged_field(value, assume_compact=True))
 

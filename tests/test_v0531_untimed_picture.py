@@ -177,7 +177,7 @@ class UntimedPictureTests(unittest.TestCase):
         project["shots"] = [separate_shot_clock(shot) for shot in project["shots"]]
         payload = storyboard_to_xlsx(project, {"status": "fail", "issues": []})
         book = load_workbook(io.BytesIO(payload), data_only=False)
-        sheet = book["正式生产母版"]
+        sheet = book["正式分镜母版"]
         formal = sheet.cell(2, 5).value
         picture = formal.split("画面内容：", 1)[1].split("\n\n音色：", 1)[0]
         self.assertEqual(clock_annotations(picture), [])

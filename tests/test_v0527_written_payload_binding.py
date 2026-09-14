@@ -123,7 +123,7 @@ class WrittenPayloadBindingTests(unittest.TestCase):
     def test_new_explicit_current_binding_after_historical_clause(self):
         text = "昨日纸面写着“旧约”；现在纸面可读文字：“新提议”。"
         for fn in self.projectors():
-            with self.assertRaisesRegex(ValueError, "keyframe_static_contract_violation: unbound_visual_text"):
+            with self.assertRaisesRegex(ValueError, "(?:field_content_violation|keyframe_static_contract_violation: unbound_visual_text)"):
                 fn(shot(text))
         # A current declaration still works; only the mixed static input is
         # rejected instead of silently discarding its historical quotation.
@@ -138,7 +138,7 @@ class WrittenPayloadBindingTests(unittest.TestCase):
                        "甲在0.6秒自然眨眼一次。"):
             for fn in self.projectors():
                 with self.subTest(action=action, projector=fn):
-                    with self.assertRaisesRegex(ValueError, "keyframe_static_contract_violation"):
+                    with self.assertRaisesRegex(ValueError, "(?:field_content_violation|keyframe_static_contract_violation)"):
                         fn(shot("纸面可读文字：“安置提议”；" + action))
 
     def test_sentence_boundary_does_not_inherit_written_binding(self):
@@ -167,7 +167,7 @@ class WrittenPayloadBindingTests(unittest.TestCase):
                      '甲说道：“纸面写着旧约。”'):
             for fn in self.projectors():
                 with self.subTest(text=text, projector=fn):
-                    with self.assertRaisesRegex(ValueError, 'keyframe_static_contract_violation'):
+                    with self.assertRaisesRegex(ValueError, '(?:field_content_violation|keyframe_static_contract_violation)'):
                         fn(shot(text))
 
     def test_explicit_current_state_overrides_historical_object_origin(self):
@@ -189,7 +189,7 @@ class WrittenPayloadBindingTests(unittest.TestCase):
                      '旁白转述，现在纸面写着“旧约”。'):
             for fn in self.projectors():
                 with self.subTest(text=text, projector=fn):
-                    with self.assertRaisesRegex(ValueError, 'keyframe_static_contract_violation'):
+                    with self.assertRaisesRegex(ValueError, '(?:field_content_violation|keyframe_static_contract_violation)'):
                         fn(shot(text))
 
     def test_correction_and_current_origin_never_hide_adjacent_movement(self):
@@ -197,7 +197,7 @@ class WrittenPayloadBindingTests(unittest.TestCase):
                      '从前留下的纸面现在仍写着“旧约”；甲随后抬手。'):
             for fn in self.projectors():
                 with self.subTest(text=text, projector=fn):
-                    with self.assertRaisesRegex(ValueError, 'keyframe_static_contract_violation'):
+                    with self.assertRaisesRegex(ValueError, '(?:field_content_violation|keyframe_static_contract_violation)'):
                         fn(shot(text))
         # The binding layer must retain even shorthand whose process/pose
         # interpretation belongs to a different gate; it must never mask it.

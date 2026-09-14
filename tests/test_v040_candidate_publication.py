@@ -80,7 +80,7 @@ class CandidatePublicationFaultTests(unittest.IsolatedAsyncioTestCase):
                 "must_keep": ["剧情、对白、认知、声画与光影"],
                 "must_remove": [],
                 "protected_scope": [],
-                "expected_outputs": ["正式分镜", "正式生产母版"],
+                "expected_outputs": ["正式分镜", "正式分镜母版"],
                 "window_key": window_key,
             },
         )
