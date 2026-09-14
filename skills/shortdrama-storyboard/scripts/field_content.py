@@ -60,6 +60,19 @@ def _findings_for_value(field, value, *, mask, subfield=None, dialogue_rows=()):
                 text = text[:match.start()] + " " * (match.end() - match.start()) + text[match.end():]
     path = field + ("." + subfield if subfield else "")
     found = []
+    heading_policy = policy.get("embedded_heading_policy", {})
+    if heading_policy.get("forbid_foreign_field_headings"):
+        headings = set(policy["fields"]) | set(policy["voice_subfields"]) | {
+            row["label"] for row in policy["keyframe_sections"]}
+        allowed = {subfield or field} | set(heading_policy.get("exceptions", {}).get(field, []))
+        foreign = sorted(headings - allowed, key=len, reverse=True)
+        pattern = r"(?:^|[；;。\n])\s*(?P<label>" + "|".join(map(re.escape, foreign)) + r")\s*[:：]"
+        for match in re.finditer(pattern, text):
+            found.append({"code": ERROR_CODE, "path": path, "role": "foreign_field_heading",
+                          "excerpt": original[match.start():match.end()],
+                          "offset": [match.start(), match.end()],
+                          "message": path + "不能嵌入其他字段或子项标题：" + match.group("label"),
+                          "repair": "回到对应字段的来源决定修正；不要将整段标题正文塞入另一个字段"})
     for role in spec.get("forbidden_roles", []):
         for expression in policy["role_patterns"][role]:
             for match in re.finditer(expression, text, flags=re.I):
@@ -173,6 +186,7 @@ def model_field_contract():
             "fields": {name: row["allows"] for name, row in policy["fields"].items()},
             "voice_subfields": {name: row["allows"] for name, row in policy["voice_subfields"].items()},
             "keyframe_sections": policy["keyframe_sections"],
+            "embedded_heading_policy": policy["embedded_heading_policy"],
             "workbook": {"formal_sheet": "正式分镜母版", "reading_sheets": "每集_逐镜阅读", "source_sheet": "使用与来源", "visible_columns": 10},
             "new_production_entry": policy["new_production_entry"],
             "legacy_canonical": "兼容候选仍执行全部字段检查；不因此视为已验证结构化生成",

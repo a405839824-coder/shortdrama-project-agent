@@ -172,6 +172,20 @@ class FieldContentTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'aspect_ratio_projection_violation'):
                 projector(shot)
 
+    def test_foreign_heading_cannot_bypass_roles_as_a_plain_paragraph(self):
+        for field, value in [('机位', '平视50mm。\n当前表达：迟疑。'),
+                             ('光源方向', '从右侧入射；音色：柔和。'),
+                             ('环境动态', '窗纸轻动。\n起始状态：甲站门前。')]:
+            shot = strict_fixture()['shots'][0]; shot[field] = value
+            for projector in (compile_formal_merged_field, compile_gpt_keyframe_instruction,
+                              project_formal_master, project_gpt_keyframe):
+                with self.subTest(field=field, projector=projector):
+                    with self.assertRaisesRegex(ValueError, 'field_content_violation'):
+                        projector(shot)
+        shot = strict_fixture()['shots'][0]
+        shot['起始状态'] = '纸面当前已有题头：“当前表达：迟疑”；纸页平放。'
+        self.assertIn('当前表达：迟疑', compile_gpt_keyframe_instruction(shot))
+
 
 class FieldContentMcpTests(unittest.TestCase):
     def setUp(self):

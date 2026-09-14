@@ -73,6 +73,7 @@ def render_field_contract(policy):
     lines = ["# 字段内容合同", "", "由 rule_registry.json 生成；不得单独编辑。",
              "", "合同：" + policy["contract"], "",
              "生产决定按字段类型输入，母版/GPT由程序投影。历史原件保留；结构和已支持错列检查不能自签来源或表演语义。",
+             "字段正文不得嵌入其他字段或音色子项标题；真实对白和当前可见道具文字保留字面含义。",
              "", "| 字段 | 允许内容 | 关联与禁止内容 |", "|---|---|---|"]
     for field, spec in policy["fields"].items():
         lines.append(f"| {field} | {spec['allows']} | {spec['requires']} |")

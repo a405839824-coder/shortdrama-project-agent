@@ -7959,6 +7959,15 @@
       "first_attempts_retained": true,
       "unknown_is_not_pass": true,
       "no_silent_clause_deletion_or_rerouting": true,
+      "embedded_heading_policy": {
+        "forbid_foreign_field_headings": true,
+        "exceptions": {
+          "参考图锚定": [
+            "文字造型锚"
+          ]
+        },
+        "literal_scope": "actual spoken or currently visible written payload only"
+      },
       "fields": {
         "镜头编号": {
           "allows": "程序分配的本镜标识",
