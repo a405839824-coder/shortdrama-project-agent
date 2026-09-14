@@ -1,5 +1,7 @@
 # Production decisions v1
 
+0.5.33 新生产先冻结 [production_plan_contract.md](production_plan_contract.md)；实际决定须匹配计划，编译器重算状态和输出。完整规则见 [production_prevention_contract.md](production_prevention_contract.md)。纯函数兼容旧输入不代表执行过新生产计划检查。
+
 0.5.32 字段内容约束以 [field_content_contract.md](field_content_contract.md) 为准；该文件由唯一规则注册表生成。正式母版、GPT 和 R5 阅读页必须由同一份字段数据生成。遇到错列返回路径与原片段，不能静默删句或补造依据。
 
 This contract is a producer for the existing typed-authoring v2 format. It is not a source, performance or release certificate. Production callers must freeze the original complete input through `record_attempt`; calling a pure lowering function is not attempt accounting.

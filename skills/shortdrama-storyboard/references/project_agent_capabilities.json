@@ -343,7 +343,7 @@
     "legacy_policy": "read_only_migration_to_compact_successor",
     "mother_template_column_count": 10,
     "output_contract": "R10-SPC-1",
-    "plugin_version": "0.5.32",
+    "plugin_version": "0.5.33",
     "production_audit_status": "PENDING_AUDIT",
     "required_per_shot_aspect_phrase": "9:16竖屏",
     "schema_version": "R10.1",
@@ -589,5 +589,6 @@
     "keyframe_optional_sections": 1,
     "semantic_accuracy_percent": null,
     "source_semantics": "independent_review_required"
-  }
+  },
+  "production_prevention_contract": "storyboard-production-prevention-v1"
 }

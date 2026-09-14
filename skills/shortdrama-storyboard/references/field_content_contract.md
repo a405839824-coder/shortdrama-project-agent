@@ -82,3 +82,4 @@
 - audio：bind speaker/utterance/voice profile, real complete emphasis units, mouth state and independently calibrated timing
 - source：coverage of identity, negation, condition, chronology and causality; citations cannot substitute for actual scene presentation
 - acceptance：freeze real first attempts and score source/semantics/state/availability separately; software tests do not prove 98%
+- production_policy_ref：runtime.production_prevention_policy

@@ -18,6 +18,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEPENDENCIES = (
     'production_derivation.py', 'production_decisions.py', 'source_decisions.py', 'production_input.py',
     'production_environment.py', 'source_action_plans.py',
+    'production_plan.py',
     'author_storyboard.py', 'authoring_preflight.py', 'production_state.py',
     'staging_geometry.py', 'staging_text_bindings.py', 'authoring_contract_blocks.py',
     'dynamic_eye_decisions.py', 'timing_model.py', 'validate_storyboard.py',
@@ -207,7 +208,8 @@ def inspect_derivation(candidate):
         if expected != payload['source_obligations']: fault('source_obligations', 'source obligations do not bind actual consumed fields')
         if not response['faults']:
             response.update(valid=True, source_obligations=expected, source_graph_sha256=payload['source_graph_sha256'],
-                            derivation_sha256=payload['binding_sha256'])
+                            derivation_sha256=payload['binding_sha256'],
+                            production_prevention_verified=lowered['derivation'].get('production_prevention', {}).get('status') == 'pass')
     except Exception as exc:
         fault('recompile', f'{type(exc).__name__}: {exc}')
     return response

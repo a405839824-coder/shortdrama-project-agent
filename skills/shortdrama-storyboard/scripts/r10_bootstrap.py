@@ -219,7 +219,7 @@ def verify_bundled(self_test: bool) -> dict:
         "conflicts": 32,
         "task_cards": 30,
         "validators": 51,
-        "error_codes": 69,
+        "error_codes": 70,
         "atomic_rules": 157,
         "templates": 50,
         "golden_tests": 82,

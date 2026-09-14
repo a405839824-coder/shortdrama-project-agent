@@ -34,6 +34,7 @@ from .canonical import (
 )
 from .config import Settings
 from .field_content import model_field_contract
+from .production_plan import model_production_contract
 from .acceptance_service import controlled_acceptance_operation
 from .delta import (
     changed_shot_fields,
@@ -4737,6 +4738,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             "target_model": "Seedance 2.5",
             "aspect_ratio": "9:16",
             "field_content_contract": model_field_contract(),
+            "production_prevention_contract": model_production_contract(),
             "controlled_workbook_migration": {
                 "target_version": WORKBOOK_MIGRATION_TARGET,
                 "supported": True,
@@ -11197,12 +11199,14 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 directory / "decisions.original.json", directory / "compiler_attempts",
                 source_graph_path=directory / "source_graph.original.json",
                 source_graph_sha256=expected_graph,
+                require_production_plan=True,
             )
             summary.update(
                 compiler_attempt_id=attempt["attempt_id"], status=attempt["status"],
                 findings=copy.deepcopy(attempt.get("findings", [])),
                 checks_completed=attempt.get("checks_completed"),
                 checks_not_run=attempt.get("checks_not_run"),
+                production_prevention=copy.deepcopy(attempt.get("production_prevention")),
             )
             if attempt["status"] == "rendered_pending_preflight":
                 raw_candidate = Path(attempt["canonical_path"]).read_bytes()
@@ -11842,6 +11846,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "scope": "supported field-role checks; source and performance semantics still require independent audit",
                     "semantic_accuracy_percent": None,
                 },
+                "production_prevention_validation": (copy.deepcopy(authoring_attempt.get('production_prevention'))
+                    if authoring_attempt is not None else {
+                        'contract': 'storyboard-production-prevention-v1',
+                        'status': 'not_supported', 'input_route': 'canonical_compatibility',
+                        'reason': 'this call is not a new recorded production-plan execution',
+                        'semantic_accuracy_percent': None}),
                 "draft_preflight": record,
                 "candidate_observation": observation,
                 "report": report,

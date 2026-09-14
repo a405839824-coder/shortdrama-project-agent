@@ -35,6 +35,9 @@ class McpProductionAuthoringTests(unittest.TestCase):
         self.project = self.fixture._project("合成生成入口")
         self.responses = []
         self.decisions, graph_bytes, _ = complete_source_input()
+        from production_plan_test_support import with_plan
+        texts = {r['source_id']:r['source_text'] for r in self.decisions['project']['prevention_evidence']['source_ledger']}
+        graph_bytes = with_plan(self.decisions, graph_bytes, texts)
         self.graph_order = self.begin("storyboard_plan", planning=True)
         saved = self.mcp("commit_project_artifact", {
             "project_id": self.project, "work_order_id": self.graph_order,

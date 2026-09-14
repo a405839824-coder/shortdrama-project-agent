@@ -98,6 +98,7 @@ class SourceCompilation:
     required_fact_ids: tuple[str, ...]
     represented_fact_ids: tuple[str, ...]
     action_plans_json: bytes | None = None
+    production_plan_json: bytes | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # Fresh dictionaries cannot mutate the immutable compilation.
@@ -106,6 +107,7 @@ class SourceCompilation:
                 "uses_by_id": {u.id: u.to_dict() for u in self.uses},
                 "written_objects_by_id": {w.id: w.to_dict() for w in self.written_objects},
                 "action_plans": json.loads(self.action_plans_json) if self.action_plans_json is not None else None,
+                "production_plan": json.loads(self.production_plan_json) if self.production_plan_json is not None else None,
                 "required_fact_ids": list(self.required_fact_ids),
                 "structurally_referenced_fact_ids": list(self.represented_fact_ids),
                 "global_missing_fact_ids": [], "semantic_accuracy_percent": None,
@@ -115,6 +117,17 @@ class SourceCompilation:
     def _obligation(self, use: SourceUse) -> dict[str, Any]:
         payload = {"graph_sha256": self.graph_sha256, "actual_source_use": use.to_dict(),
                    "written_objects": [paper.to_dict() for paper in self.written_objects if paper.use_id == use.id]}
+        if self.production_plan_json is not None:
+            plan = json.loads(self.production_plan_json)
+            payload['production_plan_review'] = {
+                'plan_sha256': hashlib.sha256(self.production_plan_json).hexdigest(),
+                'source_fact_ids': list(use.fact_ids),
+                'required_questions': ['does the source support the frozen premise and setting',
+                    'do initial knowledge and belief/pretence have actual source support',
+                    'do director choices preserve the fact and make the whole shot deliverable'],
+                'related_shots': [shot['shot_id'] for shot in plan['shots'] if set(shot['purpose_fact_ids']) & set(use.fact_ids)],
+                'semantic_status': SEMANTIC_STATUS,
+            }
         return {"id": "source-decision:" + hashlib.sha256(_json_bytes(payload)).hexdigest(),
                 "kind": "adapted_dialogue" if use.mode == "spoken" and use.wording == "adapted" else "source_semantics",
                 "use_id": use.id, "fact_ids": list(use.fact_ids), "status": SEMANTIC_STATUS,
@@ -302,6 +315,8 @@ def _inspect(graph, decisions, source_texts, expected_graph_sha256):
     graph_keys = {"contract", "sources", "facts"}
     if "action_plans" in g:
         graph_keys.add("action_plans")
+    if "production_plan" in g:
+        graph_keys.add("production_plan")
     if not obj(g, graph_keys, "$graph"):
         return tuple(issues), None
     action_plans = g.get("action_plans")
@@ -472,8 +487,16 @@ def _inspect(graph, decisions, source_texts, expected_graph_sha256):
     for uid, use in uses.items():
         if use.mode in {"current_written", "write"} and not any(p.use_id == uid for p in papers.values()):
             bad("paper_missing", "$decisions.uses." + uid, "written use requires a carrier/time-bound object", use.fact_ids, True)
+    production_plan = None
+    if 'production_plan' in g:
+        from production_plan import validate_source_plan, ProductionPlanError
+        try:
+            production_plan = validate_source_plan(g['production_plan'], facts, source_texts, g['sources'])
+        except ProductionPlanError as exc:
+            bad('production_plan_' + exc.status, exc.path, exc.reason, global_issue=True)
     result = SourceCompilation(digest, tuple(uses.values()), tuple(papers.values()), tuple(fid for fid, f in facts.items() if f["required"] is True), tuple(fid for fid in facts if fid in represented),
-                               _json_bytes(action_plans) if action_plans is not None else None)
+                               _json_bytes(action_plans) if action_plans is not None else None,
+                               _json_bytes(production_plan) if production_plan is not None else None)
     return tuple(issues), result
 
 

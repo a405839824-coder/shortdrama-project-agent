@@ -282,6 +282,17 @@ def _source_action_call(function, *args, **kwargs):
         raise ProductionDecisionError(exc.path, exc.reason) from exc
 
 
+def _production_plan_call(function, *args):
+    from production_plan import ProductionPlanError
+    try:
+        return function(*args)
+    except ProductionPlanError as exc:
+        error = ProductionDecisionError(exc.path, exc.reason)
+        error.findings = exc.findings
+        error.status = exc.status
+        raise error from exc
+
+
 def _apply_source_action(world, action, info, tick, path, execution):
     # Observe this one actual effect application, not a separately replayed
     # expected world and not another hand-authored endpoint.
@@ -739,7 +750,8 @@ def _initial(world, view, sources):
         for hand in shown["hands"]: rows.append(f"{identity}{'左手' if hand == 'left' else '右手'}位于{_coord(_hand(actor, hand))}。")
         eyes = eye_blocks(subject=identity, visibility="visible" if shown["eye_visible"] else "hidden",
                           state=("source_closed" if actor["eye_state"] == "closed" else "natural_open") if shown["eye_visible"] else None,
-                          source_basis="初态明确闭眼决定" if shown["eye_visible"] and actor["eye_state"] == "closed" else None)
+                          source_basis="初态明确闭眼决定" if shown["eye_visible"] and actor["eye_state"] == "closed" else None,
+                          planned_events=sources.get('production_plan') is not None)
         rows.append(eyes["initial_state_append"]); limits.append(eyes["generation_limits_append"])
         if shown["eye_visible"] and actor["gaze"] is not None:
             rows.append(f"{identity}视线落在{actor['gaze']['ref']['id']}。")
@@ -811,6 +823,8 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
     except (TypeError, ValueError) as exc:
         raise ProductionDecisionError("$", "requires finite JSON production decisions: " + str(exc)) from exc
     sources = _source(source_compilation)
+    from production_plan import ProductionPlanGuard
+    plan_guard = _production_plan_call(ProductionPlanGuard, payload, sources)
     world = _world(payload["initial_world"], sources)
     project = copy.deepcopy(payload["project"])
     _need(isinstance(project, dict) and isinstance(project.get("prevention_evidence"), dict), "project", "explicit project evidence required")
@@ -1050,6 +1064,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                                    "projection_status": "audio" if is_audio else "hidden" if not pieces else "partial" if partial_blink else "visible",
                                    "source_use_id": action["source_use_id"]})
             used_events[action["id"]] = elapsed + action["end"]
+        _production_plan_call(plan_guard.check_shot, row, samples, actions, action_records)
         visibility = {}
         for identity in world["actors"]:
             windows = []; opened = None
@@ -1103,9 +1118,11 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
         consumption_issues = validate_source_consumption(source_compilation, use_ids=consumed_uses, written_object_ids=consumed_papers)
         _need(not consumption_issues, "source_consumption", "; ".join(x.message for x in consumption_issues))
     source_action_report = _source_action_call(source_action_execution.finish)
+    production_plan_report = _production_plan_call(plan_guard.finish)
     return copy.deepcopy({"typed_decisions": {"contract": "typed-authoring-decisions-v2", "project": project, "shots": rows},
                           "derivation": {"contract": CONTRACT, "input_sha256": raw_input_sha256, "scope": SCOPE,
                                          "expanded_decisions_sha256": _hash(payload), "source_action_execution": source_action_report,
+                                         "production_prevention": production_plan_report,
                                          "consumed_source_use_ids": sorted(consumed_uses), "consumed_written_object_ids": sorted(consumed_papers),
                                          "shots": records, "world_events": world_events, "final_world": world, "independent_audit_status": "not_performed",
                                          "commit_eligible": False, "semantic_accuracy_percent": None}})
@@ -1185,6 +1202,7 @@ def inspect_production_decisions(payload: dict, *, source_compilation=None, sour
                     "not_checked": [{"stage": "full_preflight_and_independent_semantics", "reason": "outside this compiler"}],
                     "lowered": result}
         except ProductionDecisionError as exc:
-            findings.append({"path": exc.path, "message": exc.reason, "stage": "state_effect_simulation"})
+            findings.append({"path": exc.path, "message": exc.reason, "stage": "state_effect_simulation",
+                             **({'status': exc.status, 'code': 'E-PRODUCTION-PLAN-001'} if hasattr(exc, 'status') else {})})
             not_checked.append({"stage": "dependent_state_suffix_and_rendering", "reason": "blocked by " + exc.path})
     return {"findings": findings, "checked": checked, "not_checked": not_checked}

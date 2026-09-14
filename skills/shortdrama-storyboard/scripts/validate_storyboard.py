@@ -3577,6 +3577,12 @@ def validate_project(
     episode_running: dict[str, float] = defaultdict(float)
     strict_duration_sum = 0.0
 
+    from production_derivation import inspect_derivation
+    production_binding = inspect_derivation(obj)
+    # Only a full successful recompile can select actual event applicability.
+    # A caller-written flag, a changed candidate, and legacy inputs cannot.
+    planned_performance = production_binding.get('production_prevention_verified') is True
+
     for index, raw in enumerate(raw_shots, 1):
         location = f"shots[{index}]"
         if not isinstance(raw, dict):
@@ -3898,7 +3904,7 @@ def validate_project(
         elif core_emotion and len(categories) < 4:
             issues.append(_issue(catalog, "E-EXPRESSION-002", f"{location}.画面内容", f"重要情绪镜只有 {len(categories)} 类细节：{categories}", severity="warning"))
 
-        eye_faults = _eye_contract_faults(
+        eye_faults = [] if planned_performance else _eye_contract_faults(
             shot,
             duration=duration,
             strict=strict_contract,
@@ -4038,7 +4044,7 @@ def validate_project(
                     issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容", "R10-SPC-1可见对白未写“口型与对白一致”。"))
                 if visible_speakers and "不看镜头" not in image_content:
                     issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "R10-SPC-1对白人物未明确不看镜头。"))
-                reaction_faults = listener_reaction_faults(execution_shot, duration=duration, dialogue_rows=dialogue_rows)
+                reaction_faults = [] if planned_performance else listener_reaction_faults(execution_shot, duration=duration, dialogue_rows=dialogue_rows)
                 if reaction_faults:
                     issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "多人对白镜未写听者错峰反应。" + "；".join(reaction_faults)))
         elif strict_contract and not VOICE_NO_DIALOGUE_RE.fullmatch(str(shot.get("音色") or "").strip()):
@@ -4151,13 +4157,12 @@ def validate_project(
         if not isinstance(review, dict) or review.get("最终归档") != "approved" or is_empty(review.get("签名")):
             issues.append(_issue(catalog, "E-ARCHIVE-001", "human_review", "归档模式缺approved状态或真实签名。"))
 
-    from production_derivation import inspect_derivation
-    production_binding = inspect_derivation(obj)
     if production_binding['present']:
         gate_metrics['production_derivation'] = {
             'valid': production_binding['valid'],
             'source_obligations': len(production_binding['source_obligations']),
             'semantic_audit': 'separate_independent_review_required',
+            'performance_check_basis': 'recompiled_plan_events' if planned_performance else 'legacy_prose_contract',
         }
         for fault in production_binding['faults']:
             issues.append(_issue(catalog, 'E-GATE-001', fault['path'], fault['message']))
