@@ -46,6 +46,8 @@ def compact_shot() -> dict[str, object]:
         "可见主体": "江氏",
         "机位": "平视50mm。",
         "音色": VOICE_BLOCK,
+        "环境音效": "近处衣料与呼吸声。",
+        "光影": "空气清澈，曝光正常。",
         "生成限制": "9:16竖屏；禁止额外配乐。",
     })
     return shot
@@ -82,7 +84,9 @@ class FormalVoiceTemplateTests(unittest.TestCase):
     def test_gpt_keyframe_rejects_unobservable_symbolic_narration(self) -> None:
         shot = compact_shot()
         shot["光影"] = "红色代表爱情、婚姻和希望。"
-        with self.assertRaisesRegex(ValueError, "keyframe_unobservable_contract_violation"):
+        # Current field ownership rejects this symbolic clause before the
+        # downstream static-image diagnostic. Both routes must stay blocking.
+        with self.assertRaisesRegex(ValueError, "field_content_violation|keyframe_unobservable_contract_violation"):
             compile_gpt_keyframe_instruction(shot, assume_compact=True)
 
 

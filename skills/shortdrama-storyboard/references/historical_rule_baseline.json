@@ -4825,16 +4825,10 @@
     },
     "AR-R10-FIELD-001": {
       "rule_id": "AR-R10-FIELD-001",
-      "rule_name": "正式母版与GPT逐字段内容归属",
       "module_group": "T2I_PROMPT",
-      "rule_full_text": "27字段、音色11个标签及GPT十个固定段和可选造型锚按field_content_policy执行；模型不得自由替写E/F整格，摄影视角、初态及光影复用同一生产决定，当前可见文字与真实对白分开；已知错列阻断，未知语义须独审，不以字段合规承诺正确率。",
+      "rule_full_text": "27字段、音色11标签及GPT固定投影遵守唯一字段合同；机位及已登记声线、表达、环境音效、光影实行完整子句语法，未知句式不算通过。当前生产按真实发声时段核对视线/摄影机，内部片段和完成注记不得进入画面。原文与表演语义仍独审。",
       "trigger_condition": "新分镜生成、修正、正式母版和GPT投影及十列导出",
       "pass_condition": "字段结构和归属检查通过，实际输出来自对应数据且保留真实字面内容；开放语义有独立证据",
-      "fail_condition": "错列、静态未来态、发声子项混写、输出与输入不一致或未验证却声称全部合格",
-      "repair_action": "回到唯一数据所属决定修正，沿实际依赖重建并复验",
-      "hard_rule": true,
-      "current_status": "active",
-      "priority": 100,
       "linked_error_codes": [
         "E-FIELD-CONTENT-001"
       ]
@@ -4889,16 +4883,10 @@
     },
     "AR-R10-EPISODE-004": {
       "rule_id": "AR-R10-EPISODE-004",
-      "rule_name": "节拍与钩子交付",
       "module_group": "EPISODE_RULES",
-      "rule_full_text": "节拍与钩子交付必须按episode_rule_policy和实际内容核对；片段/未知不得认证整集，来源例外不得自报跳过。",
+      "rule_full_text": "节拍必须绑定重放后的真实交付事件ID、源文ID、所属字段与原句；申报时钟须等于真实事件时段，指标按实际执行计算，同事件换标签或子句不能创造新推进。未支持或缺证据不能认证整集。",
       "trigger_condition": "所有实际时间轴；完整集附加聚合与来源证据检查",
       "pass_condition": "episode_rules对应检查无失败且适用范围证据完整；语义与成片结论独立",
-      "fail_condition": "规则被省略、冲突未裁决或无证据宣称通过",
-      "repair_action": "按错误码修复并重跑对应模块",
-      "hard_rule": true,
-      "current_status": "active",
-      "priority": 99,
       "linked_error_codes": [
         "E-EPISODE-BEAT-001"
       ]
@@ -4969,7 +4957,8 @@
     }
   },
   "counterexample_files": {
-    "skills/shortdrama-storyboard/scripts/test_episode_rules.py": "46b98c83c543346276f9dad860014fd918192e94a99c0e10ab8d5bf78aaf3880"
+    "skills/shortdrama-storyboard/scripts/test_episode_rules.py": "3c5b97872e23bc185d738baf910a36e457e24a53a683b3dc779d690ad7dfba26",
+    "tests/test_v0535_production_contract.py": "e8194053570e071d9b78954887c8e69a1a2631bc46fdfb29a405f80d1427d760"
   },
   "critical_runtime_policies": {
     "field_content_policy": {
@@ -5627,7 +5616,9 @@
           "未列(?:出)?人物(?:不得|禁止|不允许)"
         ],
         "production_note": [
-          "本轮仅核对|不声称已验证|审计(?:通过|未通过|结论|状态)|(?:建立|交代)本镜人物关系|本镜唯一核心动作|留出回答的时间|承接上一个镜头|承接上一镜"
+          "本轮仅核对|不声称已验证|审计(?:通过|未通过|结论|状态)|(?:建立|交代)本镜人物关系|本镜唯一核心动作|留出回答的时间|承接上一个镜头|承接上一镜",
+          "承接(?:上(?:一|个|一个)?镜(?:头)?|前(?:一|个)?镜(?:头)?)(?:状态)?",
+          "该动作在本段(?:尚未完成|结束时完成)|本动作片段结束|结束该同步片段|保持当前站位与手态"
         ],
         "light_height": [
           "光源离地\\s*\\d+(?:\\.\\d+)?\\s*米"
@@ -5693,14 +5684,71 @@
         "(?:固定(?:机位|镜头)?|平视|仰视|俯视|顶视|中机位|低机位|高机位|眼平|主位|主机位|正厅|门内侧|门外侧|左前方|右前方|左后方|右后方|前方|后方|左侧|右侧|正侧|人物|侧面|正面|背面|中景|近景|远景|特写|物件|手部|宽景|大近景|过肩|镜头|\\d+(?:\\.\\d+)?(?:mm|毫米|度|米)?|\\s)+",
         "摄影机(?:离地\\d+(?:\\.\\d+)?米|位于[\\w\\u3400-\\u9fff\\-]{1,32}[东西南北前后左右](?:侧)?(?:朝[东西南北]{1,2})?)",
         "(?:朝[东西南北]{1,2}|(?:仰角|俯角|水平视角|垂直视角)\\d+(?:\\.\\d+)?度)",
-        "焦点(?:优先)?(?:落)?(?:在|对准)[^。；;，,\\n]{1,80}",
         "[\\w\\u3400-\\u9fff]{1,12}(?:口部|嘴部|面部)(?:完全)?不入画",
         "当前主体与所列物件在明确取景范围内",
         "f/\\d+(?:\\.\\d+)?",
         "[一二三四五六七八九十两\\d]+(?:席|人|主体)同框",
         "摄影机在(?:门|窗|厅|室|屋|房)(?:内|外)(?:侧)?",
-        "[\\w\\u3400-\\u9fff\\-]{1,24}位于[\\w\\u3400-\\u9fff\\-]{1,24}的画面[左右]侧"
-      ]
+        "[\\w\\u3400-\\u9fff\\-]{1,24}位于[\\w\\u3400-\\u9fff\\-]{1,24}的画面[左右]侧",
+        "焦点(?:优先)?(?:落)?(?:在|对准)(?:[\\w\\u3400-\\u9fff·-]{1,12}(?:已经握住的|的)?(?:面部|眼睛|双眼|手部|左手|右手|袖口|嘴部|口部|信纸|纸面|字迹|木牌|茶盏)|当前可见主体|所列物件|当前主体与所列物件)",
+        "焦点落在当前已写的(?:“[^”\\r\\n]{1,80}”|\"[^\"\\r\\n]{1,80}\")(?:标题|纸面文字)(?:与程序文字)?"
+      ],
+      "speaking_gaze_policy": {
+        "contract": "speaking-gaze-camera-v1",
+        "camera_cone_degrees": 5,
+        "applicability": "replayed current production; visible open eyes during actual speaking ticks",
+        "unknown": "insufficient_evidence",
+        "basis": "explicit conservative geometric production margin, not a measured perceptual threshold",
+        "limits": "0.1-second declared landmarks; actual eyes and naturalness still require independent review"
+      },
+      "owned_clause_patterns": {
+        "音色.基础声线": [
+          "(?:年龄感(?:为)?(?:成年|青年|中年|老年|少年)|[一二三四五六七八九十两\\d]+(?:余)?岁(?:青年|中年)?(?:男|女)声|(?:成年|青年|中年|老年|少年)(?:男|女)声)",
+          "(?:中低|中高|低|中|高)音区",
+          "厚薄(?:适中|偏厚|偏薄)",
+          "明暗(?:中性|偏明|偏暗)",
+          "(?:声线|长期|常态|保持|温和|温润|平稳|清楚|清亮|低沉|浑厚|明亮|偏薄|偏厚|而|的|克制|质感|中性|柔和|沙哑)+",
+          "[\\w\\u3400-\\u9fff·]{1,12}声线(?:温和|清亮|低沉|柔和)"
+        ],
+        "音色.当前表达": [
+          "(?:表面|平静|克制|温和|亲近|带锋|警觉|利落|紧张|急切|坚定|迟疑|悲伤|愤怒|惊讶|疑惑|冷淡|平稳|自然|震惊|而|略带|稍显|适度|、)+",
+          "(?:意在|暗含|保持|致歉时保持)(?:确认|自己|是否|迟到|的|试探|判断|清楚|自身|分寸|告知|商议|时间|当前|编号|安排|位置|边界|立场|请求|拒绝|提醒|回应|态度|关切)+"
+        ],
+        "环境音效": [
+          "(?:无|无额外环境音效|无环境音效|无额外声音|静默)",
+          "(?:[\\w\\u3400-\\u9fff·]{1,12}对白最清晰)",
+          "(?:近处|远处|门外|院外|回廊|室内|环境|底声|衣料|呼吸|脚步|风|木椅|纸张|物件|接触|笔尖|纸面|摩擦|声|细响|轻响|与|的|持续|接近|压低|低|避让|对白|自然|开口时|正常音量|轻声|、)+",
+          "(?:\\d+(?:\\.\\d+)?—\\d+(?:\\.\\d+)?秒：)?[\\w\\u3400-\\u9fff·]{1,12}(?:移动[\\w\\u3400-\\u9fff·]{1,24}时的物件接触声|书写时笔尖接触纸面的声音|行走时的脚步声)",
+          "(?:近处|远处|衣料|呼吸|瓷盏|晨鸟|与|、|细响|压低|声)+",
+          "(?:近处|中层|远处|画外|门外|室内|木门|木轮|幌子|更鼓|细微|风|吹|声|女主|脚步|与|衣料|低声交谈|和|货物|碰触|错落叫卖|轻响|、)+",
+          "街上无人声",
+          "对白清晰",
+          "纸张和指腹接触的轻响",
+          "对白时底声避让"
+        ],
+        "光影": [
+          "(?:室内)?空气清澈",
+          "[\\w\\u3400-\\u9fff·、]{1,48}(?:面部)?(?:保持自然明暗层次|受光略亮|保留明暗层次|保留自然明暗层次|受光柔和|形成柔和明暗|呈现自然明暗层次)",
+          "(?:曝光正常|高光不过曝|不泛白|不雾化|不泛白、不雾化|不死黑|暗部不死黑|暗部保留材质灰阶|无可见光束|无薄雾|无烟尘|背景不泛白|背景结构清晰可辨|亮度沿可见表面与空间纵深衰减)",
+          "暗侧由[\\w\\u3400-\\u9fff·]{1,24}弱反射补光",
+          "(?:背景|木构|门窗|与|衣料|纸面|木色|布料|人物|皮肤|材质|质感|结构|清晰可辨|保持本色|反射自然|柔和明暗|明暗层次|、)+",
+          "(?:晨光|日光|灯光)向画面[左右]侧衰减",
+          "面部不过曝",
+          "窗侧暖光勾勒人物与门框",
+          "暗部保留(?:皮肤|衣料|木构|货物|质感|、|和)+",
+          "[\\w\\u3400-\\u9fff·、]{1,48}(?:保持夜间自然明暗|材质可辨)",
+          "阴影不抬亮成白昼",
+          "窗侧晨光勾勒人物与门框",
+          "有源底光照亮人物面部",
+          "纸纹清楚",
+          "正常曝光",
+          "人物面部明暗可读",
+          "衣料高光克制",
+          "暗部保留木构材质",
+          "人物面部不过曝",
+          "左侧晨光向右衰减"
+        ]
+      }
     },
     "production_prevention_policy": {
       "contract": "storyboard-production-prevention-v1",
@@ -6737,5 +6785,21 @@
     }
   },
   "master_sections_audit_version": "0.5.33",
-  "master_sections_role": "Original audit inventory, preserved as evidence. Status and missing-rule notes describe pre-fix 0.5.33; current decisions and episode_rule_contract.md describe the replacement."
+  "master_sections_role": "Original audit inventory, preserved as evidence. Status and missing-rule notes describe pre-fix 0.5.33; current decisions and episode_rule_contract.md describe the replacement.",
+  "migration_0535": {
+    "reason": "user-authorized correction of observed compiler, field and beat-time omissions",
+    "changed_atomic_ids": [
+      "AR-R10-FIELD-001",
+      "AR-R10-EPISODE-004"
+    ],
+    "preserved": [
+      "original source hashes",
+      "149 master section inventory",
+      "all original rule identities",
+      "episode thresholds",
+      "independent semantic review",
+      "no repair-round cap"
+    ],
+    "acceptance_scope": "synthetic software controls and whole current production pipeline; no real first-draft percentage"
+  }
 }

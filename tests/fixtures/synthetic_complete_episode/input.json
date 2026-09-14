@@ -1,0 +1,2702 @@
+{
+  "contract": "production-decisions-v1",
+  "project": {
+    "source_lock": {
+      "上集终点": "合成编号测试边界：上集终点",
+      "本集起点": "合成编号测试边界：本集起点",
+      "本集计划终点": "合成编号测试边界：本集计划终点",
+      "下一集起点": "合成编号测试边界：下一集起点",
+      "禁止重复": "合成编号测试边界：禁止重复",
+      "禁止提前": "合成编号测试边界：禁止提前",
+      "output_contract": "R10-SPC-1",
+      "target_model": "Seedance 2.5",
+      "aspect_ratio": "9:16"
+    },
+    "prevention_evidence": {
+      "scope_lock": {
+        "authoritative_source": "本文件中的合成编号源文",
+        "task_scope": "EP90 合成链路",
+        "protected_scope": "所有真实项目",
+        "active_rule_revision": "R10-PG1"
+      },
+      "source_ledger": [
+        {
+          "source_id": "DOC",
+          "source_text": "纸面现在写有“若条件满足，明日交付。”",
+          "source_type": "文字信息",
+          "speaker": "叙述者",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-001",
+            "EP90-002",
+            "EP90-003",
+            "EP90-004",
+            "EP90-005",
+            "EP90-006",
+            "EP90-007",
+            "EP90-008",
+            "EP90-009",
+            "EP90-010",
+            "EP90-011",
+            "EP90-012",
+            "EP90-013",
+            "EP90-014",
+            "EP90-015",
+            "EP90-016",
+            "EP90-017",
+            "EP90-018",
+            "EP90-019",
+            "EP90-020"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC1",
+          "source_text": "甲说道：编号一可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-001"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC6",
+          "source_text": "甲说道：编号六可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-006"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC7",
+          "source_text": "甲说道：编号七可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-007"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC8",
+          "source_text": "甲说道：编号八可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-008"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC9",
+          "source_text": "甲说道：编号九可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-009"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC10",
+          "source_text": "甲说道：编号十可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-010"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC11",
+          "source_text": "甲说道：编号十一可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-011"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC12",
+          "source_text": "甲说道：编号十二可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-012"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC13",
+          "source_text": "甲说道：编号十三可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-013"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC14",
+          "source_text": "甲说道：编号十四可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-014"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC15",
+          "source_text": "甲说道：编号十五可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-015"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC16",
+          "source_text": "甲说道：编号十六可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-016"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC17",
+          "source_text": "甲说道：编号十七可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-017"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC18",
+          "source_text": "甲说道：编号十八可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-018"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC19",
+          "source_text": "甲说道：编号十九可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-019"
+          ],
+          "authorization": "不适用：保留"
+        },
+        {
+          "source_id": "DOC20",
+          "source_text": "甲说道：编号二十可以开始。",
+          "source_type": "对白",
+          "speaker": "甲",
+          "treatment": "保留",
+          "target_shots": [
+            "EP90-020"
+          ],
+          "authorization": "不适用：保留"
+        }
+      ],
+      "change_lock": {
+        "must_include": [],
+        "must_exclude": []
+      },
+      "cognition_matrix": [
+        {
+          "character": "甲",
+          "knows": [
+            "合成编号"
+          ],
+          "does_not_know": [
+            "无其他剧情"
+          ],
+          "relationship_stage": "合成",
+          "emotion_stage": "平静",
+          "forbidden": [
+            "添加真实项目剧情"
+          ]
+        }
+      ],
+      "shot_plan": [
+        {
+          "shot_id": "EP90-001",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-002",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-003",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-004",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-005",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-006",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-007",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-008",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-009",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-010",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-011",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-012",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-013",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-014",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-015",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-016",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-017",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-018",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-019",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        },
+        {
+          "shot_id": "EP90-020",
+          "core_function": "合成编号核对",
+          "viewpoint_count": 1,
+          "main_camera_count": 1,
+          "camera_position": "固定机位",
+          "main_action_stage": "展示本镜编号",
+          "main_action_stage_count": 1,
+          "transition_function": "同场信息顺序",
+          "is_detail_shot": false,
+          "detail_shot_function": "不适用：宽景"
+        }
+      ],
+      "performance_chains": [
+        {
+          "shot_id": "EP90-001",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-006",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-007",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-008",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-009",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-010",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-011",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-012",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-013",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-014",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-015",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-016",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-017",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-018",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-019",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        },
+        {
+          "shot_id": "EP90-020",
+          "stimulus": "本镜合成编号信息",
+          "listen_or_observe_reaction": "说话时视线继续停在离摄影机轴线26.6度的观察点。",
+          "gaze_path": "持续注视既定观察点，无新增换焦动作。",
+          "micro_expression": "自然睁眼，本镜无表情变化事件。",
+          "ecological_action": "双手停在已给定位置，无新增手部动作。",
+          "body_or_breath": "按本镜对白发声，不添加额外身体动作。",
+          "end_state": "既定站位、视线和手态继续保持。"
+        }
+      ],
+      "audio_workflow": {
+        "timing": {
+          "contract": "shot-timing-v1",
+          "utterances": []
+        },
+        "seedance_bgm_policy": "禁止额外配乐",
+        "bgm_cue_stage": "画面锁定后独立设计",
+        "scene_emotional_key": "服从当前剧情节拍",
+        "dialogue_ducking": "对白优先，音乐后期避让"
+      },
+      "audit_layers": [
+        "源文对白",
+        "机位可见性",
+        "空间连续",
+        "表演链",
+        "镜头节奏",
+        "正式母版单镜执行完整性",
+        "禁项与声音",
+        "统计闭合"
+      ],
+      "repair_history": [],
+      "source_decisions": {
+        "contract": "source-decisions-v1",
+        "uses": [
+          {
+            "id": "U1",
+            "fact_ids": [
+              "F1"
+            ],
+            "mode": "current_written",
+            "wording": "verbatim",
+            "actor": null,
+            "text": "若条件满足，明日交付。"
+          },
+          {
+            "id": "U2",
+            "fact_ids": [
+              "F2"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号一可以开始。"
+          },
+          {
+            "id": "U7",
+            "fact_ids": [
+              "F7"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号六可以开始。"
+          },
+          {
+            "id": "U8",
+            "fact_ids": [
+              "F8"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号七可以开始。"
+          },
+          {
+            "id": "U9",
+            "fact_ids": [
+              "F9"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号八可以开始。"
+          },
+          {
+            "id": "U10",
+            "fact_ids": [
+              "F10"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号九可以开始。"
+          },
+          {
+            "id": "U11",
+            "fact_ids": [
+              "F11"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号十可以开始。"
+          },
+          {
+            "id": "U12",
+            "fact_ids": [
+              "F12"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号十一可以开始。"
+          },
+          {
+            "id": "U13",
+            "fact_ids": [
+              "F13"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号十二可以开始。"
+          },
+          {
+            "id": "U14",
+            "fact_ids": [
+              "F14"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号十三可以开始。"
+          },
+          {
+            "id": "U15",
+            "fact_ids": [
+              "F15"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号十四可以开始。"
+          },
+          {
+            "id": "U16",
+            "fact_ids": [
+              "F16"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号十五可以开始。"
+          },
+          {
+            "id": "U17",
+            "fact_ids": [
+              "F17"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号十六可以开始。"
+          },
+          {
+            "id": "U18",
+            "fact_ids": [
+              "F18"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号十七可以开始。"
+          },
+          {
+            "id": "U19",
+            "fact_ids": [
+              "F19"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号十八可以开始。"
+          },
+          {
+            "id": "U20",
+            "fact_ids": [
+              "F20"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号十九可以开始。"
+          },
+          {
+            "id": "U21",
+            "fact_ids": [
+              "F21"
+            ],
+            "mode": "spoken",
+            "wording": "verbatim",
+            "actor": "甲",
+            "text": "编号二十可以开始。"
+          }
+        ],
+        "written_objects": [
+          {
+            "id": "P1",
+            "use_id": "U1",
+            "carrier_id": "信纸",
+            "at": "frame0",
+            "state": "current"
+          }
+        ]
+      },
+      "episode_contract": {
+        "contract": "episode-production-contract-v1",
+        "profile_id": "mother-episode-90-180-v1",
+        "scope": "complete_episodes",
+        "source_kind": "original",
+        "episodes": [
+          {
+            "episode_id": "EP90",
+            "core_actor": "甲",
+            "ending": "hook",
+            "beat_events": [
+              {
+                "id": "B1",
+                "kind": "opening_hook",
+                "shot_id": "EP90-001",
+                "source_ids": [
+                  "DOC1"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号一可以开始。",
+                  "event_ids": [
+                    "SPEECH1"
+                  ]
+                },
+                "start": 1,
+                "end": 3.5
+              },
+              {
+                "id": "B6",
+                "kind": "advance",
+                "shot_id": "EP90-006",
+                "source_ids": [
+                  "DOC6"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号六可以开始。",
+                  "event_ids": [
+                    "SPEECH6"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B7",
+                "kind": "advance",
+                "shot_id": "EP90-007",
+                "source_ids": [
+                  "DOC7"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号七可以开始。",
+                  "event_ids": [
+                    "SPEECH7"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B8",
+                "kind": "advance",
+                "shot_id": "EP90-008",
+                "source_ids": [
+                  "DOC8"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号八可以开始。",
+                  "event_ids": [
+                    "SPEECH8"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B9",
+                "kind": "advance",
+                "shot_id": "EP90-009",
+                "source_ids": [
+                  "DOC9"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号九可以开始。",
+                  "event_ids": [
+                    "SPEECH9"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B10",
+                "kind": "advance",
+                "shot_id": "EP90-010",
+                "source_ids": [
+                  "DOC10"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号十可以开始。",
+                  "event_ids": [
+                    "SPEECH10"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B11",
+                "kind": "advance",
+                "shot_id": "EP90-011",
+                "source_ids": [
+                  "DOC11"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号十一可以开始。",
+                  "event_ids": [
+                    "SPEECH11"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B12",
+                "kind": "advance",
+                "shot_id": "EP90-012",
+                "source_ids": [
+                  "DOC12"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号十二可以开始。",
+                  "event_ids": [
+                    "SPEECH12"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B13",
+                "kind": "advance",
+                "shot_id": "EP90-013",
+                "source_ids": [
+                  "DOC13"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号十三可以开始。",
+                  "event_ids": [
+                    "SPEECH13"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B14",
+                "kind": "advance",
+                "shot_id": "EP90-014",
+                "source_ids": [
+                  "DOC14"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号十四可以开始。",
+                  "event_ids": [
+                    "SPEECH14"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B15",
+                "kind": "advance",
+                "shot_id": "EP90-015",
+                "source_ids": [
+                  "DOC15"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号十五可以开始。",
+                  "event_ids": [
+                    "SPEECH15"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B16",
+                "kind": "advance",
+                "shot_id": "EP90-016",
+                "source_ids": [
+                  "DOC16"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号十六可以开始。",
+                  "event_ids": [
+                    "SPEECH16"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B17",
+                "kind": "advance",
+                "shot_id": "EP90-017",
+                "source_ids": [
+                  "DOC17"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号十七可以开始。",
+                  "event_ids": [
+                    "SPEECH17"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B18",
+                "kind": "advance",
+                "shot_id": "EP90-018",
+                "source_ids": [
+                  "DOC18"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号十八可以开始。",
+                  "event_ids": [
+                    "SPEECH18"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B19",
+                "kind": "advance",
+                "shot_id": "EP90-019",
+                "source_ids": [
+                  "DOC19"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号十九可以开始。",
+                  "event_ids": [
+                    "SPEECH19"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              },
+              {
+                "id": "B20",
+                "kind": "ending_hook",
+                "shot_id": "EP90-020",
+                "source_ids": [
+                  "DOC20"
+                ],
+                "delivery": {
+                  "field": "画面内容",
+                  "quote": "编号二十可以开始。",
+                  "event_ids": [
+                    "SPEECH20"
+                  ]
+                },
+                "start": 1,
+                "end": 4
+              }
+            ],
+            "source_functions": [
+              {
+                "source_id": "DOC",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-001",
+                  "EP90-002",
+                  "EP90-003",
+                  "EP90-004",
+                  "EP90-005",
+                  "EP90-006",
+                  "EP90-007",
+                  "EP90-008",
+                  "EP90-009",
+                  "EP90-010",
+                  "EP90-011",
+                  "EP90-012",
+                  "EP90-013",
+                  "EP90-014",
+                  "EP90-015",
+                  "EP90-016",
+                  "EP90-017",
+                  "EP90-018",
+                  "EP90-019",
+                  "EP90-020"
+                ]
+              },
+              {
+                "source_id": "DOC1",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-001"
+                ]
+              },
+              {
+                "source_id": "DOC6",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-006"
+                ]
+              },
+              {
+                "source_id": "DOC7",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-007"
+                ]
+              },
+              {
+                "source_id": "DOC8",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-008"
+                ]
+              },
+              {
+                "source_id": "DOC9",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-009"
+                ]
+              },
+              {
+                "source_id": "DOC10",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-010"
+                ]
+              },
+              {
+                "source_id": "DOC11",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-011"
+                ]
+              },
+              {
+                "source_id": "DOC12",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-012"
+                ]
+              },
+              {
+                "source_id": "DOC13",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-013"
+                ]
+              },
+              {
+                "source_id": "DOC14",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-014"
+                ]
+              },
+              {
+                "source_id": "DOC15",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-015"
+                ]
+              },
+              {
+                "source_id": "DOC16",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-016"
+                ]
+              },
+              {
+                "source_id": "DOC17",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-017"
+                ]
+              },
+              {
+                "source_id": "DOC18",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-018"
+                ]
+              },
+              {
+                "source_id": "DOC19",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-019"
+                ]
+              },
+              {
+                "source_id": "DOC20",
+                "kind": "plot",
+                "shot_ids": [
+                  "EP90-020"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "initial_world": {
+    "scenes": {
+      "ROOM": {
+        "label": "书房",
+        "door_window_state": "东纸窗关闭。",
+        "light": {
+          "period": "day",
+          "kind": "paper_window",
+          "name": "东纸窗",
+          "state": "closed",
+          "position_xyz": [
+            3,
+            0,
+            2
+          ],
+          "main_tone": "neutral",
+          "shadow_tone": "neutral",
+          "materials": [
+            "纸面"
+          ]
+        },
+        "barriers": []
+      }
+    },
+    "actors": {
+      "甲": {
+        "scene_id": "ROOM",
+        "position_xyz": [
+          0,
+          0,
+          0
+        ],
+        "body_yaw": 0,
+        "head_yaw": 0,
+        "eye_height": 1.5,
+        "eye_state": "natural_open",
+        "posture": "站立",
+        "hands": {
+          "left": [
+            -0.2,
+            0.3,
+            1.0
+          ],
+          "right": [
+            0.2,
+            0.3,
+            1.0
+          ]
+        },
+        "gaze": {
+          "kind": "point",
+          "id": "观察点"
+        },
+        "reach_m": 0.9,
+        "reach_origin_xyz": [
+          0,
+          0,
+          1.2
+        ],
+        "performance_state": {
+          "eyelid": "slightly_tense",
+          "breath": "resting"
+        }
+      }
+    },
+    "props": {
+      "信纸": {
+        "anchor": {
+          "point": "案左"
+        },
+        "written_ref": "P1"
+      }
+    },
+    "points": {
+      "案左": {
+        "scene_id": "ROOM",
+        "position_xyz": [
+          0.2,
+          0.3,
+          1.0
+        ]
+      },
+      "案右": {
+        "scene_id": "ROOM",
+        "position_xyz": [
+          0.5,
+          0.3,
+          1.0
+        ]
+      },
+      "取景中心": {
+        "scene_id": "ROOM",
+        "position_xyz": [
+          0,
+          0,
+          1.1
+        ]
+      },
+      "落脚处": {
+        "scene_id": "ROOM",
+        "position_xyz": [
+          1,
+          0,
+          0
+        ]
+      },
+      "观察点": {
+        "scene_id": "ROOM",
+        "position_xyz": [
+          1,
+          2,
+          1.5
+        ]
+      }
+    }
+  },
+  "shots": [
+    {
+      "shot_id": "EP90-001",
+      "shot_uid": "OMISSION-SYNTHETIC-001",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        20,
+        70,
+        105
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH1",
+          "kind": "speak",
+          "start": 10,
+          "end": 35,
+          "after": [],
+          "source_use_id": "U2",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号一可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC1"
+      ],
+      "transition": {
+        "relation": "initial",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-002",
+      "shot_uid": "OMISSION-SYNTHETIC-002",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        1,
+        3,
+        5
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "纸面现在写有“若条件满足，明日交付。”"
+      },
+      "source_unit_ids": [
+        "DOC"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-003",
+      "shot_uid": "OMISSION-SYNTHETIC-003",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        5,
+        10,
+        15
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "纸面现在写有“若条件满足，明日交付。”"
+      },
+      "source_unit_ids": [
+        "DOC"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-004",
+      "shot_uid": "OMISSION-SYNTHETIC-004",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        5,
+        10,
+        15
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "纸面现在写有“若条件满足，明日交付。”"
+      },
+      "source_unit_ids": [
+        "DOC"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-005",
+      "shot_uid": "OMISSION-SYNTHETIC-005",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        1,
+        3,
+        5
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "纸面现在写有“若条件满足，明日交付。”"
+      },
+      "source_unit_ids": [
+        "DOC"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-006",
+      "shot_uid": "OMISSION-SYNTHETIC-006",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH6",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U7",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号六可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC6"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-007",
+      "shot_uid": "OMISSION-SYNTHETIC-007",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH7",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U8",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号七可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC7"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-008",
+      "shot_uid": "OMISSION-SYNTHETIC-008",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH8",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U9",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号八可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC8"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-009",
+      "shot_uid": "OMISSION-SYNTHETIC-009",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH9",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U10",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号九可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC9"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-010",
+      "shot_uid": "OMISSION-SYNTHETIC-010",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH10",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U11",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号十可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC10"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-011",
+      "shot_uid": "OMISSION-SYNTHETIC-011",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH11",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U12",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号十一可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC11"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-012",
+      "shot_uid": "OMISSION-SYNTHETIC-012",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH12",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U13",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号十二可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC12"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-013",
+      "shot_uid": "OMISSION-SYNTHETIC-013",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH13",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U14",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号十三可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC13"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-014",
+      "shot_uid": "OMISSION-SYNTHETIC-014",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH14",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U15",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号十四可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC14"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-015",
+      "shot_uid": "OMISSION-SYNTHETIC-015",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH15",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U16",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号十五可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC15"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-016",
+      "shot_uid": "OMISSION-SYNTHETIC-016",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH16",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U17",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号十六可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC16"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-017",
+      "shot_uid": "OMISSION-SYNTHETIC-017",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH17",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U18",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号十七可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC17"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-018",
+      "shot_uid": "OMISSION-SYNTHETIC-018",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH18",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U19",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号十八可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC18"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-019",
+      "shot_uid": "OMISSION-SYNTHETIC-019",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH19",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U20",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号十九可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC19"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    },
+    {
+      "shot_id": "EP90-020",
+      "shot_uid": "OMISSION-SYNTHETIC-020",
+      "episode_id": "EP90",
+      "scene_id": "ROOM",
+      "continuity_id": "ROOM-C1",
+      "ticks": [
+        0,
+        10,
+        45,
+        60
+      ],
+      "camera": {
+        "position_xyz": [
+          0,
+          4,
+          1.5
+        ],
+        "target": "取景中心",
+        "hfov_deg": 50,
+        "vfov_deg": 50,
+        "frame": "wide"
+      },
+      "actions": [
+        {
+          "id": "SPEECH20",
+          "kind": "speak",
+          "start": 10,
+          "end": 40,
+          "after": [],
+          "source_use_id": "U21",
+          "voice": {
+            "baseline": "年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。",
+            "speech_act": "陈述编号安排。",
+            "current_expression": "平静，意在确认当前编号。",
+            "volume": "近距离交谈音量。",
+            "rhythm": "中速，逐字清楚。",
+            "breath": "发声前自然吸气，句末轻呼气。",
+            "pauses": "句中不停顿。",
+            "emphasis": "“编号”。",
+            "tail_direction": "落稳",
+            "tail_execution": "句末自然收住。",
+            "prohibited_tones": [
+              "喊叫",
+              "哭腔"
+            ]
+          }
+        }
+      ],
+      "editorial": {
+        "功能类型": "合成编号信息核对",
+        "环境音效": {
+          "mode": "none"
+        },
+        "环境动态": {
+          "mode": "shared_world"
+        },
+        "参考图锚定": "无外部图像锚点。",
+        "原文依据类型": "动作叙述",
+        "原文支撑句": "甲说道：编号二十可以开始。"
+      },
+      "source_unit_ids": [
+        "DOC",
+        "DOC20"
+      ],
+      "transition": {
+        "relation": "continuous",
+        "basis": "合成同场连续动作。"
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Generate through the existing MCP preflight tool
 
-0.5.34 新生产必须先把 [production_plan_contract.md](production_plan_contract.md) 的计划随来源图冻结；依据 [production_prevention_contract.md](production_prevention_contract.md) 核对事实前提、决定归属、知情事件及整镜交付。以下 envelope 的来源图必须含该计划，服务器不自动补计划，缺失时先留存原始请求再拒绝生成。
+0.5.35 新生产必须先把 [production_plan_contract.md](production_plan_contract.md) 的计划随来源图冻结；依据 [production_prevention_contract.md](production_prevention_contract.md) 核对事实前提、决定归属、知情事件及整镜交付。以下 envelope 的来源图必须含该计划，服务器不自动补计划，缺失时先留存原始请求再拒绝生成。
 
 0.5.32 字段内容约束以 [field_content_contract.md](field_content_contract.md) 为准；该文件由唯一规则注册表生成。正式母版、GPT 和 R5 阅读页必须由同一份字段数据生成。遇到错列返回路径与原片段，不能静默删句或补造依据。
 

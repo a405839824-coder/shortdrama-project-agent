@@ -93,8 +93,13 @@ class MusicAbsenceContractTests(unittest.TestCase):
                 self.assertEqual(standalone._active_music_directive(text), '')
                 self.assertEqual(server._active_music_directive(text), '')
                 shot = copy.deepcopy(compact_storyboard()['shots'][0])
-                shot['环境音效'] = '纸张和指腹接触的轻响，室内底声低；' + text
+                shot['环境音效'] = '纸张和指腹接触的轻响，室内底声低。'
                 shot['生成限制'] = '9:16竖屏；' + text + '禁止字幕、水印和现代物件。'
+                misplaced = copy.deepcopy(shot)
+                misplaced['环境音效'] += text
+                for compile_one in self.compilers():
+                    with self.assertRaisesRegex(ValueError, 'field_content_violation'):
+                        compile_one(misplaced)
                 original = copy.deepcopy(shot)
                 formal = standalone.project_formal_master(shot)
                 keyframe = standalone.project_gpt_keyframe(shot)

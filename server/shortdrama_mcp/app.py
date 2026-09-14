@@ -551,6 +551,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "默认建立窗口无角色限制的工单：同一已认证用户的任意聊天窗口均可发起或继续"
             "生产、独立审计和修正。服务端为每张工单签发独立执行身份并保留完整证据链；"
             "旧的角色接续动作仅供0.5.13及更早历史工单兼容。"
+            "借用来源优先传borrow_permissions；旧窗口缺少该参数时，action=create的confirmation可传"
+            "task-options-v1:前缀加严格JSON字符串，含contract=storyboard-task-options-v1及borrow_permissions数组，不能同时传两处；权限校验相同。"
         ),
         annotations=_annotations(read_only=False),
         meta=meta("正在锁定任务范围…", "执行工单已建立"),

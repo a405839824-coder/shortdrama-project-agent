@@ -1,0 +1,449 @@
+{
+  "contract": "source-facts-v1",
+  "facts": [
+    {
+      "channel": "written",
+      "conditions": [],
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "若条件满足，明日交付。",
+      "depends_on": [],
+      "event_id": "E1",
+      "expression_occurrence": "current",
+      "expression_status": "asserted",
+      "id": "F1",
+      "modality": "asserted",
+      "occurrence": "conditional",
+      "polarity": "affirmative",
+      "required": true,
+      "subject": "甲",
+      "supports": [
+        {
+          "end": 19,
+          "source_id": "DOC",
+          "start": 0,
+          "text": "纸面现在写有“若条件满足，明日交付。”"
+        }
+      ]
+    },
+    {
+      "id": "F2",
+      "subject": "甲",
+      "event_id": "E2",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号一可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC1",
+          "start": 0,
+          "end": 12,
+          "text": "甲说道：编号一可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F7",
+      "subject": "甲",
+      "event_id": "E7",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号六可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC6",
+          "start": 0,
+          "end": 12,
+          "text": "甲说道：编号六可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F8",
+      "subject": "甲",
+      "event_id": "E8",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号七可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC7",
+          "start": 0,
+          "end": 12,
+          "text": "甲说道：编号七可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F9",
+      "subject": "甲",
+      "event_id": "E9",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号八可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC8",
+          "start": 0,
+          "end": 12,
+          "text": "甲说道：编号八可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F10",
+      "subject": "甲",
+      "event_id": "E10",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号九可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC9",
+          "start": 0,
+          "end": 12,
+          "text": "甲说道：编号九可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F11",
+      "subject": "甲",
+      "event_id": "E11",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号十可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC10",
+          "start": 0,
+          "end": 12,
+          "text": "甲说道：编号十可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F12",
+      "subject": "甲",
+      "event_id": "E12",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号十一可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC11",
+          "start": 0,
+          "end": 13,
+          "text": "甲说道：编号十一可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F13",
+      "subject": "甲",
+      "event_id": "E13",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号十二可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC12",
+          "start": 0,
+          "end": 13,
+          "text": "甲说道：编号十二可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F14",
+      "subject": "甲",
+      "event_id": "E14",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号十三可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC13",
+          "start": 0,
+          "end": 13,
+          "text": "甲说道：编号十三可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F15",
+      "subject": "甲",
+      "event_id": "E15",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号十四可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC14",
+          "start": 0,
+          "end": 13,
+          "text": "甲说道：编号十四可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F16",
+      "subject": "甲",
+      "event_id": "E16",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号十五可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC15",
+          "start": 0,
+          "end": 13,
+          "text": "甲说道：编号十五可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F17",
+      "subject": "甲",
+      "event_id": "E17",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号十六可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC16",
+          "start": 0,
+          "end": 13,
+          "text": "甲说道：编号十六可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F18",
+      "subject": "甲",
+      "event_id": "E18",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号十七可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC17",
+          "start": 0,
+          "end": 13,
+          "text": "甲说道：编号十七可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F19",
+      "subject": "甲",
+      "event_id": "E19",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号十八可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC18",
+          "start": 0,
+          "end": 13,
+          "text": "甲说道：编号十八可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F20",
+      "subject": "甲",
+      "event_id": "E20",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号十九可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC19",
+          "start": 0,
+          "end": 13,
+          "text": "甲说道：编号十九可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    },
+    {
+      "id": "F21",
+      "subject": "甲",
+      "event_id": "E21",
+      "polarity": "affirmative",
+      "conditions": [],
+      "modality": "asserted",
+      "occurrence": "occurred",
+      "expression_occurrence": "occurred",
+      "expression_status": "asserted",
+      "channel": "oral",
+      "content_availability": "given",
+      "content_policy": "adaptable",
+      "content_text": "编号二十可以开始。",
+      "supports": [
+        {
+          "source_id": "DOC20",
+          "start": 0,
+          "end": 13,
+          "text": "甲说道：编号二十可以开始。"
+        }
+      ],
+      "depends_on": [],
+      "required": true
+    }
+  ],
+  "sources": {
+    "DOC": "297acf3232847f761c7e6599161c5a654d1a322e40de66e6ad94b1b2c5529562",
+    "DOC1": "f15ab1efdd3aab7b8931f31d9daf9fa2b6313b4fef9002bf91fd353afc80a5ee",
+    "DOC6": "3c96742d7835f332d88a5717c147d6cba707e9d2ff66eb6da56ffc2006b168ca",
+    "DOC7": "da4a985432d6921488f8d3a1bc327afbc89bd2ad5184b21b247d4d4935201428",
+    "DOC8": "582878173b9a9984fcf67c5a682d18d205fd0fb9338e861371dc8be027ba709c",
+    "DOC9": "33e603ac8b4d0e1542ed0e8adf195e217f4b8c2729290fd15dbebe9495defc6e",
+    "DOC10": "0ced20cb787665ce2655686d16da7a8b07e58352fc67db90c1f9903810c972ec",
+    "DOC11": "6f947bc6cc1708b4d171f1b347f648a9b8ea68fe89d977ff8a5ccb397102fbb6",
+    "DOC12": "0d2b60451f02a5bb80d6e488acfb5a7efa8fea9cabe517030b9668f70634fbf0",
+    "DOC13": "29aab3112c5a59f87dc4550dc3db7cfa1ba2ac0a24044f356576f52928d26822",
+    "DOC14": "80520ddf0b61934fa6e6744b46b27b2c09e87fa031e2f3bc5b118f00a828cdda",
+    "DOC15": "09c619a1cf47f50cc9dcc70020d42dea0a22a3eebcff8574afc365c00622861c",
+    "DOC16": "e1c8ee61bef59b55c89b01ae50306f39087788ea0f4ffa006e71883eaf3fa433",
+    "DOC17": "5f6d815ff8079b599096f9245f24bf760f1dc364a0c709b8479662bfad81d5ff",
+    "DOC18": "13af3fcdf5cb013b5c9e92be2aeb747bb9e49926e0818596bf74383106966e10",
+    "DOC19": "9f6916f7639d0bf150a85a3e3fb8bcdbc4cf2d27ab40c6ac7a7388546a697794",
+    "DOC20": "c16d9e7d945723859cb2e58c2e9476243c8f8b092a3dfd7c27c2598a7898a8ff"
+  }
+}

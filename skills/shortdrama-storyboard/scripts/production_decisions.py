@@ -266,6 +266,35 @@ def _check_gazes(world, path):
                   path + "." + identity, "gaze endpoint lies behind the allowed head direction")
 
 
+def _speaking_gaze(samples, action, camera, path, *, required):
+    """Check the actual eye-to-target ray against the eye-to-camera ray.
+
+    This is a declared landmark check, not an estimate of the final rendered
+    eyes. Hidden/closed eyes impose no invented gaze or mouth performance.
+    """
+    from field_content import field_policy
+    cone = field_policy()['speaking_gaze_policy']['camera_cone_degrees']
+    angles = []; unknown = []
+    for tick in range(action['start'], action['end']):
+        sample = samples[tick]; actor = sample['world']['actors'][action['actor']]
+        if not sample['view']['actors'].get(action['actor'], {}).get('eye_visible') or actor['eye_state'] == 'closed':
+            continue
+        if actor['gaze'] is None:
+            unknown.append(tick); continue
+        eye = _eye(actor)
+        target = _unit(_sub(actor['gaze']['position_xyz'], eye), path)
+        lens = _unit(_sub(camera['origin'], eye), path)
+        angles.append(math.degrees(math.acos(max(-1., min(1., _dot(target, lens))))))
+    status = 'insufficient_evidence' if unknown else 'fail' if angles and min(angles) <= cone else 'pass'
+    if required:
+        _need(status == 'pass', path,
+              'speaking_gaze_' + status + ': visible speaking eyes require an explicit target outside the registered camera cone')
+    return {'contract': 'speaking-gaze-camera-v1', 'status': status,
+            'camera_cone_degrees': cone, 'checked_ticks': len(angles),
+            'unknown_ticks': unknown, 'minimum_angle_degrees': min(angles) if angles else None,
+            'scope': 'declared open-eye landmarks during actual speech; not rendered-eye verification'}
+
+
 def _source(source_compilation):
     if source_compilation is None: return {"uses_by_id": {}, "written_objects_by_id": {}}
     # A caller-supplied dictionary would permit bypassing the source compiler.
@@ -642,6 +671,9 @@ def _apply(world, action, info, tick, path):
 def _action_sentence(action, info):
     actor, kind = action["actor"], action["kind"]
     before = info.get("before", {})
+    if kind == 'hold':
+        return '保持', (f"{actor}保持{before['posture']}，身体朝{_direction(before['body_yaw'])}。"
+                        f"{actor}左手停在{_coord(_hand(before, 'left'))}，右手停在{_coord(_hand(before, 'right'))}。")
     if kind == "eyelid":
         verb = "放松" if action["to"] == "relaxed" else "轻收"
         return verb, f"{actor}上眼睑{verb}。"
@@ -678,8 +710,7 @@ def _action_sentence(action, info):
                  f"{actor}头部随目标方向转动。{actor}眼球随头部角度调整继续对准{target}。")
         return verb, text
     hand = "左手" if action.get("hand") == "left" else "右手"
-    verbs = {"hold": ("保持", "保持当前站位与手态"),
-             "move_actor": ("移动", f"移动至{action.get('to', '')}"),
+    verbs = {"move_actor": ("移动", f"移动至{action.get('to', '')}"),
              "turn": ("转身", f"转身至身体朝{_direction(float(action.get('body_yaw', 0)))}，{actor}头部朝{_direction(float(action.get('head_yaw', 0)))}"),
              "point": ("指向", f"{hand}指向{(action.get('target') or {}).get('id', '')}"),
              "move_prop": ("移动", f"{hand}移动{action.get('prop', '')}至{action.get('to', '')}"),
@@ -689,7 +720,7 @@ def _action_sentence(action, info):
              "look": ("注视", "保持无当前注视" if action.get("target") is None else
                       ("持续跟随注视" if action.get("tracking") else "将视线落到") + (action.get("target") or {}).get("id", ""))}
     if kind == "speak": return None, f'{actor}说道：“{info["use"]["text"]}”'
-    if kind == "narrate": return None, "本段客观旁白按已绑定音轨播放。"
+    if kind == "narrate": return None, ""  # The audible source belongs to 心理音轨.
     verb, content = verbs[kind]
     if kind == "look": verb = "保持" if action["target"] is None else "注视" if action["tracking"] else "视线落到"
     # Actor starts the physical clause; the exact same sentence is timing basis.
@@ -969,6 +1000,9 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                           if max(lo, left) < min(hi, right)]
             mouth_intervals = (_visible_intervals(samples, action["actor"], action["start"], action["end"])
                                if action["kind"] == "speak" else [])
+            gaze_check = (_speaking_gaze(samples, action, cam, ap + '.gaze_camera',
+                                        required=sources.get('production_plan') is not None)
+                          if action['kind'] == 'speak' else None)
             if action["source_use_id"] is not None and pieces: consumed_uses.add(action["source_use_id"])
             if action["kind"] == "write": consumed_papers.add(action["paper_ref"])
             fragment_ids = []; rendered_sentences = []
@@ -981,18 +1015,15 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                 fragment = sentence
                 if is_audio:
                     if part_index:
-                        fragment = (f"{action['actor']}继续本句发言。" if action["kind"] == "speak" else
-                                    "客观旁白继续本句叙述。")
-                    elif len(pieces) > 1:
-                        fragment += "本句从该时点连续起声。"
+                        fragment = ''
                     if action["kind"] == "speak":
-                        if not fragment.endswith(("。", "；")): fragment += "；"
+                        if fragment and not fragment.endswith(("。", "；")): fragment += "；"
                         for left, right in mouth_intervals:
                             left, right = max(lo, left), min(hi, right)
                             if left < right:
-                                fragment += f"{action['actor']}自{left / 10:.1f}秒起口型与对白一致，在{right / 10:.1f}秒结束该同步片段。"
+                                fragment += f"{action['actor']}口部入画时口型与对白一致。"
                         if not mouth_intervals and part_index == 0:
-                            fragment += f"{action['actor']}口部不入画，本句按现场画外发声执行。"
+                            fragment += f"{action['actor']}口部不入画。"
                 elif action["kind"] == "blink":
                     # Keep the clock and actual actor in the same consumer
                     # clause; a comma before the actor loses this binding.
@@ -1002,10 +1033,9 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     fragment = f"{action['actor']}在{lo / 10:.1f}秒{after_text}"
                     fragment += "呈现一次眨眼动作的局部。" if partial_blink else "自然眨眼一次。"
                     if partial_blink: verb = "眨眼"
-                elif len(pieces) > 1:
+                elif len(pieces) > 1 and action['kind'] != 'hold':
                     prefix = "开始" if part_index == 0 else "继续"
                     fragment = str(action["actor"]) + prefix + sentence[len(action["actor"]):]
-                    fragment += "该动作在本段尚未完成。" if hi < action["end"] else "该动作在本段结束时完成。"
                 if not is_audio and action["kind"] != "blink":
                     prior_speech = [item for item in world_events if item["id"] in inherited
                                     and item["shot_id"] == sid and item["kind"] == "speak" and item["actor"] != action["actor"]]
@@ -1013,7 +1043,8 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     fragment = re.sub(r"(^|[，,；;。])" + re.escape(action["actor"]),
                                       lambda m: m[1] + action["actor"] + f"在{lo / 10:.1f}秒" + after_text, fragment)
                 prefix = f"{lo / 10:.1f}秒，" if is_audio else ""
-                phases[phase_index]["text"] += f"{prefix}{fragment}{hi / 10:.1f}秒本动作片段结束。"
+                if fragment:
+                    phases[phase_index]["text"] += f"{prefix}{fragment}"
                 rendered_sentences.append(fragment)
                 if not is_audio:
                     event = {"id": fragment_id, "kind": "hold" if action["kind"] == "hold" else "action", "actor": action["actor"],
@@ -1059,6 +1090,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                                    "after_sha256": _hash(samples[action["end"]]["world"]), "world_action_description": sentence,
                                    "rendered_sentences": rendered_sentences,
                                    "mouth_sync_intervals": [[a / 10, b / 10] for a, b in mouth_intervals],
+                                   "speaking_gaze_check": gaze_check,
                                    "performance_binding": info.get("restraint_binding"),
                                    "phase_fragments": fragment_ids, "reads_after": action["after"], "projected_after": inherited,
                                    "projection_status": "audio" if is_audio else "hidden" if not pieces else "partial" if partial_blink else "visible",
@@ -1093,7 +1125,13 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                             phases[i]["text"] += f"{identity}头部保持不动。"
                         phases[i]["text"] += f"{identity}最终视线停在{target}。"
             if not phases[i]["text"]:
-                phases[i]["text"] = "当前入画物件保持所列位置。" if not first_view["actors"] else "当前人物与物件保持所列位置。"
+                sample = samples[a]
+                phases[i]['text'] = ''.join(f"{name}保持{sample['world']['actors'][name]['posture']}。"
+                                           for name in sample['view']['actors'])
+                phases[i]['text'] += ''.join(f"{name}位于{_coord(_anchor(sample['world'], sample['world']['props'][name])[1])}。"
+                                            for name in sample['view']['props'])
+                if not phases[i]['text']:
+                    phases[i]['text'] = f"{start_world['scenes'][row['scene_id']]['label']}空景。"
         try:
             environment_fields, environment_binding = render_environment(
                 row["editorial"], initial_world=start_world, final_world=world,
@@ -1101,6 +1139,19 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
         except EnvironmentDecisionError as exc:
             raise ProductionDecisionError(path + "." + exc.path, exc.reason) from exc
         fields.update(environment_fields)
+        current_deliveries = []
+        for ref in sorted(set(visible_current_paper_refs)):
+            paper = sources['written_objects_by_id'][ref]
+            last = 0
+            for sample in samples[:-1]:
+                prop = sample['world']['props'][paper['carrier_id']]
+                if paper['carrier_id'] not in sample['view']['props'] or prop['written_ref'] != ref:
+                    break
+                last = sample['tick'] + 1
+            if last:
+                current_deliveries.append({'id': f"state:{sid}:{ref}", 'field': '起始状态',
+                    'source_use_id': paper['use_id'], 'text': paper['text'], 'start': 0, 'end': last / 10,
+                    'scope': 'current carrier visibility; legibility still requires independent review'})
         end = chain.advance(_state(world), label=sid + "-end", reason="effects of the modelled shot actions")
         rows.append({"shot_id": sid, "shot_uid": row["shot_uid"], "episode_id": row["episode_id"], "duration": ticks[-1] / 10,
                      "source_unit_ids": row["source_unit_ids"], "fields": fields, "staging": staging,
@@ -1111,6 +1162,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                         "eye_visibility_ticks": visibility, "actions": action_records, "audio_alignments": audio_alignments, "camera": cam,
                         "visible_current_paper_refs": sorted(set(visible_current_paper_refs)),
                         "environment_binding": environment_binding,
+                        "current_written_deliveries": current_deliveries,
                         "physical_scene": row["scene_id"], "continuity_id": row["continuity_id"]})
         elapsed += ticks[-1]; previous = row
     if source_compilation is not None:

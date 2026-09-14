@@ -47,7 +47,7 @@ def _instruction_text(value, field, mask):
     return text
 
 
-def _findings_for_value(field, value, *, mask, subfield=None, dialogue_rows=()):
+def _findings_for_value(field, value, *, mask, subfield=None, dialogue_rows=(), context=None):
     policy = field_policy()
     spec = policy["voice_subfields"][subfield] if subfield else policy["fields"][field]
     original = str(value or "")
@@ -60,12 +60,27 @@ def _findings_for_value(field, value, *, mask, subfield=None, dialogue_rows=()):
                 text = text[:match.start()] + " " * (match.end() - match.start()) + text[match.end():]
     path = field + ("." + subfield if subfield else "")
     found = []
+    clause_patterns = policy.get('owned_clause_patterns', {}).get(path)
+    if clause_patterns is not None:
+        for match in re.finditer(r'[^。；;，,\n]+', text):
+            clause = match.group().strip()
+            if clause and not any(re.fullmatch(pattern, clause, re.I) for pattern in clause_patterns):
+                found.append({'code': ERROR_CODE, 'path': path, 'role': 'unsupported_owned_clause',
+                              'status': 'not_supported', 'excerpt': original[match.start():match.end()],
+                              'offset': [match.start(), match.end()],
+                              'message': path + '子句不属于已登记的完整字段语法；已有正确子句不能为其余正文放行',
+                              'repair': '保留输入并回到对应决定；合法但未覆盖的表达须登记语法和正反例，不自动删句或猜测改写'})
     if field == '机位' and subfield is None:
         # Every clause must match supported camera syntax. A known word in one
         # clause does not license unrelated text elsewhere in the field.
         for match in re.finditer(r'[^。；;，,\n]+', text):
             clause=match.group().strip()
-            if clause and not any(re.fullmatch(pattern,clause,re.I)
+            focus = re.fullmatch(r'焦点(?:优先)?(?:落)?(?:在|对准)([\w\u3400-\u9fff·-]{1,12})', clause)
+            subjects = re.split(r'[，,；;、。\n]', str((context or {}).get('可见主体') or ''))
+            named_focus = focus is not None and any(focus[1] == subject.strip() or re.match(
+                re.escape(focus[1]) + r'(?:的)?(?:面部|眼睛|双眼|手部|身体|上半身|下半身|全身|可见|[：:（(])', subject.strip())
+                for subject in subjects)
+            if clause and not named_focus and not any(re.fullmatch(pattern,clause,re.I)
                                   for pattern in policy['camera_clause_patterns']):
                 found.append({'code':ERROR_CODE,'path':path,'role':'unsupported_camera_clause',
                               'excerpt':original[match.start():match.end()], 'offset':[match.start(),match.end()],
@@ -151,7 +166,7 @@ def field_content_findings(shot, *, mask=None, dialogue_rows=()):
         if field == "音色":
             findings.extend(voice_content_findings(shot[field], mask=mask, dialogue_rows=dialogue_rows))
         else:
-            findings.extend(_findings_for_value(field, shot[field], mask=mask))
+            findings.extend(_findings_for_value(field, shot[field], mask=mask, context=shot))
     unique = {}
     for row in findings:
         unique[(row["path"], row["role"], tuple(row["offset"]))] = row
@@ -198,6 +213,8 @@ def model_field_contract():
             "voice_subfields": {name: row["allows"] for name, row in policy["voice_subfields"].items()},
             "keyframe_sections": policy["keyframe_sections"],
             "embedded_heading_policy": policy["embedded_heading_policy"],
+            "owned_clause_patterns": policy.get("owned_clause_patterns", {}),
+            "speaking_gaze_policy": policy.get("speaking_gaze_policy"),
             "workbook": {"formal_sheet": "正式分镜母版", "reading_sheets": "每集_逐镜阅读", "source_sheet": "使用与来源", "visible_columns": 10},
             "new_production_entry": policy["new_production_entry"],
             "legacy_canonical": "兼容候选仍执行全部字段检查；不因此视为已验证结构化生成",

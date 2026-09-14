@@ -64,7 +64,7 @@ def shot(kind='face', audio='none', night=False):
         '镜头类型':scale, '可见主体':visible, '空间站位描述':'木案位于房间中央。'+light['spatial_state_append'],
         '起始状态':initial+eye['initial_state_append'], '机位':'固定机位，50mm，当前主体与所列物件在明确取景范围内。',
         '运镜方式':'固定镜头。', '画面内容':picture, '音色':voice, '心理音轨':psych,
-        '环境音效':'低环境底声，无额外配乐。', '环境动态':'木案纹理清楚，空气清澈。',
+        '环境音效':'低环境底声。', '环境动态':'木案纹理清楚，空气清澈。',
         **light['lighting_fields'],
         '生成限制':'9:16竖屏；禁止额外配乐；不看镜头；禁止字幕、水印。'+light['generation_limits_append']+eye['generation_limits_append'],
         **transition_block(method='hard_cut'), '参考图锚定':'无。', '覆盖原文':'合成输入单元',

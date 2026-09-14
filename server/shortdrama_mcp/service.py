@@ -4771,6 +4771,15 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             "aspect_ratio": "9:16",
             "field_content_contract": model_field_contract(),
             "production_prevention_contract": model_production_contract(),
+            "task_options_contract": {
+                "contract": "storyboard-task-options-v1",
+                "preferred_parameter": "begin_project_task.borrow_permissions",
+                "legacy_transport": "begin_project_task.confirmation = task-options-v1: followed by exact JSON; only for action=create",
+                "legacy_envelope": {"contract": "storyboard-task-options-v1", "borrow_permissions": []},
+                "same_authorization_and_validation": True,
+                "client_schema_refresh_verified": False,
+                "instructions": "If this chat cannot submit borrow_permissions, prefix the exact serialized envelope with task-options-v1: and pass that string in confirmation. The prefix preserves the string through MCP JSON preprocessing. Never pass both parameters. Explicit execute authorization, source hashes and server-issued grant IDs remain mandatory. Continuation confirmations are unchanged.",
+            },
             "controlled_workbook_migration": {
                 "target_version": WORKBOOK_MIGRATION_TARGET,
                 "supported": True,
@@ -13078,6 +13087,30 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     ) -> ToolResponse:
         self._require_runtime()
         create_actions = {"create", "create_window_neutral"}
+        if action in create_actions and confirmation is not None:
+            # A cached ChatGPT schema already has this string parameter. The
+            # versioned envelope is transport compatibility, not new authority.
+            # Do not parse request_text or accept grants from candidate content.
+            def unique_keys(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError('task_options_invalid: duplicate JSON key')
+                    result[key] = value
+                return result
+            if not isinstance(confirmation, str) or len(confirmation) > 131072 or not confirmation.startswith('task-options-v1:'):
+                raise ValueError('task_options_invalid: bounded versioned JSON envelope required')
+            try:
+                envelope = json.loads(confirmation[len('task-options-v1:'):], object_pairs_hook=unique_keys)
+            except (ValueError, TypeError) as exc:
+                raise ValueError('task_options_invalid: exact versioned JSON envelope required') from exc
+            if (borrow_permissions is not None or not isinstance(envelope, dict)
+                    or set(envelope) != {'contract', 'borrow_permissions'}
+                    or envelope['contract'] != 'storyboard-task-options-v1'
+                    or not isinstance(envelope['borrow_permissions'], list)):
+                raise ValueError('task_options_invalid: exact envelope, no duplicate native parameter')
+            borrow_permissions = envelope['borrow_permissions']
+            confirmation = None
         if borrow_permissions is not None and (action not in create_actions or mode not in {'execute','audit_and_repair'}
                 or authorization != 'explicit_execute' or operation not in STORYBOARD_OPERATIONS):
             raise ValueError('borrow_permission_authority_invalid: use an explicit executable storyboard task')

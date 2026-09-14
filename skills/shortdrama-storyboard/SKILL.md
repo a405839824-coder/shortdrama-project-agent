@@ -17,6 +17,23 @@ and eye actions tied to speech events in the picture. Do not silently strip an
 invalid static clause. Unknown source/performance semantics require independent
 review; passing field checks does not establish a real first-draft percentage.
 
+Use the current `field_content_contract.owned_clause_patterns` for supported
+voice-baseline, expression, environment-sound and lighting clauses. Unknown prose
+is `not_supported`; do not attach a good prefix to unrelated narrative. Current
+speaking gaze is checked against the actual camera during speech, with explicit
+targets required for visible open eyes. Do not add "不看镜头" as a proof patch.
+Do not put internal fragment/completion notes into 画面内容. Keep objective
+narration in 心理音轨 and all event clocks in internal evidence.
+
+Complete-episode beat deliveries must bind actual execution `event_ids`, the
+owning field, source IDs and quote. Copy their real local interval; relabelling
+a quote or claiming an earlier clock cannot move the delivery. Current visible
+paper uses `state:<shot_id>:<paper_ref>` in 起始状态. Unsupported modalities remain
+explicit and do not count toward a certified hook. If a cached chat schema lacks
+`borrow_permissions`, follow `get_agent_status.task_options_contract`: prefix the
+strict envelope JSON with `task-options-v1:` in the existing `confirmation` string.
+This has the same authorization checks; it does not repair an expired login.
+
 ## Produce, revise and review narrative artifacts
 
 Before a chapter analysis, story/adaptation/episode plan, character arc, script,
@@ -201,7 +218,7 @@ Only when status or an explicit authorized task identifies legacy window-bound r
 
 ## Keep window orchestration within the authenticated account role
 
-Use the current server-advertised tool set and account role: Admin has 24 tools and Producer has 21 in 0.5.34. Producer may produce, modify, audit, repair and export, but may not alter rules, templates, validators, runtime, configuration or member permissions. For public MCP calls, `begin_project_task(action="create")` creates a window-neutral work order. Within the same authorized account role and namespace, a trusted ChatGPT window may create or continue eligible production, independent-audit and repair work orders; never ask the user to find an old window to restore access. The trusted transport session is request provenance, not an account-role grant. Window-neutral status and `window_role_restrictions=false` describe window orchestration only; they do not disable the Admin/Producer account policy. Do not disclose session fingerprints or internal tokens.
+Use the current server-advertised tool set and account role: Admin has 24 tools and Producer has 21 in 0.5.35. Producer may produce, modify, audit, repair and export, but may not alter rules, templates, validators, runtime, configuration or member permissions. For public MCP calls, `begin_project_task(action="create")` creates a window-neutral work order. Within the same authorized account role and namespace, a trusted ChatGPT window may create or continue eligible production, independent-audit and repair work orders; never ask the user to find an old window to restore access. The trusted transport session is request provenance, not an account-role grant. Window-neutral status and `window_role_restrictions=false` describe window orchestration only; they do not disable the Admin/Producer account policy. Do not disclose session fingerprints or internal tokens.
 
 Preserve evidence separation by server identity. Every work order receives its own server-minted authority root, window binding, actor binding, operation, mode, and authorization. Production and audit must differ in work order, authority root, window binding, and actor binding, but they may be requested from the same ChatGPT session. Audit remains read-only and independently recomputes all eight layers; a production preflight is never an independent verdict. Repair still requires an exact signed package plus explicit user authorization, uses a separate repair authority, and returns to the original audit authority root and cycle. Any authenticated window in the same namespace may invoke that exact audit root; another audit root may not replace it.
 
