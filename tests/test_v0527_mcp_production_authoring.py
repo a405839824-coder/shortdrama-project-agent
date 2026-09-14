@@ -83,9 +83,12 @@ class McpProductionAuthoringTests(unittest.TestCase):
         })["work_order_id"]
 
     def arguments(self, request=None, order=None):
+        scene = self.decisions["shots"][0]["continuity_id"]
+        if isinstance(request,dict) and request.get('shots'):
+            scene=request['shots'][0].get('场景连续性ID',scene)
         return {"project_id": self.project, "work_order_id": order or self.order,
                 "storyboard": self.request if request is None else request,
-                "scope_kind": "full", "scope_id": "EP90"}
+                "scope_kind": "scene", "scope_id": scene}
 
     def direct(self, request=None, order=None):
         response = self.service.preflight_storyboard_draft(
@@ -189,14 +192,16 @@ class McpProductionAuthoringTests(unittest.TestCase):
         self.assertIsNotNone(result.data["compiled_storyboard"])
         self.assertEqual(len(self.records()), 1)
 
-    def test_legacy_canonical_uses_existing_preflight_without_compiler(self):
+    def test_legacy_canonical_cannot_bypass_current_production_plan(self):
+        self.service.__dict__.pop('_require_current_production', None)
         with patch.object(author_storyboard, "record_attempt", wraps=author_storyboard.record_attempt) as compiler:
             result = self.direct(valid_storyboard())
         compiler.assert_not_called()
         self.assertNotIn("authoring_attempt", result.data)
         self.assertNotIn("compiled_storyboard", result.data)
         self.assertEqual(self.records(), [])
-        self.assertFalse(any(row["error_code"] == "E-DRAFT-CONTRACT-001" for row in result.data["report"]["issues"]))
+        self.assertTrue(any(row["error_code"] == "E-DRAFT-CONTRACT-001" for row in result.data["report"]["issues"]))
+        self.assertIn('production_plan_required', str(result.data['report']['issues']))
 
     def test_mutually_exclusive_wrapper_rejects_extra_canonical_payload(self):
         request = copy.deepcopy(self.request)

@@ -18,7 +18,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEPENDENCIES = (
     'production_derivation.py', 'production_decisions.py', 'source_decisions.py', 'production_input.py',
     'production_environment.py', 'source_action_plans.py',
-    'production_plan.py',
+    'production_plan.py', 'episode_rules.py', 'field_content.py',
     'author_storyboard.py', 'authoring_preflight.py', 'production_state.py',
     'staging_geometry.py', 'staging_text_bindings.py', 'authoring_contract_blocks.py',
     'dynamic_eye_decisions.py', 'timing_model.py', 'validate_storyboard.py',
@@ -74,6 +74,10 @@ def owned_content(obj):
              'source_lock', 'scene_anchors', 'shots')},
             'source_ledger': evidence.get('source_ledger'),
             'source_decisions': evidence.get('source_decisions'),
+            'episode_contract': evidence.get('episode_contract'),
+            'borrow_ledger': evidence.get('borrow_ledger'),
+            'source_ingestion': obj.get('source_ingestion'),
+            'chapter_intake': obj.get('chapter_intake'),
             'scene_state_ledger': evidence.get('scene_state_ledger'),
             'audio_timing': evidence.get('audio_workflow', {}).get('timing'),
             'authoring_evidence': evidence.get('authoring_evidence')}

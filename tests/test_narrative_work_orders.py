@@ -152,18 +152,17 @@ class NarrativeWorkOrderTests(unittest.TestCase):
                 order["internal_round"] = 20
                 self.assertEqual(agent.validate_hub(hub), [])
 
-    def test_legacy_storyboard_round_limit_and_certificate_gate_are_unchanged(self):
+    def test_storyboard_round_count_preserves_certificate_gate(self):
         hub, order = setup_order("storyboard_repair")
         self.assertEqual(order["server_actor_role"], "repair")
         self.assertEqual(order["repair_return_role"], "independent_audit")
         order.update(status="failed_current", internal_round=3)
-        with self.assertRaisesRegex(ValueError, "maximum internal repair rounds"):
-            agent.transition_work_order(hub, order["work_order_id"], "executing", STAMP)
-        self.assertEqual(order["internal_round"], 3)
+        agent.transition_work_order(hub, order["work_order_id"], "executing", STAMP)
+        self.assertEqual(order["internal_round"], 4)
         with self.assertRaisesRegex(ValueError, "independent_audit_required"):
             agent.record_validation(hub, clean_claim(order))
         order["internal_round"] = 4
-        self.assertTrue(any("invalid internal_round" in error for error in agent.validate_hub(hub)))
+        self.assertFalse(any("invalid internal_round" in error for error in agent.validate_hub(hub)))
 
     def test_historical_narrative_pass_and_archive_can_still_be_read(self):
         for status in ("passed", "awaiting_signoff", "archived"):

@@ -38,6 +38,8 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         os.environ.pop("ALLOW_LOCAL_FILE_URLS", None)
         self.settings = Settings.from_env()
         self.server, self.service = create_mcp(self.settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(self.service)
 
     async def asyncTearDown(self) -> None:
         self.temp.cleanup()
@@ -329,6 +331,8 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
             os.environ["ALLOW_LOCAL_FILE_URLS"] = "1"
             settings = Settings.from_env()
             server, _service = create_mcp(settings)
+            from historical_entry_fixture import freeze_legacy_entry
+            freeze_legacy_entry(_service)
             result = await server.call_tool(
                 "import_source_file",
                 {

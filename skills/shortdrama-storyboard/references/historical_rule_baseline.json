@@ -1,0 +1,4967 @@
+{
+  "contract": "historical-rule-preservation-v1",
+  "source_hashes": {
+    "S01": "bf05203a935757cd023494d0c95ed385f0b5e42a8000ed3b7891514264bef541",
+    "S02": "43d804be9d2d4244fd7038b0906045c882fe4beae5c3d790b368773c726e5082",
+    "S03": "789f850db8884bb30a430dd1888f50f427b08beaf3c4c3672a84ebef233a3c13",
+    "S04": "e468bbe369d8bd8ae9ba4cbcd268460f7bfab5bc5506e5e8250b1927a76c8297",
+    "S05": "4c304da9638ad5d7a8fa17e972c186f560f1fd265270341c099522e01188eff5",
+    "S06": "267181addb041167ee0da9162d5dbdca652d613566a6f1c0ec808ed868ac31a0",
+    "S07": "cf71680779df7e3cb1559156b793a6f70c99eef5adc0848040eb075ecc22fd1d",
+    "S08": "31a7ecaffd621e9b4b37887da0ff352512e862786dfa32f210ba0a031658b680",
+    "S09": "602cce29b93742a2e91d71a88aaea8abc73baa9a13e44e62974540b0dcf63b0d",
+    "S10": "66784dcf1dadea81f93de12c99c329a798452ba529bb263c22accee12e0ea704"
+  },
+  "required_atomic_ids": [
+    "AR-R10-GLOBAL-001",
+    "AR-R10-GLOBAL-002",
+    "AR-R10-GLOBAL-003",
+    "AR-R10-GLOBAL-004",
+    "AR-R10-GLOBAL-005",
+    "AR-R10-GLOBAL-006",
+    "AR-R10-GLOBAL-007",
+    "AR-R10-GLOBAL-008",
+    "AR-R10-GLOBAL-009",
+    "AR-R10-TEMPLATE-001",
+    "AR-R10-EXPR-001",
+    "AR-R10-EXPR-002",
+    "AR-R10-EXPR-003",
+    "AR-R10-EXPR-E01",
+    "AR-R10-EXPR-E02",
+    "AR-R10-EXPR-E03",
+    "AR-R10-EXPR-E04",
+    "AR-R10-EXPR-E05",
+    "AR-R10-EXPR-E06",
+    "AR-R10-EXPR-E07",
+    "AR-R10-EXPR-E08",
+    "AR-R10-EXPR-E09",
+    "AR-R10-EXPR-E10",
+    "AR-R10-EXPR-E11",
+    "AR-R10-EXPR-E12",
+    "AR-R10-EXPR-E13",
+    "AR-R10-EXPR-E14",
+    "AR-R10-EXPR-E15",
+    "AR-R10-EXPR-E16",
+    "AR-R10-EXPR-E17",
+    "AR-R10-EXPR-E18",
+    "AR-R10-EXPR-E19",
+    "AR-R10-EXPR-E20",
+    "AR-R10-ACTOR-S01",
+    "AR-R10-ACTOR-S02",
+    "AR-R10-ACTOR-S03",
+    "AR-R10-ACTOR-S04",
+    "AR-R10-ACTOR-S05",
+    "AR-R10-ACTOR-S06",
+    "AR-R10-ACTOR-S07",
+    "AR-R10-ACTOR-S08",
+    "AR-R10-ACTOR-S09",
+    "AR-R10-ACTOR-S10",
+    "AR-R10-ACTOR-S11",
+    "AR-R10-ACTOR-S12",
+    "AR-R10-ACTOR-S13",
+    "AR-R10-ACTOR-S14",
+    "AR-R10-ACTOR-S15",
+    "AR-R10-MOTION-000",
+    "AR-R10-MOTION-01",
+    "AR-R10-MOTION-02",
+    "AR-R10-MOTION-03",
+    "AR-R10-MOTION-04",
+    "AR-R10-MOTION-05",
+    "AR-R10-MOTION-06",
+    "AR-R10-MOTION-07",
+    "AR-R10-MOTION-08",
+    "AR-R10-MOTION-09",
+    "AR-R10-MOTION-10",
+    "AR-R10-MOTION-11",
+    "AR-R10-MOTION-12",
+    "AR-R10-MOTION-13",
+    "AR-R10-MOTION-14",
+    "AR-R10-MOTION-15",
+    "AR-R10-MOTION-16",
+    "AR-R10-CINE-001",
+    "AR-R10-SHOTSIZE-01",
+    "AR-R10-SHOTSIZE-02",
+    "AR-R10-SHOTSIZE-03",
+    "AR-R10-SHOTSIZE-04",
+    "AR-R10-LIGHT-01",
+    "AR-R10-LIGHT-02",
+    "AR-R10-LIGHT-03",
+    "AR-R10-LIGHT-04",
+    "AR-R10-VOICE-001",
+    "AR-R10-PUNCT-01",
+    "AR-R10-PUNCT-02",
+    "AR-R10-PUNCT-03",
+    "AR-R10-PUNCT-04",
+    "AR-R10-PUNCT-05",
+    "AR-R10-PUNCT-06",
+    "AR-R10-PUNCT-07",
+    "AR-R10-PUNCT-08",
+    "AR-R10-VOICE-T01",
+    "AR-R10-VOICE-T02",
+    "AR-R10-VOICE-T03",
+    "AR-R10-VOICE-T04",
+    "AR-R10-VOICE-T05",
+    "AR-R10-VOICE-T06",
+    "AR-R10-VOICE-T07",
+    "AR-R10-VOICE-T08",
+    "AR-R10-VOICE-T09",
+    "AR-R10-VOICE-T10",
+    "AR-R10-VOICE-T11",
+    "AR-R10-VOICE-T12",
+    "AR-R10-PSYCH-001",
+    "AR-R10-BATCH-001",
+    "AR-R10-C-001",
+    "AR-R10-C-002",
+    "AR-R10-C-003",
+    "AR-R10-C-004",
+    "AR-R10-C-005",
+    "AR-R10-C-006",
+    "AR-R10-C-007",
+    "AR-R10-C-008",
+    "AR-R10-C-009",
+    "AR-R10-C-010",
+    "AR-R10-C-011",
+    "AR-R10-C-012",
+    "AR-R10-C-013",
+    "AR-R10-C-014",
+    "AR-R10-C-015",
+    "AR-R10-C-016",
+    "AR-R10-C-017",
+    "AR-R10-C-018",
+    "AR-R10-C-019",
+    "AR-R10-C-020",
+    "AR-R10-C-021",
+    "AR-R10-C-022",
+    "AR-R10-C-023",
+    "AR-R10-C-024",
+    "AR-R10-PG1-001",
+    "AR-R10-PG1-002",
+    "AR-R10-PG1-003",
+    "AR-R10-PG1-004",
+    "AR-R10-PG1-005",
+    "AR-R10-PG1-006",
+    "AR-R10-PG1-007",
+    "AR-R10-PG1-008",
+    "AR-R10-PG1-009",
+    "AR-R10-PG1-010",
+    "AR-R10-PG1-011",
+    "AR-R10-PG1-012",
+    "AR-R10-PG1-013",
+    "AR-R10-PG1-014",
+    "AR-R10-PG1-015",
+    "AR-R10-PG1-016",
+    "AR-R10-PG1-017",
+    "AR-R10-PG1-018",
+    "AR-R10-PG1-019",
+    "AR-R10-PG1-020",
+    "AR-R10-PG1-021",
+    "AR-R10-PG1-022",
+    "AR-R10-PG1-023",
+    "AR-R10-PG1-024",
+    "AR-R10-PG1-025",
+    "AR-R10-PG1-026",
+    "AR-R10-PG1-027",
+    "AR-R10-PG1-028",
+    "AR-R10-PG1-029",
+    "AR-R10-PG1-030",
+    "AR-R10-PG1-031",
+    "AR-R10-PG1-032",
+    "AR-R10-PG1-033",
+    "AR-R10-PG1-034",
+    "AR-R10-PG1-035",
+    "AR-R10-FIELD-001"
+  ],
+  "required_current_atomic_ids": [
+    "AR-R10-GLOBAL-001",
+    "AR-R10-GLOBAL-002",
+    "AR-R10-GLOBAL-003",
+    "AR-R10-GLOBAL-004",
+    "AR-R10-GLOBAL-005",
+    "AR-R10-GLOBAL-006",
+    "AR-R10-GLOBAL-007",
+    "AR-R10-GLOBAL-008",
+    "AR-R10-GLOBAL-009",
+    "AR-R10-TEMPLATE-001",
+    "AR-R10-EXPR-001",
+    "AR-R10-EXPR-002",
+    "AR-R10-EXPR-003",
+    "AR-R10-EXPR-E01",
+    "AR-R10-EXPR-E02",
+    "AR-R10-EXPR-E03",
+    "AR-R10-EXPR-E04",
+    "AR-R10-EXPR-E05",
+    "AR-R10-EXPR-E06",
+    "AR-R10-EXPR-E07",
+    "AR-R10-EXPR-E08",
+    "AR-R10-EXPR-E09",
+    "AR-R10-EXPR-E10",
+    "AR-R10-EXPR-E11",
+    "AR-R10-EXPR-E12",
+    "AR-R10-EXPR-E13",
+    "AR-R10-EXPR-E14",
+    "AR-R10-EXPR-E15",
+    "AR-R10-EXPR-E16",
+    "AR-R10-EXPR-E17",
+    "AR-R10-EXPR-E18",
+    "AR-R10-EXPR-E19",
+    "AR-R10-EXPR-E20",
+    "AR-R10-ACTOR-S01",
+    "AR-R10-ACTOR-S02",
+    "AR-R10-ACTOR-S03",
+    "AR-R10-ACTOR-S04",
+    "AR-R10-ACTOR-S05",
+    "AR-R10-ACTOR-S06",
+    "AR-R10-ACTOR-S07",
+    "AR-R10-ACTOR-S08",
+    "AR-R10-ACTOR-S09",
+    "AR-R10-ACTOR-S10",
+    "AR-R10-ACTOR-S11",
+    "AR-R10-ACTOR-S12",
+    "AR-R10-ACTOR-S13",
+    "AR-R10-ACTOR-S14",
+    "AR-R10-ACTOR-S15",
+    "AR-R10-MOTION-000",
+    "AR-R10-MOTION-01",
+    "AR-R10-MOTION-02",
+    "AR-R10-MOTION-03",
+    "AR-R10-MOTION-04",
+    "AR-R10-MOTION-05",
+    "AR-R10-MOTION-06",
+    "AR-R10-MOTION-07",
+    "AR-R10-MOTION-08",
+    "AR-R10-MOTION-09",
+    "AR-R10-MOTION-10",
+    "AR-R10-MOTION-11",
+    "AR-R10-MOTION-12",
+    "AR-R10-MOTION-13",
+    "AR-R10-MOTION-14",
+    "AR-R10-MOTION-15",
+    "AR-R10-MOTION-16",
+    "AR-R10-CINE-001",
+    "AR-R10-SHOTSIZE-01",
+    "AR-R10-SHOTSIZE-02",
+    "AR-R10-SHOTSIZE-03",
+    "AR-R10-SHOTSIZE-04",
+    "AR-R10-LIGHT-01",
+    "AR-R10-LIGHT-02",
+    "AR-R10-LIGHT-03",
+    "AR-R10-LIGHT-04",
+    "AR-R10-VOICE-001",
+    "AR-R10-PUNCT-01",
+    "AR-R10-PUNCT-02",
+    "AR-R10-PUNCT-03",
+    "AR-R10-PUNCT-04",
+    "AR-R10-PUNCT-05",
+    "AR-R10-PUNCT-06",
+    "AR-R10-PUNCT-07",
+    "AR-R10-PUNCT-08",
+    "AR-R10-VOICE-T01",
+    "AR-R10-VOICE-T02",
+    "AR-R10-VOICE-T03",
+    "AR-R10-VOICE-T04",
+    "AR-R10-VOICE-T05",
+    "AR-R10-VOICE-T06",
+    "AR-R10-VOICE-T07",
+    "AR-R10-VOICE-T08",
+    "AR-R10-VOICE-T09",
+    "AR-R10-VOICE-T10",
+    "AR-R10-VOICE-T11",
+    "AR-R10-VOICE-T12",
+    "AR-R10-PSYCH-001",
+    "AR-R10-BATCH-001",
+    "AR-R10-C-001",
+    "AR-R10-C-002",
+    "AR-R10-C-003",
+    "AR-R10-C-004",
+    "AR-R10-C-005",
+    "AR-R10-C-006",
+    "AR-R10-C-007",
+    "AR-R10-C-008",
+    "AR-R10-C-009",
+    "AR-R10-C-010",
+    "AR-R10-C-011",
+    "AR-R10-C-012",
+    "AR-R10-C-013",
+    "AR-R10-C-014",
+    "AR-R10-C-015",
+    "AR-R10-C-016",
+    "AR-R10-C-017",
+    "AR-R10-C-018",
+    "AR-R10-C-019",
+    "AR-R10-C-020",
+    "AR-R10-C-021",
+    "AR-R10-C-022",
+    "AR-R10-C-023",
+    "AR-R10-C-024",
+    "AR-R10-PG1-001",
+    "AR-R10-PG1-002",
+    "AR-R10-PG1-003",
+    "AR-R10-PG1-004",
+    "AR-R10-PG1-005",
+    "AR-R10-PG1-006",
+    "AR-R10-PG1-007",
+    "AR-R10-PG1-008",
+    "AR-R10-PG1-009",
+    "AR-R10-PG1-010",
+    "AR-R10-PG1-011",
+    "AR-R10-PG1-012",
+    "AR-R10-PG1-013",
+    "AR-R10-PG1-014",
+    "AR-R10-PG1-015",
+    "AR-R10-PG1-016",
+    "AR-R10-PG1-017",
+    "AR-R10-PG1-018",
+    "AR-R10-PG1-019",
+    "AR-R10-PG1-020",
+    "AR-R10-PG1-021",
+    "AR-R10-PG1-022",
+    "AR-R10-PG1-023",
+    "AR-R10-PG1-024",
+    "AR-R10-PG1-025",
+    "AR-R10-PG1-026",
+    "AR-R10-PG1-027",
+    "AR-R10-PG1-028",
+    "AR-R10-PG1-029",
+    "AR-R10-PG1-030",
+    "AR-R10-PG1-031",
+    "AR-R10-PG1-032",
+    "AR-R10-PG1-033",
+    "AR-R10-PG1-034",
+    "AR-R10-PG1-035",
+    "AR-R10-FIELD-001",
+    "AR-R10-EPISODE-001",
+    "AR-R10-EPISODE-002",
+    "AR-R10-EPISODE-003",
+    "AR-R10-EPISODE-004",
+    "AR-R10-EPISODE-005",
+    "AR-R10-EPISODE-006",
+    "AR-R10-EPISODE-007",
+    "AR-R10-EPISODE-008"
+  ],
+  "master_sections": [
+    {
+      "id": "M-000",
+      "number": 0,
+      "title": "0. 总原则",
+      "source_id": "S01",
+      "paragraph_start": 5,
+      "paragraph_end": 18,
+      "area": "规则优先级与版本",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "当前有唯一优先级与冲突表；旧条款逐项保留/替代/退休关系未闭合。",
+      "implementation": "rule_registry.py / rule_registry.json:global_priority,conflicts,deprecated_rules"
+    },
+    {
+      "id": "M-001",
+      "number": 1,
+      "title": "1. 全自动总流程",
+      "source_id": "S01",
+      "paragraph_start": 19,
+      "paragraph_end": 44,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-002",
+      "number": 2,
+      "title": "2. Source Progress Lock 原文进度锁",
+      "source_id": "S01",
+      "paragraph_start": 45,
+      "paragraph_end": 72,
+      "area": "原文与跨集边界",
+      "status": "部分承接",
+      "findings": "F01,F02,F08,F12,F15",
+      "note": "有Source Lock、来源注册/字节身份和覆盖检查；完整分集合同及借用/实际交付仍有缺口。",
+      "implementation": "source_dialogue.py / source_decisions.py / service.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-003",
+      "number": 3,
+      "title": "3. Source Ledger 原文账本",
+      "source_id": "S01",
+      "paragraph_start": 73,
+      "paragraph_end": 90,
+      "area": "原文与跨集边界",
+      "status": "部分承接",
+      "findings": "F01,F02,F08,F12,F15",
+      "note": "有Source Lock、来源注册/字节身份和覆盖检查；完整分集合同及借用/实际交付仍有缺口。",
+      "implementation": "source_dialogue.py / source_decisions.py / service.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-004",
+      "number": 4,
+      "title": "4. Borrow Ledger 借后文账本",
+      "source_id": "S01",
+      "paragraph_start": 91,
+      "paragraph_end": 111,
+      "area": "借后文与合法例外",
+      "status": "执行缺口",
+      "findings": "F04,F05,F08",
+      "note": "通用授权和来源处理存在，专项触发、债务及后续新起点尚未闭合。",
+      "implementation": "validate_storyboard.py:_validate_preventive_gates / access.py / service.py"
+    },
+    {
+      "id": "M-005",
+      "number": 5,
+      "title": "5. Source Beat 拆分规则",
+      "source_id": "S01",
+      "paragraph_start": 112,
+      "paragraph_end": 203,
+      "area": "内容分级与取舍",
+      "status": "部分承接",
+      "findings": "F12,F16",
+      "note": "章节取舍/保护对白/状态变化有检查，适用性依赖模式，分类正确性仍须语义核对。",
+      "implementation": "validate_storyboard.py:_validate_chapter_intake / source_decisions.py"
+    },
+    {
+      "id": "M-006",
+      "number": 6,
+      "title": "6. 删除 / 合并 / 压缩规则",
+      "source_id": "S01",
+      "paragraph_start": 204,
+      "paragraph_end": 239,
+      "area": "内容分级与取舍",
+      "status": "部分承接",
+      "findings": "F12,F16",
+      "note": "章节取舍/保护对白/状态变化有检查，适用性依赖模式，分类正确性仍须语义核对。",
+      "implementation": "validate_storyboard.py:_validate_chapter_intake / source_decisions.py"
+    },
+    {
+      "id": "M-007",
+      "number": 7,
+      "title": "7. 分集边界规则",
+      "source_id": "S01",
+      "paragraph_start": 240,
+      "paragraph_end": 263,
+      "area": "原文与跨集边界",
+      "status": "部分承接",
+      "findings": "F01,F02,F08,F12,F15",
+      "note": "有Source Lock、来源注册/字节身份和覆盖检查；完整分集合同及借用/实际交付仍有缺口。",
+      "implementation": "source_dialogue.py / source_decisions.py / service.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-008",
+      "number": 8,
+      "title": "8. Source Text Density / 时长预算",
+      "source_id": "S01",
+      "paragraph_start": 264,
+      "paragraph_end": 290,
+      "area": "时长与节拍预算",
+      "status": "部分承接",
+      "findings": "F01,F02,F05,F12",
+      "note": "现行统一timing_policy和事件预算；未实现整集范围与对白分布。",
+      "implementation": "timing_model.py / timing_events.py / ADAPTATION_BUDGET"
+    },
+    {
+      "id": "M-009",
+      "number": 9,
+      "title": "9. T1-T13 时长 / 时序规则",
+      "source_id": "S01",
+      "paragraph_start": 291,
+      "paragraph_end": 320,
+      "area": "T组整集与时序",
+      "status": "执行缺口",
+      "findings": "F01,F03,F04,F06",
+      "note": "单镜计时仍在；整集上限、T13和整集节奏阈值未完整迁移。",
+      "implementation": "validate_storyboard.py:3490 / timing_model.py"
+    },
+    {
+      "id": "M-010",
+      "number": 10,
+      "title": "10. H1-H7 钩子规则",
+      "source_id": "S01",
+      "paragraph_start": 321,
+      "paragraph_end": 340,
+      "area": "钩子与推进",
+      "status": "执行缺口",
+      "findings": "F04",
+      "note": "保留任务/评分词项，不等于开头、推进间隔和结尾实际事件验证。",
+      "implementation": "rule_registry.json:capabilities,CHAPTER_INTAKE / narrative_contract.py"
+    },
+    {
+      "id": "M-011",
+      "number": 11,
+      "title": "11. A1-A7 音频规则",
+      "source_id": "S01",
+      "paragraph_start": 341,
+      "paragraph_end": 374,
+      "area": "对白音色与声音",
+      "status": "部分承接",
+      "findings": "F05,F14,F16,F18",
+      "note": "对白出现身份、来源、发音计数、音色子项和心理音轨已实现；分布/开放语义/实测仍有边界。",
+      "implementation": "dialogue_occurrences.py / source_dialogue.py / timing_model.py / field_content.py"
+    },
+    {
+      "id": "M-012",
+      "number": 12,
+      "title": "12. V1-V9 视角规则",
+      "source_id": "S01",
+      "paragraph_start": 375,
+      "paragraph_end": 394,
+      "area": "景别与运镜",
+      "status": "部分承接",
+      "findings": "F09,F10",
+      "note": "运镜词库、主体目的、单机位和几何检查存在；旧比例/POV等条款未逐项裁决。",
+      "implementation": "validate_storyboard.py / staging_geometry.py / production_plan.py"
+    },
+    {
+      "id": "M-013",
+      "number": 13,
+      "title": "13. P1-P26 提示词规则",
+      "source_id": "S01",
+      "paragraph_start": 395,
+      "paragraph_end": 513,
+      "area": "提示词内容工程",
+      "status": "部分承接",
+      "findings": "F14,F17",
+      "note": "已有27字段和GPT固定路由；有限措辞识别不能保证所有内容归属正确。",
+      "implementation": "field_content.py / materializer.py"
+    },
+    {
+      "id": "M-014",
+      "number": 14,
+      "title": "14. S1-S24 静态图 / 分镜图规则",
+      "source_id": "S01",
+      "paragraph_start": 514,
+      "paragraph_end": 555,
+      "area": "静帧参考与资产",
+      "status": "部分承接",
+      "findings": "F16,F18",
+      "note": "文本锚定与静帧投影限制存在，实际人物/背景图是否吻合仍需图像核验。",
+      "implementation": "materializer.py / field_content.py / source_action_plans.py"
+    },
+    {
+      "id": "M-015",
+      "number": 15,
+      "title": "15. 正式分镜输出模板",
+      "source_id": "S01",
+      "paragraph_start": 556,
+      "paragraph_end": 584,
+      "area": "旧输出模板",
+      "status": "已替代",
+      "findings": "F17",
+      "note": "按用户R5十列、正式母版27字段和音色11子项执行，旧6步/旧多列不恢复。",
+      "implementation": "canonical.py / materializer.py / r5_workbook.py / field_content.py"
+    },
+    {
+      "id": "M-016",
+      "number": 16,
+      "title": "16. 四类镜头所有内容模板",
+      "source_id": "S01",
+      "paragraph_start": 585,
+      "paragraph_end": 651,
+      "area": "旧输出模板",
+      "status": "已替代",
+      "findings": "F17",
+      "note": "按用户R5十列、正式母版27字段和音色11子项执行，旧6步/旧多列不恢复。",
+      "implementation": "canonical.py / materializer.py / r5_workbook.py / field_content.py"
+    },
+    {
+      "id": "M-017",
+      "number": 17,
+      "title": "17. 台词容量规则",
+      "source_id": "S01",
+      "paragraph_start": 652,
+      "paragraph_end": 679,
+      "area": "旧固定对白容量",
+      "status": "已替代",
+      "findings": "F09",
+      "note": "固定2.8/3.5字每秒退出硬判断；用现行timing_policy、实际事件和测量证据，不能恢复旧上限表。",
+      "implementation": "timing_model.py / timing_events.py / rule_registry.json:timing_policy"
+    },
+    {
+      "id": "M-018",
+      "number": 18,
+      "title": "18. 对白占比规则",
+      "source_id": "S01",
+      "paragraph_start": 680,
+      "paragraph_end": 688,
+      "area": "对白比例与分布",
+      "status": "执行缺口",
+      "findings": "F05",
+      "note": "逐发言可计时，但整集角色对白比例及分布/空档未复算。",
+      "implementation": "timing_model.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-019",
+      "number": 19,
+      "title": "19. 短镜比例规则",
+      "source_id": "S01",
+      "paragraph_start": 689,
+      "paragraph_end": 696,
+      "area": "短镜统计与意义",
+      "status": "执行缺口",
+      "findings": "F06",
+      "note": "严格小于阈值的占比与有效功能绑定未承接，不能用无意义短镜凑数。",
+      "implementation": "validate_storyboard.py / quality.py"
+    },
+    {
+      "id": "M-020",
+      "number": 20,
+      "title": "20. 女频快节奏规则",
+      "source_id": "S01",
+      "paragraph_start": 697,
+      "paragraph_end": 705,
+      "area": "钩子与推进",
+      "status": "执行缺口",
+      "findings": "F04",
+      "note": "保留任务/评分词项，不等于开头、推进间隔和结尾实际事件验证。",
+      "implementation": "rule_registry.json:capabilities,CHAPTER_INTAKE / narrative_contract.py"
+    },
+    {
+      "id": "M-021",
+      "number": 21,
+      "title": "21. i2v生成批次规则",
+      "source_id": "S01",
+      "paragraph_start": 706,
+      "paragraph_end": 749,
+      "area": "旧引擎批次包装",
+      "status": "已替代",
+      "findings": "F09,F17",
+      "note": "旧4秒批次/Seedance2.0独立列退役；正式单镜母版与按需GPT投影是当前口径。",
+      "implementation": "canonical.py / materializer.py / picture_presentation.py"
+    },
+    {
+      "id": "M-022",
+      "number": 22,
+      "title": "22. 参考图锚定规则",
+      "source_id": "S01",
+      "paragraph_start": 750,
+      "paragraph_end": 772,
+      "area": "静帧参考与资产",
+      "status": "部分承接",
+      "findings": "F16,F18",
+      "note": "文本锚定与静帧投影限制存在，实际人物/背景图是否吻合仍需图像核验。",
+      "implementation": "materializer.py / field_content.py / source_action_plans.py"
+    },
+    {
+      "id": "M-023",
+      "number": 23,
+      "title": "23. 去AI感规则",
+      "source_id": "S01",
+      "paragraph_start": 773,
+      "paragraph_end": 803,
+      "area": "画面真实与光影",
+      "status": "部分承接",
+      "findings": "F16,F18",
+      "note": "室内清透、物理光源、门窗和跨镜连续性已有具体检查；真实图片/视频观感未自动认证。",
+      "implementation": "lighting_checks.py / production_environment.py / test_lighting_checks.py"
+    },
+    {
+      "id": "M-024",
+      "number": 24,
+      "title": "24. 审计流程",
+      "source_id": "S01",
+      "paragraph_start": 804,
+      "paragraph_end": 829,
+      "area": "独立审计与修复",
+      "status": "部分承接",
+      "findings": "F11,F12,F15,F16",
+      "note": "签名、N-1相邻证据、首稿保全和依赖失效已有执行；不能替代遗失业务规则或语义真值。",
+      "implementation": "service.py / quality.py / repair_observations.py / acceptance_control.py"
+    },
+    {
+      "id": "M-025",
+      "number": 25,
+      "title": "25. 审计报告模板",
+      "source_id": "S01",
+      "paragraph_start": 830,
+      "paragraph_end": 880,
+      "area": "结构输出与状态枚举",
+      "status": "已有执行检查",
+      "findings": "F02",
+      "note": "现行Schema、不可变工件、版本/状态和R5读回已有测试；枚举名称/文件名按新合同，不按旧模板原字复活。",
+      "implementation": "models.py / canonical.py / storage.py / file_io.py"
+    },
+    {
+      "id": "M-026",
+      "number": 26,
+      "title": "26. 结果等级",
+      "source_id": "S01",
+      "paragraph_start": 881,
+      "paragraph_end": 886,
+      "area": "结构输出与状态枚举",
+      "status": "已有执行检查",
+      "findings": "F02",
+      "note": "现行Schema、不可变工件、版本/状态和R5读回已有测试；枚举名称/文件名按新合同，不按旧模板原字复活。",
+      "implementation": "models.py / canonical.py / storage.py / file_io.py"
+    },
+    {
+      "id": "M-027",
+      "number": 27,
+      "title": "27. 修复流程",
+      "source_id": "S01",
+      "paragraph_start": 887,
+      "paragraph_end": 897,
+      "area": "独立审计与修复",
+      "status": "部分承接",
+      "findings": "F11,F12,F15,F16",
+      "note": "签名、N-1相邻证据、首稿保全和依赖失效已有执行；不能替代遗失业务规则或语义真值。",
+      "implementation": "service.py / quality.py / repair_observations.py / acceptance_control.py"
+    },
+    {
+      "id": "M-028",
+      "number": 28,
+      "title": "28. 表格转换规则",
+      "source_id": "S01",
+      "paragraph_start": 898,
+      "paragraph_end": 917,
+      "area": "旧输出模板",
+      "status": "已替代",
+      "findings": "F17",
+      "note": "按用户R5十列、正式母版27字段和音色11子项执行，旧6步/旧多列不恢复。",
+      "implementation": "canonical.py / materializer.py / r5_workbook.py / field_content.py"
+    },
+    {
+      "id": "M-029",
+      "number": 29,
+      "title": "29. JSON归档模板",
+      "source_id": "S01",
+      "paragraph_start": 918,
+      "paragraph_end": 946,
+      "area": "结构输出与状态枚举",
+      "status": "已有执行检查",
+      "findings": "F02",
+      "note": "现行Schema、不可变工件、版本/状态和R5读回已有测试；枚举名称/文件名按新合同，不按旧模板原字复活。",
+      "implementation": "models.py / canonical.py / storage.py / file_io.py"
+    },
+    {
+      "id": "M-030",
+      "number": 30,
+      "title": "30. 最终自检清单",
+      "source_id": "S01",
+      "paragraph_start": 947,
+      "paragraph_end": 979,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-031",
+      "number": 31,
+      "title": "31. 最终执行句",
+      "source_id": "S01",
+      "paragraph_start": 980,
+      "paragraph_end": 996,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-032",
+      "number": 32,
+      "title": "32. T1-T13 逐条判定表",
+      "source_id": "S01",
+      "paragraph_start": 997,
+      "paragraph_end": 1127,
+      "area": "T组整集与时序",
+      "status": "执行缺口",
+      "findings": "F01,F03,F04,F06",
+      "note": "单镜计时仍在；整集上限、T13和整集节奏阈值未完整迁移。",
+      "implementation": "validate_storyboard.py:3490 / timing_model.py"
+    },
+    {
+      "id": "M-033",
+      "number": 33,
+      "title": "33. H1-H7 钩子逐条判定表",
+      "source_id": "S01",
+      "paragraph_start": 1128,
+      "paragraph_end": 1237,
+      "area": "钩子与推进",
+      "status": "执行缺口",
+      "findings": "F04",
+      "note": "保留任务/评分词项，不等于开头、推进间隔和结尾实际事件验证。",
+      "implementation": "rule_registry.json:capabilities,CHAPTER_INTAKE / narrative_contract.py"
+    },
+    {
+      "id": "M-034",
+      "number": 34,
+      "title": "34. A1-A7 音频轨完整体系",
+      "source_id": "S01",
+      "paragraph_start": 1238,
+      "paragraph_end": 1371,
+      "area": "对白音色与声音",
+      "status": "部分承接",
+      "findings": "F05,F14,F16,F18",
+      "note": "对白出现身份、来源、发音计数、音色子项和心理音轨已实现；分布/开放语义/实测仍有边界。",
+      "implementation": "dialogue_occurrences.py / source_dialogue.py / timing_model.py / field_content.py"
+    },
+    {
+      "id": "M-035",
+      "number": 35,
+      "title": "35. V1-V9 视角分布审计表",
+      "source_id": "S01",
+      "paragraph_start": 1372,
+      "paragraph_end": 1430,
+      "area": "景别与运镜",
+      "status": "部分承接",
+      "findings": "F09,F10",
+      "note": "运镜词库、主体目的、单机位和几何检查存在；旧比例/POV等条款未逐项裁决。",
+      "implementation": "validate_storyboard.py / staging_geometry.py / production_plan.py"
+    },
+    {
+      "id": "M-036",
+      "number": 36,
+      "title": "36. P1-P26 工程提示词完整模板",
+      "source_id": "S01",
+      "paragraph_start": 1431,
+      "paragraph_end": 1498,
+      "area": "提示词内容工程",
+      "status": "部分承接",
+      "findings": "F14,F17",
+      "note": "已有27字段和GPT固定路由；有限措辞识别不能保证所有内容归属正确。",
+      "implementation": "field_content.py / materializer.py"
+    },
+    {
+      "id": "M-037",
+      "number": 37,
+      "title": "37. S1-S24 静态图生成分流流程",
+      "source_id": "S01",
+      "paragraph_start": 1499,
+      "paragraph_end": 1554,
+      "area": "静帧参考与资产",
+      "status": "部分承接",
+      "findings": "F16,F18",
+      "note": "文本锚定与静帧投影限制存在，实际人物/背景图是否吻合仍需图像核验。",
+      "implementation": "materializer.py / field_content.py / source_action_plans.py"
+    },
+    {
+      "id": "M-038",
+      "number": 38,
+      "title": "38. 四类镜头模板字段硬顺序锁",
+      "source_id": "S01",
+      "paragraph_start": 1555,
+      "paragraph_end": 1607,
+      "area": "旧输出模板",
+      "status": "已替代",
+      "findings": "F17",
+      "note": "按用户R5十列、正式母版27字段和音色11子项执行，旧6步/旧多列不恢复。",
+      "implementation": "canonical.py / materializer.py / r5_workbook.py / field_content.py"
+    },
+    {
+      "id": "M-039",
+      "number": 39,
+      "title": "39. 心理音轨图生视频防张嘴专项规则",
+      "source_id": "S01",
+      "paragraph_start": 1608,
+      "paragraph_end": 1660,
+      "area": "心理音轨隔离",
+      "status": "已有执行检查",
+      "findings": "F16,F18",
+      "note": "心理声音独立、不驱动可见口型、静帧剔除音频；实际音轨质量需另测。",
+      "implementation": "timing_model.py / performance_checks.py / materializer.py"
+    },
+    {
+      "id": "M-040",
+      "number": 40,
+      "title": "40. 生成批次层完整执行模板",
+      "source_id": "S01",
+      "paragraph_start": 1661,
+      "paragraph_end": 1727,
+      "area": "旧引擎批次包装",
+      "status": "已替代",
+      "findings": "F09,F17",
+      "note": "旧4秒批次/Seedance2.0独立列退役；正式单镜母版与按需GPT投影是当前口径。",
+      "implementation": "canonical.py / materializer.py / picture_presentation.py"
+    },
+    {
+      "id": "M-041",
+      "number": 41,
+      "title": "41. 审计项 pass / warning / fail 枚举表",
+      "source_id": "S01",
+      "paragraph_start": 1728,
+      "paragraph_end": 1797,
+      "area": "警告与结果等级",
+      "status": "规则待裁决",
+      "findings": "F11,F17",
+      "note": "当前status按fail/warning分流并限制签审；未逐项承接旧核心warning累计升级公式。",
+      "implementation": "validate_storyboard.py:4174 / service.py"
+    },
+    {
+      "id": "M-042",
+      "number": 42,
+      "title": "42. 修复闭环标准动作表",
+      "source_id": "S01",
+      "paragraph_start": 1798,
+      "paragraph_end": 1833,
+      "area": "独立审计与修复",
+      "status": "部分承接",
+      "findings": "F11,F12,F15,F16",
+      "note": "签名、N-1相邻证据、首稿保全和依赖失效已有执行；不能替代遗失业务规则或语义真值。",
+      "implementation": "service.py / quality.py / repair_observations.py / acceptance_control.py"
+    },
+    {
+      "id": "M-043",
+      "number": 43,
+      "title": "43. 表格转换完整模板区",
+      "source_id": "S01",
+      "paragraph_start": 1834,
+      "paragraph_end": 1872,
+      "area": "旧输出模板",
+      "status": "已替代",
+      "findings": "F17",
+      "note": "按用户R5十列、正式母版27字段和音色11子项执行，旧6步/旧多列不恢复。",
+      "implementation": "canonical.py / materializer.py / r5_workbook.py / field_content.py"
+    },
+    {
+      "id": "M-044",
+      "number": 44,
+      "title": "44. JSON状态枚举全集",
+      "source_id": "S01",
+      "paragraph_start": 1873,
+      "paragraph_end": 1914,
+      "area": "结构输出与状态枚举",
+      "status": "已有执行检查",
+      "findings": "F02",
+      "note": "现行Schema、不可变工件、版本/状态和R5读回已有测试；枚举名称/文件名按新合同，不按旧模板原字复活。",
+      "implementation": "models.py / canonical.py / storage.py / file_io.py"
+    },
+    {
+      "id": "M-045",
+      "number": 45,
+      "title": "45. 最终100项自检清单",
+      "source_id": "S01",
+      "paragraph_start": 1915,
+      "paragraph_end": 2024,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-046",
+      "number": 46,
+      "title": "46. V16.0 / V16.3 版本继承与冲突裁决规则",
+      "source_id": "S01",
+      "paragraph_start": 2025,
+      "paragraph_end": 2067,
+      "area": "规则优先级与版本",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "当前有唯一优先级与冲突表；旧条款逐项保留/替代/退休关系未闭合。",
+      "implementation": "rule_registry.py / rule_registry.json:global_priority,conflicts,deprecated_rules"
+    },
+    {
+      "id": "M-047",
+      "number": 47,
+      "title": "47. 四层编译系统必须写入母版",
+      "source_id": "S01",
+      "paragraph_start": 2068,
+      "paragraph_end": 2095,
+      "area": "生成编译与预检",
+      "status": "部分承接",
+      "findings": "F13,F15,F16",
+      "note": "新生产计划可冻结重编译，兼容canonical仍可进入预检；计划正确性不等于源文解读正确。",
+      "implementation": "author_storyboard.py / production_input.py / production_plan.py / service.py"
+    },
+    {
+      "id": "M-048",
+      "number": 48,
+      "title": "48. 固定执行链必须补入母版",
+      "source_id": "S01",
+      "paragraph_start": 2096,
+      "paragraph_end": 2122,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-049",
+      "number": 49,
+      "title": "49. Episode Contract 本集合同规则",
+      "source_id": "S01",
+      "paragraph_start": 2123,
+      "paragraph_end": 2171,
+      "area": "原文与跨集边界",
+      "status": "部分承接",
+      "findings": "F01,F02,F08,F12,F15",
+      "note": "有Source Lock、来源注册/字节身份和覆盖检查；完整分集合同及借用/实际交付仍有缺口。",
+      "implementation": "source_dialogue.py / source_decisions.py / service.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-050",
+      "number": 50,
+      "title": "50. Previous Ledger 上集重复锁",
+      "source_id": "S01",
+      "paragraph_start": 2172,
+      "paragraph_end": 2191,
+      "area": "原文与跨集边界",
+      "status": "部分承接",
+      "findings": "F01,F02,F08,F12,F15",
+      "note": "有Source Lock、来源注册/字节身份和覆盖检查；完整分集合同及借用/实际交付仍有缺口。",
+      "implementation": "source_dialogue.py / source_decisions.py / service.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-051",
+      "number": 51,
+      "title": "51. DialogueUnit 生成前强制预判规则",
+      "source_id": "S01",
+      "paragraph_start": 2192,
+      "paragraph_end": 2227,
+      "area": "对白音色与声音",
+      "status": "部分承接",
+      "findings": "F05,F14,F16,F18",
+      "note": "对白出现身份、来源、发音计数、音色子项和心理音轨已实现；分布/开放语义/实测仍有边界。",
+      "implementation": "dialogue_occurrences.py / source_dialogue.py / timing_model.py / field_content.py"
+    },
+    {
+      "id": "M-052",
+      "number": 52,
+      "title": "52. ActionUnit 动作复杂度预算规则",
+      "source_id": "S01",
+      "paragraph_start": 2228,
+      "paragraph_end": 2259,
+      "area": "动作复杂度与功能时长",
+      "status": "规则待裁决",
+      "findings": "F09",
+      "note": "新状态/资源/同阶段连续动作与旧五因素强拆/固定短镜表有冲突，需登记替代关系。",
+      "implementation": "production_decisions.py / production_state.py / timing_events.py"
+    },
+    {
+      "id": "M-053",
+      "number": 53,
+      "title": "53. Motion Plan 女频运镜计划",
+      "source_id": "S01",
+      "paragraph_start": 2260,
+      "paragraph_end": 2290,
+      "area": "景别与运镜",
+      "status": "部分承接",
+      "findings": "F09,F10",
+      "note": "运镜词库、主体目的、单机位和几何检查存在；旧比例/POV等条款未逐项裁决。",
+      "implementation": "validate_storyboard.py / staging_geometry.py / production_plan.py"
+    },
+    {
+      "id": "M-054",
+      "number": 54,
+      "title": "54. Beat Budget 时长预算表",
+      "source_id": "S01",
+      "paragraph_start": 2291,
+      "paragraph_end": 2314,
+      "area": "时长与节拍预算",
+      "status": "部分承接",
+      "findings": "F01,F02,F05,F12",
+      "note": "现行统一timing_policy和事件预算；未实现整集范围与对白分布。",
+      "implementation": "timing_model.py / timing_events.py / ADAPTATION_BUDGET"
+    },
+    {
+      "id": "M-055",
+      "number": 55,
+      "title": "55. ShotGraph 中间产物规则",
+      "source_id": "S01",
+      "paragraph_start": 2315,
+      "paragraph_end": 2337,
+      "area": "生成编译与预检",
+      "status": "部分承接",
+      "findings": "F13,F15,F16",
+      "note": "新生产计划可冻结重编译，兼容canonical仍可进入预检；计划正确性不等于源文解读正确。",
+      "implementation": "author_storyboard.py / production_input.py / production_plan.py / service.py"
+    },
+    {
+      "id": "M-056",
+      "number": 56,
+      "title": "56. ShotGraph Gate 硬闸门清单",
+      "source_id": "S01",
+      "paragraph_start": 2338,
+      "paragraph_end": 2369,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-057",
+      "number": 57,
+      "title": "57. 单镜功能类型合法时长表",
+      "source_id": "S01",
+      "paragraph_start": 2370,
+      "paragraph_end": 2415,
+      "area": "动作复杂度与功能时长",
+      "status": "规则待裁决",
+      "findings": "F09",
+      "note": "新状态/资源/同阶段连续动作与旧五因素强拆/固定短镜表有冲突，需登记替代关系。",
+      "implementation": "production_decisions.py / production_state.py / timing_events.py"
+    },
+    {
+      "id": "M-058",
+      "number": 58,
+      "title": "58. 标准对白镜 4.5s 上限规则",
+      "source_id": "S01",
+      "paragraph_start": 2416,
+      "paragraph_end": 2433,
+      "area": "旧固定对白容量",
+      "status": "已替代",
+      "findings": "F09",
+      "note": "固定2.8/3.5字每秒退出硬判断；用现行timing_policy、实际事件和测量证据，不能恢复旧上限表。",
+      "implementation": "timing_model.py / timing_events.py / rule_registry.json:timing_policy"
+    },
+    {
+      "id": "M-059",
+      "number": 59,
+      "title": "59. 关键情绪反应独立极短镜规则",
+      "source_id": "S01",
+      "paragraph_start": 2434,
+      "paragraph_end": 2464,
+      "area": "动作复杂度与功能时长",
+      "status": "规则待裁决",
+      "findings": "F09",
+      "note": "新状态/资源/同阶段连续动作与旧五因素强拆/固定短镜表有冲突，需登记替代关系。",
+      "implementation": "production_decisions.py / production_state.py / timing_events.py"
+    },
+    {
+      "id": "M-060",
+      "number": 60,
+      "title": "60. 正式分镜自然编号规则",
+      "source_id": "S01",
+      "paragraph_start": 2465,
+      "paragraph_end": 2483,
+      "area": "镜号与累计",
+      "status": "已有执行检查",
+      "findings": "F01",
+      "note": "当前EP##-###和逐集累计有执行；累计正确不代表该集长度合规。",
+      "implementation": "canonical.py / validate_storyboard.py:3642-3683"
+    },
+    {
+      "id": "M-061",
+      "number": 61,
+      "title": "61. C1-S1 逐句追溯签名兼容规则",
+      "source_id": "S01",
+      "paragraph_start": 2484,
+      "paragraph_end": 2501,
+      "area": "原文与跨集边界",
+      "status": "部分承接",
+      "findings": "F01,F02,F08,F12,F15",
+      "note": "有Source Lock、来源注册/字节身份和覆盖检查；完整分集合同及借用/实际交付仍有缺口。",
+      "implementation": "source_dialogue.py / source_decisions.py / service.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-062",
+      "number": 62,
+      "title": "62. C1-S2 预校验引擎规则",
+      "source_id": "S01",
+      "paragraph_start": 2502,
+      "paragraph_end": 2520,
+      "area": "生成编译与预检",
+      "status": "部分承接",
+      "findings": "F13,F15,F16",
+      "note": "新生产计划可冻结重编译，兼容canonical仍可进入预检；计划正确性不等于源文解读正确。",
+      "implementation": "author_storyboard.py / production_input.py / production_plan.py / service.py"
+    },
+    {
+      "id": "M-063",
+      "number": 63,
+      "title": "63. ZTA 零信任审计规则",
+      "source_id": "S01",
+      "paragraph_start": 2521,
+      "paragraph_end": 2549,
+      "area": "独立审计与修复",
+      "status": "部分承接",
+      "findings": "F11,F12,F15,F16",
+      "note": "签名、N-1相邻证据、首稿保全和依赖失效已有执行；不能替代遗失业务规则或语义真值。",
+      "implementation": "service.py / quality.py / repair_observations.py / acceptance_control.py"
+    },
+    {
+      "id": "M-064",
+      "number": 64,
+      "title": "64. Warning Escalation Rule 警告升级机制",
+      "source_id": "S01",
+      "paragraph_start": 2550,
+      "paragraph_end": 2576,
+      "area": "警告与结果等级",
+      "status": "规则待裁决",
+      "findings": "F11,F17",
+      "note": "当前status按fail/warning分流并限制签审；未逐项承接旧核心warning累计升级公式。",
+      "implementation": "validate_storyboard.py:4174 / service.py"
+    },
+    {
+      "id": "M-065",
+      "number": 65,
+      "title": "65. Low Density Resolution Priority 低密度处理优先级",
+      "source_id": "S01",
+      "paragraph_start": 2577,
+      "paragraph_end": 2590,
+      "area": "借后文与合法例外",
+      "status": "执行缺口",
+      "findings": "F04,F05,F08",
+      "note": "通用授权和来源处理存在，专项触发、债务及后续新起点尚未闭合。",
+      "implementation": "validate_storyboard.py:_validate_preventive_gates / access.py / service.py"
+    },
+    {
+      "id": "M-066",
+      "number": 66,
+      "title": "66. Dialogue Shortage Exemption 低对白豁免规则",
+      "source_id": "S01",
+      "paragraph_start": 2591,
+      "paragraph_end": 2611,
+      "area": "借后文与合法例外",
+      "status": "执行缺口",
+      "findings": "F04,F05,F08",
+      "note": "通用授权和来源处理存在，专项触发、债务及后续新起点尚未闭合。",
+      "implementation": "validate_storyboard.py:_validate_preventive_gates / access.py / service.py"
+    },
+    {
+      "id": "M-067",
+      "number": 67,
+      "title": "67. Short Shot Meaningfulness Check 短镜意义检查",
+      "source_id": "S01",
+      "paragraph_start": 2612,
+      "paragraph_end": 2637,
+      "area": "短镜统计与意义",
+      "status": "执行缺口",
+      "findings": "F06",
+      "note": "严格小于阈值的占比与有效功能绑定未承接，不能用无意义短镜凑数。",
+      "implementation": "validate_storyboard.py / quality.py"
+    },
+    {
+      "id": "M-068",
+      "number": 68,
+      "title": "68. Hook Shortage Resolution 原文无自然钩子的合法路径",
+      "source_id": "S01",
+      "paragraph_start": 2638,
+      "paragraph_end": 2651,
+      "area": "借后文与合法例外",
+      "status": "执行缺口",
+      "findings": "F04,F05,F08",
+      "note": "通用授权和来源处理存在，专项触发、债务及后续新起点尚未闭合。",
+      "implementation": "validate_storyboard.py:_validate_preventive_gates / access.py / service.py"
+    },
+    {
+      "id": "M-069",
+      "number": 69,
+      "title": "69. Desc2Shot 描述转分镜边界规则",
+      "source_id": "S01",
+      "paragraph_start": 2652,
+      "paragraph_end": 2669,
+      "area": "描述与蒙太奇预算",
+      "status": "执行缺口",
+      "findings": "F07,F16",
+      "note": "新源文分类有范围约束，但旧镜数/时长百分比上限和比喻语义仍未闭合。",
+      "implementation": "source_decisions.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-070",
+      "number": 70,
+      "title": "70. Source Ledger Verbatim Verification 支撑句逐字校验",
+      "source_id": "S01",
+      "paragraph_start": 2670,
+      "paragraph_end": 2686,
+      "area": "原文与跨集边界",
+      "status": "部分承接",
+      "findings": "F01,F02,F08,F12,F15",
+      "note": "有Source Lock、来源注册/字节身份和覆盖检查；完整分集合同及借用/实际交付仍有缺口。",
+      "implementation": "source_dialogue.py / source_decisions.py / service.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-071",
+      "number": 71,
+      "title": "71. Source ID 缺号 / 坐标异常判定规则",
+      "source_id": "S01",
+      "paragraph_start": 2687,
+      "paragraph_end": 2708,
+      "area": "原文与跨集边界",
+      "status": "部分承接",
+      "findings": "F01,F02,F08,F12,F15",
+      "note": "有Source Lock、来源注册/字节身份和覆盖检查；完整分集合同及借用/实际交付仍有缺口。",
+      "implementation": "source_dialogue.py / source_decisions.py / service.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-072",
+      "number": 72,
+      "title": "72. Engine Short Shot Production Strategy 短镜生成策略",
+      "source_id": "S01",
+      "paragraph_start": 2709,
+      "paragraph_end": 2725,
+      "area": "旧引擎批次包装",
+      "status": "已替代",
+      "findings": "F09,F17",
+      "note": "旧4秒批次/Seedance2.0独立列退役；正式单镜母版与按需GPT投影是当前口径。",
+      "implementation": "canonical.py / materializer.py / picture_presentation.py"
+    },
+    {
+      "id": "M-073",
+      "number": 73,
+      "title": "73. Excel / 表格导出字段补丁",
+      "source_id": "S01",
+      "paragraph_start": 2726,
+      "paragraph_end": 2757,
+      "area": "旧输出模板",
+      "status": "已替代",
+      "findings": "F17",
+      "note": "按用户R5十列、正式母版27字段和音色11子项执行，旧6步/旧多列不恢复。",
+      "implementation": "canonical.py / materializer.py / r5_workbook.py / field_content.py"
+    },
+    {
+      "id": "M-074",
+      "number": 74,
+      "title": "74. Execution Log 执行日志规则",
+      "source_id": "S01",
+      "paragraph_start": 2758,
+      "paragraph_end": 2781,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-075",
+      "number": 75,
+      "title": "75. 全局生成禁令尾行规则",
+      "source_id": "S01",
+      "paragraph_start": 2782,
+      "paragraph_end": 2839,
+      "area": "全局禁令尾行",
+      "status": "已替代",
+      "findings": "F17",
+      "note": "当前单镜生成限制和正式/GPT投影按用户模板统一，不恢复BGM字面量及重复旧尾行。",
+      "implementation": "field_content.py / materializer.py / deprecated_rules"
+    },
+    {
+      "id": "M-076",
+      "number": 76,
+      "title": "76. Rule Registry 历史规则登记表",
+      "source_id": "S01",
+      "paragraph_start": 2840,
+      "paragraph_end": 2866,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-077",
+      "number": 77,
+      "title": "77. 上下文接续包 / 新窗口加载规则",
+      "source_id": "S01",
+      "paragraph_start": 2867,
+      "paragraph_end": 2896,
+      "area": "接续与长输出",
+      "status": "已有执行检查",
+      "findings": "F02,F11",
+      "note": "服务端存储、快照身份、签名接续和分段证据有回归；本轮没有逐个真实Library项目重挂载。",
+      "implementation": "external_storage.py / service.py / storage.py"
+    },
+    {
+      "id": "M-078",
+      "number": 78,
+      "title": "78. 审计优先级 P0-P12 完整表",
+      "source_id": "S01",
+      "paragraph_start": 2897,
+      "paragraph_end": 2917,
+      "area": "规则优先级与版本",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "当前有唯一优先级与冲突表；旧条款逐项保留/替代/退休关系未闭合。",
+      "implementation": "rule_registry.py / rule_registry.json:global_priority,conflicts,deprecated_rules"
+    },
+    {
+      "id": "M-079",
+      "number": 79,
+      "title": "79. 对白分布审计规则",
+      "source_id": "S01",
+      "paragraph_start": 2918,
+      "paragraph_end": 2936,
+      "area": "对白比例与分布",
+      "status": "执行缺口",
+      "findings": "F05",
+      "note": "逐发言可计时，但整集角色对白比例及分布/空档未复算。",
+      "implementation": "timing_model.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-080",
+      "number": 80,
+      "title": "80. 量化阈值补丁",
+      "source_id": "S01",
+      "paragraph_start": 2937,
+      "paragraph_end": 2968,
+      "area": "描述与蒙太奇预算",
+      "status": "执行缺口",
+      "findings": "F07,F16",
+      "note": "新源文分类有范围约束，但旧镜数/时长百分比上限和比喻语义仍未闭合。",
+      "implementation": "source_decisions.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-081",
+      "number": 81,
+      "title": "81. Seedance 2.0 导出规则",
+      "source_id": "S01",
+      "paragraph_start": 2969,
+      "paragraph_end": 2989,
+      "area": "旧引擎批次包装",
+      "status": "已替代",
+      "findings": "F09,F17",
+      "note": "旧4秒批次/Seedance2.0独立列退役；正式单镜母版与按需GPT投影是当前口径。",
+      "implementation": "canonical.py / materializer.py / picture_presentation.py"
+    },
+    {
+      "id": "M-082",
+      "number": 82,
+      "title": "82. 声音层独立审计规则补全",
+      "source_id": "S01",
+      "paragraph_start": 2990,
+      "paragraph_end": 3010,
+      "area": "对白音色与声音",
+      "status": "部分承接",
+      "findings": "F05,F14,F16,F18",
+      "note": "对白出现身份、来源、发音计数、音色子项和心理音轨已实现；分布/开放语义/实测仍有边界。",
+      "implementation": "dialogue_occurrences.py / source_dialogue.py / timing_model.py / field_content.py"
+    },
+    {
+      "id": "M-083",
+      "number": 83,
+      "title": "83. 版本管理 / 临时豁免记录规则",
+      "source_id": "S01",
+      "paragraph_start": 3011,
+      "paragraph_end": 3038,
+      "area": "权限与豁免",
+      "status": "部分承接",
+      "findings": "F08,F13",
+      "note": "Admin/Producer与工单授权有执行；借用等业务例外还需专项合同。已授权事项不重复要求用户批准。",
+      "implementation": "access.py / members.py / service.py / acceptance_control.py"
+    },
+    {
+      "id": "M-084",
+      "number": 84,
+      "title": "84. 人工确认节点清单",
+      "source_id": "S01",
+      "paragraph_start": 3039,
+      "paragraph_end": 3052,
+      "area": "权限与豁免",
+      "status": "部分承接",
+      "findings": "F08,F13",
+      "note": "Admin/Producer与工单授权有执行；借用等业务例外还需专项合同。已授权事项不重复要求用户批准。",
+      "implementation": "access.py / members.py / service.py / acceptance_control.py"
+    },
+    {
+      "id": "M-085",
+      "number": 85,
+      "title": "85. C类蒙太奇 / D类补足细节边界",
+      "source_id": "S01",
+      "paragraph_start": 3053,
+      "paragraph_end": 3081,
+      "area": "描述与蒙太奇预算",
+      "status": "执行缺口",
+      "findings": "F07,F16",
+      "note": "新源文分类有范围约束，但旧镜数/时长百分比上限和比喻语义仍未闭合。",
+      "implementation": "source_decisions.py / validate_storyboard.py"
+    },
+    {
+      "id": "M-086",
+      "number": 86,
+      "title": "86. 最终放行标准补全",
+      "source_id": "S01",
+      "paragraph_start": 3082,
+      "paragraph_end": 3106,
+      "area": "独立审计与修复",
+      "status": "部分承接",
+      "findings": "F11,F12,F15,F16",
+      "note": "签名、N-1相邻证据、首稿保全和依赖失效已有执行；不能替代遗失业务规则或语义真值。",
+      "implementation": "service.py / quality.py / repair_observations.py / acceptance_control.py"
+    },
+    {
+      "id": "M-087",
+      "number": 87,
+      "title": "87. 母版执行边界声明",
+      "source_id": "S01",
+      "paragraph_start": 3107,
+      "paragraph_end": 3141,
+      "area": "模型程序与人工边界",
+      "status": "边界已声明",
+      "findings": "F16,F18",
+      "note": "当前明确区分机器结果、语义审计、首稿准确率和成片指标，不能用测试通过冒充98%。",
+      "implementation": "production_prevention_contract.md / quality.py / narrative_contract.py"
+    },
+    {
+      "id": "M-088",
+      "number": 88,
+      "title": "88. 母版总目录与编号锁",
+      "source_id": "S01",
+      "paragraph_start": 3142,
+      "paragraph_end": 3153,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-089",
+      "number": 89,
+      "title": "89. 输入物清单",
+      "source_id": "S01",
+      "paragraph_start": 3154,
+      "paragraph_end": 3178,
+      "area": "输入路由与产物要求",
+      "status": "部分承接",
+      "findings": "F02,F12,F13",
+      "note": "任务路由和已知失败阻断存在；范围/章级模式/新旧生产入口仍需统一。",
+      "implementation": "service.py / project_agent_capabilities.json / app.py"
+    },
+    {
+      "id": "M-090",
+      "number": 90,
+      "title": "90. 输出物清单",
+      "source_id": "S01",
+      "paragraph_start": 3179,
+      "paragraph_end": 3204,
+      "area": "输入路由与产物要求",
+      "status": "部分承接",
+      "findings": "F02,F12,F13",
+      "note": "任务路由和已知失败阻断存在；范围/章级模式/新旧生产入口仍需统一。",
+      "implementation": "service.py / project_agent_capabilities.json / app.py"
+    },
+    {
+      "id": "M-091",
+      "number": 91,
+      "title": "91. 失败中止协议",
+      "source_id": "S01",
+      "paragraph_start": 3205,
+      "paragraph_end": 3224,
+      "area": "输入路由与产物要求",
+      "status": "部分承接",
+      "findings": "F02,F12,F13",
+      "note": "任务路由和已知失败阻断存在；范围/章级模式/新旧生产入口仍需统一。",
+      "implementation": "service.py / project_agent_capabilities.json / app.py"
+    },
+    {
+      "id": "M-092",
+      "number": 92,
+      "title": "92. 复审 / 重跑协议",
+      "source_id": "S01",
+      "paragraph_start": 3225,
+      "paragraph_end": 3244,
+      "area": "独立审计与修复",
+      "status": "部分承接",
+      "findings": "F11,F12,F15,F16",
+      "note": "签名、N-1相邻证据、首稿保全和依赖失效已有执行；不能替代遗失业务规则或语义真值。",
+      "implementation": "service.py / quality.py / repair_observations.py / acceptance_control.py"
+    },
+    {
+      "id": "M-093",
+      "number": 93,
+      "title": "93. 文件命名 / 版本命名规则",
+      "source_id": "S01",
+      "paragraph_start": 3245,
+      "paragraph_end": 3263,
+      "area": "结构输出与状态枚举",
+      "status": "已有执行检查",
+      "findings": "F02",
+      "note": "现行Schema、不可变工件、版本/状态和R5读回已有测试；枚举名称/文件名按新合同，不按旧模板原字复活。",
+      "implementation": "models.py / canonical.py / storage.py / file_io.py"
+    },
+    {
+      "id": "M-094",
+      "number": 94,
+      "title": "94. 字段字典",
+      "source_id": "S01",
+      "paragraph_start": 3264,
+      "paragraph_end": 3280,
+      "area": "旧输出模板",
+      "status": "已替代",
+      "findings": "F17",
+      "note": "按用户R5十列、正式母版27字段和音色11子项执行，旧6步/旧多列不恢复。",
+      "implementation": "canonical.py / materializer.py / r5_workbook.py / field_content.py"
+    },
+    {
+      "id": "M-095",
+      "number": 95,
+      "title": "95. 母版合并归档流程",
+      "source_id": "S01",
+      "paragraph_start": 3281,
+      "paragraph_end": 3302,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-096",
+      "number": 96,
+      "title": "96. 最终归档声明",
+      "source_id": "S01",
+      "paragraph_start": 3303,
+      "paragraph_end": 3351,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-097",
+      "number": 97,
+      "title": "97. 表演微表情可控化补丁",
+      "source_id": "S01",
+      "paragraph_start": 3352,
+      "paragraph_end": 3371,
+      "area": "表演与眼部自然性",
+      "status": "部分承接",
+      "findings": "F09,F16,F17",
+      "note": "现行计划按实际眼部/刺激/动作核验，不强制自然静止加动作；旧文字路径仍有历史合同。",
+      "implementation": "performance_checks.py / dynamic_eye_decisions.py / production_plan.py"
+    },
+    {
+      "id": "M-098",
+      "number": 98,
+      "title": "98. 运镜功能化补丁",
+      "source_id": "S01",
+      "paragraph_start": 3372,
+      "paragraph_end": 3395,
+      "area": "景别与运镜",
+      "status": "部分承接",
+      "findings": "F09,F10",
+      "note": "运镜词库、主体目的、单机位和几何检查存在；旧比例/POV等条款未逐项裁决。",
+      "implementation": "validate_storyboard.py / staging_geometry.py / production_plan.py"
+    },
+    {
+      "id": "M-099",
+      "number": 99,
+      "title": "99. 景别光影叙事补丁",
+      "source_id": "S01",
+      "paragraph_start": 3396,
+      "paragraph_end": 3419,
+      "area": "画面真实与光影",
+      "status": "部分承接",
+      "findings": "F16,F18",
+      "note": "室内清透、物理光源、门窗和跨镜连续性已有具体检查；真实图片/视频观感未自动认证。",
+      "implementation": "lighting_checks.py / production_environment.py / test_lighting_checks.py"
+    },
+    {
+      "id": "M-100",
+      "number": 100,
+      "title": "100. 台词发声真实感补丁",
+      "source_id": "S01",
+      "paragraph_start": 3420,
+      "paragraph_end": 3456,
+      "area": "对白音色与声音",
+      "status": "部分承接",
+      "findings": "F05,F14,F16,F18",
+      "note": "对白出现身份、来源、发音计数、音色子项和心理音轨已实现；分布/开放语义/实测仍有边界。",
+      "implementation": "dialogue_occurrences.py / source_dialogue.py / timing_model.py / field_content.py"
+    },
+    {
+      "id": "M-101",
+      "number": 101,
+      "title": "101. 97-100补丁冲突裁决规则",
+      "source_id": "S01",
+      "paragraph_start": 3457,
+      "paragraph_end": 3480,
+      "area": "规则优先级与版本",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "当前有唯一优先级与冲突表；旧条款逐项保留/替代/退休关系未闭合。",
+      "implementation": "rule_registry.py / rule_registry.json:global_priority,conflicts,deprecated_rules"
+    },
+    {
+      "id": "M-102",
+      "number": 102,
+      "title": "102. 镜头主体可见性 / 书页特写一致性补丁",
+      "source_id": "S01",
+      "paragraph_start": 3481,
+      "paragraph_end": 3487,
+      "area": "主体与关键部位可见性",
+      "status": "部分承接",
+      "findings": "F13,F16,F18",
+      "note": "已实现受支持模型下的朝向/视锥/部位窗口；有限几何不是图像遮挡/可读性真值。",
+      "implementation": "staging_geometry.py / production_plan.py / source_action_plans.py"
+    },
+    {
+      "id": "M-103",
+      "number": 103,
+      "title": "103. 全流程机械执行锁 / 零遗忘固定校验门",
+      "source_id": "S01",
+      "paragraph_start": 3488,
+      "paragraph_end": 3490,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-104",
+      "number": 104,
+      "title": "104. 前置声明锁 / 最小输出量 / 分阶段规则包补丁",
+      "source_id": "S01",
+      "paragraph_start": 3491,
+      "paragraph_end": 3493,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-105",
+      "number": 105,
+      "title": "105. 外部校验器预留接口补丁",
+      "source_id": "S01",
+      "paragraph_start": 3494,
+      "paragraph_end": 3496,
+      "area": "外部校验接口",
+      "status": "已有执行检查",
+      "findings": "F11",
+      "note": "MCP预检/正式审计/读回真实调用程序；接口连通性不能证明旧业务规则无遗漏。",
+      "implementation": "app.py / service.py / http_smoke.py / stdio_smoke.py"
+    },
+    {
+      "id": "M-106",
+      "number": 106,
+      "title": "106. 结构化输出 JSON Schema 补丁",
+      "source_id": "S01",
+      "paragraph_start": 3497,
+      "paragraph_end": 3499,
+      "area": "结构输出与状态枚举",
+      "status": "已有执行检查",
+      "findings": "F02",
+      "note": "现行Schema、不可变工件、版本/状态和R5读回已有测试；枚举名称/文件名按新合同，不按旧模板原字复活。",
+      "implementation": "models.py / canonical.py / storage.py / file_io.py"
+    },
+    {
+      "id": "M-107",
+      "number": 107,
+      "title": "107. 表格导出字段硬顺序补丁",
+      "source_id": "S01",
+      "paragraph_start": 3500,
+      "paragraph_end": 3502,
+      "area": "旧输出模板",
+      "status": "已替代",
+      "findings": "F17",
+      "note": "按用户R5十列、正式母版27字段和音色11子项执行，旧6步/旧多列不恢复。",
+      "implementation": "canonical.py / materializer.py / r5_workbook.py / field_content.py"
+    },
+    {
+      "id": "M-108",
+      "number": 108,
+      "title": "108. 图生视频批次层强制复审补丁",
+      "source_id": "S01",
+      "paragraph_start": 3503,
+      "paragraph_end": 3505,
+      "area": "旧引擎批次包装",
+      "status": "已替代",
+      "findings": "F09,F17",
+      "note": "旧4秒批次/Seedance2.0独立列退役；正式单镜母版与按需GPT投影是当前口径。",
+      "implementation": "canonical.py / materializer.py / picture_presentation.py"
+    },
+    {
+      "id": "M-109",
+      "number": 109,
+      "title": "109. 参考图污染防控补丁",
+      "source_id": "S01",
+      "paragraph_start": 3506,
+      "paragraph_end": 3508,
+      "area": "静帧参考与资产",
+      "status": "部分承接",
+      "findings": "F16,F18",
+      "note": "文本锚定与静帧投影限制存在，实际人物/背景图是否吻合仍需图像核验。",
+      "implementation": "materializer.py / field_content.py / source_action_plans.py"
+    },
+    {
+      "id": "M-110",
+      "number": 110,
+      "title": "110. 外部验证器 / 代码校验边界补丁",
+      "source_id": "S01",
+      "paragraph_start": 3509,
+      "paragraph_end": 3510,
+      "area": "模型程序与人工边界",
+      "status": "边界已声明",
+      "findings": "F16,F18",
+      "note": "当前明确区分机器结果、语义审计、首稿准确率和成片指标，不能用测试通过冒充98%。",
+      "implementation": "production_prevention_contract.md / quality.py / narrative_contract.py"
+    },
+    {
+      "id": "M-111",
+      "number": 111,
+      "title": "111. 总流程索引与模块调用矩阵",
+      "source_id": "S01",
+      "paragraph_start": 3511,
+      "paragraph_end": 3512,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-112",
+      "number": 112,
+      "title": "112. 任务类型路由器",
+      "source_id": "S01",
+      "paragraph_start": 3513,
+      "paragraph_end": 3514,
+      "area": "输入路由与产物要求",
+      "status": "部分承接",
+      "findings": "F02,F12,F13",
+      "note": "任务路由和已知失败阻断存在；范围/章级模式/新旧生产入口仍需统一。",
+      "implementation": "service.py / project_agent_capabilities.json / app.py"
+    },
+    {
+      "id": "M-113",
+      "number": 113,
+      "title": "113. 前置依赖阻断规则",
+      "source_id": "S01",
+      "paragraph_start": 3515,
+      "paragraph_end": 3516,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-114",
+      "number": 114,
+      "title": "114. 逐步勾选回填与证据绑定规则",
+      "source_id": "S01",
+      "paragraph_start": 3517,
+      "paragraph_end": 3518,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-115",
+      "number": 115,
+      "title": "115. 异常处理与重跑规则",
+      "source_id": "S01",
+      "paragraph_start": 3519,
+      "paragraph_end": 3520,
+      "area": "独立审计与修复",
+      "status": "部分承接",
+      "findings": "F11,F12,F15,F16",
+      "note": "签名、N-1相邻证据、首稿保全和依赖失效已有执行；不能替代遗失业务规则或语义真值。",
+      "implementation": "service.py / quality.py / repair_observations.py / acceptance_control.py"
+    },
+    {
+      "id": "M-116",
+      "number": 116,
+      "title": "116. 全局冲突裁决表",
+      "source_id": "S01",
+      "paragraph_start": 3521,
+      "paragraph_end": 3524,
+      "area": "规则优先级与版本",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "当前有唯一优先级与冲突表；旧条款逐项保留/替代/退休关系未闭合。",
+      "implementation": "rule_registry.py / rule_registry.json:global_priority,conflicts,deprecated_rules"
+    },
+    {
+      "id": "M-117",
+      "number": 117,
+      "title": "117. 长输出分段与截断防遗忘规则",
+      "source_id": "S01",
+      "paragraph_start": 3525,
+      "paragraph_end": 3526,
+      "area": "接续与长输出",
+      "status": "已有执行检查",
+      "findings": "F02,F11",
+      "note": "服务端存储、快照身份、签名接续和分段证据有回归；本轮没有逐个真实Library项目重挂载。",
+      "implementation": "external_storage.py / service.py / storage.py"
+    },
+    {
+      "id": "M-118",
+      "number": 118,
+      "title": "118. 审计日志与证据索引规则",
+      "source_id": "S01",
+      "paragraph_start": 3527,
+      "paragraph_end": 3528,
+      "area": "独立审计与修复",
+      "status": "部分承接",
+      "findings": "F11,F12,F15,F16",
+      "note": "签名、N-1相邻证据、首稿保全和依赖失效已有执行；不能替代遗失业务规则或语义真值。",
+      "implementation": "service.py / quality.py / repair_observations.py / acceptance_control.py"
+    },
+    {
+      "id": "M-119",
+      "number": 119,
+      "title": "119. 最终归档清单与交付包规则",
+      "source_id": "S01",
+      "paragraph_start": 3529,
+      "paragraph_end": 3530,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-120",
+      "number": 120,
+      "title": "120. 模型 / 代码 / 人工三层责任边界",
+      "source_id": "S01",
+      "paragraph_start": 3531,
+      "paragraph_end": 3532,
+      "area": "模型程序与人工边界",
+      "status": "边界已声明",
+      "findings": "F16,F18",
+      "note": "当前明确区分机器结果、语义审计、首稿准确率和成片指标，不能用测试通过冒充98%。",
+      "implementation": "production_prevention_contract.md / quality.py / narrative_contract.py"
+    },
+    {
+      "id": "M-121",
+      "number": 121,
+      "title": "121. 完整度定义与100%口径补丁",
+      "source_id": "S01",
+      "paragraph_start": 3533,
+      "paragraph_end": 3534,
+      "area": "模型程序与人工边界",
+      "status": "边界已声明",
+      "findings": "F16,F18",
+      "note": "当前明确区分机器结果、语义审计、首稿准确率和成片指标，不能用测试通过冒充98%。",
+      "implementation": "production_prevention_contract.md / quality.py / narrative_contract.py"
+    },
+    {
+      "id": "M-122",
+      "number": 122,
+      "title": "122. 23步主流程最小输出量表",
+      "source_id": "S01",
+      "paragraph_start": 3535,
+      "paragraph_end": 3536,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-123",
+      "number": 123,
+      "title": "123. BEGIN / END 执行令牌规则",
+      "source_id": "S01",
+      "paragraph_start": 3537,
+      "paragraph_end": 3539,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-124",
+      "number": 124,
+      "title": "124. 独立审计轮次规则",
+      "source_id": "S01",
+      "paragraph_start": 3540,
+      "paragraph_end": 3541,
+      "area": "独立审计与修复",
+      "status": "部分承接",
+      "findings": "F11,F12,F15,F16",
+      "note": "签名、N-1相邻证据、首稿保全和依赖失效已有执行；不能替代遗失业务规则或语义真值。",
+      "implementation": "service.py / quality.py / repair_observations.py / acceptance_control.py"
+    },
+    {
+      "id": "M-125",
+      "number": 125,
+      "title": "125. Borrow Ledger 专项 Gate",
+      "source_id": "S01",
+      "paragraph_start": 3542,
+      "paragraph_end": 3543,
+      "area": "借后文与合法例外",
+      "status": "执行缺口",
+      "findings": "F04,F05,F08",
+      "note": "通用授权和来源处理存在，专项触发、债务及后续新起点尚未闭合。",
+      "implementation": "validate_storyboard.py:_validate_preventive_gates / access.py / service.py"
+    },
+    {
+      "id": "M-126",
+      "number": 126,
+      "title": "126. E级 Beat 处置路径",
+      "source_id": "S01",
+      "paragraph_start": 3544,
+      "paragraph_end": 3545,
+      "area": "内容分级与取舍",
+      "status": "部分承接",
+      "findings": "F12,F16",
+      "note": "章节取舍/保护对白/状态变化有检查，适用性依赖模式，分类正确性仍须语义核对。",
+      "implementation": "validate_storyboard.py:_validate_chapter_intake / source_decisions.py"
+    },
+    {
+      "id": "M-127",
+      "number": 127,
+      "title": "127. 生成批次层独立 Gate",
+      "source_id": "S01",
+      "paragraph_start": 3546,
+      "paragraph_end": 3547,
+      "area": "旧引擎批次包装",
+      "status": "已替代",
+      "findings": "F09,F17",
+      "note": "旧4秒批次/Seedance2.0独立列退役；正式单镜母版与按需GPT投影是当前口径。",
+      "implementation": "canonical.py / materializer.py / picture_presentation.py"
+    },
+    {
+      "id": "M-128",
+      "number": 128,
+      "title": "128. 术语统一表 / Glossary",
+      "source_id": "S01",
+      "paragraph_start": 3548,
+      "paragraph_end": 3549,
+      "area": "结构输出与状态枚举",
+      "status": "已有执行检查",
+      "findings": "F02",
+      "note": "现行Schema、不可变工件、版本/状态和R5读回已有测试；枚举名称/文件名按新合同，不按旧模板原字复活。",
+      "implementation": "models.py / canonical.py / storage.py / file_io.py"
+    },
+    {
+      "id": "M-129",
+      "number": 129,
+      "title": "129. 用户新增规则吸收协议",
+      "source_id": "S01",
+      "paragraph_start": 3550,
+      "paragraph_end": 3551,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-130",
+      "number": 130,
+      "title": "130. 最终完整度验收门",
+      "source_id": "S01",
+      "paragraph_start": 3552,
+      "paragraph_end": 3553,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-131",
+      "number": 131,
+      "title": "131. Rule Registry / 全规则注册表",
+      "source_id": "S01",
+      "paragraph_start": 3554,
+      "paragraph_end": 3555,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-132",
+      "number": 132,
+      "title": "132. Validator Ruleset / 代码校验规则表",
+      "source_id": "S01",
+      "paragraph_start": 3556,
+      "paragraph_end": 3557,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-133",
+      "number": 133,
+      "title": "133. Error Code / 错误码与阻塞等级表",
+      "source_id": "S01",
+      "paragraph_start": 3558,
+      "paragraph_end": 3559,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-134",
+      "number": 134,
+      "title": "134. Golden Test Cases / 母版回归测试用例",
+      "source_id": "S01",
+      "paragraph_start": 3560,
+      "paragraph_end": 3561,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-135",
+      "number": 135,
+      "title": "135. Task Package Cards / 任务规则包卡片",
+      "source_id": "S01",
+      "paragraph_start": 3562,
+      "paragraph_end": 3563,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-136",
+      "number": 136,
+      "title": "136. Final Integration Checklist / 最终合并检查清单",
+      "source_id": "S01",
+      "paragraph_start": 3564,
+      "paragraph_end": 3565,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-137",
+      "number": 137,
+      "title": "137. Full Rule Registry / 全量规则注册表正文",
+      "source_id": "S01",
+      "paragraph_start": 3566,
+      "paragraph_end": 3568,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-138",
+      "number": 138,
+      "title": "138. Full Validator Ruleset / 全量代码校验规则正文",
+      "source_id": "S01",
+      "paragraph_start": 3569,
+      "paragraph_end": 3571,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-139",
+      "number": 139,
+      "title": "139. Full Error Code Catalog / 全量错误码正文",
+      "source_id": "S01",
+      "paragraph_start": 3572,
+      "paragraph_end": 3574,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-140",
+      "number": 140,
+      "title": "140. Full Golden Test Suite / 全量母版回归测试正文",
+      "source_id": "S01",
+      "paragraph_start": 3575,
+      "paragraph_end": 3577,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-141",
+      "number": 141,
+      "title": "141. Full Task Package Cards / 全量任务规则包正文",
+      "source_id": "S01",
+      "paragraph_start": 3578,
+      "paragraph_end": 3579,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-142",
+      "number": 142,
+      "title": "142. Full Conflict Crosswalk / 全量冲突裁决映射表",
+      "source_id": "S01",
+      "paragraph_start": 3580,
+      "paragraph_end": 3582,
+      "area": "规则优先级与版本",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "当前有唯一优先级与冲突表；旧条款逐项保留/替代/退休关系未闭合。",
+      "implementation": "rule_registry.py / rule_registry.json:global_priority,conflicts,deprecated_rules"
+    },
+    {
+      "id": "M-143",
+      "number": 143,
+      "title": "143. Full Template Library / 全量模板库正文",
+      "source_id": "S01",
+      "paragraph_start": 3583,
+      "paragraph_end": 3584,
+      "area": "注册表与模板治理",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "注册、错误码、任务卡、模板和黄金测试存在；独立历史全集与逐条执行/反例映射缺失。",
+      "implementation": "rule_registry.py / run_golden_tests.py / template_library.md"
+    },
+    {
+      "id": "M-144",
+      "number": 144,
+      "title": "144. Full Versioning / ChangeLog / Deprecation Map",
+      "source_id": "S01",
+      "paragraph_start": 3585,
+      "paragraph_end": 3586,
+      "area": "规则优先级与版本",
+      "status": "部分承接",
+      "findings": "F11,F17",
+      "note": "当前有唯一优先级与冲突表；旧条款逐项保留/替代/退休关系未闭合。",
+      "implementation": "rule_registry.py / rule_registry.json:global_priority,conflicts,deprecated_rules"
+    },
+    {
+      "id": "M-145",
+      "number": 145,
+      "title": "145. Full Document Integration Protocol / DOCX本体合并协议",
+      "source_id": "S01",
+      "paragraph_start": 3587,
+      "paragraph_end": 3588,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-146",
+      "number": 146,
+      "title": "146. Full Execution Log Schema / 全量执行日志结构",
+      "source_id": "S01",
+      "paragraph_start": 3589,
+      "paragraph_end": 3590,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    },
+    {
+      "id": "M-147",
+      "number": 147,
+      "title": "147. Full Authorization / Exception Ledger",
+      "source_id": "S01",
+      "paragraph_start": 3591,
+      "paragraph_end": 3592,
+      "area": "权限与豁免",
+      "status": "部分承接",
+      "findings": "F08,F13",
+      "note": "Admin/Producer与工单授权有执行；借用等业务例外还需专项合同。已授权事项不重复要求用户批准。",
+      "implementation": "access.py / members.py / service.py / acceptance_control.py"
+    },
+    {
+      "id": "M-148",
+      "number": 148,
+      "title": "148. Full Completeness Audit Report Template / 全量完整度审计报告模板",
+      "source_id": "S01",
+      "paragraph_start": 3593,
+      "paragraph_end": 3604,
+      "area": "流程与完整性",
+      "status": "部分承接",
+      "findings": "F01,F03,F11,F12",
+      "note": "已实现状态/工单/门禁证据；缺独立旧规则全集与部分整集检查，不能仅因步骤名齐全判完整。",
+      "implementation": "project_agent.py / storyboard_agent.py / service.py / rule_registry.py"
+    }
+  ],
+  "episode_policy": {
+    "contract": "episode-production-contract-v1",
+    "profile_id": "mother-episode-90-180-v1",
+    "min_seconds": 90,
+    "max_seconds": 180,
+    "opening_face_seconds": 3,
+    "opening_face_area_min_percent": 30,
+    "opening_hook_seconds": 5,
+    "advance_gap_max_seconds": 25,
+    "ending_window_seconds": 12,
+    "dialogue_min_percent": 35,
+    "short_under_1_percent": 8,
+    "short_under_2_percent": 15,
+    "carryover_max_shots": 2,
+    "carryover_max_seconds": 5,
+    "montage_shot_percent_max": 20,
+    "montage_time_percent_max": 15,
+    "montage_shots_per_source_max": 2,
+    "description_shots_per_source_max": 3,
+    "description_seconds_per_source_max": 8,
+    "description_run_time_percent_max": 15,
+    "detail_elements_per_shot_max": 3,
+    "detail_duration_multiplier_max": 1.5,
+    "beat_kinds": [
+      "opening_hook",
+      "advance",
+      "ending_hook",
+      "closure",
+      "carryover"
+    ],
+    "scope": "90–180 seconds is the active new-production profile. Fragment diagnostics never certify complete episodes. Historical 60-second minimum and 7200-second series target are not global defaults.",
+    "exceptions": "A source conflict or natural low-dialogue story needs an explicit scoped rule amendment; a producer cannot silently override thresholds, add plot, or self-authorize an exemption.",
+    "semantic_limits": "Source entailment, hook quality, meaningful short cuts, face area/readability and measured AV are independently reviewed; labels, visible eye landmarks and software PASS are not semantic certificates.",
+    "style_advice": {
+      "fixed_camera_percent": [
+        65,
+        75
+      ],
+      "complex_motion_percent_max": 5,
+      "enforcement": "advisory, never force unnecessary cuts or actions"
+    },
+    "retirements": {
+      "fixed_105_seconds": "source-grounded 90–180 range",
+      "series_7200_seconds": "project-specific historical target; no global total",
+      "complexity_score_3": "typed action resources, state transitions and camera constraints; engine calibration still required",
+      "forced_reaction_blinks_or_holds": "actual events and justified concurrent timing only",
+      "visible_three_timecodes": "internal event clock; no visible numeric picture timecodes"
+    },
+    "source_refs": [
+      "S10 lines510-517/1192/1347",
+      "S01 chapters18/19/80/85",
+      "latest user requested 90–180; audit correction authorized 2026-09-14"
+    ]
+  },
+  "decisions": {
+    "fixed_105_seconds": "source-grounded 90–180 range",
+    "series_7200_seconds": "project-specific historical target; no global total",
+    "complexity_score_3": "typed action resources, state transitions and camera constraints; engine calibration still required",
+    "forced_reaction_blinks_or_holds": "actual events and justified concurrent timing only",
+    "visible_three_timecodes": "internal event clock; no visible numeric picture timecodes",
+    "repair_round_cap": "Retired by current user requirement; actual residuals and regression bind status, no forced rebuild by count. Old golden IDs retained with new zero-residual pass assertions."
+  },
+  "coverage_limit": "149 chapter-level dispositions preserve the original source index. Partial semantic coverage and measured AV remain explicit; this is not a 98% certificate.",
+  "atomic_semantic_definitions": {
+    "AR-R10-GLOBAL-001": {
+      "rule_id": "AR-R10-GLOBAL-001",
+      "module_group": "BOOTSTRAP",
+      "rule_full_text": "新窗口必须先加载AGENTS、SKILL、R10_BOOTSTRAP和runtime rules，并核对版本。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-BOOTSTRAP-001"
+      ]
+    },
+    "AR-R10-GLOBAL-002": {
+      "rule_id": "AR-R10-GLOBAL-002",
+      "module_group": "CONFLICT",
+      "rule_full_text": "安全合规 > 源文忠实 > 分集边界 > 台词容量 > 统计闭合 > 可见性 > 图生视频可执行性 > 节奏留存 > 美学细节",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VERSION-001"
+      ]
+    },
+    "AR-R10-GLOBAL-003": {
+      "rule_id": "AR-R10-GLOBAL-003",
+      "module_group": "VERSION",
+      "rule_full_text": "R10与R1-R9冲突时，R10获胜，旧条目只能保留为deprecated。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VERSION-001"
+      ]
+    },
+    "AR-R10-GLOBAL-004": {
+      "rule_id": "AR-R10-GLOBAL-004",
+      "module_group": "WORKFLOW",
+      "rule_full_text": "锁终点与起点、列源文、Source Lock、Ledger、Borrow、拆Beat与分级、处理删合压、算密度与边界、建节奏轴、生成27字段唯一单镜母版、检查对白与统计、连续性、单镜母版执行完整性、十列投影、独立审计、JSON、归档。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-FINAL-999"
+      ]
+    },
+    "AR-R10-GLOBAL-005": {
+      "rule_id": "AR-R10-GLOBAL-005",
+      "module_group": "SOURCE",
+      "rule_full_text": "每镜必须有覆盖原文、原文依据类型、原文支撑句。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-SOURCE-001"
+      ]
+    },
+    "AR-R10-GLOBAL-006": {
+      "rule_id": "AR-R10-GLOBAL-006",
+      "module_group": "DIALOGUE",
+      "rule_full_text": "逐发言选择匹配的可信timing_policy配置并逐阶段核对事件时间轴；暂无实测时使用明确标记未标定的候选估算；不得把候选速度当成普遍上限或按旧固定速度加固定呼吸、反应、镜尾费。",
+      "trigger_condition": "带对白或动作的正式镜头",
+      "pass_condition": "发言及动作/停顿实际占用在所在阶段内闭合；并行只占同一时间窗，先后依赖完整",
+      "linked_error_codes": [
+        "E-BATCH-003"
+      ]
+    },
+    "AR-R10-GLOBAL-007": {
+      "rule_id": "AR-R10-GLOBAL-007",
+      "module_group": "VISIBILITY",
+      "rule_full_text": "可见性高于微表情与眨眼；不可见则删除描述或拆镜。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VIS-005"
+      ]
+    },
+    "AR-R10-GLOBAL-008": {
+      "rule_id": "AR-R10-GLOBAL-008",
+      "module_group": "COMPACT_MASTER",
+      "rule_full_text": "R10-SPC-1正式分镜母版是唯一单镜执行文本；canonical→正式/GPT投影→XLSX→反向解析必须在UTF-8 NFC+LF归一化后哈希一致并完整保留多行对白，禁止独立Seedance列、生成批次或持久化重复提示词。",
+      "trigger_condition": "正式分镜生成、导出、转换或审计",
+      "pass_condition": "27字段真值唯一，投影/XLSX反向解析哈希一致且多行字段不丢失",
+      "linked_error_codes": [
+        "E-INTEGRATION-001",
+        "E-FIELDORDER-001"
+      ]
+    },
+    "AR-R10-GLOBAL-009": {
+      "rule_id": "AR-R10-GLOBAL-009",
+      "module_group": "ARCHIVE",
+      "rule_full_text": "生产导出的审计overlay必须是PENDING_AUDIT/未签发结论，问题计数与audit_trace_id未设置；只有指纹一致的independent_audit证书可生成不可变的签名审计overlay新工件和后继工作簿，原生产XLSX与canonical不得就地改写；最终归档仍必须有真实人工签核。",
+      "trigger_condition": "生产导出、独立审计或归档",
+      "pass_condition": "生产未预填结论，签名审计新工件有trace/证书/指纹且归档有人工签核",
+      "linked_error_codes": [
+        "E-ARCHIVE-001"
+      ]
+    },
+    "AR-R10-TEMPLATE-001": {
+      "rule_id": "AR-R10-TEMPLATE-001",
+      "module_group": "TEMPLATE",
+      "rule_full_text": "27字段顺序不变；每镜生成限制必须含干净的9:16竖屏并投影到正式母版和GPT关键帧，只禁两条冗长旧9:16固定短语；动作、表情、精确对白、口型及自然动作先后关系、听者反应只在画面内容写一次；数字制作时点独立保存在内部计时记录，完整发声规格只在音色固定子模板写一次。",
+      "trigger_condition": "新生成、重建、修正或十列导出",
+      "pass_condition": "27字段精确有序且三个单镜执行位置均明确9:16竖屏",
+      "linked_error_codes": [
+        "E-I2V-INDEP-002",
+        "E-FIELDORDER-001",
+        "E-TIMELINE-001"
+      ]
+    },
+    "AR-R10-EXPR-001": {
+      "rule_id": "AR-R10-EXPR-001",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "情绪=嘴角状态+眼神变化+面部状态；重要情绪镜至少4类可见细节。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-002": {
+      "rule_id": "AR-R10-EXPR-002",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "情绪状态=表情细节+手部动作+身体姿态+视线方向。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-EXPR-003": {
+      "rule_id": "AR-R10-EXPR-003",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "面部清楚可见且持续约2秒以上时，画面时间轴必须写视线起点→眼球先换焦/位移→头部随后轻跟或明确不跟→眼睑变化→具体眨眼时点或有理由不眨→镜尾视线；3-5秒每人0-1次，>5-10秒每人1-2次；关键词/重音/决定性尾音期间不眨；多人逐人错峰。无依据全程不眨、僵直瞪视、机械高频、同步眨眼失败。静态GPT关键帧只写双眼自然睁开并避开半眨眼，原文明确闭眼除外。",
+      "trigger_condition": "人物面部清楚可见且镜头时长>=2秒，或出现眼神/眨眼指令",
+      "pass_condition": "时间轴、生成限制和静态起始状态同时闭合，且逐人时点/重音/错峰可执行",
+      "linked_error_codes": [
+        "E-EXPRESSION-003"
+      ]
+    },
+    "AR-R10-EXPR-E01": {
+      "rule_id": "AR-R10-EXPR-E01",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "开心：嘴角轻抬；眼神柔和、眼形微弯；面部放松、脸颊略提。",
+      "trigger_condition": "情绪为开心时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E02": {
+      "rule_id": "AR-R10-EXPR-E02",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "委屈：嘴角轻压；眼眶微红或泪光聚起；表情短暂停住。",
+      "trigger_condition": "情绪为委屈时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E03": {
+      "rule_id": "AR-R10-EXPR-E03",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "紧张：嘴唇轻抿；目光游移；眉眼与面部肌肉绷紧。",
+      "trigger_condition": "情绪为紧张时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E04": {
+      "rule_id": "AR-R10-EXPR-E04",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "生气：嘴角压平或唇线绷紧；目光集中而锐利；眉心收紧、下颌发力。",
+      "trigger_condition": "情绪为生气时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E05": {
+      "rule_id": "AR-R10-EXPR-E05",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "惊讶：嘴微张；眼睛睁大、瞳孔变化；眉毛上抬、额头舒展。",
+      "trigger_condition": "情绪为惊讶时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E06": {
+      "rule_id": "AR-R10-EXPR-E06",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "害怕：嘴角下拉、唇部轻颤；睁大但目光不稳；眉毛收紧或上挑、面部僵住。",
+      "trigger_condition": "情绪为害怕时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E07": {
+      "rule_id": "AR-R10-EXPR-E07",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "悲伤：嘴角下垂；目光黯淡、眼眶湿润；眉毛内收、面部下沉。",
+      "trigger_condition": "情绪为悲伤时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E08": {
+      "rule_id": "AR-R10-EXPR-E08",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "厌恶：上唇微抬、下唇收紧；眼睛微眯或偏开；鼻梁轻皱、面颊紧绷。",
+      "trigger_condition": "情绪为厌恶时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E09": {
+      "rule_id": "AR-R10-EXPR-E09",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "惊喜：嘴角明显上扬；目光发亮、眼形弯起；脸颊上提、额头放松。",
+      "trigger_condition": "情绪为惊喜时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E10": {
+      "rule_id": "AR-R10-EXPR-E10",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "困惑：嘴角偏斜或抿住；目光寻找信息；眉毛一高一低或轻皱。",
+      "trigger_condition": "情绪为困惑时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E11": {
+      "rule_id": "AR-R10-EXPR-E11",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "自豪：嘴角克制上扬；眼神坚定；眉眼舒展、面部有支撑。",
+      "trigger_condition": "情绪为自豪时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E12": {
+      "rule_id": "AR-R10-EXPR-E12",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "羞涩：嘴角轻扬或抿住；目光闪躲；脸颊微热、表情略僵。",
+      "trigger_condition": "情绪为羞涩时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E13": {
+      "rule_id": "AR-R10-EXPR-E13",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "惆怅：嘴角轻压；凝视远处或失焦；眉头微皱、面部松弛。",
+      "trigger_condition": "情绪为惆怅时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E14": {
+      "rule_id": "AR-R10-EXPR-E14",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "平静：唇线自然；目光稳定柔和；面部完全放松。",
+      "trigger_condition": "情绪为平静时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E15": {
+      "rule_id": "AR-R10-EXPR-E15",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "调皮：嘴角带轻微歪斜；眼神闪动；眉毛微挑、头部轻偏。",
+      "trigger_condition": "情绪为调皮时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E16": {
+      "rule_id": "AR-R10-EXPR-E16",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "冷漠：嘴角平直；目光淡或空；面部变化极少。",
+      "trigger_condition": "情绪为冷漠时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E17": {
+      "rule_id": "AR-R10-EXPR-E17",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "焦虑：嘴唇抿紧或轻咬；目光快速游移；眉心微皱、肌肉紧张。",
+      "trigger_condition": "情绪为焦虑时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E18": {
+      "rule_id": "AR-R10-EXPR-E18",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "惊恐：嘴张开并可能颤动；眼睛与瞳孔明显放大；眉毛高抬、面部僵硬。",
+      "trigger_condition": "情绪为惊恐时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E19": {
+      "rule_id": "AR-R10-EXPR-E19",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "欣慰：嘴角轻扬；眼神温暖；眉眼与面部逐渐放松。",
+      "trigger_condition": "情绪为欣慰时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-EXPR-E20": {
+      "rule_id": "AR-R10-EXPR-E20",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "期待：嘴角轻扬；目光明亮并锁定目标；放松中保留轻微紧张。",
+      "trigger_condition": "情绪为期待时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-001"
+      ]
+    },
+    "AR-R10-ACTOR-S01": {
+      "rule_id": "AR-R10-ACTOR-S01",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "开心：表情=嘴角上扬、眼形微弯；手部=手部自然或轻拍；身体=身体略前倾、肩膀放松；视线=看向带来快乐的人或物。",
+      "trigger_condition": "表演状态为开心时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S02": {
+      "rule_id": "AR-R10-ACTOR-S02",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "开心大笑：表情=嘴张开、眼形弯起；手部=捂嘴或自然打开；身体=身体前倾、肩膀轻颤；视线=看向引发笑意的人。",
+      "trigger_condition": "表演状态为开心大笑时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S03": {
+      "rule_id": "AR-R10-ACTOR-S03",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "感动：表情=嘴唇轻抿、眼角微湿；手部=手轻握或触碰胸口/脸颊；身体=身体略前倾、肩线收紧；视线=注视情绪来源后缓慢移开。",
+      "trigger_condition": "表演状态为感动时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S04": {
+      "rule_id": "AR-R10-ACTOR-S04",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "害羞：表情=嘴角轻扬；手部=手指交错或轻遮面；身体=肩膀内收；视线=快速移开视线。",
+      "trigger_condition": "表演状态为害羞时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S05": {
+      "rule_id": "AR-R10-ACTOR-S05",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "生气：表情=眉心紧、唇线绷；手部=握拳或抱臂；身体=上身前倾、肩线僵硬；视线=直视对方。",
+      "trigger_condition": "表演状态为生气时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S06": {
+      "rule_id": "AR-R10-ACTOR-S06",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "伤心：表情=嘴角下垂、眼眶发红；手部=抱住自己或抚脸；身体=身体轻蜷；视线=目光低垂。",
+      "trigger_condition": "表演状态为伤心时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S07": {
+      "rule_id": "AR-R10-ACTOR-S07",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "紧张：表情=嘴唇轻抿；手部=搓手、抓衣角；身体=身体僵硬、肩膀微抬；视线=游移并回避直视。",
+      "trigger_condition": "表演状态为紧张时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S08": {
+      "rule_id": "AR-R10-ACTOR-S08",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "惊讶：表情=眉毛抬起、眼睛睁大、嘴微张；手部=手自然抬起或捂嘴；身体=身体后仰；视线=锁定突发事件。",
+      "trigger_condition": "表演状态为惊讶时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S09": {
+      "rule_id": "AR-R10-ACTOR-S09",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "尴尬：表情=嘴角僵硬；手部=搓手或摸后颈；身体=耸肩、身体偏转；视线=目光闪避。",
+      "trigger_condition": "表演状态为尴尬时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S10": {
+      "rule_id": "AR-R10-ACTOR-S10",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "自豪：表情=眉毛轻挑、嘴角上扬；手部=自然垂放或扶腰；身体=胸口打开、身体略后仰；视线=坚定直视。",
+      "trigger_condition": "表演状态为自豪时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S11": {
+      "rule_id": "AR-R10-ACTOR-S11",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "放松：表情=眼睑放松、唇线自然；手部=手放在膝上或自然交叠；身体=身体靠后、肩颈松开；视线=从容扫视。",
+      "trigger_condition": "表演状态为放松时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S12": {
+      "rule_id": "AR-R10-ACTOR-S12",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "思考：表情=眉头轻皱、嘴角收住；手部=托下巴或轻触嘴唇；身体=上身略前倾；视线=停在一点或向上寻找。",
+      "trigger_condition": "表演状态为思考时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S13": {
+      "rule_id": "AR-R10-ACTOR-S13",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "爱慕：表情=嘴角含笑、眼神柔和；手部=轻触自己或靠近对象；身体=身体微微前倾；视线=持续注视喜欢的人。",
+      "trigger_condition": "表演状态为爱慕时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S14": {
+      "rule_id": "AR-R10-ACTOR-S14",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "焦虑：表情=眉心紧、唇部用力；手部=握拳、敲腿或反复动作；身体=上身前倾、身体紧绷；视线=四处寻找出口/答案。",
+      "trigger_condition": "表演状态为焦虑时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-ACTOR-S15": {
+      "rule_id": "AR-R10-ACTOR-S15",
+      "module_group": "EXPRESSION",
+      "rule_full_text": "惊喜：表情=眼睛睁大、嘴微张后上扬；手部=双手抬起或靠近胸口；身体=身体前倾；视线=锁定惊喜来源。",
+      "trigger_condition": "表演状态为惊喜时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-EXPRESSION-002"
+      ]
+    },
+    "AR-R10-MOTION-000": {
+      "rule_id": "AR-R10-MOTION-000",
+      "module_group": "MOTION",
+      "rule_full_text": "每次运镜必须写类型、主体、移动路径/触发、原因和叙事效果；每个单镜最多一个主运镜，不同镜头可选择不同主运镜。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-01": {
+      "rule_id": "AR-R10-MOTION-01",
+      "module_group": "MOTION",
+      "rule_full_text": "推镜头：镜头向明确主体靠近；功能=强化情绪,聚焦注意力,制造压迫感；适用=意识到真相,质问,告白前后,眼神变化。",
+      "trigger_condition": "运镜方式为推镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-02": {
+      "rule_id": "AR-R10-MOTION-02",
+      "module_group": "MOTION",
+      "rule_full_text": "拉镜头：镜头从近处退出并揭示有效环境信息；功能=孤独感,反转,信息揭示,关系疏离；适用=真相揭开,人物被留在空间,关系断裂。",
+      "trigger_condition": "运镜方式为拉镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-03": {
+      "rule_id": "AR-R10-MOTION-03",
+      "module_group": "MOTION",
+      "rule_full_text": "后跟镜头：镜头位于人物后方并跟随移动；功能=代入感,沉浸式叙事；适用=进入新场景,逃离,长廊行走。",
+      "trigger_condition": "运镜方式为后跟镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-04": {
+      "rule_id": "AR-R10-MOTION-04",
+      "module_group": "MOTION",
+      "rule_full_text": "侧跟镜头：镜头与主体平行移动；功能=展示动作,增强节奏,表现并行关系；适用=并肩行走,追逐,护送。",
+      "trigger_condition": "运镜方式为侧跟镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-05": {
+      "rule_id": "AR-R10-MOTION-05",
+      "module_group": "MOTION",
+      "rule_full_text": "前跟镜头：镜头在人物前方后退，人物朝镜头前进；功能=情绪冲击,主角压迫感；适用=逼近,质问,决断,强势登场。",
+      "trigger_condition": "运镜方式为前跟镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-06": {
+      "rule_id": "AR-R10-MOTION-06",
+      "module_group": "MOTION",
+      "rule_full_text": "360°环绕镜头：镜头围绕唯一核心主体旋转；功能=主角感,高光时刻,情绪放大,仪式感；适用=身份揭露,承诺,册封,强情绪爆点。",
+      "trigger_condition": "运镜方式为360°环绕镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-07": {
+      "rule_id": "AR-R10-MOTION-07",
+      "module_group": "MOTION",
+      "rule_full_text": "升镜头：镜头由下向上展示主体或空间体量；功能=宏伟,压迫感,权威感；适用=宫殿,权势登场,高大空间。",
+      "trigger_condition": "运镜方式为升镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-08": {
+      "rule_id": "AR-R10-MOTION-08",
+      "module_group": "MOTION",
+      "rule_full_text": "降镜头：镜头由上向下落到主体或空间；功能=渺小感,命运感,脆弱感；适用=人物孤立,空旷空间,命运转折。",
+      "trigger_condition": "运镜方式为降镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-09": {
+      "rule_id": "AR-R10-MOTION-09",
+      "module_group": "MOTION",
+      "rule_full_text": "摇镜头：机位基本不移，镜头水平旋转；功能=信息展示,空间展开,关系揭示；适用=场景建立,多人站位,朝堂宴席。",
+      "trigger_condition": "运镜方式为摇镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-10": {
+      "rule_id": "AR-R10-MOTION-10",
+      "module_group": "MOTION",
+      "rule_full_text": "斜俯镜头：画面轴线有意倾斜；功能=不安,紧张,失控感,心理不稳定；适用=毒发,惊惧,危险临近。",
+      "trigger_condition": "运镜方式为斜俯镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-11": {
+      "rule_id": "AR-R10-MOTION-11",
+      "module_group": "MOTION",
+      "rule_full_text": "平移镜头：镜头平稳横向移动；功能=空间流动,质感,秩序感；适用=宫殿,长廊,礼制场面。",
+      "trigger_condition": "运镜方式为平移镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-12": {
+      "rule_id": "AR-R10-MOTION-12",
+      "module_group": "MOTION",
+      "rule_full_text": "希区柯克变焦：推拉机位与反向变焦同步；功能=恐惧,心理冲击,失重感；适用=噩耗,毒发,真相打击。",
+      "trigger_condition": "运镜方式为希区柯克变焦时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-13": {
+      "rule_id": "AR-R10-MOTION-13",
+      "module_group": "MOTION",
+      "rule_full_text": "轨道镜头：镜头沿直线或弧线轨道稳定移动；功能=稳定推进,专业感,电影感；适用=人物入场,仪式场面,关系推进。",
+      "trigger_condition": "运镜方式为轨道镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-14": {
+      "rule_id": "AR-R10-MOTION-14",
+      "module_group": "MOTION",
+      "rule_full_text": "手持镜头：保留受控的不稳定感但主体清楚；功能=真实感,紧张感,突发临场感；适用=逃跑,火灾,混乱,追赶。",
+      "trigger_condition": "运镜方式为手持镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-15": {
+      "rule_id": "AR-R10-MOTION-15",
+      "module_group": "MOTION",
+      "rule_full_text": "肩扛镜头：轻微晃动且比纯手持稳定；功能=纪实感,电影感平衡,压迫性临场；适用=紧张跟随,对峙,现场对话。",
+      "trigger_condition": "运镜方式为肩扛镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-MOTION-16": {
+      "rule_id": "AR-R10-MOTION-16",
+      "module_group": "MOTION",
+      "rule_full_text": "旋转镜头：镜头绕光轴旋转并限制持续时间；功能=眩晕,混乱,情绪爆发,失控；适用=昏厥,毒发,火场,心理崩溃。",
+      "trigger_condition": "运镜方式为旋转镜头时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-MOTION-001"
+      ]
+    },
+    "AR-R10-CINE-001": {
+      "rule_id": "AR-R10-CINE-001",
+      "module_group": "CINEMATIC",
+      "rule_full_text": "不得把环境、动作、情绪、细节全部塞入一镜；用镜头顺序引导注意力。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-LIGHT-001"
+      ]
+    },
+    "AR-R10-SHOTSIZE-01": {
+      "rule_id": "AR-R10-SHOTSIZE-01",
+      "module_group": "CINEMATIC",
+      "rule_full_text": "远景：交代环境、时间、空间关系和场面；先让观众知道人物身处何处。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-TEMPLATE-001"
+      ]
+    },
+    "AR-R10-SHOTSIZE-02": {
+      "rule_id": "AR-R10-SHOTSIZE-02",
+      "module_group": "CINEMATIC",
+      "rule_full_text": "中景：承接动作、站位和人物与环境关系；让动作和关系距离可读。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-TEMPLATE-001"
+      ]
+    },
+    "AR-R10-SHOTSIZE-03": {
+      "rule_id": "AR-R10-SHOTSIZE-03",
+      "module_group": "CINEMATIC",
+      "rule_full_text": "近景：传递情绪、眼神和即时反应；把注意力移到人物感受。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-TEMPLATE-001"
+      ]
+    },
+    "AR-R10-SHOTSIZE-04": {
+      "rule_id": "AR-R10-SHOTSIZE-04",
+      "module_group": "CINEMATIC",
+      "rule_full_text": "特写：放大手、道具、泪光等有剧情功能的细节；只强调推动剧情或心理外化的细节。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-TEMPLATE-001"
+      ]
+    },
+    "AR-R10-LIGHT-01": {
+      "rule_id": "AR-R10-LIGHT-01",
+      "module_group": "CINEMATIC",
+      "rule_full_text": "冷色顶光：功能=紧张,压迫,审讯,危险；有源转译=冷月光,高窗冷光,阴冷廊光,偏冷天光。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-LIGHT-001"
+      ]
+    },
+    "AR-R10-LIGHT-02": {
+      "rule_id": "AR-R10-LIGHT-02",
+      "module_group": "CINEMATIC",
+      "rule_full_text": "逆光候选仅在真实后/侧后光源成立时采用；室外清澈空气允许有源逆光，室内须绑定具体开启开口或已有场内灯火；闭窗纸漫射不自动生成轮廓或开窗。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-LIGHT-001"
+      ]
+    },
+    "AR-R10-LIGHT-03": {
+      "rule_id": "AR-R10-LIGHT-03",
+      "module_group": "CINEMATIC",
+      "rule_full_text": "底光：功能=恐怖,诡异,反常,不安；有源转译=火光,药炉光,烛火下照,火场反光。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-LIGHT-001"
+      ]
+    },
+    "AR-R10-LIGHT-04": {
+      "rule_id": "AR-R10-LIGHT-04",
+      "module_group": "CINEMATIC",
+      "rule_full_text": "丁达尔光候选必须同时有定向光和已建立的真实烟雾尘水汽；普通清洁室内禁用，不能由光效自己发明介质或香炉。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-LIGHT-001"
+      ]
+    },
+    "AR-R10-VOICE-001": {
+      "rule_id": "AR-R10-VOICE-001",
+      "module_group": "VOICE",
+      "rule_full_text": "带对白镜的音色必须按基础声线、言语行为、当前表达、发声方式空标题、音量、语速与节奏、呼吸、停顿、重音、尾音、禁止语气固定顺序填写；基础声线覆盖年龄感/音区/厚薄/明暗/长期特征，重音逐字来自本镜实际对白，禁止语气2—4项，不追加统一中性模板；无对白镜固定写无对白，不适用。",
+      "trigger_condition": "R10-SPC-1正式镜头生成、修正、导出或独立审计",
+      "pass_condition": "音色结构、内容和本镜对白重音全部通过，独审禁项与声音层逐镜提交field:镜头编号.音色证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-PUNCT-01": {
+      "rule_id": "AR-R10-PUNCT-01",
+      "module_group": "PUNCT",
+      "rule_full_text": "，：真实短停顿与语义分层；适用=思考,犹豫,试探,撒娇,安慰。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-PUNCT-004"
+      ]
+    },
+    "AR-R10-PUNCT-02": {
+      "rule_id": "AR-R10-PUNCT-02",
+      "module_group": "PUNCT",
+      "rule_full_text": "。：尾音收住、情绪落地；适用=平静,冷淡,克制,陈述。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-PUNCT-004"
+      ]
+    },
+    "AR-R10-PUNCT-03": {
+      "rule_id": "AR-R10-PUNCT-03",
+      "module_group": "PUNCT",
+      "rule_full_text": "！：加强情绪和重音；适用=警告,愤怒,兴奋,震惊。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-PUNCT-004"
+      ]
+    },
+    "AR-R10-PUNCT-04": {
+      "rule_id": "AR-R10-PUNCT-04",
+      "module_group": "PUNCT",
+      "rule_full_text": "？：疑问、试探或尾音变化；适用=疑问,怀疑,不确定,撒娇式询问。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-PUNCT-004"
+      ]
+    },
+    "AR-R10-PUNCT-05": {
+      "rule_id": "AR-R10-PUNCT-05",
+      "module_group": "PUNCT",
+      "rule_full_text": "？！：质问与爆发叠加；适用=愤怒,震惊,强质问。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-PUNCT-004"
+      ]
+    },
+    "AR-R10-PUNCT-06": {
+      "rule_id": "AR-R10-PUNCT-06",
+      "module_group": "PUNCT",
+      "rule_full_text": "……：情绪卡住并产生明显停顿；适用=难过,委屈,害怕,紧张,舍不得。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-PUNCT-004"
+      ]
+    },
+    "AR-R10-PUNCT-07": {
+      "rule_id": "AR-R10-PUNCT-07",
+      "module_group": "PUNCT",
+      "rule_full_text": "～：尾音轻快、柔软或拉长；适用=开心,撒娇,亲近,温柔。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-PUNCT-004"
+      ]
+    },
+    "AR-R10-PUNCT-08": {
+      "rule_id": "AR-R10-PUNCT-08",
+      "module_group": "PUNCT",
+      "rule_full_text": "——：转折、打断、强调或情绪断裂；适用=震惊,迟疑,突然意识到,强调。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-PUNCT-004"
+      ]
+    },
+    "AR-R10-VOICE-T01": {
+      "rule_id": "AR-R10-VOICE-T01",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为开心/兴奋时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T02": {
+      "rule_id": "AR-R10-VOICE-T02",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为难过/委屈时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T03": {
+      "rule_id": "AR-R10-VOICE-T03",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为愤怒/质问时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T04": {
+      "rule_id": "AR-R10-VOICE-T04",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为警告/压迫感时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T05": {
+      "rule_id": "AR-R10-VOICE-T05",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为紧张/害怕时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T06": {
+      "rule_id": "AR-R10-VOICE-T06",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为怀疑/试探时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T07": {
+      "rule_id": "AR-R10-VOICE-T07",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为安慰/温柔坚定时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T08": {
+      "rule_id": "AR-R10-VOICE-T08",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为思考/犹豫时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T09": {
+      "rule_id": "AR-R10-VOICE-T09",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为舍不得/挽留时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T10": {
+      "rule_id": "AR-R10-VOICE-T10",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为反派/掌控感时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T11": {
+      "rule_id": "AR-R10-VOICE-T11",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为撒娇/亲近时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-VOICE-T12": {
+      "rule_id": "AR-R10-VOICE-T12",
+      "module_group": "VOICE",
+      "rule_full_text": null,
+      "trigger_condition": "台词情绪为惊讶/不敢相信时",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-PSYCH-001": {
+      "rule_id": "AR-R10-PSYCH-001",
+      "module_group": "PSYCH",
+      "rule_full_text": "心理音轨不张嘴、不驱动口型、不生成字幕、不计入角色对白。",
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": [
+        "E-PSYCH-001"
+      ]
+    },
+    "AR-R10-BATCH-001": {
+      "rule_id": "AR-R10-BATCH-001",
+      "module_group": "COMPACT_MASTER",
+      "rule_full_text": "正式镜头保留剧情所需时长，不设旧批次4秒下限；R10-SPC-1 Seedance 2.5内部计时视图必须恰好3个一位小数标准阶段，从0.0开始、连续不重叠并以镜头时长结束。 对外画面内容使用自然动作顺序，不显示数字制作时间标记；计时注释仅在picture_timing中绑定正文，修正不得将时间码补回正文。",
+      "trigger_condition": "新生成、重建、修正、审计或十列母版导出",
+      "pass_condition": "阶段恰好3个、格式标准、边界连续并与镜头时长闭合",
+      "linked_error_codes": [
+        "E-BATCH-002",
+        "E-JIMENG-TIMING-001",
+        "E-TIMELINE-001"
+      ]
+    },
+    "AR-R10-C-001": {
+      "rule_id": "AR-R10-C-001",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-002": {
+      "rule_id": "AR-R10-C-002",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-003": {
+      "rule_id": "AR-R10-C-003",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-004": {
+      "rule_id": "AR-R10-C-004",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-005": {
+      "rule_id": "AR-R10-C-005",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-006": {
+      "rule_id": "AR-R10-C-006",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-007": {
+      "rule_id": "AR-R10-C-007",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "短于4秒的正式镜头",
+      "pass_condition": "不因旧批次规则拉长或复制镜头",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-008": {
+      "rule_id": "AR-R10-C-008",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-009": {
+      "rule_id": "AR-R10-C-009",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-010": {
+      "rule_id": "AR-R10-C-010",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-011": {
+      "rule_id": "AR-R10-C-011",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-012": {
+      "rule_id": "AR-R10-C-012",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-013": {
+      "rule_id": "AR-R10-C-013",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-014": {
+      "rule_id": "AR-R10-C-014",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-015": {
+      "rule_id": "AR-R10-C-015",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-016": {
+      "rule_id": "AR-R10-C-016",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-017": {
+      "rule_id": "AR-R10-C-017",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-018": {
+      "rule_id": "AR-R10-C-018",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-019": {
+      "rule_id": "AR-R10-C-019",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-020": {
+      "rule_id": "AR-R10-C-020",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-021": {
+      "rule_id": "AR-R10-C-021",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-022": {
+      "rule_id": "AR-R10-C-022",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-023": {
+      "rule_id": "AR-R10-C-023",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-C-024": {
+      "rule_id": "AR-R10-C-024",
+      "module_group": "CONFLICT",
+      "rule_full_text": null,
+      "trigger_condition": "相关任务触发",
+      "pass_condition": "输出满足规则且给出具体证据",
+      "linked_error_codes": null
+    },
+    "AR-R10-PG1-001": {
+      "rule_id": "AR-R10-PG1-001",
+      "module_group": "PREVENTIVE_GATES",
+      "rule_full_text": "正式生成、审计、修复与归档必须使用workflow_profile=R10-PG1并提交完整prevention_evidence。",
+      "trigger_condition": "audit/repair/archive",
+      "pass_condition": "PG1档案与十道门禁证据完整",
+      "linked_error_codes": [
+        "E-GATE-001"
+      ]
+    },
+    "AR-R10-PG1-002": {
+      "rule_id": "AR-R10-PG1-002",
+      "module_group": "SCOPE_LOCK",
+      "rule_full_text": "每轮任务只允许一个权威输入，必须锁定任务范围、保护范围与R10-PG1修订。",
+      "trigger_condition": "所有分镜任务",
+      "pass_condition": "scope_lock四项完整",
+      "linked_error_codes": [
+        "E-GATE-001"
+      ]
+    },
+    "AR-R10-PG1-003": {
+      "rule_id": "AR-R10-PG1-003",
+      "module_group": "SOURCE",
+      "rule_full_text": "每个正式镜必须进入源文台账；关键事件与关键对白映射率必须为100%。",
+      "trigger_condition": "生成与审计",
+      "pass_condition": "所有shot_id被有效source ledger覆盖",
+      "linked_error_codes": [
+        "E-SOURCE-005"
+      ]
+    },
+    "AR-R10-PG1-004": {
+      "rule_id": "AR-R10-PG1-004",
+      "module_group": "CHANGE_LOCK",
+      "rule_full_text": "每轮修改同时建立must_include与must_exclude；旧内容命中一次即失败。",
+      "trigger_condition": "修改、替换、修复",
+      "pass_condition": "必含全部命中且禁用内容零命中",
+      "linked_error_codes": [
+        "E-SOURCE-005",
+        "E-CHANGELOCK-001"
+      ]
+    },
+    "AR-R10-PG1-005": {
+      "rule_id": "AR-R10-PG1-005",
+      "module_group": "COGNITION",
+      "rule_full_text": "人物必须记录已知、未知、关系阶段、情感阶段和禁止表达，防止认知或感情提前。",
+      "trigger_condition": "人物剧情与对白",
+      "pass_condition": "认知矩阵完整并用于审计",
+      "linked_error_codes": [
+        "E-COGNITION-001"
+      ]
+    },
+    "AR-R10-PG1-006": {
+      "rule_id": "AR-R10-PG1-006",
+      "module_group": "CONTINUITY",
+      "rule_full_text": "七项场景状态向量必须同时记录start/end；起始状态不得已包含本镜核心动作的完成结果。",
+      "trigger_condition": "所有正式镜头",
+      "pass_condition": "action_progress_start与action_progress_end分离且起始未越过本镜动作",
+      "linked_error_codes": [
+        "E-CONTINUITY-001"
+      ]
+    },
+    "AR-R10-PG1-007": {
+      "rule_id": "AR-R10-PG1-007",
+      "module_group": "CONTINUITY",
+      "rule_full_text": "镜头数N必须产生恰好N-1个按canonical顺序的相邻组，覆盖同场、跨场和跨集边界；每组绑定左镜end_state、右镜start_state、七项状态向量、边界类型、transition_explanation、双方状态SHA-256和有序pair集合SHA-256。同场状态必须闭合或由可见变化解释；跨场/跨集必须明确时空切换。同一时点每件prop_id只有一个主要持有人，交接过程明确holder/state起止。",
+      "trigger_condition": "所有正式分镜；N>=2时逐组触发",
+      "pass_condition": "N-1组100%唯一有序覆盖，状态/道具闭合，边界说明与全部哈希一致",
+      "linked_error_codes": [
+        "E-CONTINUITY-001"
+      ]
+    },
+    "AR-R10-PG1-008": {
+      "rule_id": "AR-R10-PG1-008",
+      "module_group": "SHOT_GRANULARITY",
+      "rule_full_text": "单镜只有一个主机位、一个视角和一个核心叙事/动作阶段；仅允许该阶段内部相互依赖的连续动作。",
+      "trigger_condition": "所有正式镜头",
+      "pass_condition": "camera_position/viewpoint/core_function/main_action_stage均唯一",
+      "linked_error_codes": [
+        "E-BATCH-004"
+      ]
+    },
+    "AR-R10-PG1-009": {
+      "rule_id": "AR-R10-PG1-009",
+      "module_group": "SHOT_GRANULARITY",
+      "rule_full_text": "每镜具名/主要可见人物不超过3人；公共场景背景普通人物在环境生态证据中记录，不计入主要人物数且不得抢戏。",
+      "trigger_condition": "所有正式镜头",
+      "pass_condition": "primary_visible_subject_count<=3且背景生态与主要人物分层",
+      "linked_error_codes": [
+        "E-VIS-001"
+      ]
+    },
+    "AR-R10-PG1-010": {
+      "rule_id": "AR-R10-PG1-010",
+      "module_group": "SHOT_GRANULARITY",
+      "rule_full_text": "手、脚步、眼神、道具特写必须推动剧情、信息或情绪；无功能则合并或删除。",
+      "trigger_condition": "特写镜头",
+      "pass_condition": "detail_shot_function明确",
+      "linked_error_codes": [
+        "E-SHOTFRAG-001"
+      ]
+    },
+    "AR-R10-PG1-011": {
+      "rule_id": "AR-R10-PG1-011",
+      "module_group": "PERFORMANCE_CHAIN",
+      "rule_full_text": "台词和重要情绪镜必须形成刺激、听/看反应、视线路径、微表情、生态动作、身体呼吸与结束状态。",
+      "trigger_condition": "带台词或重要情绪镜",
+      "pass_condition": "七项表演链完整且均可见",
+      "linked_error_codes": [
+        "E-PERFORMANCE-001"
+      ]
+    },
+    "AR-R10-PG1-012": {
+      "rule_id": "AR-R10-PG1-012",
+      "module_group": "COMPACT_MASTER",
+      "rule_full_text": "正式母版必须从零上下文写清完整单镜；GPT关键帧首行写画幅：9:16竖屏，只从场景、主体、站位、起始静态姿态、机位、光影四项、环境静态瞬间、参考锚点和生成限制投影，动态过程/转场/时间词零命中。",
+      "trigger_condition": "正式单镜母版或GPT关键帧导出",
+      "pass_condition": "正式母版自包含且GPT仅含静态白名单字段",
+      "linked_error_codes": [
+        "E-JIMENG-TIMING-001"
+      ]
+    },
+    "AR-R10-PG1-013": {
+      "rule_id": "AR-R10-PG1-013",
+      "module_group": "COMPACT_MASTER",
+      "rule_full_text": "正式单镜母版与GPT投影都禁止承接上一镜、保持上一关键帧、同上、延续之前、继续刚才等历史上下文代指。",
+      "trigger_condition": "正式母版或GPT投影导出",
+      "pass_condition": "禁词零命中且两列均可空白上下文执行",
+      "linked_error_codes": [
+        "E-I2V-INDEP-001"
+      ]
+    },
+    "AR-R10-PG1-014": {
+      "rule_id": "AR-R10-PG1-014",
+      "module_group": "AUDIO_WORKFLOW",
+      "rule_full_text": "正式单镜母版与GPT投影的`BGM`字面量必须零命中，负面限制统一写`禁止额外配乐`；画面锁定后才可在独立音乐Cue工作流中讨论配乐。",
+      "trigger_condition": "正式母版、GPT投影或配乐任务",
+      "pass_condition": "两列BGM字面量零命中且后期Cue阶段独立",
+      "linked_error_codes": [
+        "E-AUDIO-STAGE-001"
+      ]
+    },
+    "AR-R10-PG1-015": {
+      "rule_id": "AR-R10-PG1-015",
+      "module_group": "REGRESSION",
+      "rule_full_text": "每次修正必须回归原问题、相邻镜头、受影响场景、全局硬规则及canonical→投影→XLSX→反向解析哈希；多行对白必须完整保留。保留不可变来源中的全部历史修正观察；当前门禁使用最新实际完整检查，不把已归档的失败计数永久作为当前阻断，也不接受追加零或旧检查证明。来源归因待定仍为未知，机器观察不是独立语义签证。",
+      "trigger_condition": "任何修复或导出器/解析器修改",
+      "pass_condition": "当前候选实测残留0、新增0、保护范围未变且反向哈希一致；历史失败保留，当前检查绑定完整候选、历史前缀及检查器",
+      "linked_error_codes": [
+        "E-REGRESSION-001",
+        "E-REGRESSION-002",
+        "E-INTEGRATION-001"
+      ]
+    },
+    "AR-R10-PG1-016": {
+      "rule_id": "AR-R10-PG1-016",
+      "module_group": "SYSTEMIC_ESCALATION",
+      "rule_full_text": "重复问题按实际根因、变更差异与依赖失效选择修正范围；轮数只记录，不强制重建、停止或令真实修复永久失败。",
+      "trigger_condition": "重复问题",
+      "pass_condition": "repeat_rounds与升级动作匹配",
+      "linked_error_codes": [
+        "E-SYSTEMIC-001"
+      ]
+    },
+    "AR-R10-PG1-017": {
+      "rule_id": "AR-R10-PG1-017",
+      "module_group": "JIMENG_TIMING",
+      "rule_full_text": "R10-SPC-1目标锁定Seedance 2.5时，现有内部计时检查保留三个连续闭合的阶段并覆盖本镜时长；数值注释仅通过picture_timing绑定当前正文。对外画面内容使用自然动作顺序，不显示数字制作时间标记，也不为凑段落新增动作。旧版缺少内部计时的自然描述可读入，但不能据此宣称计时检查通过。GPT关键帧首行写画幅：9:16竖屏，时间码、运镜、转场和几秒后等过程词不得进入静态投影。",
+      "trigger_condition": "新生成、重建、修正、审计或十列母版导出",
+      "pass_condition": "内部计时与正文绑定且连续闭合；画面正文不含数字制作时间标记；GPT投影含9:16竖屏并仅保留静态语义",
+      "linked_error_codes": [
+        "E-JIMENG-TIMING-001",
+        "E-TIMELINE-001",
+        "E-I2V-INDEP-002"
+      ]
+    },
+    "AR-R10-PG1-018": {
+      "rule_id": "AR-R10-PG1-018",
+      "module_group": "CHAPTER_INTAKE",
+      "rule_full_text": "小说章节可分块读取，但必须全部分块完成并合并为唯一章节地图后才能规划节拍或镜头，禁止边读边生成。",
+      "trigger_condition": "source_ingestion.mode=chapter_to_storyboard",
+      "pass_condition": "complete_read=true且chunks_read=chunk_count",
+      "linked_error_codes": [
+        "E-CHAPTER-INTAKE-001"
+      ]
+    },
+    "AR-R10-PG1-019": {
+      "rule_id": "AR-R10-PG1-019",
+      "module_group": "CHAPTER_MAP",
+      "rule_full_text": "章节必须锁定前后边界、章节目标、核心事件、原因行动结果链和高潮结尾状态。",
+      "trigger_condition": "小说章节转分镜",
+      "pass_condition": "边界、事件、因果链和目标均非空且映射节拍",
+      "linked_error_codes": [
+        "E-CHAPTER-INTAKE-001"
+      ]
+    },
+    "AR-R10-PG1-020": {
+      "rule_id": "AR-R10-PG1-020",
+      "module_group": "SOURCE_SELECTION",
+      "rule_full_text": "S/A/B/C只能是因果、信息、人物变化、冲突回报、情绪、电影功能、重复度和制作可行性评估后的结果，禁止见字即拍。",
+      "trigger_condition": "章节内容取舍",
+      "pass_condition": "每个源文单元有价值轴、等级、处理方式和理由",
+      "linked_error_codes": [
+        "E-SOURCE-SELECT-001"
+      ]
+    },
+    "AR-R10-PG1-021": {
+      "rule_id": "AR-R10-PG1-021",
+      "module_group": "SOURCE_SELECTION",
+      "rule_full_text": "C级仅是删除候选；删除必须有用户授权或冗余证据，时间空间情绪伏笔转场和人物生态功能必须被其他节拍承接。",
+      "trigger_condition": "源文单元处理为删除",
+      "pass_condition": "授权或冗余证据成立且电影功能已迁移",
+      "linked_error_codes": [
+        "E-SOURCE-SELECT-001"
+      ]
+    },
+    "AR-R10-PG1-022": {
+      "rule_id": "AR-R10-PG1-022",
+      "module_group": "DIALOGUE_PROTECTION",
+      "rule_full_text": "新事实、认知关系变化、决定承诺威胁、冲突反转爽点、因果桥、角色声音和章节钩子对白必须进入保护清单并映射节拍；canonical、正式母版和XLSX反向解析必须逐字保留说话人、文本、标点、顺序和多行分段。",
+      "trigger_condition": "章节存在对白或执行投影/表格转换",
+      "pass_condition": "保护对白覆盖率100%，说话人、功能、文本、标点、顺序和多行分段完全一致",
+      "linked_error_codes": [
+        "E-SOURCE-SELECT-001"
+      ]
+    },
+    "AR-R10-PG1-023": {
+      "rule_id": "AR-R10-PG1-023",
+      "module_group": "CHARACTER_STATE",
+      "rule_full_text": "每个关键人物必须记录开始状态、触发事件、结束状态、认知前后和禁止提前表达信息。",
+      "trigger_condition": "章节有人物状态变化",
+      "pass_condition": "状态和认知变化完整且触发事件存在",
+      "linked_error_codes": [
+        "E-CHAPTER-INTAKE-001",
+        "E-COGNITION-001"
+      ]
+    },
+    "AR-R10-PG1-024": {
+      "rule_id": "AR-R10-PG1-024",
+      "module_group": "ADAPTATION_BUDGET",
+      "rule_full_text": "先用同源timing_policy逐发言、事件时间轴计算章节与单镜预算，再核对转场和高潮留时与镜头数范围；真实先后相加、可并行共用，不得固定叠加呼吸/反应/镜尾或挤压核心剧情。",
+      "trigger_condition": "章节转分镜或单镜含对白/动作/反应",
+      "pass_condition": "逐发言/阶段容量闭合，章节实际事件和转场预算可行，镜头数范围有依据",
+      "linked_error_codes": [
+        "E-BATCH-003",
+        "E-CHAPTER-BUDGET-001"
+      ]
+    },
+    "AR-R10-PG1-025": {
+      "rule_id": "AR-R10-PG1-025",
+      "module_group": "BEAT_PLAN",
+      "rule_full_text": "章节必须经过源文单元到事件/节拍再到镜头的三层转换，禁止一句一镜和直接逐段拍摄。",
+      "trigger_condition": "章节转分镜",
+      "pass_condition": "所有核心事件和非删除源文单元进入有效节拍",
+      "linked_error_codes": [
+        "E-CHAPTER-BUDGET-001",
+        "E-SOURCE-SELECT-001"
+      ]
+    },
+    "AR-R10-PG1-026": {
+      "rule_id": "AR-R10-PG1-026",
+      "module_group": "SOURCE_EXPANSION",
+      "rule_full_text": "只允许有源依据的表情眼神呼吸手部身体环境摄影与光影；未经授权禁止新增事件冲突人物行为决定动机信息或结果。",
+      "trigger_condition": "小说内容视觉化",
+      "pass_condition": "new_plot_events为空且条件外化plot_change=false",
+      "linked_error_codes": [
+        "E-SOURCE-EXPANSION-001"
+      ]
+    },
+    "AR-R10-PG1-027": {
+      "rule_id": "AR-R10-PG1-027",
+      "module_group": "CHAPTER_COVERAGE_AUDIT",
+      "rule_full_text": "生成前和生成后核心事件、因果链、人物状态变化、保护对白和源文处理率均必须达到100%。",
+      "trigger_condition": "章节转分镜",
+      "pass_condition": "五项覆盖率均为100且边界闭合",
+      "linked_error_codes": [
+        "E-CHAPTER-INTAKE-001",
+        "E-SOURCE-SELECT-001"
+      ]
+    },
+    "AR-R10-PG1-028": {
+      "rule_id": "AR-R10-PG1-028",
+      "module_group": "COMPACT_MASTER",
+      "rule_full_text": "十列依次为分镜序号、时长、累计时长、功能类型/场景连续性ID、正式分镜母版、GPT关键帧生成指令、参考图锚定、覆盖原文、原文依据类型、原文支撑句；第五列每格以EP编号/时长/集内累计首行开头；正式母版逐镜生成限制和GPT首行都明确9:16竖屏；导出前执行THG-01至THG-17，覆盖眼神/眨眼/静帧自然性、相邻镜头N-1逐组证明、音色固定子模板、原文事实转化对白逐单元证明和静帧可见光影物理证明，并继续执行转场去重、静态关键帧、跨上下文禁用、对白/多行round-trip与canonical哈希一致性；生产审计覆盖层固定PENDING_AUDIT且计数/trace为空；禁止Seedance列和生成批次表。",
+      "trigger_condition": "正式母版导出",
+      "pass_condition": "十列名称顺序精确，正式母版唯一可执行，GPT仅确定性静态投影，THG全通过且审计未签发状态真实",
+      "linked_error_codes": [
+        "E-I2V-INDEP-002",
+        "E-DUPLICATE-GENERATION-001",
+        "E-JIMENG-TIMING-001",
+        "E-I2V-INDEP-001",
+        "E-SOURCE-SELECT-001",
+        "E-VIS-001",
+        "E-BATCH-004",
+        "E-CONTINUITY-001",
+        "E-EXPRESSION-003",
+        "E-VOICE-001",
+        "E-ADAPTED-DIALOGUE-001",
+        "E-T2I-001",
+        "E-LIGHT-001",
+        "E-BATCH-003",
+        "E-INTEGRATION-001",
+        "E-ARCHIVE-001"
+      ]
+    },
+    "AR-R10-PG1-029": {
+      "rule_id": "AR-R10-PG1-029",
+      "module_group": "PUBLIC_SCENE_ECOLOGY",
+      "rule_full_text": "公共流动场景必须出现与地点和时代匹配的普通人物；只有同时写明可见空场状态及宵禁闭市封锁疏散等剧情原因时才可豁免。",
+      "trigger_condition": "街道市集商街巷道城门码头驿站公共餐饮寺院店铺等公共流动场景",
+      "pass_condition": "普通人物角色可见且生成限制未排除，或空场状态与原因双证据齐全",
+      "linked_error_codes": [
+        "E-PUBLIC-ECOLOGY-001"
+      ]
+    },
+    "AR-R10-PG1-030": {
+      "rule_id": "AR-R10-PG1-030",
+      "module_group": "PUBLIC_SCENE_ECOLOGY",
+      "rule_full_text": "非豁免公共镜必须写人流密度或人数、地点角色、彼此错峰的生活动作和与景别匹配的空间层次；禁止只写人群或路人。",
+      "trigger_condition": "非豁免公共场景",
+      "pass_condition": "密度角色动作空间层次全部可执行",
+      "linked_error_codes": [
+        "E-PUBLIC-CROWD-001"
+      ]
+    },
+    "AR-R10-PG1-031": {
+      "rule_id": "AR-R10-PG1-031",
+      "module_group": "PUBLIC_SCENE_ECOLOGY",
+      "rule_full_text": "公共建立全远景至少三类具体声源和近中远三层声场，其他景别至少两类和两层；带台词镜必须明确环境底声压低且不遮盖对白。",
+      "trigger_condition": "非豁免公共场景",
+      "pass_condition": "具体声源数量声场层次与对白避让满足景别规则",
+      "linked_error_codes": [
+        "E-PUBLIC-AUDIO-001"
+      ]
+    },
+    "AR-R10-PG1-032": {
+      "rule_id": "AR-R10-PG1-032",
+      "module_group": "PUBLIC_SCENE_ECOLOGY",
+      "rule_full_text": "可识别声音必须有画内可见或可信画外声源；匿名群演不得说清晰完整对白；唯一正式母版的环境音效和环境动态必须从零复现公共人物与声音生态。",
+      "trigger_condition": "公共场景正式镜头",
+      "pass_condition": "声画有源、无匿名完整对白和时代错位声音、母版可脱离上下文执行",
+      "linked_error_codes": [
+        "E-PUBLIC-AVSYNC-001"
+      ]
+    },
+    "AR-R10-PG1-033": {
+      "rule_id": "AR-R10-PG1-033",
+      "module_group": "PUBLIC_SCENE_ECOLOGY",
+      "rule_full_text": "同一公共场景相邻镜的人流密度流向出入口主要背景角色和环境声床必须连续；变化必须由涌入散开疏散离开或时间推进可见解释。",
+      "trigger_condition": "同一公共场景有连续镜",
+      "pass_condition": "生态连续或变化有可见过渡",
+      "linked_error_codes": [
+        "E-PUBLIC-CONT-001"
+      ]
+    },
+    "AR-R10-PG1-034": {
+      "rule_id": "AR-R10-PG1-034",
+      "module_group": "SOURCE_DIALOGUE_ADAPTATION",
+      "rule_full_text": "原文直接对白逐字逐标点保护；授权范围内每个叙述单元必须判定为叙述性会话、混合会话或非会话，不以引号或言语动词为前提。问答、劝决、令应、报听、辩核、证判等交流闭环必须还原对白，不得机械改成无声动作。采用原文事实转化对白时必须明确标为非原文逐字对白，并绑定源文顺序、逐字原文事实、场景语义、交流功能、交流双方、开口必要性、说话人依据、事实原子、目标镜头、用户授权、plot_change=false、new_plot_facts=[]及entailed_by_source；音色重音以本镜实际对白为准。 仅当原文确实只声明交代、完整回答、道歉或听医嘱事件而未给交流内容，可采用source-content-limit-v1客观叙述窄例外；采用例外的父段按Unicode连续范围完整分割，已给交流仍走普通转化对白，直接引号子段保持THG-05保护occurrence独立路由且不计入adapted entries。event_only子段逐字绑定原文与SHA、目标镜客观旁白/实际画面全文SHA，并保持会话分类及source_event_only_pending_independent。生产只能结构验证，不能自签unknown或独审通过；最终独立源文层必须按序提交source-limit:adaptation_id:绑定digest及实际心理音轨/画面字段证据，源文、范围、分段或输出改变即失效。该例外只证明事件忠实呈现，不认证未给医嘱详单。",
+      "trigger_condition": "用户授权小说叙述转对白的章节或集范围",
+      "pass_condition": "source-fact-dialogue-v1台账按授权范围100%覆盖，所有改编对白逐条映射且独审源文对白层按序引用全部source-unit及目标镜画面内容；若采用未给内容例外，完整父段/原句保护/实际输出绑定及独立source-limit证据均通过，未给内容不伪称entailed_by_source",
+      "linked_error_codes": [
+        "E-ADAPTED-DIALOGUE-001",
+        "E-SOURCE-EXPANSION-001",
+        "E-SOURCE-SELECT-001",
+        "E-VOICE-001"
+      ]
+    },
+    "AR-R10-PG1-035": {
+      "rule_id": "AR-R10-PG1-035",
+      "module_group": "T2I_LIGHTING",
+      "rule_full_text": "GPT关键帧只保留单帧可见事实或摄影可控参数；抽象情绪、声音、象征和未来信息须先转为可见证据，否则删除。普通室内保留光源方向字段但使用前侧/侧面大面积漫射明暗，锁定空气清澈、背景可辨、不泛白不雾化及门窗原状态，禁用无依据雾烟、穿插光束、柔焦扩散、强逆光和轮廓光；室外氛围光与室内剧情介质须满足真实光源、散射介质及局部受控前提。室外有源逆光不以雾烟为前提；空气雾感/可见光束才额外需要散射介质。金属湿地的反射高光不是室内halation例外。",
+      "trigger_condition": "R10-SPC-1正式母版光影字段及GPT关键帧投影",
+      "pass_condition": "静帧不可见语义零命中，室内外光影分流正确，普通室内背景清晰，光影四项与场景/门窗/物理前提闭合，独审机位可见性层逐镜按序覆盖四项字段",
+      "linked_error_codes": [
+        "E-T2I-001",
+        "E-LIGHT-001",
+        "E-LIGHT-002"
+      ]
+    },
+    "AR-R10-FIELD-001": {
+      "rule_id": "AR-R10-FIELD-001",
+      "module_group": "T2I_PROMPT",
+      "rule_full_text": "27字段、音色11个标签及GPT十个固定段和可选造型锚按field_content_policy执行；模型不得自由替写E/F整格，摄影视角、初态及光影复用同一生产决定，当前可见文字与真实对白分开；已知错列阻断，未知语义须独审，不以字段合规承诺正确率。",
+      "trigger_condition": "新分镜生成、修正、正式母版和GPT投影及十列导出",
+      "pass_condition": "字段结构和归属检查通过，实际输出来自对应数据且保留真实字面内容；开放语义有独立证据",
+      "linked_error_codes": [
+        "E-FIELD-CONTENT-001"
+      ]
+    },
+    "AR-R10-EPISODE-001": {
+      "rule_id": "AR-R10-EPISODE-001",
+      "module_group": "EPISODE_RULES",
+      "rule_full_text": "整集时长与范围必须按episode_rule_policy和实际内容核对；片段/未知不得认证整集，来源例外不得自报跳过。",
+      "trigger_condition": "所有实际时间轴；完整集附加聚合与来源证据检查",
+      "pass_condition": "episode_rules对应检查无失败且适用范围证据完整；语义与成片结论独立",
+      "linked_error_codes": [
+        "E-EPISODE-DURATION-001"
+      ]
+    },
+    "AR-R10-EPISODE-002": {
+      "rule_id": "AR-R10-EPISODE-002",
+      "module_group": "EPISODE_RULES",
+      "rule_full_text": "分集合同身份必须按episode_rule_policy和实际内容核对；片段/未知不得认证整集，来源例外不得自报跳过。",
+      "trigger_condition": "所有实际时间轴；完整集附加聚合与来源证据检查",
+      "pass_condition": "episode_rules对应检查无失败且适用范围证据完整；语义与成片结论独立",
+      "linked_error_codes": [
+        "E-EPISODE-CONTRACT-001"
+      ]
+    },
+    "AR-R10-EPISODE-003": {
+      "rule_id": "AR-R10-EPISODE-003",
+      "module_group": "EPISODE_RULES",
+      "rule_full_text": "开头面部窗口必须按episode_rule_policy和实际内容核对；片段/未知不得认证整集，来源例外不得自报跳过。",
+      "trigger_condition": "所有实际时间轴；完整集附加聚合与来源证据检查",
+      "pass_condition": "episode_rules对应检查无失败且适用范围证据完整；语义与成片结论独立",
+      "linked_error_codes": [
+        "E-EPISODE-OPENING-001"
+      ]
+    },
+    "AR-R10-EPISODE-004": {
+      "rule_id": "AR-R10-EPISODE-004",
+      "module_group": "EPISODE_RULES",
+      "rule_full_text": "节拍与钩子交付必须按episode_rule_policy和实际内容核对；片段/未知不得认证整集，来源例外不得自报跳过。",
+      "trigger_condition": "所有实际时间轴；完整集附加聚合与来源证据检查",
+      "pass_condition": "episode_rules对应检查无失败且适用范围证据完整；语义与成片结论独立",
+      "linked_error_codes": [
+        "E-EPISODE-BEAT-001"
+      ]
+    },
+    "AR-R10-EPISODE-005": {
+      "rule_id": "AR-R10-EPISODE-005",
+      "module_group": "EPISODE_RULES",
+      "rule_full_text": "对白实际占用必须按episode_rule_policy和实际内容核对；片段/未知不得认证整集，来源例外不得自报跳过。",
+      "trigger_condition": "所有实际时间轴；完整集附加聚合与来源证据检查",
+      "pass_condition": "episode_rules对应检查无失败且适用范围证据完整；语义与成片结论独立",
+      "linked_error_codes": [
+        "E-EPISODE-DIALOGUE-001"
+      ]
+    },
+    "AR-R10-EPISODE-006": {
+      "rule_id": "AR-R10-EPISODE-006",
+      "module_group": "EPISODE_RULES",
+      "rule_full_text": "有效短镜比例必须按episode_rule_policy和实际内容核对；片段/未知不得认证整集，来源例外不得自报跳过。",
+      "trigger_condition": "所有实际时间轴；完整集附加聚合与来源证据检查",
+      "pass_condition": "episode_rules对应检查无失败且适用范围证据完整；语义与成片结论独立",
+      "linked_error_codes": [
+        "E-EPISODE-RHYTHM-001"
+      ]
+    },
+    "AR-R10-EPISODE-007": {
+      "rule_id": "AR-R10-EPISODE-007",
+      "module_group": "EPISODE_RULES",
+      "rule_full_text": "来源功能聚合预算必须按episode_rule_policy和实际内容核对；片段/未知不得认证整集，来源例外不得自报跳过。",
+      "trigger_condition": "所有实际时间轴；完整集附加聚合与来源证据检查",
+      "pass_condition": "episode_rules对应检查无失败且适用范围证据完整；语义与成片结论独立",
+      "linked_error_codes": [
+        "E-EPISODE-SOURCE-BUDGET-001"
+      ]
+    },
+    "AR-R10-EPISODE-008": {
+      "rule_id": "AR-R10-EPISODE-008",
+      "module_group": "EPISODE_RULES",
+      "rule_full_text": "跨集借用与后续边界必须按episode_rule_policy和实际内容核对；片段/未知不得认证整集，来源例外不得自报跳过。",
+      "trigger_condition": "所有实际时间轴；完整集附加聚合与来源证据检查",
+      "pass_condition": "episode_rules对应检查无失败且适用范围证据完整；语义与成片结论独立",
+      "linked_error_codes": [
+        "E-BORROW-CONTRACT-001"
+      ]
+    }
+  },
+  "counterexample_files": {
+    "skills/shortdrama-storyboard/scripts/test_episode_rules.py": "08cfac09e4a7926fa504395f839cc1aec10b1b5916f8d0c26fe16dc9116365f1"
+  },
+  "critical_runtime_policies": {
+    "field_content_policy": {
+      "contract": "storyboard-field-content-v1",
+      "canonical_fields_preserved": 27,
+      "visible_columns_preserved": 10,
+      "new_production_entry": "production-authoring-request-v1",
+      "evidence_scope": "deterministic structure, supported role violations, typed generation and fixed projections; independent source/performance semantics still required",
+      "first_attempts_retained": true,
+      "unknown_is_not_pass": true,
+      "no_silent_clause_deletion_or_rerouting": true,
+      "embedded_heading_policy": {
+        "forbid_foreign_field_headings": true,
+        "exceptions": {
+          "参考图锚定": [
+            "文字造型锚"
+          ]
+        },
+        "literal_scope": "actual spoken or currently visible written payload only"
+      },
+      "fields": {
+        "镜头编号": {
+          "allows": "程序分配的本镜标识",
+          "requires": "不接收自由备注、另一套镜号；对应稳定镜头身份",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "时长": {
+          "allows": "本镜执行时长数值",
+          "requires": "不接收剧情解释；对白、动作、心理音轨和依赖顺序实际可容纳",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "累计时长": {
+          "allows": "同集按序累计结果",
+          "requires": "不由模型手算，不跨集串算",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "功能类型": {
+          "allows": "已确认叙事节拍中的本镜作用",
+          "requires": "不写长篇剧情、审核意见；不得借填功能新增剧情",
+          "forbidden_roles": [
+            "camera",
+            "voice_profile"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "场景连续性ID": {
+          "allows": "已登记场景状态标识",
+          "requires": "不用自由文字代替；换场／跨时空须有对应转换依据",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "镜头类型": {
+          "allows": "景别、构图和单镜拍摄类型",
+          "requires": "不写动作过程、第二机位、剪辑指令；与实际入画范围相符",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "voice_delivery",
+            "future_static",
+            "spoken_payload"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "可见主体": {
+          "allows": "本镜视场内的具名人物、身体局部或道具",
+          "requires": "不列仅被提到的人；声音来自画外不等于声源可见；明确入画时段，GPT 只取起始可见集合",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "voice_delivery",
+            "future_static",
+            "spoken_payload"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "空间站位描述": {
+          "allows": "起始时各对象相对场景锚点的位置、朝向和空间关系",
+          "requires": "不写走近、坐下等过程，不写未来落点；由同一场景和初态数据生成",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "voice_delivery",
+            "future_static",
+            "spoken_payload",
+            "global_policy",
+            "light_height"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "起始状态": {
+          "allows": "起始时刻的姿势、表情、视线、手部和道具状态",
+          "requires": "不写下一步动作／未来结果；不写“承接上镜”“保持原状态”，须展开具体事实",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "voice_delivery",
+            "future_static",
+            "spoken_payload",
+            "global_policy",
+            "light_height"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "机位": {
+          "allows": "摄影机起始位置、高度、朝向、必要镜头参数、焦点对象与部位",
+          "requires": "不写演员动作、声音或剧情结果；焦点须在此刻存在且具备所需可见性，不能对焦未来文字／转身后的眼睛",
+          "forbidden_roles": [
+            "production_note",
+            "voice_profile",
+            "voice_delivery",
+            "future_static",
+            "spoken_payload",
+            "actor_action",
+            "global_policy"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "运镜方式": {
+          "allows": "摄影机及焦点随镜内事件的运动方式、轨迹和终点；无运动时写固定镜头",
+          "requires": "不写人物走位正文、对白或隐藏切镜；起点绑定机位，终点绑定已确认拍摄决定",
+          "forbidden_roles": [
+            "production_note",
+            "voice_profile",
+            "global_policy"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "画面内容": {
+          "allows": "有依据的可见动作、表情变化、视线和道具变化，按自然先后关系表达；准确对白及其说话人／口型事件",
+          "requires": "不写摄影操作、声线参数、光源配置、制作目的、跨镜省略、全局生成禁令或审计结论；无数字制作时间标记；原句中的真实时间保留",
+          "forbidden_roles": [
+            "camera",
+            "voice_profile",
+            "global_policy",
+            "voice_delivery",
+            "production_note",
+            "light_height"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "音色": {
+          "allows": "发言人的稳定声线及当前对白的发声指导，严格按第 5 节子项组织",
+          "requires": "不放摄影、可见动作、新增剧情或改写后的台词；每段绑定说话人和实际对白",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "actor_action",
+            "global_policy",
+            "cross_voice_reference",
+            "light_height"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "心理音轨": {
+          "allows": "有依据并获准的内心独白；以及既有规则允许的客观旁白，明确类别、所属角色／叙述者、原句和音轨属性",
+          "requires": "不把客观旁白冒充人物所知；不让心理话变成嘴部对白。现有“不驱动口型、不生成字幕、不计角色对白”等局部音轨属性留在本字段，不扩成全局杂项",
+          "forbidden_roles": [
+            "camera"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "环境音效": {
+          "allows": "场内声源、具体声音、远近层次及相对事件关系",
+          "requires": "不写人物主对白、音色指导、配乐或摄影；声源可在画外，不能据此添加可见物体",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "global_policy"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "环境动态": {
+          "allows": "背景人物／环境物体的可见运动",
+          "requires": "不写运镜、声音、主角核心动作；不得无依据补风雨烟雾；对应环境事件状态",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "global_policy",
+            "actor_action",
+            "eye_execution",
+            "spoken_payload",
+            "voice_delivery"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "光影": {
+          "allows": "当前光源作用于具体主体／材质的明暗、投影和反射效果",
+          "requires": "不写人物心理、剧情目的或无依据雾化；不在此重复编一套光源位置和色温",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "voice_delivery",
+            "future_static",
+            "spoken_payload",
+            "light_height"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "光源来源": {
+          "allows": "已登记光源的种类、位置及真实开启／遮挡状态",
+          "requires": "不编造灯、窗或天气；不将“紧张、压抑”当作光源",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "voice_delivery",
+            "future_static",
+            "spoken_payload",
+            "actor_action"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "光源方向": {
+          "allows": "光线相对世界、主体与画面的入射方向",
+          "requires": "从光源、机位和主体朝向推导；不照抄已失效的画面左右，不混入声线和动作",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "voice_delivery",
+            "future_static",
+            "spoken_payload",
+            "actor_action",
+            "light_height"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "色温倾向": {
+          "allows": "光源组合所支持的冷暖及主次关系",
+          "requires": "不写照射方向、灯位或情绪；沿用当前定性表达规范，不增加被禁用的 K／开尔文数字",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "voice_delivery",
+            "future_static",
+            "spoken_payload",
+            "actor_action"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "生成限制": {
+          "allows": "项目允许的画幅、额外人物、字幕水印、额外配乐等生成政策",
+          "requires": "不接收剧情、起始状态、摄影参数或审计声明；按视觉／音频等适用对象分类，供不同输出选取",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "转场类型": {
+          "allows": "已登记的剪辑／转换类型",
+          "requires": "不写第二段剧情；须与本镜结束和目标镜关系匹配",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "切镜/转场提示词": {
+          "allows": "具体切点、结束条件、确有依据的目标画面关系",
+          "requires": "不复制完整动作段，不用“承接上一个镜头”代替事实，不追加机械等待或新剧情",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "参考图锚定": {
+          "allows": "真实素材绑定、对象、版本和用途；或有设定依据的文字造型描述与绑定状态",
+          "requires": "不虚构图片 ID、附件已核实结论；文本造型事实与“未附图”等状态分别存储",
+          "forbidden_roles": [
+            "production_note",
+            "camera",
+            "voice_profile",
+            "voice_delivery",
+            "future_static",
+            "spoken_payload",
+            "actor_action"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "覆盖原文": {
+          "allows": "原文位置清单",
+          "requires": "不写剧情梗概、通过率、是／否；定位须能回到锁定来源",
+          "forbidden_roles": [],
+          "source_semantics": "requires_independent_review",
+          "verbatim_source": true
+        },
+        "原文依据类型": {
+          "allows": "已登记分类、实际组合与授权依据",
+          "requires": "不将推断记成原文直述，不替用户新增改编授权",
+          "forbidden_roles": [
+            "camera",
+            "voice_profile"
+          ],
+          "source_semantics": "requires_independent_review"
+        },
+        "原文支撑句": {
+          "allows": "与来源位置一致的逐字文本",
+          "requires": "不允许补写、润色或删否定／条件；不能拿模板样文冒充本集依据",
+          "forbidden_roles": [],
+          "source_semantics": "requires_independent_review",
+          "verbatim_source": true
+        }
+      },
+      "voice_subfields": {
+        "基础声线": {
+          "allows": "来自人物声线档案的年龄感、音区、厚薄、明暗、长期稳定特征",
+          "requires": "临时情绪、语速、动作、机位；不得无依据推测声线",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_delivery",
+            "voice_volume",
+            "voice_speed",
+            "voice_breath",
+            "voice_pause",
+            "voice_emphasis",
+            "voice_tail"
+          ]
+        },
+        "言语行为": {
+          "allows": "本句的询问、请求、拒绝、警告等已确认话语行为",
+          "requires": "走动、皱眉、运镜、未来剧情",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_volume",
+            "voice_speed",
+            "voice_breath",
+            "voice_pause",
+            "voice_emphasis",
+            "voice_tail"
+          ]
+        },
+        "当前表达": {
+          "allows": "本句可执行的声音情绪和有依据的表达意图",
+          "requires": "长篇心理分析、隐藏剧情真相、身体动作、摄影指令",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_volume",
+            "voice_speed",
+            "voice_breath",
+            "voice_pause",
+            "voice_emphasis",
+            "voice_tail"
+          ]
+        },
+        "发声方式": {
+          "allows": "只作以下六项的分组标题",
+          "requires": "标题后不另写自由正文",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_volume",
+            "voice_speed",
+            "voice_breath",
+            "voice_pause",
+            "voice_emphasis",
+            "voice_tail"
+          ]
+        },
+        "音量": {
+          "allows": "本句响度及必要的相对变化",
+          "requires": "音区、身体动作、环境声设计",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_profile",
+            "voice_speed",
+            "voice_breath",
+            "voice_pause",
+            "voice_emphasis",
+            "voice_tail"
+          ]
+        },
+        "语速与节奏": {
+          "allows": "本句快慢与节奏组织",
+          "requires": "镜头时长、制作时间码、停镜／运镜安排",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_profile",
+            "voice_volume",
+            "voice_breath",
+            "voice_pause",
+            "voice_emphasis",
+            "voice_tail"
+          ]
+        },
+        "呼吸": {
+          "allows": "与本句发声相关的气息支持、气声或换气方式",
+          "requires": "胸口起伏等可见动作正文、人物新病症或环境风声",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_profile",
+            "voice_volume",
+            "voice_speed",
+            "voice_pause",
+            "voice_emphasis",
+            "voice_tail"
+          ]
+        },
+        "停顿": {
+          "allows": "绑定实际词句或事件的必要语句停连",
+          "requires": "为凑镜长机械等待；不凭空增加对白或镜尾停顿",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_profile",
+            "voice_volume",
+            "voice_speed",
+            "voice_breath",
+            "voice_emphasis",
+            "voice_tail"
+          ]
+        },
+        "重音": {
+          "allows": "实际对白中可定位的原词／原片段及其重读方式",
+          "requires": "改写原词、引用另一人物对白、追加动作和机位",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_profile",
+            "voice_volume",
+            "voice_speed",
+            "voice_breath",
+            "voice_pause",
+            "voice_tail"
+          ]
+        },
+        "尾音": {
+          "allows": "上抬、下压、截断、发虚、落稳、短收中的适用收尾方式",
+          "requires": "自由续写另一句台词或剧情",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_profile",
+            "voice_volume",
+            "voice_speed",
+            "voice_breath",
+            "voice_pause",
+            "voice_emphasis"
+          ]
+        },
+        "禁止语气": {
+          "allows": "针对本句的 2—4 项错误发声方式",
+          "requires": "额外人物、字幕、水印、拍摄位置等全局或视觉限制",
+          "forbidden_roles": [
+            "camera",
+            "actor_action",
+            "global_policy",
+            "production_note",
+            "cross_voice_reference",
+            "production_clock",
+            "voice_profile",
+            "voice_volume",
+            "voice_speed",
+            "voice_breath",
+            "voice_pause",
+            "voice_emphasis",
+            "voice_tail"
+          ]
+        }
+      },
+      "keyframe_sections": [
+        {
+          "label": "画幅",
+          "sources": [],
+          "optional": false
+        },
+        {
+          "label": "场景与站位",
+          "sources": [
+            "空间站位描述"
+          ],
+          "optional": false
+        },
+        {
+          "label": "镜头类型及可见主体",
+          "sources": [
+            "镜头类型",
+            "可见主体"
+          ],
+          "optional": false
+        },
+        {
+          "label": "静态姿态",
+          "sources": [
+            "起始状态"
+          ],
+          "optional": false
+        },
+        {
+          "label": "机位",
+          "sources": [
+            "机位"
+          ],
+          "optional": false
+        },
+        {
+          "label": "光影",
+          "sources": [
+            "光影"
+          ],
+          "optional": false
+        },
+        {
+          "label": "光源来源",
+          "sources": [
+            "光源来源"
+          ],
+          "optional": false
+        },
+        {
+          "label": "光源方向",
+          "sources": [
+            "光源方向"
+          ],
+          "optional": false
+        },
+        {
+          "label": "色温倾向",
+          "sources": [
+            "色温倾向"
+          ],
+          "optional": false
+        },
+        {
+          "label": "文字造型锚",
+          "sources": [],
+          "optional": true
+        },
+        {
+          "label": "视觉限制",
+          "sources": [],
+          "optional": false
+        }
+      ],
+      "role_labels": {
+        "camera": "摄影机或镜头参数",
+        "voice_profile": "稳定声线",
+        "voice_delivery": "发声参数",
+        "actor_action": "人物动作过程",
+        "future_static": "动作完成后的未来状态",
+        "global_policy": "全局生成政策",
+        "production_note": "制作目的或审计状态",
+        "light_height": "光源位置参数",
+        "color_temperature": "色温参数",
+        "cross_voice_reference": "未展开的别镜发声基准",
+        "production_clock": "数字制作时间标记",
+        "voice_volume": "音量决定",
+        "voice_speed": "语速决定",
+        "voice_breath": "发声气息决定",
+        "voice_pause": "语句停连决定",
+        "voice_emphasis": "重读位置决定",
+        "voice_tail": "尾音决定",
+        "spoken_payload": "说话或旁白执行内容",
+        "eye_execution": "人物眼部动作"
+      },
+      "role_patterns": {
+        "camera": [
+          "(?:摄影机|摄像机|相机)(?:位于|置于|朝向|离地|在|高度|向)|镜头焦距|(?:焦距|镜头参数)\\s*[:：]?\\s*\\d+",
+          "(?<![\\d.])\\d+(?:\\.\\d+)?\\s*mm(?![A-Za-z])|\\bf/\\d+(?:\\.\\d+)?\\b",
+          "(?:推镜|拉镜|摇镜|移镜|切换机位)"
+        ],
+        "voice_profile": [
+          "基础声线|声线|(?:声音|嗓音)(?:清亮|明亮|低沉|沙哑|温润|浑厚)|(?:中低|中高|低|高)音区"
+        ],
+        "voice_delivery": [
+          "语速|音量|重音|尾音|发声方式|语速与节奏"
+        ],
+        "actor_action": [
+          "(?:^|[，,；;。\\n])\\s*(?!(?:焦点|镜头|对焦|聚焦|可见|画面|取景))[\\u3400-\\u9fffA-Za-z_·]{1,16}?\\s*(?:先|随后|接着|再|缓缓|轻轻)?(?:皱眉|握紧|松开|抬手|举手|转身|起身|坐下|走向|走近|走到|递出|接过|拿起|低头|抬头|伸手|抬眼|低眼)(?!的|后|状态)",
+          "(?:^|[，,；;。\\n])\\s*(?:左手|右手|双手)\\s*(?:握紧|松开|抬起|放下|伸向|移向)"
+        ],
+        "future_static": [
+          "(?:转身|转头|转肩|起身|坐下|松手|松开手指|翻开|开册|写完|书写完成)(?:完成)?(?:后|以后)(?:的|再|才|可见|正面|面部|眼睛|内页|文字)",
+          "作为下一镜(?:头)?起点|为下一镜(?:头)?(?:做准备|准备)"
+        ],
+        "global_policy": [
+          "(?:禁止|不得|不允许|不要)(?:生成|新增|出现|添加)?(?:额外人物|未列人物|额外配乐|字幕|水印)",
+          "未列(?:出)?人物(?:不得|禁止|不允许)"
+        ],
+        "production_note": [
+          "本轮仅核对|不声称已验证|审计(?:通过|未通过|结论|状态)|(?:建立|交代)本镜人物关系|本镜唯一核心动作|留出回答的时间|承接上一个镜头|承接上一镜"
+        ],
+        "light_height": [
+          "光源离地\\s*\\d+(?:\\.\\d+)?\\s*米"
+        ],
+        "color_temperature": [
+          "色温(?:倾向)?\\s*[:：]|\\b\\d{3,5}\\s*[kK]\\b|开尔文"
+        ],
+        "cross_voice_reference": [
+          "比前一(?:镜|需求急报)|与(?:上一镜|前一镜|疏散指令)同档|略低于争执时|与前镜(?:同档|相同)|沿用(?:上一|前一)镜音量"
+        ],
+        "production_clock": [
+          "[【\\[]\\s*\\d+(?:\\.\\d+)?\\s*[—–~～-]\\s*\\d+(?:\\.\\d+)?\\s*秒\\s*[】\\]]"
+        ],
+        "voice_volume": [
+          "(?:音量|响度)(?:\\s*[:：]|放大|加大|压低|放低|降低|提高|变大|变小)|(?:大声|高声)喊叫"
+        ],
+        "voice_speed": [
+          "语速(?:\\s*[:：]|放慢|变慢|减慢|加快|变快|自然|平稳)|每秒\\s*\\d+(?:\\.\\d+)?\\s*字"
+        ],
+        "voice_breath": [
+          "(?:开口前|句中|句间)(?:轻|先|自然)?(?:吸气|换气|呼气)|气息(?:\\s*[:：]|支持|平稳|稳定)"
+        ],
+        "voice_pause": [
+          "(?:逗号|句中|句间)(?:处)?(?:自然)?短停|停顿(?:\\s*[:：]|安排|放在|落在)"
+        ],
+        "voice_emphasis": [
+          "重音(?:\\s*[:：]|放在|落在|明确落在)|重读(?:\\s*[:：]|放在)"
+        ],
+        "voice_tail": [
+          "尾音(?:\\s*[:：]|克制|上扬|上抬|下压|落稳|截断|短收)"
+        ],
+        "spoken_payload": [
+          "说道\\s*[:：]|问道\\s*[:：]|答道\\s*[:：]|喊道\\s*[:：]|(?:低声|轻声|开口)说|(?:旁白|内心独白|对白|台词)\\s*[:：]"
+        ],
+        "eye_execution": [
+          "眨眼(?:一次|两次|三次)|眼球(?:轻微)?(?:换焦|位移)|眼睑(?:缓慢)?开合"
+        ]
+      },
+      "literal_policy": "preserve source, actual spoken quotes and current visible written payloads; a quote alone does not exempt an instruction",
+      "historical_acceptance": "preserve originals and frozen contracts; old input is not certified as a newly constrained first draft",
+      "remaining_problem_plan": {
+        "historical_scope": "EP32-38; 229 first-draft and 109 revision category-shot-version units; not unique shots or future probabilities",
+        "direct_design_coverage": {
+          "first": [
+            85,
+            229
+          ],
+          "revision": [
+            46,
+            109
+          ],
+          "measured_resolution": null
+        },
+        "state": "single authoritative world, typed event effects, complete dependency propagation and start/end comparison",
+        "geometry": "derive visible set, frame crop, world-to-screen position and light direction from the same camera; mesh occlusion remains separately reviewed",
+        "performance": "explicit gaze endpoints, unique event occurrence, listener prerequisites and source-grounded expression; correct field labels do not choose acting decisions",
+        "audio": "bind speaker/utterance/voice profile, real complete emphasis units, mouth state and independently calibrated timing",
+        "source": "coverage of identity, negation, condition, chronology and causality; citations cannot substitute for actual scene presentation",
+        "acceptance": "freeze real first attempts and score source/semantics/state/availability separately; software tests do not prove 98%",
+        "production_policy_ref": "runtime.production_prevention_policy"
+      },
+      "camera_clause_patterns": [
+        "(?:固定(?:机位|镜头)?|平视|仰视|俯视|顶视|中机位|低机位|高机位|眼平|主位|主机位|正厅|门内侧|门外侧|左前方|右前方|左后方|右后方|前方|后方|左侧|右侧|正侧|人物|侧面|正面|背面|中景|近景|远景|特写|物件|手部|宽景|大近景|过肩|镜头|\\d+(?:\\.\\d+)?(?:mm|毫米|度|米)?|\\s)+",
+        "摄影机(?:离地\\d+(?:\\.\\d+)?米|位于[\\w\\u3400-\\u9fff\\-]{1,32}[东西南北前后左右](?:侧)?(?:朝[东西南北]{1,2})?)",
+        "(?:朝[东西南北]{1,2}|(?:仰角|俯角|水平视角|垂直视角)\\d+(?:\\.\\d+)?度)",
+        "焦点(?:优先)?(?:落)?(?:在|对准)[^。；;，,\\n]{1,80}",
+        "[\\w\\u3400-\\u9fff]{1,12}(?:口部|嘴部|面部)(?:完全)?不入画",
+        "当前主体与所列物件在明确取景范围内",
+        "f/\\d+(?:\\.\\d+)?",
+        "[一二三四五六七八九十两\\d]+(?:席|人|主体)同框",
+        "摄影机在(?:门|窗|厅|室|屋|房)(?:内|外)(?:侧)?",
+        "[\\w\\u3400-\\u9fff\\-]{1,24}位于[\\w\\u3400-\\u9fff\\-]{1,24}的画面[左右]侧"
+      ]
+    },
+    "production_prevention_policy": {
+      "contract": "storyboard-production-prevention-v1",
+      "plan_contract": "storyboard-production-plan-v1",
+      "statuses": [
+        "pass",
+        "fail",
+        "insufficient_evidence",
+        "not_supported"
+      ],
+      "authored_basis": [
+        "source_fact",
+        "locked_setting",
+        "director_choice"
+      ],
+      "compiler_owned_basis": "derived_state",
+      "visibility_kinds": [
+        "actor",
+        "eyes",
+        "left_hand",
+        "right_hand",
+        "prop",
+        "current_written"
+      ],
+      "knowledge_stances": [
+        "known",
+        "reported",
+        "suspected",
+        "mistaken",
+        "pretended",
+        "narrator",
+        "not_applicable"
+      ],
+      "acquisition_modes": [
+        "heard"
+      ],
+      "rules": [
+        {
+          "id": "PP-01",
+          "title": "事实前提与信息交付",
+          "inputs": "冻结原文、事实主体/条件/否定/时序、实际来源使用与交付事件",
+          "prevention": "先核对事实再选择交付方式；出处存在不代表支持结论，引用原文不代表画面已经交付。必要事实必须绑定实际使用。",
+          "on_failure": "定位事实与交付事件；无依据保持不足，不能删去必要信息换取通过。",
+          "exceptions": "允许获准的视觉转译、旁白与改编；保留改编权限和关键条件。",
+          "enforcement": "原文跨度、事实ID、必需使用、原句及依赖由现有来源编译器检查；完整蕴含关系独立审查。",
+          "counterexample": "未获同意不能开库，不得改成可以开库；只在来源列引用不算交付。",
+          "limits": "原文提取和事实解读均可能出错；程序不签署语义正确率。",
+          "invalidates": [
+            "源文事实",
+            "对白",
+            "事件",
+            "全部依赖字段"
+          ]
+        },
+        {
+          "id": "PP-02",
+          "title": "决定依据与导演选择",
+          "inputs": "独立冻结的production_plan.decisions及实际生产输入",
+          "prevention": "输入决定分为原文事实、锁定设定和导演选择；可计算状态为程序产物。每个世界对象、机位、时段、转场和自由动作有唯一计划项。",
+          "on_failure": "缺计划项、依据类别错误或实际值偏离计划均拒绝；回到拥有该决定的计划，不逐列补句。",
+          "exceptions": "允许有叙事目标且不改变锁定事实的导演选择；不要求原文写出每个摄影参数。",
+          "enforcement": "关键输入完整分区、准确值绑定、事实ID与设定原文跨度检查；禁止把派生状态作为自由输入。",
+          "counterexample": "摄影机是导演选择可以通过；将没有来源的剧情事实标为source_fact不能通过。",
+          "limits": "冻结导演选择不是证明其合理；合理性仍需与原文及整镜目标比对。",
+          "invalidates": [
+            "初始世界",
+            "机位",
+            "动作",
+            "声画字段",
+            "下游状态"
+          ]
+        },
+        {
+          "id": "PP-03",
+          "title": "人物知情与视角",
+          "inputs": "初始知情证据、获知事件、实际动作使用、语句立场",
+          "prevention": "角色知情与故事真相分开；已知、猜测、误解、伪装和客观旁白分别登记；反应不得借用未来信息。",
+          "on_failure": "无前置获知或证据时拒绝依赖行为；未支持的获知渠道保持not_supported。",
+          "exceptions": "允许有来源依据的误解、试探、伪装；不把角色说错话自动判为剧情写错。",
+          "enforcement": "逐动作覆盖、角色/事实绑定和已完成获知事件检查；受限同场对白听取模型；初始知情/信念蕴含独立审查。",
+          "counterexample": "乙在甲揭露秘密之前断言知情失败；有明确试探依据的suspected可通过结构检查。",
+          "limits": "不推测任意自然语言的知情；复杂声学、读心、隔墙听取未建模。",
+          "invalidates": [
+            "人物认知",
+            "对白",
+            "听者反应",
+            "心理音轨",
+            "后续剧情"
+          ]
+        },
+        {
+          "id": "PP-04",
+          "title": "状态与交接连续性",
+          "inputs": "单一初态、动作前提、事件效果、场景连续性与明确转场",
+          "prevention": "人物位置、手部、道具和门窗共享世界状态；动作更新末态，连续后镜读取该末态。",
+          "on_failure": "回到动作/初态决定，所有依赖同时失效重算，不沿用旧结果。",
+          "exceptions": "交接中的共同接触不等于两个完成持有人；时间跳跃与蒙太奇须有独立边界依据。",
+          "enforcement": "现有动作/世界模拟和重编译绑定；任意共同接触、离场动作和复杂时间跳跃不自动代填。",
+          "counterexample": "没有交接事件乙不能突然持有甲的信；合法交接不能因共同接触而被笼统禁止。",
+          "limits": "复杂接触尚无完整模型，明确返回支持范围；不将未建模动作算通过。",
+          "invalidates": [
+            "人物姿态",
+            "手部",
+            "持物",
+            "下游镜头",
+            "关键帧"
+          ]
+        },
+        {
+          "id": "PP-05",
+          "title": "反应事件与内部时间",
+          "inputs": "真实对白/刺激、反应依赖、资源通道与内部时段",
+          "prevention": "反应绑定刺激，事件只执行一次；兼容动作可并行，不凭固定模板添加眨眼、吸气或等待。",
+          "on_failure": "缺刺激或时间冲突时修正事件决定与依赖；不恢复画面数字制作时间码。",
+          "exceptions": "允许自然静止、无台词镜头及有依据的预判；吸气冲突不扩大为禁止一切呼吸与说话并行。",
+          "enforcement": "现有时序、动作通道和实际可见窗口检查；表演自然度与精确刺激语义独立审查。",
+          "counterexample": "先听到拒绝才出现由该拒绝触发的反应；自然静止不能被迫补三次动作。",
+          "limits": "0.1秒声明时序不是实测表演；旧固定眨眼/加时要求不得盖过实际事件适用性。",
+          "invalidates": [
+            "事件顺序",
+            "口型",
+            "眼部动作",
+            "音频时段",
+            "反应"
+          ]
+        },
+        {
+          "id": "PP-06",
+          "title": "整镜可执行与可见交付",
+          "inputs": "本镜目的、必要事件/音轨、指定部位可见窗口、同一摄影机",
+          "prevention": "先确定必须交付什么，再共同检查机位与动作；人物在场不代表脸手道具可见，初帧不提前使用未来状态。",
+          "on_failure": "必要部位出框或必要事件缺失则拒绝；调整获准机位或镜头划分，不能添加清晰可见掩盖冲突。",
+          "exceptions": "合法画外声无需嘴部可见；要求读清文字和复杂遮挡不能伪装为点位可见已验证。",
+          "enforcement": "整批镜头/事件完整覆盖；逐0.1秒检查已建模人物、眼部、手和道具点位；独立声明必要声音及源文使用。",
+          "counterexample": "特写中要求远处人物眼睛全程可见应失败；同段有声音但画外发言应允许。",
+          "limits": "可读字号、布料遮挡、完整人体网格与最终图像未建模。",
+          "invalidates": [
+            "摄影机",
+            "景框",
+            "动作",
+            "初帧",
+            "光源画面方向"
+          ]
+        },
+        {
+          "id": "PP-07",
+          "title": "光源一致与室内清晰",
+          "inputs": "世界光源、开合/材质/时段、受光人和摄影机",
+          "prevention": "同一光源共享世界位置；换机位重算画面方向；普通室内空气清澈，情绪不能作为加雾或光束的来源。",
+          "on_failure": "回到灯具/窗户/机位状态修正并更新关联镜头。",
+          "exceptions": "关闭纸窗仍可能透光；有明确剧情依据的特殊环境另行建模，不套用无依据默认。",
+          "enforcement": "共享光源编译器、字段归属、防雾和场景状态绑定；复杂反射/曝光独立检查。",
+          "counterexample": "熄灯不能仍作主光；反打不能把窗户移到另一面墙。",
+          "limits": "声明照明不证明实际图像或物理光度。",
+          "invalidates": [
+            "光源来源",
+            "光源方向",
+            "光影",
+            "色温",
+            "反打镜头"
+          ]
+        },
+        {
+          "id": "PP-08",
+          "title": "声音与对白联动",
+          "inputs": "人物声线、对白事件、音色子项、口型及音频证据",
+          "prevention": "固定声线与当前表达分开；重音绑定完整语义片段；对白改变后声音、口型和听者反应一起失效。",
+          "on_failure": "拒绝不存在的字、错说话人和无事件朗读模板；没有实测音频时保留估计属性。",
+          "exceptions": "叹息/哭声是独立有依据声音；画外发言不强制口型；角色获准变声需明确事件。",
+          "enforcement": "共享音色合同、原句引用、标点消费者、音轨必需事件和容量估计；重音完整语义/真实朗读独立审查。",
+          "counterexample": "对白改为后日后，明日的旧重音不得沿用；约5字/秒不作为完成标定的硬值。",
+          "limits": "软件检查不是TTS测量或自然语气验收。",
+          "invalidates": [
+            "重音",
+            "语气",
+            "口型",
+            "时长",
+            "听者反应"
+          ]
+        },
+        {
+          "id": "PP-09",
+          "title": "生效规则与资料上下文",
+          "inputs": "当前规则指纹、模板合同指纹、冻结来源指纹、初始世界指纹",
+          "prevention": "计划和生产使用同一组规则、模板与来源；冲突在输入决定阶段处理，不混用旧任务卡或缓存结论。",
+          "on_failure": "版本或来源不一致即拒绝当前计划，返回缺失或过期的准确项。",
+          "exceptions": "历史原件可回读；回读兼容性不是按现行计划重新生产的证据。",
+          "enforcement": "生产计划context逐项与本地权威文件及实际输入比较；服务端原始图文件另有双重哈希。",
+          "counterexample": "旧规则指纹、替换后的原文或改变初态后继续提交旧计划应失败。",
+          "limits": "只能验证提交的上下文，不能读取模型未提交的思维或聊天外生成稿。",
+          "invalidates": [
+            "生产计划",
+            "派生字段",
+            "预检记录",
+            "旧结论"
+          ]
+        },
+        {
+          "id": "PP-10",
+          "title": "例外与未知状态",
+          "inputs": "每条规则适用条件、正反例、缺失依据和未建模能力",
+          "prevention": "明确pass、fail、insufficient_evidence、not_supported；不把未知或不支持当作正确。",
+          "on_failure": "只阻断依赖该条件的交付；保留原始尝试和原因，不编造证据或静默删掉问题。",
+          "exceptions": "合法近似情况必须有正例；检查器误判应修检查器。",
+          "enforcement": "统一生产计划错误类型；输出检查状态和语义待审，兼容路径显式标识。",
+          "counterexample": "无来源不能填0个问题通过；要求网格遮挡验收应报告未支持。",
+          "limits": "有限支持范围不能宣传为任意自然语言完整判定。",
+          "invalidates": [
+            "依赖条件",
+            "检查结论",
+            "统计分母"
+          ]
+        },
+        {
+          "id": "PP-11",
+          "title": "同源输出与修改闭合",
+          "inputs": "唯一生产决定、依赖关系、母版/关键帧/阅读页和文件字节",
+          "prevention": "所有输出由同一数据生成；修正上游后重编译下游，禁止手工分写E/F或搬列掩盖问题。",
+          "on_failure": "旧指纹、旧派生结果和不一致输出拒绝；缺哪层证据报告哪层。",
+          "exceptions": "保留历史原件与冻结投影；兼容导入不得冒充本次结构化生成。",
+          "enforcement": "现有重编译、来源义务、字段合同与R5导出；新增计划纳入编译指纹和原始图绑定。",
+          "counterexample": "改机位后只改母版而保留旧关键帧应失败。",
+          "limits": "插件不能自动约束聊天中或别的工具手工制作的文件。",
+          "invalidates": [
+            "所有派生字段",
+            "正式母版",
+            "GPT关键帧",
+            "阅读页",
+            "实际文件"
+          ]
+        },
+        {
+          "id": "PP-12",
+          "title": "验收与首批计量",
+          "inputs": "冻结首次尝试、原始错误、近似正确反例、固定指标及独立内容证据",
+          "prevention": "生成前固定每项规则的失败样本与合法反例；分别记录第一次生成、拦截、修正和实际交付。",
+          "on_failure": "同类失败定位前提/生成决定/检查器/输出路径；不靠再次改写整段或限制修正轮数掩盖。",
+          "exceptions": "风格建议、机器误报、证据不足分别记录；未检和拒绝尝试不能从首批统计中消失。",
+          "enforcement": "原始请求先于检查持久化；软件回归和语义独审分别输出。",
+          "counterexample": "内部改好后改称首稿、把新发现都标成修正新增均不允许。",
+          "limits": "本次规则与软件验收不证明真实首批98%；需另行授权真实内容验收。",
+          "invalidates": [
+            "根因判断",
+            "准确率",
+            "首次尝试",
+            "交付统计"
+          ]
+        }
+      ],
+      "acceptance": "规则通过、首稿准确率、独立内容审计及正式交付分开；未知不是通过；不限制修正轮数。",
+      "entry_policy": "所有新生产、重建和改写必须重放冻结的结构化production_plan，完整集另需episode_contract。旧稿审计修复与验签工作簿迁移保留明确历史入口，不能认证为新首稿；无生产环境兼容开关。"
+    }
+  }
+}

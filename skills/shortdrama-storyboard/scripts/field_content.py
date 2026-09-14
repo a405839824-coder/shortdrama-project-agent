@@ -60,6 +60,17 @@ def _findings_for_value(field, value, *, mask, subfield=None, dialogue_rows=()):
                 text = text[:match.start()] + " " * (match.end() - match.start()) + text[match.end():]
     path = field + ("." + subfield if subfield else "")
     found = []
+    if field == '机位' and subfield is None:
+        # Every clause must match supported camera syntax. A known word in one
+        # clause does not license unrelated text elsewhere in the field.
+        for match in re.finditer(r'[^。；;，,\n]+', text):
+            clause=match.group().strip()
+            if clause and not any(re.fullmatch(pattern,clause,re.I)
+                                  for pattern in policy['camera_clause_patterns']):
+                found.append({'code':ERROR_CODE,'path':path,'role':'unsupported_camera_clause',
+                              'excerpt':original[match.start():match.end()], 'offset':[match.start(),match.end()],
+                              'message':'机位子句不属于支持的摄影机位置、角度、镜头或对焦语法；不得把未知内容判为所属字段正确',
+                              'repair':'使用结构化机位生成；真实但未支持的摄影表达须明确登记，不能自动删句或补写剧情'})
     heading_policy = policy.get("embedded_heading_policy", {})
     if heading_policy.get("forbid_foreign_field_headings"):
         headings = set(policy["fields"]) | set(policy["voice_subfields"]) | {

@@ -44,6 +44,8 @@ class V0514WindowNeutralOrchestrationTests(unittest.TestCase):
             max_file_bytes=50 * 1024 * 1024,
         )
         self.server, self.service = create_mcp(self.settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(self.service)
         self.project_id = str(
             self.service.create_project(
                 self.namespace, "0.5.14窗口无角色限制"

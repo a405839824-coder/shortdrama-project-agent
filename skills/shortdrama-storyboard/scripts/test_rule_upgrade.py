@@ -16,6 +16,7 @@ TEST_MODULES = (
     "test_lighting_checks",
     "test_practical_light_negation",
     "test_rule_registry",
+    "test_episode_rules",
 )
 
 

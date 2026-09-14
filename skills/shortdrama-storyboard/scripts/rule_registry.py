@@ -139,9 +139,28 @@ def _unique(rows, field, label, failures):
     return set(ids)
 
 
-def check_registry_definition(registry):
+def check_registry_definition(registry, reference_root=None):
     """Validate ID sets, applicability, definitions, parameters and references."""
     failures = []
+    baseline_path=Path(reference_root or REFERENCE_ROOT)/'historical_rule_baseline.json'
+    if not baseline_path.is_file():
+        failures.append('historical rule baseline missing')
+    else:
+        baseline=json.loads(baseline_path.read_text(encoding='utf-8'))
+        current={row.get('rule_id') for row in registry.get('atomic_rules',[])}
+        missing=set(baseline['required_current_atomic_ids'])-current
+        if missing: failures.append('historical rule preservation: missing '+', '.join(sorted(missing)))
+        if [s['number'] for s in baseline['master_sections']]!=list(range(149)):
+            failures.append('historical baseline: complete 0..148 source chapter mapping required')
+        if registry.get('runtime',{}).get('episode_rule_policy') != baseline['episode_policy']:
+            failures.append('historical baseline: episode thresholds, scope or retirement decisions changed without migration')
+        for key,expected in baseline.get('critical_runtime_policies',{}).items():
+            if registry.get('runtime',{}).get(key) != expected:
+                failures.append('historical baseline: critical runtime policy changed without migration: '+key)
+        for row in registry.get('atomic_rules', []):
+            expected = baseline.get('atomic_semantic_definitions', {}).get(row.get('rule_id'))
+            if expected is not None and {k:row.get(k) for k in expected} != expected:
+                failures.append('historical baseline: rule semantics or trigger changed: ' + row['rule_id'])
     if registry.get("registry_contract") != "r10-rule-registry-v1":
         failures.append("unsupported registry contract")
     runtime = registry["runtime"]
@@ -304,7 +323,7 @@ def validate_registry(reference_root=None):
     root = Path(reference_root or REFERENCE_ROOT)
     try:
         registry = load_registry(root)
-        failures = check_registry_definition(registry)
+        failures = check_registry_definition(registry, root)
         if failures:
             return failures
         for filename, expected in render_views(registry).items():
@@ -339,7 +358,7 @@ def validate_registry(reference_root=None):
 def write_views(reference_root=None):
     root = Path(reference_root or REFERENCE_ROOT)
     registry = load_registry(root)
-    failures = check_registry_definition(registry)
+    failures = check_registry_definition(registry, root)
     if failures:
         raise ValueError("; ".join(failures))
     for filename, value in render_views(registry).items():

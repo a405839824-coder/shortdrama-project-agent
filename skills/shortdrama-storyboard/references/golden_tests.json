@@ -2219,11 +2219,13 @@
           }
         }
       ],
-      "expected_status": "fail",
-      "expected_error_codes": [
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
         "E-SYSTEMIC-001"
       ],
-      "forbidden_error_codes": []
+      "test_description": "实质修复后，轮数和修复动作标签不得造成永久失败；旧测试ID保留以追踪迁移。",
+      "measure_current_repair": true
     },
     {
       "test_id": "G-R10-PG1-THIRD-ROUND-REBUILD",
@@ -2243,11 +2245,13 @@
           }
         }
       ],
-      "expected_status": "fail",
-      "expected_error_codes": [
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
         "E-SYSTEMIC-001"
       ],
-      "forbidden_error_codes": []
+      "test_description": "实质修复后，轮数和修复动作标签不得造成永久失败；旧测试ID保留以追踪迁移。",
+      "measure_current_repair": true
     },
     {
       "test_id": "G-R10.1-SEEDANCE25-TIMELINE-IN-VISUAL-PASS",

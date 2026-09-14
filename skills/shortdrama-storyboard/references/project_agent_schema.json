@@ -68,7 +68,7 @@
         "plan_only_never_mutates": {"const": true},
         "preserve_previous_version": {"const": true},
         "explicit_scope_required_for_destructive_change": {"const": true},
-        "max_internal_repair_rounds": {"const": 3},
+        "max_internal_repair_rounds": {"enum": [null, 3], "description": "null is current; 3 is read-only historical metadata and no longer stops repairs"},
         "impact_regression_required": {"const": true},
         "human_signoff_required_for_archive": {"const": true},
         "formal_rule_auto_mutation": {"const": false},
@@ -315,7 +315,7 @@
         "internal_round": {
           "type": "integer",
           "minimum": 0,
-          "description": "Four narrative production operations retain every attempt without the legacy three-round cap. Other operations retain their existing runtime policy."
+          "description": "Every operation retains all attempts. Round count does not cap authorized repairs; regression, independent audit and sign-off gates remain mandatory."
         }
       },
       "allOf": [

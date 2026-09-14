@@ -87,6 +87,8 @@ class WorkbookMigrationLifecycleTests(unittest.TestCase):
             oauth_scopes=("storyboard:read", "storyboard:write"), allow_local_file_urls=False,
             max_file_bytes=50*1024*1024)
         self.server, self.service = create_mcp(self.settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(self.service)
         self.project = self.service.create_project(self.namespace, "migration fixture").project_id
         status = self.service.agent_status(self.namespace, self.project, full_self_test=True)
         self.assertTrue(status.data["runtime_test_certificate_valid"])

@@ -109,6 +109,7 @@ class RuleRegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="r10-registry-test-") as directory:
             root = Path(directory)
             (root / "rule_registry.json").write_text(json.dumps(self.registry, ensure_ascii=False), encoding="utf-8")
+            (root / "historical_rule_baseline.json").write_bytes((REFERENCE_ROOT / "historical_rule_baseline.json").read_bytes())
             write_views(root)
             target = root / "validator_ruleset.json"
             rows = json.loads(target.read_text(encoding="utf-8"))
@@ -123,6 +124,7 @@ class RuleRegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="r10-registry-missing-") as directory:
             root = Path(directory)
             (root / "rule_registry.json").write_text(json.dumps(self.registry, ensure_ascii=False), encoding="utf-8")
+            (root / "historical_rule_baseline.json").write_bytes((REFERENCE_ROOT / "historical_rule_baseline.json").read_bytes())
             self.assertTrue(any("missing generated view" in error for error in validate_registry(root)))
 
     def test_generation_idempotence(self):

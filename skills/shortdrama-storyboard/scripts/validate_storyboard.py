@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import timing_model
+from episode_rules import chapter_required, delivery_text, inspect_episodes, inspect_borrowing
 from written_payload import discover_current_written_payloads, context_instruction_text
 import repair_observations
 from field_content import (assert_field_content, field_content_findings,
@@ -2748,8 +2749,14 @@ def _validate_chapter_intake(
         "chapter_source_treatment_percent": None,
     }
     intake = obj.get("source_ingestion")
-    if not isinstance(intake, dict) or intake.get("mode") != "chapter_to_storyboard":
+    if not chapter_required(obj):
         return issues, metrics
+
+    if not isinstance(intake, dict):
+        intake = {}
+    if intake.get('mode') != 'chapter_to_storyboard':
+        issues.append(_issue(catalog, 'E-CHAPTER-INTAKE-001', 'source_ingestion.mode',
+                             '章级来源或边界已声明，不能改mode或移除整章证据来跳过检查。'))
 
     metrics["chapter_intake_active"] = True
     policy = rules.get("modules", {}).get("CHAPTER_INTAKE", {})
@@ -3113,6 +3120,7 @@ def _validate_preventive_gates(
 
     shot_ids = {str(shot.get("镜头编号")) for shot in shots}
     story_blob = json.dumps({"shots": shots}, ensure_ascii=False)
+    delivered_blob = '\n'.join(delivery_text(shot) for shot in shots)
     ledger = evidence.get("source_ledger")
     covered_shots: set[str] = set()
     allowed_treatments = {"保留", "合并", "压缩", "授权删除", "借用"}
@@ -3129,6 +3137,8 @@ def _validate_preventive_gates(
             targets = row.get("target_shots")
             if treatment not in allowed_treatments:
                 issues.append(_issue(catalog, "E-SOURCE-005", location, f"非法处理方式：{treatment!r}"))
+            if treatment in {"授权删除", "借用"} and is_none_value(row.get("authorization")):
+                issues.append(_issue(catalog, "E-SOURCE-005", location, f"{treatment}缺用户授权证据。"))
             if treatment == "授权删除":
                 if is_none_value(row.get("authorization")):
                     issues.append(_issue(catalog, "E-SOURCE-005", location, "授权删除缺用户授权证据。"))
@@ -3148,7 +3158,7 @@ def _validate_preventive_gates(
     if not isinstance(change_lock, dict) or not isinstance(change_lock.get("must_include"), list) or not isinstance(change_lock.get("must_exclude"), list):
         issues.append(_issue(catalog, "E-GATE-001", "prevention_evidence.change_lock", "change_lock必须包含must_include与must_exclude数组。"))
     else:
-        missing_required = [str(term) for term in change_lock["must_include"] if str(term).strip() and str(term) not in story_blob]
+        missing_required = [str(term) for term in change_lock["must_include"] if str(term).strip() and str(term) not in delivered_blob]
         if missing_required:
             issues.append(_issue(catalog, "E-SOURCE-005", "prevention_evidence.change_lock.must_include", f"必含内容未进入正式镜头：{missing_required}"))
         residue = [str(term) for term in change_lock["must_exclude"] if str(term).strip() and str(term) in story_blob]
@@ -3479,17 +3489,15 @@ def _validate_preventive_gates(
                 issues.append(_issue(catalog, "E-REGRESSION-002", f"repair_history[{index}]", f"修正新增问题={introduced:g}"))
             repeat_rounds = int(_as_number(row.get("repeat_rounds")))
             action = str(row.get("action"))
-            if repeat_rounds == 2 and action not in {"root_cause_repair", "rebuild_upstream"}:
-                issues.append(_issue(catalog, "E-SYSTEMIC-001", f"repair_history[{index}]", f"连续2轮仍使用动作 {action!r}，必须执行根因修复。"))
-            if repeat_rounds >= 3 and action != "rebuild_upstream":
-                issues.append(_issue(catalog, "E-SYSTEMIC-001", f"repair_history[{index}]", f"连续{repeat_rounds}轮仍使用动作 {action!r}，必须回退上游重建。"))
+            if repeat_rounds >= 2 and residual > 0:
+                issues.append(_issue(catalog, "E-SYSTEMIC-001", f"repair_history[{index}]", f"连续{repeat_rounds}轮仍有已观测残留，须按实际根因与依赖修正；轮数不强制重建或停止。"))
 
     return issues, metrics
 
 
 def validate_project(
     obj: dict[str, Any] | list[Any], mode: str = "audit", rules_path: str | None = None,
-    *, timing_context: dict[str, Any] | None = None,
+    *, timing_context: dict[str, Any] | None = None, episode_fragment: bool = False,
 ) -> dict[str, Any]:
     rules = load_runtime_rules(rules_path)
     catalog = _catalog_map(rules)
@@ -4147,6 +4155,14 @@ def validate_project(
     issues.extend(chapter_issues)
     gate_metrics.update(chapter_metrics)
     gate_metrics["timing"] = timing_report["metrics"]
+    episode_report = inspect_episodes(obj, normalized_shots, timing=timing_report['metrics'],
+                                     rules=rules.get('episode_rule_policy'), production_verified=planned_performance,
+                                     fragment=episode_fragment)
+    gate_metrics['episode_compliance'] = {k:v for k,v in episode_report.items() if k!='faults'}
+    for finding in episode_report['faults'] + inspect_borrowing(obj):
+        item = _issue(catalog, finding['error_code'], finding['location'], finding['evidence'])
+        item['check_status'] = finding.get('status','fail')
+        issues.append(item)
 
     if mode == "archive":
         stage_evidence = obj.get("stage_evidence")

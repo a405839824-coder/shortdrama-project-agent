@@ -36,6 +36,8 @@ class V040ConditionalRepairSecurityTests(unittest.TestCase):
         os.environ.pop("ALLOW_LOCAL_FILE_URLS", None)
         cls.settings = Settings.from_env()
         cls.server, cls.service = create_mcp(cls.settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(cls.service)
         cls.namespace = request_namespace(cls.settings)
 
     def setUp(self) -> None:

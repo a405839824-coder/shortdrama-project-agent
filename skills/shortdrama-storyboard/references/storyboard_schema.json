@@ -34,6 +34,246 @@
         "repair_history"
       ],
       "properties": {
+        "episode_contract": {
+          "type": "object",
+          "required": [
+            "contract",
+            "profile_id",
+            "scope",
+            "episodes"
+          ],
+          "properties": {
+            "contract": {
+              "const": "episode-production-contract-v1"
+            },
+            "profile_id": {
+              "const": "mother-episode-90-180-v1"
+            },
+            "scope": {
+              "enum": [
+                "fragment",
+                "complete_episodes",
+                "complete_series"
+              ]
+            },
+            "source_kind": {
+              "enum": [
+                "novel",
+                "script",
+                "original"
+              ]
+            },
+            "episodes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "episode_id",
+                  "core_actor",
+                  "ending",
+                  "beat_events",
+                  "source_functions"
+                ],
+                "properties": {
+                  "episode_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "core_actor": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "ending": {
+                    "enum": [
+                      "hook",
+                      "finale"
+                    ]
+                  },
+                  "beat_events": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "kind",
+                        "shot_id",
+                        "source_ids",
+                        "delivery",
+                        "start",
+                        "end"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "kind": {
+                          "enum": [
+                            "opening_hook",
+                            "advance",
+                            "ending_hook",
+                            "closure",
+                            "carryover"
+                          ]
+                        },
+                        "shot_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "uniqueItems": true,
+                          "minItems": 1
+                        },
+                        "delivery": {
+                          "type": "object",
+                          "required": [
+                            "field",
+                            "quote"
+                          ],
+                          "properties": {
+                            "field": {
+                              "enum": [
+                                "画面内容",
+                                "心理音轨",
+                                "环境音效",
+                                "环境动态"
+                              ]
+                            },
+                            "quote": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "start": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "end": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "source_functions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "source_id",
+                        "kind",
+                        "shot_ids"
+                      ],
+                      "properties": {
+                        "source_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "kind": {
+                          "enum": [
+                            "plot",
+                            "montage",
+                            "detail",
+                            "description"
+                          ]
+                        },
+                        "shot_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "uniqueItems": true,
+                          "minItems": 1
+                        },
+                        "micro_elements": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "uniqueItems": true,
+                          "minItems": 1
+                        },
+                        "baseline_seconds": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "series_episode_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "borrow_ledger": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "source_id",
+              "authorization_id",
+              "authorization_basis",
+              "origin_episode",
+              "target_episode",
+              "next_source_id",
+              "repayment_state"
+            ],
+            "properties": {
+              "source_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "authorization_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "authorization_basis": {
+                "type": "string",
+                "minLength": 1
+              },
+              "origin_episode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target_episode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "next_source_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "repayment_state": {
+                "enum": [
+                  "boundary_replanned",
+                  "retired_from_origin"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
         "scope_lock": {"type": "object"},
         "source_ledger": {"type": "array", "minItems": 1},
         "change_lock": {"type": "object"},

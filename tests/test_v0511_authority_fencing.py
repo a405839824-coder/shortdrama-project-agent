@@ -43,6 +43,8 @@ class V0511AuthorityFencingTests(unittest.TestCase):
             Path(self.temp.name) / "cloud", deployment_mode="cloud"
         )
         _server, self.service = create_mcp(self.settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(self.service)
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -3861,6 +3863,8 @@ class V0511AuthorityFencingTests(unittest.TestCase):
             Path(self.temp.name) / "local", deployment_mode="local"
         )
         _server, local_service = create_mcp(local_settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(local_service)
         local_project = self._project(
             "untrusted-local-session", service=local_service
         )

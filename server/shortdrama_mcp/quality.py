@@ -263,7 +263,7 @@ def convergence_evidence(issues, prior_events):
             result.append({"issue_key": digest(key), "error_code": key[0], "field": key[1],
                            "shot_ids": list(issue.get("shot_ids", [])), "stable_shot_ids": list(key[2]),
                            "consecutive_observations": repeats,
-                           "required_action": "rebuild_upstream" if repeats >= 3 else "root_cause_repair",
+                           "required_action": "root_cause_repair",
                            "required_evidence": ["before_after_diff", "affected_scope", "regression_results"],
                            "resolved": False})
     return result

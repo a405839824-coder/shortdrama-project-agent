@@ -1153,6 +1153,8 @@ class SourceDialoguePreflightTests(unittest.TestCase):
             max_file_bytes=50 * 1024 * 1024,
         )
         self.server, self.service = create_mcp(settings)
+        from historical_entry_fixture import freeze_legacy_entry
+        freeze_legacy_entry(self.service)
         self._project_index = 0
 
     def tearDown(self) -> None:
