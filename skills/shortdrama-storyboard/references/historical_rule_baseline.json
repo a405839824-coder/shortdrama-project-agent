@@ -4969,7 +4969,7 @@
     }
   },
   "counterexample_files": {
-    "skills/shortdrama-storyboard/scripts/test_episode_rules.py": "db2a060d54701a4a3a0925c5b0602bbb1d05b50ddf340a8d3ab28ee08e5b9242"
+    "skills/shortdrama-storyboard/scripts/test_episode_rules.py": "46b98c83c543346276f9dad860014fd918192e94a99c0e10ab8d5bf78aaf3880"
   },
   "critical_runtime_policies": {
     "field_content_policy": {

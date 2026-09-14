@@ -82,6 +82,8 @@ def _inspect_episodes(obj, shots=None, *, timing=None, rules=None, production_ve
         fault('E-EPISODE-CONTRACT-001','episode_contract','unsupported or malformed episode contract')
         contract = None
     complete = not fragment and isinstance(contract,dict) and contract.get('scope') != 'fragment'
+    if complete and not groups:
+        fault('E-EPISODE-CONTRACT-001','episode_contract','an empty candidate cannot certify a complete episode or series','insufficient_evidence')
     declared = contract.get('episodes',[]) if isinstance(contract,dict) else []
     if not isinstance(declared,list) or any(not isinstance(x,dict) for x in declared):
         fault('E-EPISODE-CONTRACT-001','episode_contract.episodes','episode rows must be objects');declared=[]

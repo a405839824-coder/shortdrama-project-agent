@@ -154,6 +154,9 @@ class EpisodeRulesTests(unittest.TestCase):
         old=ids();self.er()['core_actor']='乙';self.assertNotEqual(ids(),old)
 
     def test_bad_numeric_and_container_types_return_failed_reports(self):
+        empty={'shots':[],'prevention_evidence':{'episode_contract':{
+            'contract':CONTRACT,'profile_id':policy()['profile_id'],'scope':'complete_episodes','episodes':[]}}}
+        self.assertEqual(inspect_episodes(empty)['status'],'fail')
         for v in [True,float('nan'),float('inf'),-1,'not time']:
             self.obj['shots'][0]['时长']=v
             self.assertEqual(self.inspect()['status'],'fail')
