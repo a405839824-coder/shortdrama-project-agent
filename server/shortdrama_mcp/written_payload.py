@@ -8,3 +8,4 @@ assert _spec is not None and _spec.loader is not None
 _module = module_from_spec(_spec)
 _spec.loader.exec_module(_module)
 discover_current_written_payloads = _module.discover_current_written_payloads
+context_instruction_text = _module.context_instruction_text

@@ -131,7 +131,7 @@ Before `production_to_audit` or `repair_to_audit`:
 2. run the complete existing 50-validator R10 content suite on the full successor artifact;
 3. run all applicable G0–G13 gates and required chapter coverage checks;
 4. verify unchanged-unit semantic hashes and all authorized boundary effects;
-5. verify numbering, cumulative time, formulas, total duration, exact ten-column order, removed-field absence, four lighting atoms, and single-shot stage closure globally;
+5. verify numbering, cumulative time, formulas, total duration, exact ten-column order, removed-field absence, four lighting atoms, and internal single-shot timing closure and untimed picture display globally;
 6. save a new canonical JSON and XLSX version without overwriting the base;
 7. issue only a production-preflight result and immutable handoff.
 

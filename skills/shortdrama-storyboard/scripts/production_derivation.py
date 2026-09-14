@@ -23,6 +23,7 @@ DEPENDENCIES = (
     'dynamic_eye_decisions.py', 'timing_model.py', 'validate_storyboard.py',
     'written_payload.py', 'boundary_decisions.py',
     'timing_events.py', 'performance_checks.py', 'lighting_checks.py',
+    'picture_presentation.py',
     'source_content_limits.py', 'repair_observations.py',
 )
 

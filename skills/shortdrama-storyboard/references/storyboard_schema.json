@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:shortdrama-storyboard:r10.1-compact-master",
   "title": "R10.1 Chinese Short Drama Compact Storyboard Master",
-  "description": "模型只提交一次语义原子；R10-SPC-1正式分镜母版与GPT关键帧由服务端按需编译。画面内容承载动作、表演、精确对白、声画同步时点和恰好三个Seedance 2.5单镜头时间阶段；完整发声规格只在音色固定子模板中填写。GPT关键帧仅保留单帧可见/摄影可控语义，光影按场景事实和物理前提选择，不再生成独立批次。",
+  "description": "模型只提交一次语义原子；R10-SPC-1正式母版与静态关键帧按需编译。画面内容自然描述动作、表演和精确对白，不显示数字制作时间标记；内部计时注释绑定正文，完整发声规格保留在音色子模板。",
   "type": "object",
   "required": [
     "project_version",
@@ -421,6 +421,46 @@
         "shot_uid": {"type": "string", "minLength": 1, "description": "服务端持久化的不可变镜头身份。"},
         "scene_uid": {"type": "string", "minLength": 1},
         "episode_id": {"type": "string", "minLength": 1},
+        "picture_timing": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "内部计时注释；正文不含制作时间标记。按正文SHA256绑定，只能回读计时符号，不能夹带剧情或发出通过结论。",
+          "required": [
+            "contract",
+            "text_sha256",
+            "annotations"
+          ],
+          "properties": {
+            "contract": {
+              "const": "picture-clock-annotations-v1"
+            },
+            "text_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "annotations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "offset",
+                  "token"
+                ],
+                "properties": {
+                  "offset": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "token": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
         "镜头编号": {"type": "string", "pattern": "^EP\\d{2}-\\d{3}$", "description": "新写显示编号；稳定身份仍由shot_uid承担。"},
         "时长": {"type": "number", "exclusiveMinimum": 0},
         "累计时长": {"type": "number", "minimum": 0},
@@ -432,7 +472,7 @@
         "起始状态": {"type": "string", "minLength": 1, "description": "THG-08：只说明镜头开始瞬间的位置、朝向、静态姿态、视线、道具与表演状态；不得预写本镜核心动作或其完成结果。"},
         "机位": {"type": ["string", "number"]},
         "运镜方式": {"type": "string", "minLength": 1, "description": "移动镜头在同一字段写明速度、运镜主体和叙事功能。"},
-        "画面内容": {"type": "string", "minLength": 1, "description": "按R10-SPC-1恰好写三个【0.0—x.x秒】阶段：刺激/起始反应、核心动作或角色说道：“精确对白”、镜尾反应/切点；只保留口型、可见呼吸/停顿、重音期表演、视线、听者错峰反应与最终状态，不复制完整发声规格。"},
+        "画面内容": {"type": "string", "minLength": 1, "description": "自然描述本镜具体动作、表情、精确对白、口型、视线、听者反应与结束状态，不显示【0.0—0.4秒】等数字制作时间标记，不复制完整音色规格。内部计时通过picture_timing绑定；历史带标记输入仅用于兼容读取，导出时分离计时注释。"},
         "音色": {"type": "string", "minLength": 1, "description": "THG-15：带对白镜按fixed-voice-template-v1固定顺序填写基础声线、言语行为、当前表达、发声方式下六项和2—4项禁止语气；重音逐字来自本镜实际对白。原文直接对白受THG-05逐字保护，原文事实转化对白受THG-16来源证明约束。发声方式是本字段内部空值分组标题，不是顶层字段。无对白时固定写无对白，不适用。"},
         "心理音轨": {"type": ["string", "number"]},
         "环境音效": {"type": ["string", "number"]},

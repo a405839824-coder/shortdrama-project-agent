@@ -97,3 +97,26 @@ def discover_current_written_payloads(text: str, field_name: str = "") -> tuple[
             quote=TextSpan(quote.start(), quote.end(), quote.group()),
         ))
     return tuple(result)
+
+
+_SPOKEN_QUOTE_INTRO = re.compile(r"(?:说道|问道|答道|喊道|内声|旁白|心理音轨)\s*[:：]\s*$")
+
+
+def context_instruction_text(text: str, field_name: str) -> str:
+    """Mask typed literal payloads only for instruction cross-reference checks.
+
+    A quote alone is not an exemption: quoted staging instructions still get
+    checked. Speech is recognized only in the two fields allowed to carry it;
+    source truth, speaker identity and dialogue fidelity remain separate gates.
+    """
+    text = str(text or "")
+    spans = [(item.quote.start, item.quote.end)
+             for item in discover_current_written_payloads(text, field_name)]
+    if field_name in {"画面内容", "心理音轨"}:
+        for quote in _QUOTE.finditer(text):
+            if _SPOKEN_QUOTE_INTRO.search(text[:quote.start()]):
+                spans.append((quote.start(), quote.end()))
+    masked = list(text)
+    for start, end in spans:
+        masked[start:end] = " " * (end - start)
+    return "".join(masked)

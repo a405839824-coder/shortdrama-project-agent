@@ -178,6 +178,8 @@ def validate_timing(project, shots, rules=None):
     for index, shot in enumerate(shots):
         sid = str(shot.get("镜头编号") or index + 1)
         try:
+            from picture_presentation import timing_view
+            shot = timing_view(shot)
             duration = _number(shot.get("时长"))
             if duration <= 0 or sid in shot_map:
                 raise ValueError("镜长必须为正、镜头身份必须唯一")
@@ -330,7 +332,7 @@ def validate_timing(project, shots, rules=None):
             if left["id"] != right["id"] and max(left["global_start"], right["global_start"]) < min(left["global_end"], right["global_end"]) - EPS:
                 fault("两段发声实际重叠；须安排可听辨的不重叠时段，不能用重叠规避完整发声容量", right["shot_id"])
     from timing_events import validate_events
-    event_result = validate_events(project, shots, spans)
+    event_result = validate_events(project, list(shot_map.values()), spans)
     faults.extend(event_result["faults"])
     advisories.extend(event_result["advisories"])
     for profile in selected.values():

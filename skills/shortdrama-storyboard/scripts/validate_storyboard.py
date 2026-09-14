@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import timing_model
-from written_payload import discover_current_written_payloads
+from written_payload import discover_current_written_payloads, context_instruction_text
 import repair_observations
 from continuity_checks import state_equal
 from performance_checks import eye_contract_faults, emphasis_binding_faults, visible_subject_tokens, visible_subject_annotation_faults, listener_reaction_faults
@@ -221,6 +221,8 @@ CROSS_SHOT_TERMS = {
     "沿用上一张", "同上", "继续原动作", "继续刚才", "保持上一镜", "承接关键帧",
     "上一关键帧", "上一镜头", "前一镜", "前镜",
     "下一镜",
+    "上一个镜头", "上个镜头", "上一个镜", "上个镜", "前一个镜头", "前个镜头",
+    "上一个关键帧", "上个关键帧", "上一帧", "上一个画面", "上个画面",
 }
 KEYFRAME_FORBIDDEN_RE = re.compile(
     r"(?:\d+(?:\.\d+)?\s*(?:秒|s)?\s*[-—–~至]\s*\d+(?:\.\d+)?\s*(?:秒|s)|"
@@ -883,6 +885,11 @@ def _eye_contract_faults(
     strict: bool,
 ) -> list[str]:
     """Validate each visible person, keeping the historical callable signature."""
+    from picture_presentation import timing_view, PictureTimingError
+    try:
+        shot = timing_view(shot)
+    except PictureTimingError as exc:
+        return [str(exc)]
     return eye_contract_faults(
         shot, duration=duration, strict=strict,
         dialogue_rows=extract_dialogues(shot.get("画面内容")),
@@ -1162,8 +1169,9 @@ def project_formal_master(shot: dict[str, Any]) -> str:
         f"镜头类型：{_projection_text(projected.get('镜头类型'))}｜"
         f"可见主体：{_projection_text(projected.get('可见主体'))}",
     ]
+    from picture_presentation import display_picture
     for field in FORMAL_MASTER_FIELD_ORDER:
-        value = _projection_text(projected.get(field))
+        value = display_picture(projected) if field == "画面内容" else _projection_text(projected.get(field))
         paragraphs.append(f"音色：\n\n{value}" if field == "音色" else f"{field}：{value}")
     formal = "\n\n".join(paragraphs)
     _assert_projected_aspect_contract(formal, projection="formal_master")
@@ -1177,7 +1185,9 @@ def project_formal_master(shot: dict[str, Any]) -> str:
             "formal_master_audio_contract_violation: affirmative in-shot "
             f"music directive is forbidden: {active_music!r}"
         )
-    context_hits = sorted(term for term in CROSS_SHOT_TERMS if term in formal)
+    context_text = "\n".join(context_instruction_text(_projection_text(projected.get(field)), field)
+                             for field in ("镜头类型", "可见主体", *FORMAL_MASTER_FIELD_ORDER))
+    context_hits = sorted(term for term in CROSS_SHOT_TERMS if term in context_text)
     if context_hits:
         raise ValueError(
             "formal_master_context_violation: cross-shot references are "
@@ -3412,7 +3422,8 @@ def _validate_preventive_gates(
         missing = _missing_fields(shot, independent_fields)
         if missing:
             issues.append(_issue(catalog, "E-I2V-INDEP-002", location, f"紧凑母版无法空白上下文独立执行，缺字段：{missing}"))
-        master_text = " ".join(str(shot.get(field, "")) for field in EXECUTION_SHOT_FIELDS)
+        master_text = " ".join(context_instruction_text(str(shot.get(field, "")), field)
+                               for field in EXECUTION_SHOT_FIELDS)
         context_hits = [term for term in forbidden_context_terms if term in master_text]
         if context_hits:
             metrics["cross_context_term_count"] += len(context_hits)
@@ -3663,7 +3674,14 @@ def validate_project(
 
         shot_type = str(shot.get("镜头类型", ""))
         visible = str(shot.get("可见主体", ""))
-        image_content = str(shot.get("画面内容", ""))
+        from picture_presentation import timing_view, PictureTimingError
+        try:
+            execution_shot = timing_view(shot)
+        except PictureTimingError as exc:
+            issues.append(_issue(catalog, "E-TIMELINE-001", f"{location}.picture_timing", str(exc),
+                                 repair="按当前正文重新生成内部计时依据；不要把数字时间标记补回画面内容。"))
+            execution_shot = shot
+        image_content = str(execution_shot.get("画面内容", ""))
         combined_performance = image_content
         timeline_faults = _validate_timeline(image_content, duration, strict=strict_contract,
                                               visible_subjects=visible)
@@ -4019,7 +4037,7 @@ def validate_project(
                     issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容", "R10-SPC-1可见对白未写“口型与对白一致”。"))
                 if visible_speakers and "不看镜头" not in image_content:
                     issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "R10-SPC-1对白人物未明确不看镜头。"))
-                reaction_faults = listener_reaction_faults(shot, duration=duration, dialogue_rows=dialogue_rows)
+                reaction_faults = listener_reaction_faults(execution_shot, duration=duration, dialogue_rows=dialogue_rows)
                 if reaction_faults:
                     issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "多人对白镜未写听者错峰反应。" + "；".join(reaction_faults)))
         elif strict_contract and not VOICE_NO_DIALOGUE_RE.fullmatch(str(shot.get("音色") or "").strip()):
