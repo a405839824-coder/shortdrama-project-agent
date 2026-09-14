@@ -161,6 +161,10 @@ def check_registry_definition(registry, reference_root=None):
             expected = baseline.get('atomic_semantic_definitions', {}).get(row.get('rule_id'))
             if expected is not None and {k:row.get(k) for k in expected} != expected:
                 failures.append('historical baseline: rule semantics or trigger changed: ' + row['rule_id'])
+        for row in registry.get('errors', []):
+            expected=baseline.get('error_semantic_definitions',{}).get(row.get('error_code'))
+            if expected is not None and {k:row.get(k) for k in expected} != expected:
+                failures.append('historical baseline: error or repair guidance changed: '+row['error_code'])
     if registry.get("registry_contract") != "r10-rule-registry-v1":
         failures.append("unsupported registry contract")
     runtime = registry["runtime"]

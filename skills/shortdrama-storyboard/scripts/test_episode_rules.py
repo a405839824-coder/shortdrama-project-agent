@@ -171,6 +171,14 @@ class EpisodeRulesTests(unittest.TestCase):
         self.assertTrue(any('critical runtime' in f for f in check_registry_definition(r)))
         r=load_registry();r['runtime']['production_prevention_policy']['rules'][0]['enforcement']='optional'
         self.assertTrue(any('critical runtime' in f for f in check_registry_definition(r)))
+        r=load_registry();rule=next(a for a in r['atomic_rules'] if a['rule_id']=='AR-R10-PG1-016')
+        self.assertNotIn('三轮',rule['rule_name'])
+        rule['fail_condition']='连续多轮仍局部补丁'
+        self.assertTrue(any('rule semantics' in f for f in check_registry_definition(r)))
+        r=load_registry();error=next(a for a in r['errors'] if a['error_code']=='E-SYSTEMIC-001')
+        self.assertNotIn('第三轮',error['repair_action'])
+        error['repair_action']='第三轮停止补丁并重建'
+        self.assertTrue(any('repair guidance' in f for f in check_registry_definition(r)))
 
     def test_baseline_missing_from_selected_root_does_not_use_global_copy(self):
         with tempfile.TemporaryDirectory() as d:

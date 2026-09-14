@@ -2362,20 +2362,20 @@
     },
     {
       "current_status": "active",
-      "fail_condition": "连续多轮仍局部补丁",
+      "fail_condition": "当前仍有实际残留或影响回归缺证，不能仅因修复次数或局部补丁标签判失败",
       "hard_rule": true,
       "linked_error_codes": [
         "E-SYSTEMIC-001"
       ],
       "module_group": "SYSTEMIC_ESCALATION",
-      "pass_condition": "repeat_rounds与升级动作匹配",
+      "pass_condition": "当前实际全量复核通过且影响范围和根因证据闭合，轮数只用于追踪",
       "priority": 100,
-      "repair_action": "执行root_cause_repair或rebuild_upstream",
+      "repair_action": "按实际根因和依赖决定局部修复或上游重建；真实解决后不得因轮数再次阻断",
       "rule_full_text": "重复问题按实际根因、变更差异与依赖失效选择修正范围；轮数只记录，不强制重建、停止或令真实修复永久失败。",
       "rule_id": "AR-R10-PG1-016",
-      "rule_name": "二轮根因三轮重建",
+      "rule_name": "重复问题的实际根因与修复范围",
       "rule_revision": "0.5.34",
-      "trigger_condition": "重复问题",
+      "trigger_condition": "重复问题存在当前观测残留，需要重新核对根因及依赖",
       "version": "V16.3-148-R10-StableRuntime"
     },
     {
@@ -4802,8 +4802,8 @@
       "error_code": "E-SYSTEMIC-001",
       "final_status_if_unfixed": "fail_current",
       "module": "SYSTEMIC_ESCALATION",
-      "repair_action": "第二轮执行根因修复；第三轮停止补丁并重建对应上游产物",
-      "required_evidence": "问题类别、连续轮数和实际修复动作",
+      "repair_action": "核对当前残留、根因与依赖，按实际影响选择局部修复或上游重建；不按轮数停止或强制重建",
+      "required_evidence": "当前残留、实际修复前后差异、受影响依赖和最新完整复核；连续轮数仅作历史记录",
       "rule_revision": "0.5.34",
       "severity": "fail",
       "trigger_condition": "连续多轮存在已观测残留且根因尚未闭合；已真实修复不得仅按轮数判失败",

@@ -4726,8 +4726,8 @@
       "error_code": "E-SYSTEMIC-001",
       "final_status_if_unfixed": "fail_current",
       "module": "SYSTEMIC_ESCALATION",
-      "repair_action": "第二轮执行根因修复；第三轮停止补丁并重建对应上游产物",
-      "required_evidence": "问题类别、连续轮数和实际修复动作",
+      "repair_action": "核对当前残留、根因与依赖，按实际影响选择局部修复或上游重建；不按轮数停止或强制重建",
+      "required_evidence": "当前残留、实际修复前后差异、受影响依赖和最新完整复核；连续轮数仅作历史记录",
       "rule_revision": "0.5.34",
       "severity": "fail",
       "trigger_condition": "连续多轮存在已观测残留且根因尚未闭合；已真实修复不得仅按轮数判失败",
@@ -5024,5 +5024,5 @@
   ],
   "rule_registry_contract": "r10-rule-registry-v1",
   "rule_registry_revision": "0.5.34",
-  "rule_registry_sha256": "0348dc15e183065ade24ef14749ded55c8a7dd7a97b074d33784fa2d04088ab7"
+  "rule_registry_sha256": "b9457ac9edab7b6d6cde084fc3e43aaeba96bbb9c010b7f8e9f2bb67e9ae25ba"
 }
