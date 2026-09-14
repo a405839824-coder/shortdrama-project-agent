@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT/'tests'),str(ROOT/'skills/shortdrama-storyboard/scripts')]
 from author_storyboard import record_attempt
 from performance_checks import eye_visibility_timeline_scan, eye_contract_faults
+from picture_presentation import timed_picture
 from validate_storyboard import _validate_timeline, validate_project
 from test_v0527_authoring_serializer import decisions
 from test_strict_prompt_contract import strict_fixture
@@ -43,7 +44,9 @@ class EyeWindowTimelineTests(unittest.TestCase):
             frozen=root/'attempts/visible/input.original.json'
             self.assertEqual(hashlib.sha256(raw).hexdigest(),hashlib.sha256(frozen.read_bytes()).hexdigest())
             output=json.loads((root/'attempts/visible/canonical.json').read_text('utf-8'))
-            self.assertIn(WINDOW,output['shots'][0]['画面内容'])
+            self.assertIn(WINDOW,timed_picture(output['shots'][0]))
+            self.assertIn('甲眼睛一度清楚可见',output['shots'][0]['画面内容'])
+            self.assertNotIn('0.0—1.2秒',output['shots'][0]['画面内容'])
             report=validate_project(output,mode='audit')
             self.assertFalse(any(i['error_code']=='E-TIMELINE-001' for i in report['issues']),report['issues'])
         # Valid formal fixture independently exercises the actual project caller.

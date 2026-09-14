@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import io
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -29,6 +30,13 @@ def legacy_bytes(candidate=None, edit=None):
     del book[CANONICAL_SIDECAR_SHEET]
     sheet = book["正式生产母版"]
     for row, shot in enumerate(candidate["shots"], 2):
+        # This fixture represents the earlier workbook with visible clocks.
+        # New exports deliberately omit those clocks; pin the legacy source
+        # field rather than silently changing our migration input with them.
+        formal = sheet.cell(row, 5).value
+        match = re.search(r"(?ms)(^画面内容：)(.*?)(?=^音色：)", formal)
+        assert match is not None
+        sheet.cell(row, 5).value = formal[:match.start(2)] + shot["画面内容"] + "\n\n" + formal[match.end(2):]
         sheet.cell(row, 4).value = shot["功能类型"] + " / " + shot["场景连续性ID"]
         sheet.cell(row, 3).value = f"=ROUND(B{row},1)" if row == 2 else f"=ROUND(C{row-1}+B{row},1)"
     if edit:

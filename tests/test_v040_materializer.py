@@ -97,7 +97,8 @@ class CompactMasterMaterializerTests(unittest.TestCase):
 
         self.assertIn("空间站位描述：", merged)
         self.assertIn("起始状态：", merged)
-        self.assertIn("画面内容：[0.0–0.8s]", merged)
+        self.assertIn("画面内容：苏清柳先看向右侧主位", merged)
+        self.assertNotIn("[0.0–0.8s]", merged)
         self.assertIn("【苏清柳】母亲，儿媳失手，请见谅。", merged)
         self.assertIn("口型与精确台词一致", merged)
         self.assertIn(f"音色：\n\n{shot['音色']}", merged)

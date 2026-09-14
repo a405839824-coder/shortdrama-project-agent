@@ -21,10 +21,10 @@ COMPACT_SCHEMA_PROFILE = "compact_master_v1"
 COMPACT_MATERIALIZER_CONTRACT = "compact-master-v1:no-persisted-derived:no-seedance-batches"
 
 # Exactly these 27 caller-authored fields form one R10.1 compact shot.  The
-# three stable identity fields below are server-owned CAS coordinates rather
-# than generation fields and may coexist with this public contract.
+# Stable identity fields are server-owned CAS coordinates. The picture clock
+# record is internal planning data bound to the public picture prose.
 COMPACT_SHOT_FIELDS = tuple(MATERIALIZER_COMPACT_SHOT_FIELDS)
-COMPACT_INTERNAL_SHOT_FIELDS = ("shot_uid", "episode_id", "scene_uid")
+COMPACT_INTERNAL_SHOT_FIELDS = ("shot_uid", "episode_id", "scene_uid", "picture_timing")
 
 # R10.1 is an explicit persistence contract, not an open-ended transport
 # envelope.  These are the semantic root blocks used by the schema, validator,

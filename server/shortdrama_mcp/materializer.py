@@ -5,7 +5,8 @@ import json
 import re
 from typing import Any, Iterable
 
-from .written_payload import discover_current_written_payloads
+from .written_payload import discover_current_written_payloads, context_instruction_text
+from .picture_presentation import display_picture
 
 
 FORMAL_MERGED_FIELD = "正式分镜母版"
@@ -152,7 +153,7 @@ SEEDANCE_ATOMIC_FIELDS = (
     ("生成限制", "生成限制"),
 )
 
-INTERNAL_SHOT_FIELDS = ("shot_uid", "episode_id", "scene_uid")
+INTERNAL_SHOT_FIELDS = ("shot_uid", "episode_id", "scene_uid", "picture_timing")
 
 LEGACY_STANDALONE_FIELDS = {
     "运镜主体",
@@ -393,6 +394,8 @@ BLANK_CONTEXT_FORBIDDEN_TERMS = (
     "下一镜",
     "前一镜",
     "前镜",
+    "上一个镜头", "上个镜头", "上一个镜", "上个镜", "前一个镜头", "前个镜头",
+    "上一个关键帧", "上个关键帧", "上一帧", "上一个画面", "上个画面",
 )
 
 _LIGHT_SUBFIELD_LABELS = (
@@ -1296,7 +1299,7 @@ def compile_formal_merged_field(
         ),
     ]
     for field in FORMAL_MERGED_ATOMIC_FIELDS:
-        value = _text(compact.get(field))
+        value = display_picture(compact) if field == "画面内容" else _text(compact.get(field))
         paragraphs.append(f"音色：\n\n{value}" if field == "音色" else f"{field}：{value}")
     formal = "\n\n".join(paragraphs)
     _assert_projected_aspect_contract(formal, projection="formal_master")
@@ -1311,7 +1314,9 @@ def compile_formal_merged_field(
             "formal_master_audio_contract_violation: affirmative in-shot "
             f"music directive is forbidden: {active_music!r}"
         )
-    context_hits = _contract_hits(formal, BLANK_CONTEXT_FORBIDDEN_TERMS)
+    context_text = "\n".join(context_instruction_text(_text(compact.get(field)), field)
+                             for field in ("镜头类型", "可见主体", *FORMAL_MERGED_ATOMIC_FIELDS))
+    context_hits = _contract_hits(context_text, BLANK_CONTEXT_FORBIDDEN_TERMS)
     if context_hits:
         raise ValueError(
             "formal_master_context_violation: cross-shot references are "

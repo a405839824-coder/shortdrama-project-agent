@@ -252,7 +252,8 @@ class V051XlsxGuardTests(unittest.TestCase):
             "NFC",
             str(actual_formal).replace("\r\n", "\n").replace("\r", "\n"),
         )
-        self.assertIn("Café，好。”\n2.5–4.0秒：乙说道：“我听见了！”", normalized)
+        self.assertIn("Café，好。”\n乙说道：“我听见了！”", normalized)
+        self.assertNotIn("2.5–4.0秒", normalized)
         recovered = extract_xlsx(payload)["canonical_storyboard"]
         self.assertEqual(recovered["shots"][0]["画面内容"], raw_picture)
 

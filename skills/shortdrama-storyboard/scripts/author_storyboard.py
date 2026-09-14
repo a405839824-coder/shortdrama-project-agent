@@ -356,6 +356,10 @@ def _render_decisions(decisions: dict[str, Any]) -> dict[str, Any]:
     timing_faults = validate_timing(candidate, shots)["faults"]
     if timing_faults:
         raise RejectedDecisions([{"path": f"timing:{fault.get('shot_id', '')}", "message": fault["message"]} for fault in timing_faults])
+    # Numerical planning remains available to the internal validators. The
+    # authored picture field itself is plain action/dialogue prose.
+    from picture_presentation import separate_shot_clock
+    candidate["shots"] = [separate_shot_clock(shot) for shot in candidate["shots"]]
     return candidate
 
 

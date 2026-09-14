@@ -81,7 +81,7 @@ Diagnostics never change the storyboard contract:
 - 27 canonical semantic fields per shot remain complete.
 - `空间站位描述`, `起始状态`, `音色`, `环境音效`, `环境动态`, `生成限制`, and all required performance/dialogue content remain per shot.
 - `光影`, `光源来源`, `光源方向`, and `色温倾向` remain four separate per-shot fields.
-- `画面内容` retains the exact three Seedance 2.5 time stages and all required visible action, expression, dialogue, delivery, listener reaction, breath, and end state.
+- `画面内容` retains natural action order without numeric production clock labels and all required visible action, expression, dialogue, delivery, listener reaction, breath, and end state.
 - Production, audit, repair, diagnostics, cache warm-up, and background jobs keep `legacy_generation_calls=0`, `seedance_batches_generated=0`, `model_authored_derived_chars=0`, and `duplicate_generated_bytes=0`.
 - No validator, G0–G13 gate, independent audit layer, source coverage, or continuity rule may be skipped to improve timing.
 
