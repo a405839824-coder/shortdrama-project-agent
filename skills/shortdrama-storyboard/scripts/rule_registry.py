@@ -49,6 +49,8 @@ def render_views(registry):
     }
     if "field_content_policy" in runtime:
         result["field_content_contract.md"] = render_field_contract(runtime["field_content_policy"])
+    if "production_prevention_policy" in runtime:
+        result["production_prevention_contract.md"] = render_production_contract(runtime["production_prevention_policy"])
     conflicts = {row["conflict_id"]: row for row in registry["conflicts"]}
     gate_ids = [row["gate_id"] for row in runtime["gates"]["template_hard_gates"]]
     for filename, (key, _) in VIEW_KEYS.items():
@@ -67,6 +69,20 @@ def render_views(registry):
                 row["required_template_gate_ids"] = gate_ids.copy()
         result[filename] = rows
     return result
+
+
+def render_production_contract(policy):
+    lines = ['# 生产防错规则合同', '', '由 rule_registry.json 生成；不得单独编辑。', '',
+             '合同：' + policy['contract'], '计划：' + policy['plan_contract'], '',
+             policy['entry_policy'], '', policy['acceptance'], '',
+             '输入格式见 production_plan_contract.md。声明先冻结，程序从真实输入、来源与模拟结果验证；语义准确率保持未知。', '']
+    for r in policy['rules']:
+        lines += ['## ' + r['id'] + ' ' + r['title'], '', '输入：' + r['inputs'], '',
+                  '生成前约束：' + r['prevention'], '', '失败处理：' + r['on_failure'], '',
+                  '合法例外：' + r['exceptions'], '', '执行检查：' + r['enforcement'], '',
+                  '反例：' + r['counterexample'], '', '判定边界：' + r['limits'], '',
+                  '修改影响：' + '、'.join(r['invalidates']), '']
+    return '\n'.join(lines)
 
 
 def render_field_contract(policy):
@@ -131,6 +147,23 @@ def check_registry_definition(registry):
     runtime = registry["runtime"]
     version = registry["runtime_version"]
     revision = registry["plugin_version"]
+    production = runtime.get('production_prevention_policy', {})
+    if production.get('contract') != 'storyboard-production-prevention-v1' or production.get('plan_contract') != 'storyboard-production-plan-v1':
+        failures.append('production prevention: required contract missing')
+    else:
+        wanted = {f'PP-{i:02}' for i in range(1, 13)}
+        found = _unique(production.get('rules', []), 'id', 'production prevention', failures)
+        if found != wanted:
+            failures.append('production prevention: complete PP-01..PP-12 set required')
+        for row in production['rules']:
+            for key in ('title','inputs','prevention','on_failure','exceptions','enforcement','counterexample','limits','invalidates'):
+                if not row.get(key): failures.append('production prevention: incomplete rule ' + row['id'] + '.' + key)
+        if production.get('statuses') != ['pass','fail','insufficient_evidence','not_supported']:
+            failures.append('production prevention: unknown states must not become pass')
+        if production.get('authored_basis') != ['source_fact','locked_setting','director_choice'] or production.get('compiler_owned_basis') != 'derived_state':
+            failures.append('production prevention: decision ownership differs')
+        if registry['capabilities'].get('production_prevention_contract') != production['contract']:
+            failures.append('production prevention: capability contract differs')
     ids = {}
     for _, (key, field) in VIEW_KEYS.items():
         ids[key] = _unique(registry[key], field, key, failures)

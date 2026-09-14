@@ -52,6 +52,19 @@ user has explicitly set a still-active limit.
 
 ## Produce from source facts and one action model
 
+For every new production request, first read the single-source
+`references/production_prevention_contract.md` and the input format in
+`references/production_plan_contract.md`. Read the current `production_prevention_contract`
+from `get_agent_status`. Freeze a `production_plan` in the independent source graph
+before prose: every authored decision has an explicit basis, each event has its
+character-knowledge applicability, and each shot states its required information,
+audio and landmark visibility. The current MCP production bridge and production
+CLI require this plan; do not substitute a low-level legacy renderer to bypass it.
+Do not manufacture a plan after seeing diagnostics and describe it as original.
+Retain source/plan changes and all production attempts. `pass` describes only the
+supported checks; insufficient evidence, unsupported capabilities, source meaning
+and natural performance must not be converted into a success percentage.
+
 For new storyboards within the supported physical model, read `references/source_decisions.md`,
 `references/production_decisions.md`, and `references/production_prevention.md`. Use the
 `production-decisions-v1` entry. In MCP, read `references/production_authoring_request.md`

@@ -100,7 +100,7 @@ class _Collection:
                 self.issues.append(normalized)
 
 
-def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256):
+def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256, require_production_plan=False):
     """Private recorder hook: return lowered/source objects plus public report.
 
     Only the serializable third element is the public inspection result. The
@@ -169,6 +169,15 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256):
                                       "message": f"{type(exc).__name__}: {exc}"})
     c.add("source_compilation", source_errors, semantic_status="pending_independent_review")
 
+    if require_production_plan:
+        from production_plan import CONTRACT as PLAN_CONTRACT
+        plan = compilation.to_dict().get('production_plan') if compilation is not None else None
+        c.add('frozen_production_plan', [] if plan is not None else [{
+            'code': 'E-PRODUCTION-PLAN-001', 'path': '$graph.production_plan',
+            'status': 'insufficient_evidence',
+            'message': 'new production requires a separately frozen ' + PLAN_CONTRACT +
+                       '; identity checks cannot substitute for source/knowledge/whole-shot planning'}])
+
     lowered = None
     try:
         inspected = inspect_production_decisions(
@@ -200,6 +209,7 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256):
         # These are real privately lowered shot fields, not authored PASS tags
         # or a fabricated schema-positive candidate. No whole canonical is made.
         traces = {shot["shot_id"]: shot for shot in lowered["derivation"]["shots"]}
+        planned_performance = lowered['derivation'].get('production_prevention', {}).get('status') == 'pass'
         for index, row in enumerate(typed["shots"]):
             stage = f"shots[{index}].required_performance"
             try:
@@ -210,9 +220,14 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256):
                                  f"【{phase['start']:.1f}—{phase['end']:.1f}秒】{phase['text']}"
                                  for phase in row["phases"])})
                 dialogue_rows = author.extract_dialogues(shot["画面内容"])
-                faults = eye_contract_faults(shot, duration=row["duration"], strict=True,
-                                            dialogue_rows=dialogue_rows)
-                reactions = listener_reaction_faults(shot, duration=row["duration"], dialogue_rows=dialogue_rows)
+                # A verified frozen plan uses the real event/state/visibility
+                # compiler. The legacy prose grammar requires an invented eye
+                # chain and a reaction from every listener; it is not an extra
+                # source of obligations for deterministic planned output.
+                faults = [] if planned_performance else eye_contract_faults(
+                    shot, duration=row['duration'], strict=True, dialogue_rows=dialogue_rows)
+                reactions = [] if planned_performance else listener_reaction_faults(
+                    shot, duration=row['duration'], dialogue_rows=dialogue_rows)
                 findings = [{"code": "E-EXPRESSION-003", "path": f"shots[{index}].actions",
                              "message": message} for message in faults]
                 findings.extend({"code": "E-PERFORMANCE-001", "path": f"shots[{index}].actions",
@@ -221,7 +236,8 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256):
                 c.add(stage, findings, shot_id=row["shot_id"], visibility=windows,
                       eye_applicability={actor: "visible_window" if spans else "not_applicable"
                                          for actor, spans in windows.items()},
-                      applicability_basis="actual lowered fields and current shared visible-window consumers")
+                      applicability_basis=('verified frozen plan and actual event/state/visibility compiler; naturalness is independently reviewed'
+                                           if planned_performance else 'actual lowered fields and current shared visible-window consumers'))
             except (TypeError, ValueError, KeyError, AttributeError) as exc:
                 c.exception(stage, exc, path=f"shots[{index}]")
                 c.add(stage + ".visibility", reason="actual shot projection was not available")
@@ -237,7 +253,7 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256):
     return lowered, compilation, report
 
 
-def inspect_production_input(raw, *, graph_bytes, expected_graph_sha256) -> dict[str, Any]:
+def inspect_production_input(raw, *, graph_bytes, expected_graph_sha256, require_production_plan=False) -> dict[str, Any]:
     """Read-only complete-input diagnostics; never a production attempt store.
 
     Missing graph/source dependencies do not turn referenced paper into an
@@ -245,4 +261,5 @@ def inspect_production_input(raw, *, graph_bytes, expected_graph_sha256) -> dict
     run; dependent simulation/visible-performance checks are not_checked.
     """
     return _inspect_with_intermediates(raw, graph_bytes=graph_bytes,
-                                       expected_graph_sha256=expected_graph_sha256)[2]
+                                       expected_graph_sha256=expected_graph_sha256,
+                                       require_production_plan=require_production_plan)[2]

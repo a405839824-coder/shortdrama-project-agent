@@ -1,8 +1,10 @@
 # Production prevention entry and evidence lifecycle
 
-This is a local implementation candidate. A successful recording produces a structurally
-rendered draft pending full checks and independent review. It does not install or deploy
-the plugin, run a new manuscript quality benchmark, or grant publication authority.
+This is the production recording and evidence contract. A successful recording produces
+a structurally rendered draft pending full checks and independent review. A recording
+does not establish deployment, a manuscript quality benchmark, or publication authority.
+
+0.5.33 新生产必须先冻结 [production_plan_contract.md](production_plan_contract.md)，完整规则由 [production_prevention_contract.md](production_prevention_contract.md) 给出。仅在实际重编译验证计划后，表演按已声明事件与真实状态检查；自然静止和无需回应的听者不能被旧文字模板强迫补动作。动作冲突、实际眼部状态及反应前置条件继续检查，表演自然度仍需独立核对。
 
 ## Invocation
 

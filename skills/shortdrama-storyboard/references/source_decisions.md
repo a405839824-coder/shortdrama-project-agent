@@ -1,5 +1,7 @@
 # Frozen source facts and decided written objects
 
+0.5.33 新生产来源图必须包含 [production_plan_contract.md](production_plan_contract.md) 的 `production_plan`，并遵守 [production_prevention_contract.md](production_prevention_contract.md)。计划核对真实来源、规则指纹、决定归属及知情事件；其独立审查问题绑定既有来源审计证据。允许读取旧图用于历史核验，但不能据此声称新生产计划已验证。
+
 `source_decisions.py` is a pure structural compiler. It does not read files,
 call a model, grant semantic approval, or change the existing 27 storyboard
 fields and independent source/dialogue gates. All successful output has

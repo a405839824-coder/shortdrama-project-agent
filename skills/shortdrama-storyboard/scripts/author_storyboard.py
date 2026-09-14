@@ -410,16 +410,18 @@ def _write_json(path: Path, value: Any) -> None:
     _write_once_bytes(path, payload)
 
 
-def _lower_production_input(decisions, graph_bytes, graph_sha256):
+def _lower_production_input(decisions, graph_bytes, graph_sha256, require_production_plan=False):
     """Inspect one complete input after record_attempt froze its original bytes."""
     from production_input import _inspect_with_intermediates
 
     return _inspect_with_intermediates(
-        decisions, graph_bytes=graph_bytes, expected_graph_sha256=graph_sha256)
+        decisions, graph_bytes=graph_bytes, expected_graph_sha256=graph_sha256,
+        require_production_plan=require_production_plan)
 
 
 def record_attempt(input_path: Path, attempts_root: Path, *, attempt_id: str | None = None,
-                   source_graph_path: Path | None = None, source_graph_sha256: str | None = None) -> dict[str, Any]:
+                   source_graph_path: Path | None = None, source_graph_sha256: str | None = None,
+                   require_production_plan: bool = False) -> dict[str, Any]:
     """Persist every invocation, including invalid JSON and output collisions.
 
     The attempt root is an append-only set of immutable attempt directories.
@@ -483,7 +485,8 @@ def record_attempt(input_path: Path, attempts_root: Path, *, attempt_id: str | N
                     graph_digest = actual_graph_digest
                 report['source_graph_identity_basis'] = ('caller_digest' if source_graph_sha256 is not None
                                                           else 'file_bytes_at_attempt_start')
-            production, source_compilation, coverage = _lower_production_input(decisions, graph_bytes, graph_digest)
+            production, source_compilation, coverage = _lower_production_input(decisions, graph_bytes, graph_digest,
+                                                                               require_production_plan)
             if coverage['findings']:
                 raise RejectedDecisions(coverage['findings'])
             _check(coverage['ready_for_canonical'], 'production_input',
@@ -494,6 +497,7 @@ def record_attempt(input_path: Path, attempts_root: Path, *, attempt_id: str | N
             decisions = production['typed_decisions']
             _write_json(attempt / 'typed_decisions.derived.json', decisions)
             report['checked_scope'] += '; source declarations and actual use consumption; modelled event effects and derived state/time/camera'
+            report['production_prevention'] = production['derivation']['production_prevention']
         if production is None:
             # Production input already ran the same typed checks before its
             # required-performance inspection. Legacy typed entry stays intact.
@@ -559,7 +563,8 @@ def main() -> int:
     parser.add_argument("--source-graph-sha256")
     args = parser.parse_args()
     report = record_attempt(args.input, args.attempts_root, attempt_id=args.attempt_id,
-                            source_graph_path=args.source_graph, source_graph_sha256=args.source_graph_sha256)
+                            source_graph_path=args.source_graph, source_graph_sha256=args.source_graph_sha256,
+                            require_production_plan=True)
     print(json.dumps(report, ensure_ascii=False))
     return 0 if report["status"] == "rendered_pending_preflight" else 2
 
