@@ -160,7 +160,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
                 "must_keep": [],
                 "must_remove": [],
                 "protected_scope": [],
-                "expected_outputs": ["正式分镜", "正式生产母版"],
+                "expected_outputs": ["正式分镜", "正式分镜母版"],
                 "window_key": "test-storyboard",
             },
         )
@@ -252,7 +252,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
                 "must_keep": ["主角动作"],
                 "must_remove": ["泛称环境声"],
                 "protected_scope": [],
-                "expected_outputs": ["正式分镜", "正式生产母版"],
+                "expected_outputs": ["正式分镜", "正式分镜母版"],
                 "window_key": "test-public-ecology",
             },
         )
@@ -351,7 +351,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "project_id": project_id,
                     "artifact_id": imported["artifact_id"],
-                    "section": "正式生产母版",
+                    "section": "正式分镜母版",
                     "offset": 0,
                     "limit": 10,
                     "automatic_bulk": False,
@@ -374,7 +374,7 @@ class LocalMcpTests(unittest.IsolatedAsyncioTestCase):
         storyboard["shots"][0]["画面内容"] = '=HYPERLINK("https://example.test","打开")'
         workbook = storyboard_to_xlsx(storyboard, {"issues": []})
         loaded = load_workbook(BytesIO(workbook), data_only=False, read_only=True)
-        sheet = loaded["正式生产母版"]
+        sheet = loaded["正式分镜母版"]
         headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
         content_index = headers.index("正式分镜母版") + 1
         projected = str(sheet.cell(2, content_index).value)

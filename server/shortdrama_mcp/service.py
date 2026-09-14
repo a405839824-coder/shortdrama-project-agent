@@ -33,6 +33,7 @@ from .canonical import (
     compact_storyboard_canonical,
 )
 from .config import Settings
+from .field_content import model_field_contract
 from .acceptance_service import controlled_acceptance_operation
 from .delta import (
     changed_shot_fields,
@@ -4735,6 +4736,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             "output_contract": STRICT_OUTPUT_CONTRACT,
             "target_model": "Seedance 2.5",
             "aspect_ratio": "9:16",
+            "field_content_contract": model_field_contract(),
             "controlled_workbook_migration": {
                 "target_version": WORKBOOK_MIGRATION_TARGET,
                 "supported": True,
@@ -11834,6 +11836,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             data={
                 **({"authoring_attempt": authoring_attempt,
                     "compiled_storyboard": copy.deepcopy(candidate)} if authoring_attempt is not None else {}),
+                "field_content_validation": {
+                    "contract": "storyboard-field-content-v1",
+                    "input_route": "recorded_production_decisions" if authoring_attempt is not None else "canonical_compatibility",
+                    "scope": "supported field-role checks; source and performance semantics still require independent audit",
+                    "semantic_accuracy_percent": None,
+                },
                 "draft_preflight": record,
                 "candidate_observation": observation,
                 "report": report,

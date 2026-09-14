@@ -1,5 +1,7 @@
 # V16.3-148-R10-StableRuntime Full Template Library
 
+0.5.32 字段内容约束以 [field_content_contract.md](field_content_contract.md) 为准；该文件由唯一规则注册表生成。正式母版、GPT 和 R5 阅读页必须由同一份字段数据生成。遇到错列返回路径与原片段，不能静默删句或补造依据。
+
 每个模板均为独立、可执行结构；不得用同一通用壳替代。当前0.5.24规则由`rule_registry.json`唯一维护；时长统一引用`timing_policy`，未标定候选不能写为实测。本页的规划表字段不是新增正式母版顶层字段或工作簿列。
 
 ## TPL-R10-01 Source Progress Lock模板

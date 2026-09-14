@@ -114,7 +114,9 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
     states = {"closed": "关闭", "open": "开启", "lit": "点燃", "unlit": "未点燃",
               "extinguished": "熄灭"}
     _need(light["state"] in states, "environment.light.state", "unsupported shared light state")
-    dynamics = f"空气清透；{light['name']}{states[light['state']]}。"
+    # This grammar models no independent wind/rain/flame/background action.
+    # Air appearance and the registered opening/light state have other owners.
+    dynamics = "无环境动态。"
     sound = editorial["环境音效"]
     cues = sound.get("cues", [])
     lookup = {action["id"]: action for action in actions}

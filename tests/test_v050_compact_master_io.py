@@ -185,14 +185,14 @@ class CompactMaterializerTests(unittest.TestCase):
         visible = [
             sheet.title for sheet in workbook.worksheets if sheet.sheet_state == "visible"
         ]
-        self.assertEqual(visible, ["00_范围与审计", "正式生产母版"])
+        self.assertEqual(visible, ["6集_逐镜阅读", "正式分镜母版", "使用与来源", "00_范围与审计"])
         self.assertNotIn("分镜", workbook.sheetnames)
         self.assertNotIn("生成批次", workbook.sheetnames)
-        headers = [cell.value for cell in workbook["正式生产母版"][1]]
+        headers = [cell.value for cell in workbook["正式分镜母版"][1]]
         self.assertEqual(headers, MOTHER_TEMPLATE_COLUMNS)
         self.assertEqual(
-            [workbook["正式生产母版"].column_dimensions[letter].width for letter in "ABCDEFGHIJ"],
-            [16, 9, 11, 23.5, 62, 60, 42, 20, 13, 46],
+            [workbook["正式分镜母版"].column_dimensions[letter].width for letter in "ABCDEFGHIJ"],
+            [15, 9, 11, 30, 150, 105, 52, 27, 30, 66],
         )
 
         canonical = extract_xlsx(payload)["canonical_storyboard"]
@@ -472,7 +472,7 @@ class CompactMaterializerTests(unittest.TestCase):
         self.assertNotIn("运镜功能：", formal)
         self.assertNotIn("叙事功能：", formal)
 
-    def test_gpt_scrubs_audio_dialogue_and_timing_from_every_visual_field(self) -> None:
+    def test_current_rejects_mixed_fields_and_frozen_previous_projection_is_unchanged(self) -> None:
         source = compact_storyboard()
         shot = source["shots"][0]
         shot["空间站位描述"] = "左前主门开启，远处脚步声压低。"
@@ -494,7 +494,10 @@ class CompactMaterializerTests(unittest.TestCase):
         )
         shot["运镜方式"] += "；问句前半平稳。"
 
-        gpt = formal_mother_template_rows(source)[0][GPT_KEYFRAME_FIELD]
+        with self.assertRaisesRegex(ValueError, "field_content_violation"):
+            formal_mother_template_rows(source)
+        from shortdrama_mcp import frozen_projector_0531
+        gpt = frozen_projector_0531.formal_mother_template_rows(source)[0][GPT_KEYFRAME_FIELD]
 
         for visible in (
             "左前主门开启",

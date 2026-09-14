@@ -24,11 +24,16 @@ class CurrentPaperScopeTests(unittest.TestCase):
                     self.assertIn(match.group(0), output)
                 outputs.append(output)
             else:
-                with self.assertRaisesRegex(ValueError, "keyframe_static_contract_violation: unbound_visual_text"):
+                with self.assertRaisesRegex(ValueError, "(?:field_content_violation|keyframe_static_contract_violation: unbound_visual_text)"):
                     fn(value)
         if returned:
             self.assertEqual(outputs[0], outputs[1])
         self.assertEqual(value, original)
+        if '甲随后说道：' in text:
+            for formal in (validate_storyboard.project_formal_master, lambda s: materializer.compile_formal_merged_field(s, assume_compact=True)):
+                with self.assertRaisesRegex(ValueError, 'field_content_violation: 起始状态'):
+                    formal(value)
+            return
         self.assertEqual(validate_storyboard.project_formal_master(value),
                          materializer.compile_formal_merged_field(value, assume_compact=True))
 

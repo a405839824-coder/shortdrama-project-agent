@@ -218,9 +218,9 @@ def verify_bundled(self_test: bool) -> dict:
     expected_structural = {
         "conflicts": 32,
         "task_cards": 30,
-        "validators": 50,
-        "error_codes": 68,
-        "atomic_rules": 156,
+        "validators": 51,
+        "error_codes": 69,
+        "atomic_rules": 157,
         "templates": 50,
         "golden_tests": 82,
     }

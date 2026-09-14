@@ -36,7 +36,7 @@ def voice_decisions(silent=False):
     row['fields']['音色'] = (voice_block(mode='silent', dialogue_rows=[]) if silent
                              else voice_block(**voice_arguments()))
     if not silent:
-        row['phases'][1]['text'] = '甲保持双手放在桌边。甲说道：“还能来吗？”甲口型与对白一致，末字温和上扬。'
+        row['phases'][1]['text'] = '甲保持双手放在桌边。甲说道：“还能来吗？”甲口型与对白一致。'
         data['project']['prevention_evidence']['audio_workflow']['timing']['utterances'] = [{
             'id': 'say-1', 'kind': 'dialogue', 'speaker': '甲',
             'source': {'shot_id': row['shot_id'], 'dialogue_index': 0},
@@ -57,8 +57,7 @@ def control_cases():
     bad = copy.deepcopy(positive); bad['shots'][0]['fields']['音色'] += '\n尾音：上抬。'
     result.append(('VC03_duplicate', bad, '尾音重复'))
     bad = copy.deepcopy(positive)
-    bad['shots'][0]['phases'][1]['text'] = bad['shots'][0]['phases'][1]['text'].replace('上扬', '上抬')
-    result.append(('VC04_body', bad, 'PUNCT: 问号尾音/意图'))
+    result.append(('VC04_body', bad, None))
     silent = voice_decisions(silent=True); result.append(('VC05_silent', silent, None))
     bad = copy.deepcopy(silent); bad['shots'][0]['fields']['音色'] = positive['shots'][0]['fields']['音色']
     result.append(('VC05_spoken_on_silent', bad, '无对白镜必须'))
@@ -138,7 +137,7 @@ class VoiceAuthorContractTests(unittest.TestCase):
                     voice_block(**args)
         self.run_group('VC03')
 
-    def test_vc04_body_contract_does_not_read_voice_and_v1_is_unchanged(self):
+    def test_vc04_punctuation_reads_voice_without_duplicate_body_instruction(self):
         self.run_group('VC04')
         _, bad, _ = next(item for item in control_cases() if item[0] == 'VC04_body')
         bad['contract'] = CONTRACT; del bad['shots'][0]['staging']
@@ -150,7 +149,7 @@ class VoiceAuthorContractTests(unittest.TestCase):
             self.assertEqual(report['status'], 'rendered_pending_preflight')
             self.assertNotIn('VOICE/PUNCT', report['checked_scope'])
             canonical = json.loads(Path(report['canonical_path']).read_text(encoding='utf-8'))
-            self.assertTrue(any('PUNCT' in issue['error_code'] for issue in validator.validate_project(canonical)['issues']))
+            self.assertFalse(any('PUNCT' in issue['error_code'] for issue in validator.validate_project(canonical)['issues']))
 
     def test_vc05_explicit_silent_and_no_invented_content(self):
         self.assertEqual(voice_block(mode='silent', dialogue_rows=[]), '无对白，不适用。')

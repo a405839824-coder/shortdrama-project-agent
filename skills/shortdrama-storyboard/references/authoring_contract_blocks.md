@@ -1,5 +1,7 @@
 # Explicit author contract fragments
 
+0.5.32 字段内容约束以 [field_content_contract.md](field_content_contract.md) 为准；该文件由唯一规则注册表生成。正式母版、GPT 和 R5 阅读页必须由同一份字段数据生成。遇到错列返回路径与原片段，不能静默删句或补造依据。
+
 `scripts/authoring_contract_blocks.py` renders a small set of explicit author
 decisions into the existing formal/GPT contract vocabulary. It returns fragments,
 never an entire shot, state ledger, source adaptation, timing plan, or PASS record.

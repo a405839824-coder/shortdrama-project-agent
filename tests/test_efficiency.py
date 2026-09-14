@@ -212,7 +212,7 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
                 "must_keep": ["剧情、对白、人物认知与空间连续"],
                 "must_remove": [],
                 "protected_scope": protected_scope or [],
-                "expected_outputs": ["正式分镜", "正式生产母版"],
+                "expected_outputs": ["正式分镜", "正式分镜母版"],
                 "window_key": window_key,
             },
         )

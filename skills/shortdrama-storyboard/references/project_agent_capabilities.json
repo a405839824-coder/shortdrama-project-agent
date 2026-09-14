@@ -343,7 +343,7 @@
     "legacy_policy": "read_only_migration_to_compact_successor",
     "mother_template_column_count": 10,
     "output_contract": "R10-SPC-1",
-    "plugin_version": "0.5.31",
+    "plugin_version": "0.5.32",
     "production_audit_status": "PENDING_AUDIT",
     "required_per_shot_aspect_phrase": "9:16竖屏",
     "schema_version": "R10.1",
@@ -580,5 +580,14 @@
     "preserve_literal_dialogue_and_written_payloads": true,
     "repair_requires_current_text_binding": true,
     "legacy_timed_input": "read_only_compatibility_and_lossless_internal_validation"
+  },
+  "field_content_policy": {
+    "contract": "storyboard-field-content-v1",
+    "field_count": 27,
+    "voice_label_count": 11,
+    "keyframe_fixed_sections": 10,
+    "keyframe_optional_sections": 1,
+    "semantic_accuracy_percent": null,
+    "source_semantics": "independent_review_required"
   }
 }

@@ -16,14 +16,16 @@ class ProductionEnvironmentTests(unittest.TestCase):
         before = copy.deepcopy(raw)
         lower = lower_production_decisions(raw)
         shot = _render_decisions(lower['typed_decisions'])['shots'][0]
-        self.assertEqual(shot['环境动态'], '空气清透；东纸窗关闭。')
+        self.assertEqual(shot['环境动态'], '无环境动态。')
+        self.assertIn('东纸窗', shot['光源来源'])
+        self.assertIn('关闭', shot['空间站位描述'])
         self.assertEqual(shot['环境音效'], '无额外环境音效。')
         self.assertEqual(raw, before)
         self.assertEqual(lower['derivation']['shots'][0]['environment_binding']['fields']['环境动态'], shot['环境动态'])
         raw['initial_world']['scenes']['ROOM']['light']['state'] = 'open'
         raw['initial_world']['scenes']['ROOM']['door_window_state'] = {'东纸窗': 'open'}
         changed = lower_production_decisions(raw)
-        self.assertEqual(changed['typed_decisions']['shots'][0]['fields']['环境动态'], '空气清透；东纸窗开启。')
+        self.assertEqual(changed['typed_decisions']['shots'][0]['fields']['环境动态'], '无环境动态。')
 
     def test_free_prose_cannot_add_paper_motion_fog_or_explosion(self):
         for field, text in [('环境动态', '纸张自行翻动，室内浓雾弥漫。'),

@@ -5,6 +5,18 @@ description: "Operate a full-lifecycle Chinese short-drama project Agent with th
 
 # Short-drama storyboard R10
 
+Before producing or changing storyboard fields, read `references/field_content_contract.md`.
+It is generated from the sole rule registry. Use the production-authoring request
+for new structured generation and retain the first attempt. Legacy canonical,
+repair, preflight and export also run field ownership checks; a compatibility
+candidate is not proof of typed generation. Never author E/F as separate prose.
+Camera/state/light values come from the same decisions, voice delivery stays in
+its exact subfield, and the R5 reading cards use the same canonical as the master.
+Punctuation execution is checked in 音色, not copied into 画面内容. Keep real mouth
+and eye actions tied to speech events in the picture. Do not silently strip an
+invalid static clause. Unknown source/performance semantics require independent
+review; passing field checks does not establish a real first-draft percentage.
+
 ## Produce, revise and review narrative artifacts
 
 Before a chapter analysis, story/adaptation/episode plan, character arc, script,

@@ -206,8 +206,8 @@ def upgrade_fixture_to_compact(obj: dict[str, Any]) -> None:
         sections = [picture, action]
         if dialogue and not dialogue.startswith(("无", "不适用")):
             sections.append(f"【{speaker}】{dialogue}")
-            sections.append(f"发声说明：{delivery}")
-            sections.append(f"标点按停顿、上扬、重落或收住表现：{punctuation}")
+            shot["音色"] = (str(shot.get("音色") or "") + f"；发声说明：{delivery}"
+                             + f"；标点按停顿、上扬、重落或收住表现：{punctuation}")
         if legacy_prompt and any(term in legacy_prompt for term in ("上一镜", "关键帧", "继续原动作", "加入BGM", "背景音乐")):
             sections.append(legacy_prompt)
         shot["画面内容"] = "；".join(section.strip("； ") for section in sections if section.strip("； "))

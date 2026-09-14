@@ -88,7 +88,7 @@ class CompactMasterPerformanceContracts(unittest.IsolatedAsyncioTestCase):
                 "must_keep": ["剧情、对白、认知、声画和未影响镜头语义"],
                 "must_remove": [],
                 "protected_scope": protected_scope or [],
-                "expected_outputs": ["正式分镜", "正式生产母版", "生产审计交接"],
+                "expected_outputs": ["正式分镜", "正式分镜母版", "生产审计交接"],
                 "window_key": f"performance-{operation}",
             },
         )

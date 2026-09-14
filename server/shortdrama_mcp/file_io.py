@@ -80,10 +80,13 @@ CANONICAL_SIDECAR_HEADERS = [
     "audit_page_sha256",
 ]
 LEGACY_CANONICAL_SIDECAR_HEADERS = CANONICAL_SIDECAR_HEADERS[:-3]
-CURRENT_PROJECTION_CONTRACT = "shortdrama-projector/0.5.5"
+CURRENT_PROJECTION_CONTRACT = "shortdrama-projector/0.5.32"
+PREVIOUS_PROJECTION_CONTRACT = "shortdrama-projector/0.5.5"
+from . import frozen_projector_0531
+from .r5_workbook import MASTER_NAME, WIDTHS, reading_matrices, write_reading_sheets
 LEGACY_PROJECTION_CONTRACT = "shortdrama-projector/0.5.0"
 CONTROLLED_HISTORICAL_PROJECTION_CONTRACTS = frozenset(
-    {CURRENT_PROJECTION_CONTRACT, "shortdrama-projector/0.5.4"}
+    {CURRENT_PROJECTION_CONTRACT, PREVIOUS_PROJECTION_CONTRACT, "shortdrama-projector/0.5.4"}
 )
 
 
@@ -268,6 +271,10 @@ def _sheet_value_matrix(sheet: Any) -> list[list[Any]]:
     """Return the complete used value range, including non-table columns."""
 
     raw_rows = [list(row) for row in sheet.iter_rows(values_only=True)]
+    return _used_value_matrix(raw_rows)
+
+
+def _used_value_matrix(raw_rows: list[list[Any]]) -> list[list[Any]]:
     last_row = max(
         (
             index
@@ -359,7 +366,7 @@ def _canonical_storyboard_from_sidecar(
         allowed_projection_contracts = (
             _allowed_projection_contracts
             if _allowed_projection_contracts is not None
-            else frozenset({CURRENT_PROJECTION_CONTRACT})
+            else frozenset({CURRENT_PROJECTION_CONTRACT, PREVIOUS_PROJECTION_CONTRACT})
         )
         if projection_contract not in allowed_projection_contracts:
             raise _canonical_sidecar_error("projection contract marker mismatch")
@@ -682,6 +689,26 @@ def _assert_visible_projection_matches(
     _assert_visible_projection_rows_match(sheets, expected_rows)
 
 
+def _rows_for_projection(storyboard, contract):
+    if contract in {PREVIOUS_PROJECTION_CONTRACT, "shortdrama-projector/0.5.4"}:
+        return frozen_projector_0531.formal_mother_template_rows(storyboard)
+    return formal_mother_template_rows(storyboard)
+
+
+def _assert_auxiliary_sheets(sheets, storyboard, expected_rows, contract):
+    current = contract == CURRENT_PROJECTION_CONTRACT
+    expected_aux = reading_matrices(storyboard, expected_rows) if current else {}
+    names = [str(sheet.get("name") or "") for sheet in sheets
+             if sheet.get("name") != CANONICAL_SIDECAR_SHEET]
+    expected_names = ["00_范围与审计", MASTER_NAME if current else "正式生产母版", *expected_aux]
+    if len(names) != len(set(names)) or sorted(names) != sorted(expected_names):
+        raise _canonical_sidecar_error("current workbook has unexpected visible sheets")
+    for name, expected in expected_aux.items():
+        actual = next(item for item in sheets if item.get("name") == name)
+        if _visible_sheet_sha256(name, actual.get("matrix") or []) != _visible_sheet_sha256(name, _used_value_matrix(expected)):
+            raise _canonical_sidecar_error("visible reading/source projection mismatch: " + name)
+
+
 def _visible_projection_contract(sheets: list[dict[str, Any]]) -> str:
     """Return ``current`` or ``legacy`` for the one compact mother sheet."""
 
@@ -800,17 +827,8 @@ def workbook_to_storyboard(
         # The transitional branch uses the frozen v0.5.3 projector.  It never
         # treats those rows as v0.5.0 and never invokes today's projector.
         if projection_sha256 is not None:
-            visible_names = [
-                str(sheet.get("name") or "")
-                for sheet in sheets
-                if sheet.get("name") != CANONICAL_SIDECAR_SHEET
-            ]
-            if sorted(visible_names) != sorted(
-                ["00_范围与审计", "正式生产母版"]
-            ):
-                raise _canonical_sidecar_error(
-                    "current workbook has unexpected visible sheets"
-                )
+            expected_rows = _rows_for_projection(sidecar_storyboard, projection_contract)
+            _assert_auxiliary_sheets(sheets, sidecar_storyboard, expected_rows, projection_contract)
             scope_sheet = next(
                 sheet for sheet in sheets if sheet.get("name") == "00_范围与审计"
             )
@@ -822,7 +840,6 @@ def workbook_to_storyboard(
                 raise _canonical_sidecar_error(
                     "visible audit page SHA-256 mismatch"
                 )
-            expected_rows = formal_mother_template_rows(sidecar_storyboard)
             _assert_visible_projection_rows_match(sheets, expected_rows)
         elif controlled_transitional_short_header:
             visible_names = [
@@ -1115,24 +1132,15 @@ def extract_xlsx_for_controlled_handoff_revalidation(
         legacy_v053_mother_template_rows(sidecar_storyboard)
         if compatibility_applied
         else (
-            formal_mother_template_rows(sidecar_storyboard)
+            _rows_for_projection(sidecar_storyboard, projection_contract)
             if projection_sha256 is not None
             else legacy_v050_mother_template_rows(sidecar_storyboard)
         )
     )
     visible_projection_sha256 = projection_rows_sha256(expected_rows)
 
-    visible_names = [
-        str(sheet.get("name") or "")
-        for sheet in sheets
-        if sheet.get("name") != CANONICAL_SIDECAR_SHEET
-    ]
-    if sorted(visible_names) != sorted(
-        ["00_范围与审计", "正式生产母版"]
-    ):
-        raise _canonical_sidecar_error(
-            "controlled workbook has unexpected visible sheets"
-        )
+    _assert_auxiliary_sheets(sheets, sidecar_storyboard, expected_rows,
+                             PREVIOUS_PROJECTION_CONTRACT if compatibility_applied else projection_contract)
     scope_sheet = next(
         sheet for sheet in sheets if sheet.get("name") == "00_范围与审计"
     )
@@ -1618,6 +1626,10 @@ def _write_scope_audit_sheet(
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
     for index, width in enumerate((24, 28, 24, 48, 36), 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.merge_cells("A1:E1")
+    sheet.row_dimensions[1].height = 28
+    sheet.column_dimensions["A"].width = 39
+    sheet.column_dimensions["B"].width = 58
     sheet.freeze_panes = "A3"
     return sheet
 
@@ -1643,12 +1655,23 @@ def storyboard_to_xlsx(
     formal_rows = formal_mother_template_rows(compact, assume_compact=True)
     formal_sheet = _write_table(
         workbook,
-        "正式生产母版",
+        MASTER_NAME,
         list(MOTHER_TEMPLATE_COLUMNS),
         formal_rows,
     )
-    for index, width in enumerate((16, 9, 11, 23.5, 62, 60, 42, 20, 13, 46), 1):
+    for index, width in enumerate(WIDTHS, 1):
         formal_sheet.column_dimensions[get_column_letter(index)].width = width
+    formal_sheet.row_dimensions[1].height = 30
+    for row_index in range(2, formal_sheet.max_row + 1):
+        formal_sheet.row_dimensions[row_index].height = 409
+
+    matrices = reading_matrices(compact, formal_rows)
+    write_reading_sheets(workbook, matrices)
+    # R5 reading pages first, then copyable master and source guide; retain the
+    # existing signed audit page and very-hidden canonical evidence unchanged.
+    reading_names = [name for name in matrices if name != "使用与来源"]
+    names = [*reading_names, MASTER_NAME, "使用与来源", scope_sheet.title]
+    workbook._sheets = [workbook[name] for name in names]
 
     audit_page_sha256 = _visible_sheet_sha256(
         scope_sheet.title,
@@ -1685,6 +1708,7 @@ def storyboard_to_xlsx(
     roundtrip_result = _canonical_storyboard_from_sidecar(sheets)
     roundtrip = roundtrip_result[0] if roundtrip_result is not None else None
     _assert_visible_projection_rows_match(sheets, formal_rows)
+    _assert_auxiliary_sheets(sheets, compact, formal_rows, CURRENT_PROJECTION_CONTRACT)
     if roundtrip != json_safe(compact):
         raise ValueError(
             "canonical sidecar invalid: saved workbook canonical round-trip mismatch"
