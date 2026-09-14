@@ -4,6 +4,7 @@ import copy
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 import sys
 import unittest
@@ -44,6 +45,17 @@ class FieldContentTests(unittest.TestCase):
             self.assertNotIn(retired, skill)
         self.assertIn('Displayed `画面内容` has no numeric production timecodes', skill)
         self.assertIn('rejects mixed static input instead of silently deleting clauses', skill)
+
+    def test_active_field_examples_obey_the_same_content_contract(self):
+        seen = 0
+        names = '|'.join(re.escape(k) for k in field_policy()['fields'] if k != '音色')
+        for name in ('strict_prompt_contract.md', 'jimeng_timing_policy.md'):
+            document = (ROOT/'skills/shortdrama-storyboard/references'/name).read_text(encoding='utf-8')
+            for match in re.finditer(r'^(' + names + r')：(.+)$', document, flags=re.M):
+                with self.subTest(document=name, field=match[1]):
+                    self.assertEqual(faults(match[1], match[2]), [])
+                    seen += 1
+        self.assertGreaterEqual(seen, 9)
 
     def test_three_previously_accepted_cross_field_probes_are_rejected(self):
         for field, appendix in [('机位','江氏皱眉，右手握紧袖口。'),
