@@ -36,6 +36,15 @@ class FieldContentTests(unittest.TestCase):
         self.assertEqual(sum(not r['optional'] for r in p['keyframe_sections']), 10)
         self.assertIsNone(p['remaining_problem_plan']['direct_design_coverage']['measured_resolution'])
 
+    def test_model_skill_does_not_restore_visible_clocks_or_silent_cleanup(self):
+        skill = (ROOT/'skills/shortdrama-storyboard/SKILL.md').read_text(encoding='utf-8')
+        for retired in ('Every `画面内容` has exactly three',
+                        'whose `画面内容` is not exactly three',
+                        'GPT/keyframe projection strips all timing, dialogue'):
+            self.assertNotIn(retired, skill)
+        self.assertIn('Displayed `画面内容` has no numeric production timecodes', skill)
+        self.assertIn('rejects mixed static input instead of silently deleting clauses', skill)
+
     def test_three_previously_accepted_cross_field_probes_are_rejected(self):
         for field, appendix in [('机位','江氏皱眉，右手握紧袖口。'),
                                 ('机位','江氏的声音清亮，语速放慢。'),
