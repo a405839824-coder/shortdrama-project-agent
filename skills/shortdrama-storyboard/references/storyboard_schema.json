@@ -133,7 +133,8 @@
                           "type": "object",
                           "required": [
                             "field",
-                            "quote"
+                            "quote",
+                            "event_ids"
                           ],
                           "properties": {
                             "field": {
@@ -141,12 +142,22 @@
                                 "画面内容",
                                 "心理音轨",
                                 "环境音效",
-                                "环境动态"
+                                "环境动态",
+                                "起始状态"
                               ]
                             },
                             "quote": {
                               "type": "string",
                               "minLength": 1
+                            },
+                            "event_ids": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "uniqueItems": true,
+                              "minItems": 1
                             }
                           },
                           "additionalProperties": false

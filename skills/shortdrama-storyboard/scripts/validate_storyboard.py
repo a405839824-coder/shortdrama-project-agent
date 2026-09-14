@@ -3888,7 +3888,12 @@ def validate_project(
                     repair="只从静态起始状态、静态机位、光影、锚点和9:16生成限制重投影。",
                     template_gate_id="THG-03",
                 ))
-            unobservable_hits = _keyframe_unobservable_hits(gpt_projection)
+            # Projection can fail earlier on field ownership. Still inspect
+            # independent static inputs instead of masking a known semantic
+            # category behind a generic projection error.
+            unobservable_hits = _keyframe_unobservable_hits(gpt_projection or '\n'.join(
+                context_instruction_text(str(shot.get(field) or ''), field)
+                for field in ('起始状态', '机位', '光影', '光源来源', '光源方向', '色温倾向')))
             if unobservable_hits:
                 issues.append(_issue(
                     catalog,
@@ -4050,7 +4055,9 @@ def validate_project(
                 visible_speakers = [name for name, _ in dialogue_rows if dialogue_mouth_visible(name, shot)]
                 if visible_speakers and "口型与对白一致" not in image_content:
                     issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容", "R10-SPC-1可见对白未写“口型与对白一致”。"))
-                if visible_speakers and "不看镜头" not in image_content:
+                # Current production replays the same speaking-eye geometry
+                # that generated this picture. A magic phrase is not proof.
+                if visible_speakers and not planned_performance and "不看镜头" not in image_content:
                     issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "R10-SPC-1对白人物未明确不看镜头。"))
                 reaction_faults = [] if planned_performance else listener_reaction_faults(execution_shot, duration=duration, dialogue_rows=dialogue_rows)
                 if reaction_faults:

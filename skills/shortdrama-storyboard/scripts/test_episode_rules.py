@@ -19,13 +19,25 @@ def episode_fixture():
         shots.append({'镜头编号':sid,'时长':d,'画面内容':quote,'机位':'平视近景。','起始状态':'甲面部在画内。','原文支撑句':quote,'心理音轨':'无'})
         sources.append({'source_id':src,'source_text':quote,'target_shots':[sid],'treatment':'保留','authorization':'无'})
         beats.append({'id':f'B{i+1}','kind':'opening_hook' if i==0 else 'ending_hook' if i==19 else 'advance',
-            'shot_id':sid,'source_ids':[src],'delivery':{'field':'画面内容','quote':quote},'start':0,'end':d/2})
+            'shot_id':sid,'source_ids':[src],'delivery':{'field':'画面内容','quote':quote,'event_ids':[f'A{i+1}']},'start':0,'end':d/2})
         functions.append({'source_id':src,'kind':'plot','shot_ids':[sid]})
         utterances.append({'kind':'dialogue','shot_id':sid,'start':0,'end':d*.4})
     ep={'episode_id':'EP01','core_actor':'甲','ending':'hook','beat_events':beats,'source_functions':functions}
     evidence={'source_ledger':sources,'episode_contract':{'contract':CONTRACT,'profile_id':policy()['profile_id'],
         'scope':'complete_episodes','episodes':[ep]},'production_derivation':{'source_graph_json':json.dumps({'production_plan':{'shots':[
             {'shot_id':shots[0]['镜头编号'],'visible':[{'kind':'eyes','subject':'甲','start':0,'end':5}]}]}})}}
+    # Component-only supplied trace; full proof verification is exercised by
+    # test_v0535_production_contract's actual current compiler/MCP pipeline.
+    evidence['production_derivation']['action_trace'] = {'shots':[], 'world_events':[]}
+    evidence['production_derivation']['source_compilation'] = {'uses_by_id':{}}
+    for i,(shot,beat) in enumerate(zip(shots,beats)):
+        identity=f'A{i+1}';uid=f'U{i+1}';sid=shot['镜头编号']
+        trace=evidence['production_derivation']['action_trace']
+        trace['shots'].append({'shot_id':sid,'actions':[{'id':identity,'source_use_id':uid,
+            'world_action_description':shot['画面内容'],'projection_status':'visible'}]})
+        trace['world_events'].append({'id':identity,'shot_id':sid,'start':0,'end':shot['时长']/2,'kind':'hold'})
+        evidence['production_derivation']['source_compilation']['uses_by_id'][uid] = {
+            'text':shot['画面内容'],'source_constraints':[{'supports':[{'source_id':beat['source_ids'][0]}]}]}
     return {'shots':shots,'prevention_evidence':evidence},{'utterances':utterances}
 
 

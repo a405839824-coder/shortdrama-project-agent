@@ -14,7 +14,59 @@ import re
 
 CONTRACT = 'episode-production-contract-v1'
 REF = Path(__file__).resolve().parents[1] / 'references'
-DELIVERY_FIELDS = ('画面内容', '心理音轨', '环境音效', '环境动态')
+DELIVERY_FIELDS = ('画面内容', '起始状态', '心理音轨', '环境音效', '环境动态')
+
+
+def _delivery_interval(evidence, shot_id, delivery, source_ids, *, verified):
+    """Resolve an exact delivery in a replayed trace; never trust beat clocks.
+
+    Sub-quotes conservatively occupy the whole bound event. Shorter spoken
+    delivery needs its own real utterance event, not a claimed timestamp.
+    Unsupported modalities remain explicit; source labels alone are no proof.
+    """
+    if not verified:
+        raise ValueError('delivery requires replayed production evidence')
+    refs = delivery.get('event_ids')
+    if not isinstance(refs, list) or not refs or any(not isinstance(x, str) or not x for x in refs) or len(set(refs)) != len(refs):
+        raise ValueError('delivery.event_ids requires unique actual event identities')
+    proof = evidence.get('production_derivation') or {}
+    trace = proof.get('action_trace') or {}
+    uses = (proof.get('source_compilation') or {}).get('uses_by_id', {})
+    shot = next((s for s in trace.get('shots', []) if s.get('shot_id') == shot_id), {})
+    actions = {x['id']: x for x in shot.get('actions', [])}
+    events = {x['id']: x for x in trace.get('world_events', []) if x.get('shot_id') == shot_id}
+    spans = []; actual_sources = set()
+    for identity in refs:
+        state = next((s for s in shot.get('current_written_deliveries', []) if s['id'] == identity), None)
+        if state is not None:
+            use = uses.get(state['source_use_id'])
+            if not use or delivery['field'] != state['field'] or delivery['quote'] not in state['text']:
+                raise ValueError('current written delivery differs from actual initial visible state')
+            actual_sources.update(s['source_id'] for fact in use.get('source_constraints', []) for s in fact.get('supports', []))
+            spans.append((seconds(state['start']), seconds(state['end'])))
+            continue
+        event = events.get(identity); action = actions.get(identity)
+        if event is None or action is None:
+            raise ValueError('delivery event is absent from the owning shot execution')
+        use = uses.get(action.get('source_use_id'))
+        if not use:
+            raise ValueError('delivery event has no supported source-use binding; not_supported')
+        sound = next((s for s in shot.get('environment_binding', {}).get('sound_bindings', [])
+                      if s['action_id'] == identity and delivery['field'] == '环境音效'), None)
+        field = '环境音效' if sound else '心理音轨' if event.get('kind') == 'narrate' else '画面内容'
+        if field != delivery['field'] or action.get('projection_status') == 'hidden':
+            raise ValueError('delivery field or actual visibility differs from the event')
+        actual = sound['rendered_text'] if sound else use['text'] if event.get('kind') in {'speak', 'narrate'} else action.get('world_action_description', '')
+        if delivery['quote'] not in actual:
+            raise ValueError('delivery quote is not part of the referenced event')
+        actual_sources.update(s['source_id'] for fact in use.get('source_constraints', []) for s in fact.get('supports', []))
+        spans.append((seconds(event['start']), seconds(event['end'])))
+    if set(source_ids) != actual_sources:
+        raise ValueError('delivery sources differ from the actual event source bindings')
+    _, merged = union_seconds(spans)
+    if len(merged) != 1:
+        raise ValueError('delivery must be a contiguous actual event interval')
+    return merged[0]
 
 
 def policy():
@@ -183,11 +235,20 @@ def _inspect_episodes(obj, shots=None, *, timing=None, rules=None, production_ve
             try:a,bend=seconds(b['start']),seconds(b['end'])
             except (KeyError,ValueError):fault('E-EPISODE-BEAT-001',loc,'finite local event interval required');continue
             if bend<=a or bend>by_id[sid][2]:fault('E-EPISODE-BEAT-001',loc,'event outside shot interval');continue
-            event_key = (tuple(sorted(src)), field, quote.strip())
+            try:
+                actual_a, actual_b = _delivery_interval(evidence, sid, delivery, src, verified=production_verified)
+            except (ValueError, KeyError, TypeError) as exc:
+                fault('E-EPISODE-BEAT-001',loc,str(exc),'insufficient_evidence');continue
+            if (a, bend) != (actual_a, actual_b):
+                fault('E-EPISODE-BEAT-001',loc,'declared beat clock differs from actual delivery execution')
+            # Continue metrics using actual execution even when the declaration
+            # was wrong, so one bad claim cannot hide the real missing hook.
+            a, bend = actual_a, actual_b
+            event_keys = set(delivery['event_ids'])
             if kind in {'opening_hook','advance','ending_hook','closure'}:
-                if event_key in delivered_events:
+                if event_keys & delivered_events:
                     fault('E-EPISODE-BEAT-001',loc,'relabeling the same source delivery cannot create another advancement');continue
-                delivered_events.add(event_key)
+                delivered_events.update(event_keys)
             span=(offsets[sid]+a,offsets[sid]+bend);kind_spans[kind].append(span)
             if kind in {'opening_hook','advance','ending_hook','closure'}:points.append(span[0])
         details['beat_semantics']='not_certified_by_labels_or_quotes'

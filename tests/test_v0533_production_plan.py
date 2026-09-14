@@ -207,6 +207,9 @@ class ProductionPlanTests(unittest.TestCase):
         self.data['project']['prevention_evidence']['source_decisions']=uses
         self.data['project']['prevention_evidence']['source_ledger']=[{'source_id':sid,'source_text':t} for sid,t in texts.items()]
         self.data['initial_world']['props']['信纸']['written_ref']=None
+        # Keep the knowledge tests focused on disclosure, with a physically
+        # valid off-camera gaze during the fixture's speech.
+        self.data['initial_world']['points']['观察点']['position_xyz']=[1,2,1.5]
         self.data['shots'][0]['actions']=[action('speak',id='speech',source_use_id='U1',voice=voice_spec())]
         self.graph,self.texts=graph,texts; self.replan()
 

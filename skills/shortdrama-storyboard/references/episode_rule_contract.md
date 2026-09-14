@@ -1,4 +1,4 @@
-# 0.5.34 分集规则与历史保全合同
+# 0.5.35 分集规则与历史保全合同
 
 本文件说明实际执行范围，不是首稿准确率或成片验收证明。注册源为 `rule_registry.json`；历史依据为 `historical_rule_baseline.json`，保留原始 10 份资料哈希、149 节索引及逐项迁移判断。
 
@@ -33,7 +33,9 @@
 
 这只是字段示例，空清单不能作为完整集交付。`scope` 可选 `fragment/complete_episodes/complete_series`；全剧还需要准确的 `series_episode_ids`。结尾可选 `hook/finale`，终局检查闭合，不强加新悬念。
 
-`beat_events` 每项必须包含 `id/kind/shot_id/source_ids/delivery/start/end`；`delivery` 是所属声画字段和实际原句，时间使用本镜秒数。类型为 `opening_hook/advance/ending_hook/closure/carryover`，出处栏不能代替实际交付，同源同句换标签不能当新推进。
+`beat_events` 每项必须包含 `id/kind/shot_id/source_ids/delivery/start/end`；`delivery` 必含所属字段 `field`、实际原句 `quote`、真实执行身份 `event_ids`。时间使用真实事件的本镜秒数，必须与重放证据完全一致。实际在第8秒发声的对白不能填0秒作为开篇钩子；申报时间错误仍按真实执行计算指标并报错。类型为 `opening_hook/advance/ending_hook/closure/carryover`，出处栏不能代替实际交付，同一事件换句段或标签不能当新推进。
+
+对白、客观旁白使用实际动作ID，分别属于画面内容、心理音轨。有来源使用绑定的可见动作及动作音效引用该动作ID。起始已写文字可引用 `state:<shot_id>:<paper_ref>`，字段为起始状态，时段来自该文字载体从初帧持续可见的实际窗口；字号可读性仍须独审。未建模的独立环境事件不计为已证实钩子。部分引句保守采用整个绑定事件时段，不能靠截词伪造更短交付。
 
 `source_functions` 每项包含 `source_id/kind/shot_ids`；用途独立使用 `plot/montage/detail/description`，与原文 S/A/B/C 评级分开。细节另需 `micro_elements/baseline_seconds`。来源对应镜头必须与来源台账完全一致；基准时长与分类是否真实仍须独立核对。
 
@@ -65,7 +67,7 @@
 
 ## 验证口径
 
-`test_episode_rules.py` 是合成时间轴及边界测试，`test_v0534_rule_closure.py` 使用真实生成/服务/独审消费入口。旧版本的 1–2 镜协议夹具通过 `historical_entry_fixture.py` 单独隔离新生产入口要求，用于复核原有存储、签名、权限及修复；不得把这些历史夹具计作完整集新生产通过。
+`test_episode_rules.py` 是合成时间轴及边界测试，`test_v0534_rule_closure.py` 保留上一版入口检查；`test_v0535_production_contract.py` 使用完整合成集，覆盖当前生成、逐场/整集预检、提交、签名审计消费，以及拒绝后修正且保留首份请求。审计判断在测试中明确标为合成验收输入，不是对真实剧情的独立审查。旧版本的 1–2 镜协议夹具通过 `historical_entry_fixture.py` 单独隔离新生产入口要求，用于复核原有存储、签名、权限及修复；不得把这些历史夹具计作完整集新生产通过。
 
 未知自由文本语义、实际表演质量、成片遮挡/音频和 98% 首批使用率没有因这些软件测试而获得证明。新规则能提前拦截支持范围内的错误，不能承诺任意题材或任意模型输出都达到 98%。
 
