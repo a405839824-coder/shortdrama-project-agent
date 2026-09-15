@@ -2,8 +2,11 @@
 import copy
 import hashlib
 import json
+import io
 from pathlib import Path
 import sys
+import subprocess
+import tempfile
 import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -50,6 +53,61 @@ def compile_render(data,graph,texts):
 
 
 class AudioBridgeTests(unittest.TestCase):
+    def test_isolated_server_export_uses_same_ordered_speaker_parser(self):
+        rows=[('甲','明日再议。'),('乙','明日再议。')]
+        block=build_voice_sequence([(a,t,voice_spec()) for a,t in rows])
+        payload={'画面内容':'甲说道：“明日再议。”；乙说道：“明日再议。”','音色':block}
+        code="""
+import json,sys
+sys.path.insert(0,sys.argv[1])
+from shortdrama_mcp.field_content import field_content_findings
+shot=json.load(sys.stdin)
+assert 'validate_storyboard' not in sys.modules
+assert field_content_findings(shot)==[]
+shot['音色']=shot['音色'].replace('〔2:乙〕','〔2:甲〕',1)
+assert field_content_findings(shot)
+assert 'validate_storyboard' not in sys.modules
+"""
+        result=subprocess.run([sys.executable,'-I','-X','utf8','-c',code,str(ROOT/'server')],
+                              input=json.dumps(payload,ensure_ascii=False),encoding='utf-8',capture_output=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_full_episode_thought_reaches_real_validator_and_xlsx(self):
+        from test_v0535_production_contract import complete_episode,generate
+        from validate_storyboard import validate_project
+        from shortdrama_mcp.file_io import storyboard_to_xlsx,extract_file
+        from shortdrama_mcp.materializer import MOTHER_TEMPLATE_COLUMNS
+        from openpyxl import load_workbook
+        data,graph=complete_episode();e=data['project']['prevention_evidence']
+        text='甲心想：编号十九可以开始。'
+        graph['sources']['DOC19']=hashlib.sha256(text.encode()).hexdigest()
+        f=next(f for f in graph['facts'] if f['id']=='F20');f['channel']='thought'
+        f['supports']=[{'source_id':'DOC19','start':0,'end':len(text),'text':text}]
+        use=next(u for u in e['source_decisions']['uses'] if u['id']=='U20');use['mode']='inner_voice'
+        source=next(s for s in e['source_ledger'] if s['source_id']=='DOC19')
+        source.update(source_text=text,source_type='心理')
+        shot=data['shots'][18];shot['actions'][0]['kind']='inner_voice'
+        shot['actions'][0].pop('voice')
+        shot['editorial']['原文支撑句']=text
+        beat=next(b for b in e['episode_contract']['episodes'][0]['beat_events'] if b['id']=='B19')
+        beat['delivery']['field']='心理音轨'
+        with tempfile.TemporaryDirectory() as folder:
+            canonical=generate(folder,data,graph)
+        report=validate_project(canonical)
+        self.assertEqual(report['issues'],[],report['issues'])
+        row=canonical['shots'][18]
+        self.assertIn('甲内心独白：“编号十九可以开始。”',row['心理音轨'])
+        self.assertNotIn('编号十九可以开始',row['画面内容'])
+        raw=storyboard_to_xlsx(canonical,report,assume_compact=True)
+        wb=load_workbook(io.BytesIO(raw));master=wb['正式分镜母版']
+        self.assertEqual([c.value for c in master[1]],list(MOTHER_TEMPLATE_COLUMNS))
+        self.assertIn('甲内心独白：“编号十九可以开始。”',str(master.cell(20,5).value))
+        self.assertTrue(extract_file(raw,'synthetic-thought.xlsx'))
+        beat['delivery']['field']='画面内容'
+        with tempfile.TemporaryDirectory() as folder:
+            wrong_field=generate(folder,data,graph)
+        self.assertTrue(any(i['error_code']=='E-EPISODE-BEAT-001' for i in validate_project(wrong_field)['issues']))
+
     def test_thought_is_exact_psychological_audio_without_lips_or_narrator_truth(self):
         data,g,t=fixture();g['production_plan']=frozen_plan(data,g,t)
         u=g['production_plan']['knowledge']['uses'][0]

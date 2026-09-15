@@ -1,7 +1,35 @@
 """Several actual utterances in the unchanged eleven-label voice field."""
 import re
 
+VOICE_TEMPLATE_LABELS = (
+    "基础声线", "言语行为", "当前表达", "发声方式", "音量", "语速与节奏",
+    "呼吸", "停顿", "重音", "尾音", "禁止语气",
+)
+LEGACY_DIALOGUE_TAG_RE = re.compile(
+    r"【(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})】\s*[“\"]?(?P<line>[^【\n｜|；;”\"]+)[”\"]?"
+)
+INTEGRATED_DIALOGUE_RE = re.compile(
+    r"(?:^|[；;。！？!?，,、】])\s*(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})说道[：:]?\s*[“\"](?P<line>[^”\"\n]+)[”\"]"
+)
 MARKER = re.compile(r'〔([1-9][0-9]*):([^〔〕\r\n]+)〕')
+
+
+def extract_dialogues(picture_content):
+    """Shared R10-SPC-1 and legacy read-only syntax, without validator imports."""
+    rows = []
+    text = str(picture_content or "")
+    for match in INTEGRATED_DIALOGUE_RE.finditer(text):
+        line = match.group("line").strip()
+        if line:
+            rows.append((match.group("speaker").strip(), line))
+    for match in LEGACY_DIALOGUE_TAG_RE.finditer(text):
+        line = match.group("line").strip()
+        sentence = re.match(r"(.+?[。！？?!](?:[。！？?!…])?)", line)
+        if sentence:
+            line = sentence.group(1).strip()
+        if line:
+            rows.append((match.group("speaker").strip(), line))
+    return rows
 
 
 def has_markers(text):
@@ -30,7 +58,6 @@ def build_voice_sequence(entries):
 
 
 def split_voice_sequence(parsed, rows):
-    from validate_storyboard import VOICE_TEMPLATE_LABELS
     if rows is None or len(rows)<2: return [],['多句音色必须绑定实际对白顺序，不能凭标记编造说话人']
     expected=[(str(i+1),row[0]) for i,row in enumerate(rows)]
     blocks=[{} for _ in rows]; errors=[]

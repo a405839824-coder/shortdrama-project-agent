@@ -7,6 +7,7 @@ The production compiler supplies camera/state/light values from typed decisions.
 from __future__ import annotations
 
 from functools import lru_cache
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 from pathlib import Path
 import re
@@ -15,6 +16,18 @@ import re
 REFERENCE_ROOT = Path(__file__).resolve().parents[1] / "references"
 CONTRACT = "storyboard-field-content-v1"
 ERROR_CODE = "E-FIELD-CONTENT-001"
+
+
+@lru_cache(maxsize=1)
+def _voice_syntax():
+    # The server loads this file by path and need not import the CLI validator.
+    # Use the identical sibling parser, without changing global import paths.
+    path = Path(__file__).with_name("voice_sequence.py")
+    spec = spec_from_file_location("shortdrama_shared_voice_syntax", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @lru_cache(maxsize=1)
@@ -131,10 +144,10 @@ def voice_content_findings(value, *, dialogue_rows=(), mask=None):
         findings.append({"code": ERROR_CODE, "path": "音色", "role": "unlabelled",
                          "excerpt": str(value)[:first_label.start()].strip(), "offset": [0, first_label.start()],
                          "message": "音色不接受固定标签之外的前置正文", "repair": "把发声决定填写在对应子项"})
-    from voice_sequence import has_markers,split_voice_sequence
+    syntax = _voice_syntax()
     sequence=None
-    if has_markers(str(value)):
-        sequence, errors=split_voice_sequence(dict(parts),dialogue_rows)
+    if syntax.has_markers(str(value)):
+        sequence, errors=syntax.split_voice_sequence(dict(parts),dialogue_rows)
         if errors:
             findings.append({'code':ERROR_CODE,'path':'音色','role':'invalid_voice_sequence','status':'fail',
                              'excerpt':str(value)[:120],'offset':[0,len(str(value))],
@@ -161,8 +174,7 @@ def field_content_findings(shot, *, mask=None, dialogue_rows=()):
         # The full validator supplies its authoritative dialogue parser. Direct
         # render callers retain narrowly marked speech literals for role checks;
         # source/speaker fidelity is still checked by the full validator.
-        from validate_storyboard import extract_dialogues
-        dialogue_rows = extract_dialogues(str(shot.get("画面内容") or ""))
+        dialogue_rows = _voice_syntax().extract_dialogues(shot.get("画面内容"))
     findings = []
     for field, spec in policy["fields"].items():
         if field not in shot or spec.get("verbatim_source"):
