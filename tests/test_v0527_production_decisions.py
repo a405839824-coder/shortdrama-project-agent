@@ -70,6 +70,55 @@ def performance_fixture():
 class ProductionDecisionTests(unittest.TestCase):
     def lower(self, data): return lower_production_decisions(data)
 
+    def test_turning_receiver_is_not_a_change_of_light_direction(self):
+        from lighting_checks import scene_lighting_continuity_faults
+        data=production_fixture()
+        data['shots'][0]['actions']=[action('turn', start=0, end=10, body_yaw=180, head_yaw=180)]
+        second=copy.deepcopy(data['shots'][0])
+        second.update(shot_id='EP90-002',shot_uid='TURNED-RECEIVER',actions=[])
+        second['transition']={'relation':'continuous','basis':'同光源同机位，人物已转身。'}
+        data['shots'].append(second)
+        rows=_render_decisions(self.lower(data)['typed_decisions'])['shots']
+        self.assertIn('甲后脑',rows[1]['光源方向'])
+        self.assertEqual(scene_lighting_continuity_faults(rows),[])
+        rows[1]['光源方向']=rows[1]['光源方向'].replace('画面左侧','画面右侧')
+        self.assertTrue(any('反打机位依据' in f for f in scene_lighting_continuity_faults(rows)))
+
+    def test_face_frame_requires_actual_front_head_and_excludes_feet(self):
+        data = production_fixture()
+        camera = data['shots'][0]['camera']
+        camera.update(position_xyz=[0, 1, 1.5], hfov_deg=18, vfov_deg=28, frame='face')
+        data['initial_world']['points']['取景中心']['position_xyz'] = [0, 0, 1.45]
+        canonical = _render_decisions(self.lower(data)['typed_decisions'])
+        self.assertEqual(canonical['shots'][0]['镜头类型'], '面部近景')
+        behind = copy.deepcopy(data)
+        behind['shots'][0]['camera']['position_xyz'] = [0, -1, 1.5]
+        self.rejected(behind, 'visible front-facing head')
+        feet = copy.deepcopy(data)
+        feet['shots'][0]['camera']['vfov_deg'] = 140
+        self.rejected(feet, 'excludes foot landmarks')
+
+    def test_three_people_staging_has_independent_clauses_in_actual_render(self):
+        data = production_fixture()
+        for name, x in [('乙', -.6), ('丙', .6)]:
+            actor = copy.deepcopy(data['initial_world']['actors']['甲'])
+            actor['position_xyz'][0] = x
+            actor['reach_origin_xyz'][0] = x
+            data['initial_world']['actors'][name] = actor
+        before = copy.deepcopy(data)
+        lowered = self.lower(data)
+        canonical = _render_decisions(lowered['typed_decisions'])
+        initial = canonical['shots'][0]['起始状态']
+        self.assertIn('乙位于甲的画面', initial)
+        self.assertIn('丙位于甲的画面', initial)
+        self.assertNotIn('[[staging:', initial)
+        self.assertEqual(data, before)
+        self.assertFalse(lowered['derivation']['commit_eligible'])
+        bad = copy.deepcopy(lowered['typed_decisions']['shots'][0])
+        bad['fields']['起始状态'] = bad['fields']['起始状态'].replace(']]\n[[', ']][[')
+        with self.assertRaisesRegex(Exception, 'own affirmative clause'):
+            bind_fields(bad['fields'], bad['staging'])
+
     def rejected(self, data, message):
         with self.assertRaises(ProductionDecisionError) as ctx: self.lower(data)
         self.assertIn(message, ctx.exception.reason)

@@ -134,7 +134,7 @@ def bind_fields(fields: dict[str, Any], payload: dict) -> tuple[dict, dict]:
             name = match.group(1)
             if name not in replacements:
                 raise GeometryInputError(f"fields.{field}", f"unbound staging token: {name}")
-            before = text[:match.start()].rstrip()
+            before = text[:match.start()].rstrip(" \t\r")
             if before and before[-1] not in "。；;\n":
                 raise GeometryInputError(f"fields.{field}", "a staging token must start its own affirmative clause")
             usages[name].append(field)

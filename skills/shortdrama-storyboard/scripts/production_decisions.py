@@ -227,7 +227,7 @@ def _camera(world, camera, scene, path):
           right[0] * forward[1] - right[1] * forward[0]]
     hfov = _num(camera["hfov_deg"], path); vfov = _num(camera["vfov_deg"], path)
     _need(1 <= hfov <= 150 and 1 <= vfov <= 150, path, "supported FOV is 1–150 degrees")
-    _need(camera["frame"] in {"wide", "medium", "hands", "object"}, path, "unsupported framing type")
+    _need(camera["frame"] in {"wide", "medium", "face", "hands", "object"}, path, "unsupported framing type")
     return {"origin": origin, "target": list(target), "forward": forward, "right": right, "up": up,
             "hx": math.tan(math.radians(hfov / 2)), "vy": math.tan(math.radians(vfov / 2))}
 
@@ -860,7 +860,7 @@ def _fields(world, row, cam, view, sources):
     source_vec = _sub(light["position_xyz"], cam["target"])
     _need(math.hypot(*light["position_xyz"][:2]) > EPS, "scene.light", "light world direction undefined at the common scene origin")
     screen = _dot(source_vec, cam["right"])
-    receivers = [i + ("面部" if v["eye_visible"] else "后侧头部" if v["head"] else "手部") for i, v in view["actors"].items()]
+    receivers = [i + ("面部" if v["eye_visible"] else "后脑" if v["head"] else "手部") for i, v in view["actors"].items()]
     receivers = receivers or list(view["props"])
     blocks = interior_lighting_blocks(source={k: light[k] for k in ("period", "kind", "name", "state")} |
                                      {"world_side": _direction(_bearing([0, 0, 0], light["position_xyz"])), "height_m": light["position_xyz"][2]},
@@ -885,7 +885,11 @@ def _fields(world, row, cam, view, sources):
         token = "relation" + str(i)
         bindings.append({"id": token, "kind": "screen_relation", "actor": names[i], "relative_to": names[0]})
         relation_tokens.append("[[staging:" + token + "]]")
-    framing = {"wide": "宽景", "medium": "中景", "hands": "手部特写", "object": "物件特写"}[row["camera"]["frame"]]
+    framing = {"wide": "宽景", "medium": "中景", "face": "面部近景", "hands": "手部特写", "object": "物件特写"}[row["camera"]["frame"]]
+    if row["camera"]["frame"] == "face":
+        _need(any(v["eye_visible"] for v in view["actors"].values()) and
+              not any(v["feet"] for v in view["actors"].values()), "camera.frame",
+              "face close-up requires a visible front-facing head and excludes foot landmarks; facial area still requires independent review")
     if row["camera"]["frame"] in {"hands", "object"}:
         _need(not any(v["head"] or v["feet"] for v in view["actors"].values()), "camera.frame", "declared close-up also contains head/feet landmarks")
     if row["camera"]["frame"] == "object": _need(not view["actors"], "camera.frame", "object-only frame contains actor landmarks")
@@ -893,7 +897,7 @@ def _fields(world, row, cam, view, sources):
     fields = {**{key: row["editorial"][key] for key in METADATA_FIELDS}, "场景连续性ID": row["continuity_id"], "镜头类型": framing,
               "可见主体": visible, "空间站位描述": scene["label"] + "。" + blocks["spatial_state_append"] +
                   "".join(f"{name}位于{_coord(point['position_xyz'])}。" for name, point in world["points"].items() if point["scene_id"] == row["scene_id"]),
-              "起始状态": "".join(relation_tokens) + static,
+              "起始状态": "\n".join(relation_tokens + [static]),
               "机位": "[[staging:camera]]" + f"摄影机离地{cam['origin'][2]:g}米，{'仰角' if tilt >= 0 else '俯角'}{abs(tilt):.1f}度；水平视角{row['camera']['hfov_deg']:g}度，垂直视角{row['camera']['vfov_deg']:g}度。",
               "运镜方式": "固定镜头", "音色": voice_block(mode="silent", dialogue_rows=[]), "心理音轨": "无。",
               "生成限制": "9:16竖屏；禁止额外配乐。" + eye_limits + blocks["generation_limits_append"],
