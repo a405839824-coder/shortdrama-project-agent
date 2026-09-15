@@ -5,6 +5,24 @@ description: "Operate a full-lifecycle Chinese short-drama project Agent with th
 
 # Short-drama storyboard R10
 
+## Mandatory formal delivery on ChatGPT and Codex
+
+Every account and every fresh installation uses the same server-owned template.
+Call `get_agent_status` and read `formal_delivery_contract`. Before presenting a
+formal deliverable, call `read_project_artifact` with `section="formal_delivery"`
+for its server artifact. Verify the receipt is current, `formal_delivery_ready`
+is true, and the downloaded bytes match `file_sha256`. A copied receipt, filename,
+local workbook, self-reported PASS, or field-projection success is insufficient.
+Do not count an unverified batch as complete or automatically start the next one.
+Do not catch a rejected/unsupported result and manufacture E/F, R5, HTML, or XLSX
+with Python, JavaScript, spreadsheets, other tools, or a local service. Preserve
+the draft and report the precise blocker. A required remote connection failing
+does not authorize a local fallback. Source archives are for administrator
+development; employees install only the connected package. The service cannot
+physically prohibit host tools from writing files, so host delivery and batch
+controllers must enforce the receipt check too. Historical files remain readable
+but must not be relabelled as a new verified formal delivery.
+
 Before producing or changing storyboard fields, read `references/field_content_contract.md`.
 It is generated from the sole rule registry. Use the production-authoring request
 for new structured generation and retain the first attempt. Legacy canonical,

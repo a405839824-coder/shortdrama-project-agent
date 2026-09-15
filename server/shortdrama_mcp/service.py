@@ -36,6 +36,7 @@ from .config import Settings
 from .field_content import model_field_contract
 from .production_plan import model_production_contract
 from .production_route import require_current_production
+from .formal_delivery import CONTRACT as FORMAL_DELIVERY_CONTRACT, delivery_contract, inspect_formal_delivery, verified_batch
 from .acceptance_service import controlled_acceptance_operation
 from .delta import (
     changed_shot_fields,
@@ -6535,6 +6536,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         value: dict[str, Any] = {
             "certificate_id": certificate_id,
             "certificate_type": AUDIT_CLASS_PRODUCTION_PREFLIGHT,
+            "formal_delivery_context": delivery_contract(),
             "work_order_id": work_order_id,
             "production_work_order_id": production_work_order_id,
             "artifact_id": artifact_id,
@@ -13563,6 +13565,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         offset: int,
         limit: int,
     ) -> ToolResponse:
+        if section == "formal_delivery":
+            return inspect_formal_delivery(self, namespace, project_id, artifact_id)
         extracted, record, _path = self._load_extracted_or_payload(namespace, project_id, artifact_id)
         content = preview_extracted(extracted, section, offset, limit)
         download_url = self.store.signed_download_url(namespace, project_id, artifact_id, record["file_name"])
@@ -13703,6 +13707,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 content_text=content_text, structured_data=structured_data,
                 source_artifact_id=source_artifact_id, change_summary=change_summary,
                 narrative_candidate=narrative_candidate, request_session_id=request_session_id)
+        if artifact_type == "production_batch":
+            if output_format != "json" or content_text:
+                raise ValueError("formal_batch_requires_json_references_not_authored_output")
+            structured_data = verified_batch(self, namespace, project_id, structured_data)
         if output_format == "json":
             if structured_data is None:
                 raise ValueError("structured_data is required for JSON output")
@@ -14521,6 +14529,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             # ``result`` nor the generic final count key ``issue_count``.
             certificate.update(
                 {
+                    "formal_delivery_context": delivery_contract(),
                     "preflight_status": (
                         PRODUCTION_PREFLIGHT_PASS
                         if clean
@@ -21435,6 +21444,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "stable_batch_uid_count": len(identity_manifest.get("batch_uids", [])),
                 "draft_preflight_id": draft_preflight_id,
                 "draft_commit_request_sha256": commit_request_sha256,
+                "formal_delivery_contract": FORMAL_DELIVERY_CONTRACT,
+                "template_contract_sha256": delivery_contract()["template_contract_sha256"],
+                "rule_registry_sha256": delivery_contract()["rule_registry_sha256"],
                 "draft_commit_payload_sha256": draft_commit_payload_sha256,
                 "scene_coverage_manifest_sha256": (
                     bound_draft_preflight.get("scene_coverage_manifest_sha256")
@@ -21471,6 +21483,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "canonical_json_artifact_id": json_record["artifact_id"],
                 "canonical_json_fingerprint": json_record["fingerprint"],
                 "canonical_sha256": canonical_hash,
+                "formal_delivery_contract": FORMAL_DELIVERY_CONTRACT,
+                "template_contract_sha256": delivery_contract()["template_contract_sha256"],
+                "rule_registry_sha256": delivery_contract()["rule_registry_sha256"],
                 "source_fingerprint": source_fingerprint,
                 "boundary_hash": boundary_hash,
                 "ruleset_version": self._ruleset_version,
@@ -22027,6 +22042,13 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     }
                 ),
                 "next_action": "independent_audit" if zero_issue else "repair_all_issues_then_recommit",
+                "formal_delivery": {
+                    "contract": FORMAL_DELIVERY_CONTRACT,
+                    "formal_delivery_ready": False,
+                    "counts_as_complete": False,
+                    "allows_next_batch": False,
+                    "verification_required": "read_project_artifact(section='formal_delivery') after independent audit",
+                },
             },
         )
 
@@ -24687,6 +24709,15 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
             if clean_requested and work_order.get("operation") in NARRATIVE_OPERATIONS:
                 self._verified_narrative_review(namespace, project_id, hub, work_order)
+            if clean_requested and work_order.get("operation") == "production_batch":
+                batch = next((d for d in reversed(hub.get("deliverables", []))
+                    if d.get("work_order_id") == work_order_id and d.get("artifact_type") == "production_batch"), None)
+                if batch is None:
+                    raise ValueError("formal_batch_registered_delivery_required")
+                _, batch_path = self.store.get_artifact(namespace, project_id, batch["deliverable_id"])
+                payload = self.store.read_json(batch_path)
+                verified_batch(self, namespace, project_id,
+                    {"storyboard_artifact_ids": payload.get("storyboard_artifact_ids")})
             result = project_agent.record_validation(
                 hub,
                 {

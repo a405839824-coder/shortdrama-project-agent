@@ -166,7 +166,7 @@ PLACEHOLDER_WORD_RE = re.compile(
     + r")(?:[^a-z0-9]|$)",
     re.IGNORECASE,
 )
-CONNECTION_RE = re.compile(r"^plugin_asdk_app[A-Za-z0-9_-]{8,}$")
+CONNECTION_RE = re.compile(r"^(?:plugin_)?asdk_app[A-Za-z0-9_-]{8,}$")
 WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",
@@ -328,8 +328,17 @@ def _validate_profile(
         or _is_placeholder_connection(connection_id)
     ):
         raise PackagingError("connected app manifest has an invalid ChatGPT connection ID")
-    if app_entry.get("required") is not True:
-        raise PackagingError("connected app manifest must set required=true")
+    # Older source descriptors used required=true. The host's current schema
+    # accepts only id/category; formal production is enforced by the service,
+    # not an unsupported manifest flag. Normalize legacy true during packaging.
+    if "required" in app_entry and app_entry["required"] is not True:
+        raise PackagingError("legacy connected app manifest must set required=true")
+    if set(app_entry) - {"id", "category", "required"}:
+        raise PackagingError("connected app manifest contains unsupported entry fields")
+    if "category" in app_entry and (
+        not isinstance(app_entry["category"], str) or not app_entry["category"].strip()
+    ):
+        raise PackagingError("connected app manifest category must be a nonempty string")
 
 
 def _is_sensitive_path(relative: Path) -> bool:
@@ -429,12 +438,25 @@ def _profile_allows(relative: Path, profile: PackageProfile) -> bool:
     top = relative.parts[0]
     if profile == "source":
         return top in SOURCE_DIRECTORIES
+    if _connected_local_executable(relative):
+        return False
     return top in CONNECTED_DIRECTORIES
+
+
+def _connected_local_executable(relative: Path) -> bool:
+    # Connected employees use the authenticated remote service. Shipping local
+    # compilers/renderers gives fresh installs an avoidable fallback path.
+    return relative.parts[0] == "skills" and (
+        "scripts" in relative.parts
+        or relative.suffix.lower() in {".py", ".ps1", ".js", ".mjs", ".cjs", ".sh", ".bat", ".cmd", ".exe", ".dll"}
+    )
 
 
 def _known_but_not_in_profile(relative: Path, profile: PackageProfile) -> bool:
     if profile == "source":
         return len(relative.parts) == 1 and relative.name == ".app.json"
+    if _connected_local_executable(relative):
+        return True
     if len(relative.parts) == 1:
         return relative.name in SOURCE_TOP_LEVEL_FILES or relative.name in {
             ".app.json.example",
@@ -535,6 +557,9 @@ def _package_metadata(profile: PackageProfile) -> bytes:
             "schema_version": 1,
             "profile": "connected",
             "portable_install": True,
+            "production_execution": "authenticated_remote_only",
+            "local_export_fallback": False,
+            "formal_delivery_contract": "formal-storyboard-delivery-v1",
             "purpose": (
                 "Private ChatGPT plugin bundle bound to the included app connection "
                 "descriptor."
@@ -690,6 +715,15 @@ def package(
 
     _validate_profile(plugin_root, manifest, profile)
     files = _collect_files(plugin_root, profile)
+    if profile == "connected":
+        app_manifest = json.loads(files[".app.json"].decode("utf-8"))
+        app_manifest["apps"][plugin_name].pop("required", None)
+        files[".app.json"] = (json.dumps(app_manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    if profile == "connected" and "skills/shortdrama-storyboard/SKILL.md" in files:
+        client_skill = "skills/shortdrama-storyboard/references/connected_client_skill.md"
+        if client_skill not in files:
+            raise PackagingError("connected storyboard package requires its remote-only client skill")
+        files["skills/shortdrama-storyboard/SKILL.md"] = files[client_skill]
     files[PACKAGE_METADATA_NAME] = _package_metadata(profile)
     _validate_reference_closure(manifest, files)
 

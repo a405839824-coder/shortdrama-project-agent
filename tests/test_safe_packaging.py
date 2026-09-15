@@ -97,6 +97,9 @@ class SafePackageTests(unittest.TestCase):
             return json.loads(handle.read(member))
 
     def test_profiles_are_explicit_mutually_exclusive_and_reproducible(self) -> None:
+        local_script = self.root / "skills/demo/scripts/export_xlsx.py"
+        local_script.parent.mkdir()
+        local_script.write_text("raise RuntimeError('local exporter')\n", encoding="utf-8")
         source_manifest_before = (self.root / ".codex-plugin" / "plugin.json").read_bytes()
         source = package(self.root)
         self.assertEqual(
@@ -107,6 +110,7 @@ class SafePackageTests(unittest.TestCase):
         source_members = self._members(source)
         self.assertIn(prefix + ".mcp.json", source_members)
         self.assertIn(prefix + "server/main.py", source_members)
+        self.assertIn(prefix + "skills/demo/scripts/export_xlsx.py", source_members)
         self.assertNotIn(prefix + ".app.json", source_members)
         source_metadata = self._archive_json(source, prefix + ".codex-package.json")
         self.assertEqual(source_metadata["profile"], "source")
@@ -132,7 +136,13 @@ class SafePackageTests(unittest.TestCase):
         )
         self.assertEqual((self.root / ".app.json").read_bytes(), app_before)
         connected_members = self._members(connected)
+        self.assertNotIn(prefix + "skills/demo/scripts/export_xlsx.py", connected_members)
+        self.assertFalse(any("/scripts/" in p for p in connected_members))
         self.assertIn(prefix + ".app.json", connected_members)
+        self.assertEqual(
+            self._archive_json(connected, prefix + ".app.json"),
+            {"apps": {"shortdrama-project-agent": {"id": "plugin_asdk_app_1234567890abcdef"}}},
+        )
         self.assertNotIn(prefix + ".mcp.json", connected_members)
         self.assertFalse(any(name.startswith(prefix + ".venv/") for name in connected_members))
         self.assertFalse(any(name.startswith(prefix + "server/") for name in connected_members))
@@ -145,6 +155,25 @@ class SafePackageTests(unittest.TestCase):
         other_output = Path(self.temporary.name) / "repeat" / "connected.zip"
         repeated = package(self.root, other_output, profile="connected")
         self.assertEqual(connected.read_bytes(), repeated.read_bytes())
+
+    def test_connected_skill_is_remote_only_and_supports_codex_connection_id(self):
+        root = self.root / "skills/shortdrama-storyboard"
+        (root / "references").mkdir(parents=True)
+        original = "---\nname: shortdrama-storyboard\ndescription: source\n---\nRun local compiler.\n"
+        client = "---\nname: shortdrama-storyboard\ndescription: remote\n---\nUse formal_delivery only.\n"
+        (root / "SKILL.md").write_text(original, encoding="utf-8")
+        (root / "references/connected_client_skill.md").write_text(client, encoding="utf-8", newline="\n")
+        from configure_chatgpt_connection import configure
+        configure(self.root, "asdk_app_1234567890abcdef")
+        self.assertEqual(
+            json.loads((self.root / ".app.json").read_text(encoding="utf-8")),
+            {"apps": {"shortdrama-project-agent": {"id": "asdk_app_1234567890abcdef"}}},
+        )
+        archive = package(self.root, profile="connected")
+        with zipfile.ZipFile(archive) as handle:
+            self.assertEqual(handle.read("shortdrama-project-agent/skills/shortdrama-storyboard/SKILL.md").decode(), client)
+            self.assertNotIn("shortdrama-project-agent/.mcp.json", handle.namelist())
+        self.assertEqual((root / "SKILL.md").read_text(encoding="utf-8"), original)
 
     def test_profile_preconditions_fail_before_writing(self) -> None:
         output = Path(self.temporary.name) / "out" / "candidate.zip"

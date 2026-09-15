@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-CONNECTION_RE = re.compile(r"^plugin_asdk_app[A-Za-z0-9_-]{8,}$")
+CONNECTION_RE = re.compile(r"^(?:plugin_)?asdk_app[A-Za-z0-9_-]{8,}$")
 
 
 def write_json_atomic(path: Path, value: Any) -> None:
@@ -30,7 +30,7 @@ def write_json_atomic(path: Path, value: Any) -> None:
 
 def configure(plugin_root: Path, connection_id: str, *, keep_bundled_mcp: bool = False) -> tuple[Path, Path]:
     if not CONNECTION_RE.fullmatch(connection_id):
-        raise ValueError("connection ID 必须是 ChatGPT 返回的 plugin_asdk_app... 技术 ID")
+        raise ValueError("connection ID 必须是实际连接的 plugin_asdk_app... 或 asdk_app... 技术 ID")
     manifest_path = plugin_root / ".codex-plugin" / "plugin.json"
     if not manifest_path.is_file():
         raise ValueError(f"找不到插件清单：{manifest_path}")
@@ -45,7 +45,6 @@ def configure(plugin_root: Path, connection_id: str, *, keep_bundled_mcp: bool =
         "apps": {
             "shortdrama-project-agent": {
                 "id": connection_id,
-                "required": True,
             }
         }
     }
