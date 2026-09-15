@@ -53,10 +53,10 @@ def _delivery_interval(evidence, shot_id, delivery, source_ids, *, verified):
             raise ValueError('delivery event has no supported source-use binding; not_supported')
         sound = next((s for s in shot.get('environment_binding', {}).get('sound_bindings', [])
                       if s['action_id'] == identity and delivery['field'] == '环境音效'), None)
-        field = '环境音效' if sound else '心理音轨' if event.get('kind') == 'narrate' else '画面内容'
+        field = '环境音效' if sound else '心理音轨' if event.get('kind') in {'narrate', 'inner_voice'} else '画面内容'
         if field != delivery['field'] or action.get('projection_status') == 'hidden':
             raise ValueError('delivery field or actual visibility differs from the event')
-        actual = sound['rendered_text'] if sound else use['text'] if event.get('kind') in {'speak', 'narrate'} else action.get('world_action_description', '')
+        actual = sound['rendered_text'] if sound else use['text'] if event.get('kind') in {'speak', 'narrate', 'inner_voice'} else action.get('world_action_description', '')
         if delivery['quote'] not in actual:
             raise ValueError('delivery quote is not part of the referenced event')
         actual_sources.update(s['source_id'] for fact in use.get('source_constraints', []) for s in fact.get('supports', []))

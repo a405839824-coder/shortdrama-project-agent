@@ -1,5 +1,7 @@
 # Frozen source facts and decided written objects
 
+0.5.37增加thought/channel与inner_voice/verbatim用途，以及原文明示的report/channel收悉事件。完整限制见[source_actions_0537.md](source_actions_0537.md)；思考者、角色猜测、原台词和消息真伪不可相互替换。
+
 0.5.33 新生产来源图必须包含 [production_plan_contract.md](production_plan_contract.md) 的 `production_plan`，并遵守 [production_prevention_contract.md](production_prevention_contract.md)。计划核对真实来源、规则指纹、决定归属及知情事件；其独立审查问题绑定既有来源审计证据。允许读取旧图用于历史核验，但不能据此声称新生产计划已验证。
 
 `source_decisions.py` is a pure structural compiler. It does not read files,

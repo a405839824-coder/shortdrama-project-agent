@@ -1,5 +1,7 @@
 # 冻结生产计划输入合同
 
+0.5.37补充见[source_actions_0537.md](source_actions_0537.md)：`source_report`只能登记已发生的原文禀报收悉；心声不能被heard；桥接不能消费剧情或取得知情。既有heard语义保持不变。
+
 0.5.33 新 MCP 生产请求和官方生产 CLI 要求来源图中包含 `production_plan`。
 完整规则由 [production_prevention_contract.md](production_prevention_contract.md) 提供，唯一来源是 `rule_registry.json.runtime.production_prevention_policy`。
 本文件说明输入格式；不能单独改变规则优先级或把语义待审改为通过。
@@ -45,7 +47,7 @@
 必须含 `initial`、`acquisitions`、`uses` 三个数组。
 
 - `initial`：每项 `{actor, fact_ids, evidence_fact_ids}`。记录角色开始时已知事实及原文依据，禁止重复。依据能否证明该角色知情，由独立语义核对完成。
-- `acquisitions`：每项 `{id, actor, fact_ids, evidence_fact_ids, action_id, mode}`。当前 `mode` 仅支持 `heard`：引用真实对白事件，内容必须包含相关事实，听者与说者在事件期间同场，不能自我授予听取，事件完成后才更新知情。场景含声明遮挡时，声传播不在模型范围内，返回 `not_supported`。隔墙听取、读心、复杂看见/认出等不能假装已经建模。
+- `acquisitions`：每项 `{id, actor, fact_ids, evidence_fact_ids, action_id, mode}`。`mode=heard`：引用真实对白事件，内容必须包含相关事实，听者与说者在事件期间同场，不能自我授予听取，事件完成后才更新知情。场景含声明遮挡时，声传播不在模型范围内，返回 `not_supported`。隔墙听取、读心、复杂看见/认出等不能假装已经建模。
 - `uses`：每个真实动作恰好一项 `{action_id, actor, fact_ids, stance, evidence_fact_ids}`；来源动作涉及的事实不能从这里删掉。`known` 要求有已知事实依据；`reported` 要求已经通过实际听取事件收到该信息；`suspected`、`mistaken`、`pretended` 要求非空事实与证据，仍须独立核对；`narrator` 仅用于无场内角色的客观旁白；`not_applicable` 只能对应不使用事实的动作。
 
 检查采用实际事件顺序，同一时刻先完成听取，再检查依赖动作。听到某种说法只登记为已收到信息，不自动升级为事实已经证实；猜测、误解和伪装也不变为世界真相。不强制自然眨眼或无信息动作借用剧情事实。

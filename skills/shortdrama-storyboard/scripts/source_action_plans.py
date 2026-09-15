@@ -15,7 +15,7 @@ from typing import Any
 
 CONTRACT = "source-action-plans-v1"
 REFERENCE_KEYS = {"id", "kind", "source_use_id", "step_id", "start", "end", "after"}
-EXCLUDED_KINDS = {"speak", "narrate", "write"}
+EXCLUDED_KINDS = {"speak", "narrate", "inner_voice", "write", "scene_light"}
 SEMANTIC_STATUS = "pending_independent_review"
 
 
@@ -291,6 +291,9 @@ def _target(world, ref):
         actor = world["actors"][ref["id"]]
         return [*actor["position_xyz"][:2], actor["position_xyz"][2] + actor["eye_height"]]
     anchor = world["props"][ref["id"]]["anchor"]
+    if 'free' in anchor or 'worn' in anchor or 'binding' in anchor:
+        from production_decisions import _anchor
+        return _anchor(world, world['props'][ref['id']])[1]
     return (world["points"][anchor["point"]]["position_xyz"] if "point" in anchor
             else _hand(world["actors"][anchor["actor"]], anchor["hand"]))
 
@@ -371,7 +374,13 @@ class SourceActionExecution:
             owned.append(keys)
             expected[key], actual[key] = value, copy.deepcopy(_get(world, keys))
 
-        if kind == "move_actor":
+        from production_actions import FIELDS as EXTENDED_FIELDS, effects as extended_effects
+        if kind in EXTENDED_FIELDS:
+            for keys, value in extended_effects(original, action, tick).items():
+                owned.append(keys)
+                label = '/'.join(keys)
+                expected[label], actual[label] = copy.deepcopy(value), copy.deepcopy(_get(world, keys))
+        elif kind == "move_actor":
             target = self._initial["points"][action["to"]]["position_xyz"]
             destination = [a + (b - a) * fraction for a, b in zip(before["position_xyz"], target)]
             state("position_xyz", ("position_xyz",), destination)

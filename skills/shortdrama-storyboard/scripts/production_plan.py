@@ -36,9 +36,22 @@ def runtime_context():
 def model_production_contract():
     p = policy()
     from episode_rules import policy as episode_policy
+    import production_actions
+    from production_decisions import ACTION_FIELDS
+    from production_environment import SOUND_KINDS
+    from source_decisions import MODES
     return {'contract': p['contract'], 'plan_contract': CONTRACT,
             'required_for': ['new_mcp_production_authoring', 'direct_canonical_new_production', 'official_production_cli'],
             'episode_contract': episode_policy(),
+            'action_contract':{'reference':'references/source_actions_0537.md',
+                'parameters':{k:sorted(v) for k,v in sorted(ACTION_FIELDS.items())},
+                'source_modes':sorted(MODES),'postures':sorted(production_actions.POSTURES),
+                'frozen_source_required':sorted(production_actions.SOURCE_REQUIRED),
+                'bridge_kinds':sorted(production_actions.BRIDGE_KINDS),
+                'sound_kinds':{k:sorted(v) for k,v in SOUND_KINDS.items()},
+                'bridge':'transition.bridge={ticks,actions}; omitted staging only; zero screen duration; no source credit',
+                'voices':'sequential speakers in the same eleven labels, each body bound by 〔ordinal:speaker〕',
+                'semantics':'pending_independent_review'},
             'episode_contract_shape': {
                 'contract':'episode-production-contract-v1','profile_id':'mother-episode-90-180-v1',
                 'scope':'fragment | complete_episodes | complete_series', 'source_kind':'novel | script | original',
@@ -62,7 +75,7 @@ def model_production_contract():
                                'value': 'exact JSON value of this partition; no inferred replacement'}],
                 'knowledge': {
                     'initial': ['{actor,fact_ids,evidence_fact_ids}'],
-                    'acquisitions': ['{id,actor,fact_ids,evidence_fact_ids,action_id,mode:heard}'],
+                    'acquisitions': ['{id,actor,fact_ids,evidence_fact_ids,action_id,mode:heard|source_report}'],
                     'uses': ['{action_id,actor,fact_ids,stance,evidence_fact_ids}; every actual action exactly once']},
                 'shots': ['{shot_id,purpose_fact_ids,required_action_ids,audio_action_ids,source_use_ids,visible}']},
             'decision_partitions': ['each initial_world/scenes|actors|props|points entry',
@@ -235,7 +248,8 @@ class ProductionPlanGuard:
         self.shots = {s['shot_id']: s for s in self.plan['shots']}
         need(set(self.shots) == {s['shot_id'] for s in payload['shots']}, p + '.shots', 'whole-shot plan coverage differs', 'insufficient_evidence')
         self.uses = {u['action_id']: u for u in self.plan['knowledge']['uses']}
-        action_ids = [a['id'] for shot in payload['shots'] for a in shot['actions']]
+        action_ids = [a['id'] for shot in payload['shots'] for a in
+                      [*shot['transition'].get('bridge',{}).get('actions',[]),*shot['actions']]]
         ids(action_ids, 'shots.actions')
         need(set(self.uses) == set(action_ids), p + '.knowledge.uses', 'every actual action needs its knowledge applicability', 'insufficient_evidence')
         self.known, self.reported = set(), set()
@@ -246,6 +260,13 @@ class ProductionPlanGuard:
             need(entry['actor'] in self.actors and entry['action_id'] in self.uses,
                  p + '.knowledge.acquisitions', 'unknown recipient or actual acquisition action')
 
+    def check_bridge(self, row, actions):
+        if self.plan is None: return
+        for action in actions:
+            u=self.uses[action['id']]
+            need(u['actor']==action['actor'] and u['stance']=='not_applicable' and not u['fact_ids'],
+                 '$graph.production_plan.bridge','omitted staging cannot grant or consume plot knowledge')
+
     def check_shot(self, row, samples, actions, action_records):
         if self.plan is None:
             return
@@ -255,7 +276,7 @@ class ProductionPlanGuard:
              p + '.knowledge', 'nonlinear chronology needs an explicit story-time knowledge model', 'not_supported')
         actual = {a['id']: a for a in actions}
         need(set(spec['required_action_ids']) <= set(actual), p + '.required_action_ids', 'required event absent from this shot')
-        audio = {a['id'] for a in actions if a['kind'] in {'speak', 'narrate'}}
+        audio = {a['id'] for a in actions if a['kind'] in {'speak', 'narrate', 'inner_voice'}}
         need(set(spec['audio_action_ids']) == audio, p + '.audio_action_ids', 'actual audio does not match the shot delivery plan')
         # Finish a disclosure at a tick before checking a dependent action at
         # that tick. No fictional hearing is inferred from a sentence string.
@@ -268,15 +289,24 @@ class ProductionPlanGuard:
                 if acquisition['id'] in self.granted or acquisition['action_id'] not in self.events:
                     continue
                 sid, a, prior_samples = self.events[acquisition['action_id']]
-                need(a['kind'] == 'speak', p + '.knowledge', 'heard acquisition must bind an actual spoken event')
                 actual_use = self.source['uses_by_id'][a['source_use_id']]
                 need(set(acquisition['fact_ids']) <= set(actual_use['fact_ids']), p + '.knowledge', 'disclosure does not carry the acquired fact')
-                for sample in prior_samples[a['start']:a['end']]:
-                    listener = sample['world']['actors'][acquisition['actor']]
-                    speaker = sample['world']['actors'][a['actor']]
-                    need(listener['scene_id'] == speaker['scene_id'] and acquisition['actor'] != a['actor'], p + '.knowledge', 'listener has no actual same-scene disclosure')
-                    need(not sample['world']['scenes'][speaker['scene_id']]['barriers'], p + '.knowledge',
-                         'hearing across declared barriers is not modelled', 'not_supported')
+                if acquisition['mode']=='heard':
+                    need(a['kind'] == 'speak', p + '.knowledge', 'heard acquisition must bind an actual spoken event')
+                    for sample in prior_samples[a['start']:a['end']]:
+                        listener = sample['world']['actors'][acquisition['actor']]
+                        speaker = sample['world']['actors'][a['actor']]
+                        need(listener['scene_id'] == speaker['scene_id'] and acquisition['actor'] != a['actor'], p + '.knowledge', 'listener has no actual same-scene disclosure')
+                        need(not sample['world']['scenes'][speaker['scene_id']]['barriers'], p + '.knowledge',
+                             'hearing across declared barriers is not modelled', 'not_supported')
+                else:
+                    need(a['kind']=='narrate' and actual_use['actor'] is None, p+'.knowledge','source report must be delivered by actual objective narration')
+                    reports=[f for f in actual_use['source_constraints'] if f['id'] in acquisition['evidence_fact_ids'] and f['channel']=='report']
+                    need(reports and all(f['subject']==acquisition['actor'] and f['polarity']=='affirmative' and
+                        f['modality']=='asserted' and f['occurrence']=='occurred' and not f['conditions'] and
+                        any(span['text']==actual_use['text'] for span in f['supports']) for f in reports),
+                        p+'.knowledge','source report needs exact narrated source span and an occurred receipt by this recipient')
+                    need(set(acquisition['evidence_fact_ids'])<=set(actual_use['fact_ids']),p+'.knowledge','report evidence is not delivered')
                 # Hearing an assertion establishes receipt, not its truth.
                 self.reported.update((acquisition['actor'], fid) for fid in acquisition['fact_ids'])
                 self.granted.add(acquisition['id'])

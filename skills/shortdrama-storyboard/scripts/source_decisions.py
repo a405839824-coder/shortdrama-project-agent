@@ -14,7 +14,7 @@ from typing import Any, Mapping
 GRAPH_CONTRACT = "source-facts-v1"
 DECISIONS_CONTRACT = "source-decisions-v1"
 SEMANTIC_STATUS = "pending_independent_review"
-MODES = {"physical_action", "spoken", "objective_narration", "current_written", "write"}
+MODES = {"physical_action", "spoken", "inner_voice", "objective_narration", "current_written", "write"}
 FACT_KEYS = {"id", "subject", "event_id", "polarity", "conditions", "modality", "occurrence", "expression_occurrence", "expression_status", "channel", "content_availability", "content_policy", "content_text", "supports", "depends_on", "required"}
 
 
@@ -176,14 +176,14 @@ def _spoken_format_key(text: str) -> str:
     return "".join(result)
 
 
-def _spoken_realization(projected, selected, facts, text, wording, source_texts, bad, path):
+def _spoken_realization(projected, selected, facts, text, wording, source_texts, bad, path, *, channel="oral"):
     """Bind given oral units to exact source characters and preserve their body.
 
     Qualifier interpretation is still the frozen graph author's decision. This
     hook prevents a producer from changing those decided words or retaining only
     the ID of a separately anchored condition while omitting its source span.
     """
-    oral = [f for f in projected if f["channel"] == "oral" and f["content_availability"] == "given"]
+    oral = [f for f in projected if f["channel"] == channel and f["content_availability"] == "given"]
     units = []
     for fact in oral:
         content = fact["content_text"]
@@ -353,7 +353,7 @@ def _inspect(graph, decisions, source_texts, expected_graph_sha256):
                    "occurrence": {"occurred", "ongoing", "future", "conditional"},
                    "expression_occurrence": {"occurred", "current", "future", "conditional", "not_applicable"},
                    "expression_status": {"asserted", "negated", "uncertain", "not_applicable"},
-                   "channel": {"oral", "written", "action", "narration"},
+                   "channel": {"oral", "thought", "report", "written", "action", "narration"},
                    "content_availability": {"given", "unstated", "not_applicable"},
                    "content_policy": {"verbatim", "adaptable", "event_only", "not_applicable"}}
         for key, allowed in choices.items():
@@ -425,7 +425,7 @@ def _inspect(graph, decisions, source_texts, expected_graph_sha256):
                 if dep not in refs: bad("use_dependency_missing", path, "use must retain dependency " + dep, [fid, dep], True)
         mode, actor, text = use["mode"], use["actor"], use["text"]
         wording = use["wording"]
-        allowed_wording = {"spoken": {"verbatim", "adapted"}, "current_written": {"verbatim"}, "write": {"verbatim"}, "objective_narration": {"authored"}, "physical_action": {"authored"}}
+        allowed_wording = {"spoken": {"verbatim", "adapted"}, "inner_voice": {"verbatim"}, "current_written": {"verbatim"}, "write": {"verbatim"}, "objective_narration": {"authored"}, "physical_action": {"authored"}}
         if not isinstance(wording, str) or wording not in allowed_wording.get(mode, set()):
             bad("wording_mode", path, "wording must explicitly match presentation mode")
         if not isinstance(mode, str) or mode not in MODES or not isinstance(text, str) or not text.strip():
@@ -445,6 +445,11 @@ def _inspect(graph, decisions, source_texts, expected_graph_sha256):
             oral = [f for f in projected if f["channel"] == "oral"]
             if not oral or not token(actor) or any(f["subject"] != actor or f["content_availability"] != "given" or f["expression_occurrence"] not in {"occurred", "current"} or f["expression_status"] != "asserted" for f in oral):
                 bad("spoken_unprovided", path, "spoken use needs actual oral content and its source speaker; unstated words cannot be invented", refs)
+        if mode == "inner_voice":
+            thoughts = [f for f in projected if f["channel"] == "thought"]
+            if not thoughts or not token(actor) or any(f["subject"] != actor or f["content_availability"] != "given" or
+                    f["expression_occurrence"] not in {"occurred", "current"} or f["expression_status"] != "asserted" for f in thoughts):
+                bad("inner_voice_unprovided", path, "inner voice needs actual source thoughts and their thinker; dialogue cannot silently become thought", refs)
         if mode in {"current_written", "write"}:
             written = [f for f in projected if f["channel"] == "written"]
             allowed = {"current"} if mode == "current_written" else {"current", "occurred", "future"}
@@ -452,15 +457,16 @@ def _inspect(graph, decisions, source_texts, expected_graph_sha256):
                 bad("written_scope", path, "paper needs supplied written content and the correct inscription occurrence; proposition futurity alone does not forbid current paper", refs)
         if mode == "spoken" and wording == "adapted" and any(f["channel"] == "oral" and f["content_policy"] != "adaptable" for f in projected):
             bad("protected_content_adapted", path, "protected or unstated source cannot opt into adapted speech", refs)
-        if mode in {"current_written", "write"} or (mode == "spoken" and wording == "verbatim"):
-            channel = "oral" if mode == "spoken" else "written"
+        if mode in {"current_written", "write", "inner_voice"} or (mode == "spoken" and wording == "verbatim"):
+            channel = "oral" if mode == "spoken" else "thought" if mode == "inner_voice" else "written"
             expected_text = "".join(f["content_text"] for f in projected if f["channel"] == channel and f["content_availability"] == "given")
             if text != expected_text:
                 bad("decided_content_changed", path, "rendered words must equal the ordered locked content; use adapted wording for unprotected oral content; paper/protected text cannot drift", refs)
         if mode == "objective_narration" and any(f["content_availability"] == "unstated" for f in selected) and re.search(r'[“”「」『』"]', text):
             bad("unstated_quoted_words", path, "event-only narration cannot add quoted unknown communication content", refs)
-        if mode == "spoken":
-            spoken_realization = _spoken_realization(projected, selected, facts, text, wording, source_texts, bad, path)
+        if mode in {"spoken", "inner_voice"}:
+            spoken_realization = _spoken_realization(projected, selected, facts, text, wording, source_texts, bad, path,
+                                                       channel="thought" if mode == "inner_voice" else "oral")
         uses[uid] = SourceUse(uid, tuple(refs), tuple(dict.fromkeys(f["event_id"] for f in selected)), mode, wording, actor, text, _json_bytes(selected),
                              _json_bytes(spoken_realization) if spoken_realization is not None else None)
     missing = [fid for fid, f in facts.items() if f["required"] is True and fid not in represented]

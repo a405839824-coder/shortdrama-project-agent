@@ -12,9 +12,14 @@ import re
 METADATA_FIELDS = {"功能类型", "参考图锚定", "原文依据类型", "原文支撑句"}
 ENVIRONMENT_FIELDS = {"环境动态", "环境音效"}
 SOUND_KINDS = {
-    "prop_contact": {"move_prop", "transfer"},
+    "prop_contact": {"move_prop", "transfer", "pick_up", "put_down"},
     "writing": {"write"},
-    "footsteps": {"move_actor"},
+    "footsteps": {"move_actor", "cross_passage"},
+    "drop_impact": {"drop_prop"},
+    "slap": {"contact_actor"},
+    "handclaps": {"clap"},
+    "kowtow_contact": {"kowtow"},
+    "cloth": {"wipe", "wear_prop", "remove_worn", "dress_actor", "undress_actor"},
 }
 
 
@@ -29,7 +34,7 @@ def _need(ok, path, reason):
         raise EnvironmentDecisionError(path, reason)
 
 
-def normalize_openings(value, light, path):
+def opening_states(value, path='scene.openings'):
     """One opening-state registry; accept only a finite old prose grammar.
 
     General prose cannot change the door/window snapshot behind the light
@@ -52,6 +57,11 @@ def normalize_openings(value, light, path):
             openings[name] = "closed" if state in ("关闭", "紧闭") else "open"
     else:
         _need(False, path, "requires an opening registry or exact legacy opening-state clauses")
+    return openings
+
+
+def normalize_openings(value, light, path):
+    openings=opening_states(value,path)
     if light["kind"] == "paper_window":
         _need(openings.get(light["name"]) == light["state"], path,
               "paper-window opening state must match the same shared light state")
@@ -102,7 +112,7 @@ def validate_editorial(value, path="editorial"):
         _need(cue["volume"] in ("soft", "normal"), cp, "volume must be soft or normal")
 
 
-def render_environment(editorial, *, initial_world, final_world, scene_id, actions):
+def render_environment(editorial, *, initial_world, final_world, scene_id, actions, action_start_worlds=None):
     """Render only after simulation; derive cue actor, object and clock once.
 
     This compiler's existing indoor light model declares clear air and a fixed
@@ -129,22 +139,41 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
         _need(final_world["completed"].count(action["id"]) == 1, cp,
               "sound requires that actual action to complete once")
         actor = action["actor"]
-        _need(initial_world["actors"][actor]["scene_id"] == scene_id, cp,
+        action_world = (action_start_worlds or {}).get(action['id'], initial_world)
+        _need(action_world["actors"][actor]["scene_id"] == scene_id, cp,
               "sound action belongs to another scene")
-        if cue["sound"] == "prop_contact":
+        contact_ticks = None
+        if cue['sound']=='drop_impact':
+            physical=final_world['props'][action['prop']]['physical']
+            event=f"{action['prop']}{'落下碎裂' if physical['integrity']=='broken' else '落下接触落点'}的声音"
+            contact_ticks=[action['end']]
+        elif cue['sound']=='slap':
+            _need(action['mode']=='slap',cp,'slap sound cannot bind a grasp, release or support')
+            event=f"{actor}手掌击中{action['target_actor']}面颊的声音"
+            contact_ticks=[action['end']]
+        elif cue['sound'] in {'handclaps','kowtow_contact'}:
+            event=f"{actor}{'双掌拍合' if cue['sound']=='handclaps' else '额头触地'}的声音"
+            contact_ticks=[action['start']+(action['end']-action['start'])*(i+.5)/action['count'] for i in range(action['count'])]
+            _need(all(abs(t-round(t))<1e-8 for t in contact_ticks),cp,'repeat contacts must align to actual simulated integer ticks')
+            contact_ticks=[round(t) for t in contact_ticks]
+        elif cue['sound']=='cloth':
+            event=f"{actor}使用{action['prop']}时的衣料摩擦声"
+        elif cue["sound"] == "prop_contact":
             event = f"{actor}移动{action['prop']}时的物件接触声"
         elif cue["sound"] == "writing":
             event = f"{actor}书写时笔尖接触纸面的声音"
         else:
-            _need(initial_world["actors"][actor]["posture"] == "站立", cp,
+            _need(action_world["actors"][actor]["posture"] == "站立", cp,
                   "footsteps require an explicitly standing actor; seated/lying locomotion is not modelled")
             event = f"{actor}行走时的脚步声"
         volume = "轻声" if cue["volume"] == "soft" else "正常音量"
-        text = f"{action['start'] / 10:.1f}—{action['end'] / 10:.1f}秒：{event}，{volume}。"
+        text = (''.join(f'{tick/10:.1f}秒：{event}，{volume}。' for tick in contact_ticks) if contact_ticks is not None else
+                f"{action['start'] / 10:.1f}—{action['end'] / 10:.1f}秒：{event}，{volume}。")
         lines.append(text)
         bindings.append({"action_id": action["id"], "kind": action["kind"], "actor": actor,
                          "start_tick": action["start"], "end_tick": action["end"],
-                         "sound": cue["sound"], "volume": cue["volume"], "rendered_text": text})
+                         "sound": cue["sound"], "volume": cue["volume"], "rendered_text": text,
+                         **({'contact_ticks':contact_ticks} if contact_ticks is not None else {})})
     fields = {"环境动态": dynamics, "环境音效": "".join(lines) or "无额外环境音效。"}
     return fields, {"contract": "production-environment-v1", "physical_scene": scene_id,
                     "air": "clear", "light": copy.deepcopy(light), "sound_bindings": bindings,

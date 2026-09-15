@@ -27,6 +27,8 @@ from continuity_checks import state_equal
 from performance_checks import eye_contract_faults, emphasis_binding_faults, visible_subject_tokens, visible_subject_annotation_faults, listener_reaction_faults
 from lighting_checks import affirmative_matches, lighting_context_faults, scene_lighting_continuity_faults
 from dialogue_occurrences import align_storyboard_dialogue
+from voice_sequence import (VOICE_TEMPLATE_LABELS, INTEGRATED_DIALOGUE_RE,
+                            LEGACY_DIALOGUE_TAG_RE, extract_dialogues)
 from source_content_limits import (
     AFFORDANCE as SOURCE_LIMIT_AFFORDANCE,
     ENTAILMENT as SOURCE_LIMIT_ENTAILMENT,
@@ -60,10 +62,6 @@ DEPRECATED_DISPLAY_LABELS = (
     "人物调度：", "人物调度:", "动作与表演：", "动作与表演:", "台词：", "台词:",
     "发声方式：", "发声方式:", "标点语气：", "标点语气:",
     "心理音轨属性：", "心理音轨属性:", "生成批次：", "生成批次:",
-)
-VOICE_TEMPLATE_LABELS = (
-    "基础声线", "言语行为", "当前表达", "发声方式", "音量", "语速与节奏",
-    "呼吸", "停顿", "重音", "尾音", "禁止语气",
 )
 VOICE_TEMPLATE_LINE_RE = re.compile(
     r"^(基础声线|言语行为|当前表达|发声方式|音量|语速与节奏|呼吸|停顿|重音|尾音|禁止语气)([：:])(.*)$"
@@ -182,12 +180,6 @@ STRICT_TIMELINE_STAGE_RE = re.compile(
     re.S,
 )
 EP_SHOT_ID_RE = re.compile(r"^EP(?P<episode>\d{2})-(?P<shot>\d{3})$")
-LEGACY_DIALOGUE_TAG_RE = re.compile(
-    r"【(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})】\s*[“\"]?(?P<line>[^【\n｜|；;”\"]+)[”\"]?"
-)
-INTEGRATED_DIALOGUE_RE = re.compile(
-    r"(?:^|[；;。！？!?，,、】])\s*(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})说道[：:]?\s*[“\"](?P<line>[^”\"\n]+)[”\"]"
-)
 REQUIRED_ASPECT_RATIO_PHRASE = "9:16竖屏"
 REQUIRED_ASPECT_RATIO_RE = re.compile(
     r"(?<!\d)9:16竖屏(?=$|[\s；;，,。.])"
@@ -687,6 +679,9 @@ def _voice_template_errors(
             "音色子模板必须按固定顺序且各出现一次："
             + "→".join(VOICE_TEMPLATE_LABELS)
         )
+    from voice_sequence import has_markers, validate_voice_sequence
+    if has_markers(text):
+        return list(dict.fromkeys(errors + validate_voice_sequence(parsed, dialogue_rows)))
     for label in VOICE_TEMPLATE_LABELS:
         if label == "发声方式":
             continue
@@ -920,24 +915,6 @@ def _validate_punctuation(dialogue: str, delivery: str) -> list[str]:
         if triggered and not _has_any(delivery, expected):
             missing.append(label)
     return missing
-
-
-def extract_dialogues(picture_content: Any) -> list[tuple[str, str]]:
-    """Extract integrated R10-SPC-1 dialogue and legacy read-only tags."""
-    rows: list[tuple[str, str]] = []
-    text = str(picture_content or "")
-    for match in INTEGRATED_DIALOGUE_RE.finditer(text):
-        line = match.group("line").strip()
-        if line:
-            rows.append((match.group("speaker").strip(), line))
-    for match in LEGACY_DIALOGUE_TAG_RE.finditer(text):
-        line = match.group("line").strip()
-        sentence = re.match(r"(.+?[。！？?!](?:[。！？?!…])?)", line)
-        if sentence:
-            line = sentence.group(1).strip()
-        if line:
-            rows.append((match.group("speaker").strip(), line))
-    return rows
 
 
 def _validate_timeline(text: str, duration: float, *, strict: bool = False,

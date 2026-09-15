@@ -178,13 +178,14 @@ class SourceDecisionIndependentAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "semantic_audit_source_decision_pending"):
             self.attach()
 
-    def test_actual_objective_narration_requires_both_voiceover_and_action_fields(self):
+    def test_actual_objective_narration_requires_its_owning_voiceover_field(self):
         self.storyboard = bound_fixture("narration")
         proof = inspect_derivation(self.storyboard)
         self.assertTrue(proof["valid"], proof["faults"])
         fields = proof["source_obligations"][0]["field_evidence_ids"]
-        self.assertEqual(set(fields), {"field:EP90-001.画面内容", "field:EP90-001.心理音轨"})
+        self.assertEqual(set(fields), {"field:EP90-001.心理音轨"})
         self.assertIn("商议安排在明日。", self.storyboard["shots"][0]["心理音轨"])
+        self.assertNotIn("商议安排在明日。", self.storyboard["shots"][0]["画面内容"])
         self.assertNotIn("商议安排在明日。", self.storyboard["shots"][0]["起始状态"])
         self.submission = submission_for(self.storyboard, proof["source_obligations"])
         self.assertEqual(self.attach()["independent_evidence_matrix"]["source_decision_coverage"]["state"],

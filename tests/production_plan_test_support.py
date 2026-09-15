@@ -15,9 +15,9 @@ def frozen_plan(payload, graph, texts):
         for prop in payload['initial_world']['props'].values():
             if prop['written_ref']:
                 consumed.update(w['use_id'] for w in decisions['written_objects'] if w['id'] == prop['written_ref'])
-        for a in shot['actions']:
+        for a in [*shot['transition'].get('bridge',{}).get('actions',[]),*shot['actions']]:
             u = uses.get(a.get('source_use_id'))
-            actor = u['actor'] if a['kind'] in {'speak','narrate'} else a.get('actor')
+            actor = u['actor'] if a['kind'] in {'speak','narrate','inner_voice'} else a.get('actor')
             fact_ids = list(u['fact_ids']) if u else []
             stance = 'narrator' if a['kind'] == 'narrate' else 'known' if fact_ids else 'not_applicable'
             knowledge.append({'action_id':a['id'],'actor':actor,'fact_ids':fact_ids,
@@ -26,7 +26,7 @@ def frozen_plan(payload, graph, texts):
         purpose = sorted({fid for uid in consumed for fid in uses[uid]['fact_ids']})
         shots.append({'shot_id':shot['shot_id'],'purpose_fact_ids':purpose,
                       'required_action_ids':[a['id'] for a in shot['actions']],
-                      'audio_action_ids':[a['id'] for a in shot['actions'] if a['kind'] in {'speak','narrate'}],
+                      'audio_action_ids':[a['id'] for a in shot['actions'] if a['kind'] in {'speak','narrate','inner_voice'}],
                       'source_use_ids':sorted(consumed),'visible':[]})
     return {'contract':CONTRACT,
             'context':{**runtime_context(),'source_sha256':{sid:hashlib.sha256(text.encode()).hexdigest() for sid,text in texts.items()},
