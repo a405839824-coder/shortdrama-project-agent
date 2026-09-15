@@ -401,7 +401,8 @@ def review_obligations(obj):
     bound={k:v for k,v in obj.items() if k!='prevention_evidence'}
     bound['episode_contract']=contract;bound['source_ledger']=evidence.get('source_ledger')
     bound['borrow_ledger']=evidence.get('borrow_ledger')
-    fingerprint=hashlib.sha256(json.dumps(bound,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+    from production_derivation import digest
+    fingerprint=digest(bound)
     result=[]
     for ep in contract.get('episodes',[]):
         eid=ep['episode_id']

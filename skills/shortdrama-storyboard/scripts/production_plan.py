@@ -17,8 +17,8 @@ REF = Path(__file__).resolve().parents[1] / 'references'
 
 
 def digest(value):
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
-                                    separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+    from production_derivation import digest as number_stable_digest
+    return number_stable_digest(value)
 
 
 def policy():

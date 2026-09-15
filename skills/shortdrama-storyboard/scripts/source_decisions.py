@@ -118,9 +118,10 @@ class SourceCompilation:
         payload = {"graph_sha256": self.graph_sha256, "actual_source_use": use.to_dict(),
                    "written_objects": [paper.to_dict() for paper in self.written_objects if paper.use_id == use.id]}
         if self.production_plan_json is not None:
+            from production_plan import digest as plan_digest
             plan = json.loads(self.production_plan_json)
             payload['production_plan_review'] = {
-                'plan_sha256': hashlib.sha256(self.production_plan_json).hexdigest(),
+                'plan_sha256': plan_digest(plan),
                 'source_fact_ids': list(use.fact_ids),
                 'required_questions': ['does the source support the frozen premise and setting',
                     'do initial knowledge and belief/pretence have actual source support',
