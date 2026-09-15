@@ -11821,6 +11821,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "commit_ready": commit_ready,
             }
             post_profile: dict[str, Any]
+            resolved_scene_alias_events: list[str] = []
             with self.store.mutate_project(namespace, project_id) as (_hub, ledger):
                 storyboard_agent.ingest_event(
                     ledger,
@@ -11829,6 +11830,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                         namespace, project_id
                     ),
                 )
+                if commit_ready:
+                    resolved_scene_alias_events = self._close_covered_scene_alias_failures(
+                        namespace, project_id, ledger=ledger, work_order_id=work_order_id,
+                        candidate=candidate, scene_coverage=scene_coverage,
+                        full_preflight_id=preflight_id,
+                    )
                 post_profile = storyboard_agent.active_prevention_profile(ledger)
             post_profile_sha = sha256_bytes(_stable_json_bytes(post_profile))
             record_value = {
@@ -11886,6 +11893,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "scene_coverage_missing_scenes": copy.deepcopy(
                     (scene_coverage or {}).get("missing_scenes", [])
                 ),
+                "resolved_scene_alias_events": resolved_scene_alias_events,
                 "artifact_created": False,
                 "version_created": False,
                 "xlsx_created": False,
@@ -11980,6 +11988,72 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "active_prevention_profile": profile,
             },
         )
+
+    def _close_covered_scene_alias_failures(
+        self, namespace, project_id, *, ledger, work_order_id, candidate,
+        scene_coverage, full_preflight_id,
+    ) -> list[str]:
+        """Close only an unchanged ambiguous alias covered by a clean full run.
+
+        The alias request remains a failed immutable preflight. This appends a
+        coverage-resolution event; it never signs a scene PASS for that alias.
+        Every constituent stable scene must have its own current signed PASS.
+        """
+        if not scene_coverage or not scene_coverage.get("complete"):
+            return []
+        manifest = scene_coverage.get("scene_coverage_manifest", [])
+        groups = _scene_scope_groups(candidate)
+        covered = {row["stable_scene_id"]: row for row in manifest}
+        resolved = []
+        records = self.store.list_project_records(namespace, project_id, kind="draft_preflights")
+        for record in records:
+            if (record.get("work_order_id") != work_order_id
+                    or record.get("scope_kind") != "scene"
+                    or record.get("status") != DRAFT_PREFLIGHT_FAIL
+                    or not self.store.project_record_is_signed(record)):
+                continue
+            alias = str(record.get("scope_id") or "")
+            faults = record.get("report", {}).get("issues", [])
+            if not faults or any(
+                row.get("error_code") != "E-DRAFT-SCENE-PREFLIGHT-001"
+                or row.get("location") != "scope.scene." + alias for row in faults
+            ):
+                continue
+            selected = [g for g in groups if alias in g["scene_aliases"]]
+            if len(selected) < 2 or any(
+                g["stable_scene_id"] not in covered
+                or covered[g["stable_scene_id"]].get("scope_sha256") != g["scope_sha256"]
+                or not covered[g["stable_scene_id"]].get("scene_preflight_id")
+                for g in selected
+            ):
+                continue
+            selected_ids = {sid for g in selected for sid in g["scope_shot_ids"]}
+            subset = [s for s in candidate["shots"] if str(s.get("镜头编号") or s.get("shot_uid")) in selected_ids]
+            ordered_ids = [str(s.get("镜头编号") or s.get("shot_uid")) for s in subset]
+            subset_sha = sha256_bytes(_stable_json_bytes(subset))
+            if (record.get("scope_shot_ids") != ordered_ids
+                    or record.get("scope_sha256") != subset_sha):
+                continue
+            prior_id = record.get("ledger_event", {}).get("event_id")
+            prior = next((e for e in ledger.get("events", []) if e.get("event_id") == prior_id), None)
+            scope = next((s for s in ledger.get("scope_states", []) if prior and s.get("scope_key") == prior.get("scope_key")), None)
+            if not scope or scope.get("last_event_id") != prior_id or scope.get("closure_state") == "preflight_clean":
+                continue
+            event_id = "EVT-" + sha256_bytes(_stable_json_bytes([full_preflight_id, prior_id, subset_sha]))[:20]
+            event = {key: copy.deepcopy(prior[key]) for key in (
+                "episode_id", "file_name", "audit_cycle_id", "task_type", "audit_class", "assessment_contract"
+            )}
+            event.update(event_id=event_id, timestamp=utc_stamp(),
+                file_fingerprint=canonical_storyboard_sha256(candidate), source_version="full-preflight-scope-resolution",
+                audit_round=int(scope["last_audit_round"]) + 1, result="pass", checked_shot_count=len(subset), issues=[],
+                full_scope_resolution={"contract":"signed-full-scene-alias-resolution-v1",
+                    "full_preflight_id":full_preflight_id, "failed_preflight_id":record["draft_preflight_id"],
+                    "scope_sha256":subset_sha, "scene_preflight_ids":[covered[g["stable_scene_id"]]["scene_preflight_id"] for g in selected],
+                    "meaning":"failed alias routing is superseded by exact stable-scene coverage; original failure retained"})
+            storyboard_agent.ingest_event(ledger, event,
+                checkpoint_authorizer=self._ledger_checkpoint_authorizer(namespace, project_id))
+            resolved.append(event_id)
+        return resolved
 
     def _verify_draft_preflight(
         self,
@@ -13933,8 +14007,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     ) -> None:
         """Reject full-commit changes to shots outside an episode work order."""
 
-        authorized_episodes = _episode_scope_from_targets(work_order.get("targets"))
-        if authorized_episodes is None or not source_artifact_id:
+        if not source_artifact_id:
             return
         source_record, _source_path = self.store.get_artifact(
             namespace, project_id, source_artifact_id
@@ -13949,6 +14022,13 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             "storyboard_json",
             "storyboard_json_recovered",
         }:
+            return
+
+        # This guard compares a revised storyboard with its existing base.
+        # Source-graph/reference targets are valid inputs to new production;
+        # they are not episode labels or a pre-existing storyboard to preserve.
+        authorized_episodes = _episode_scope_from_targets(work_order.get("targets"))
+        if authorized_episodes is None:
             return
 
         base_storyboard, _base_record = self._storyboard_from_artifact(
