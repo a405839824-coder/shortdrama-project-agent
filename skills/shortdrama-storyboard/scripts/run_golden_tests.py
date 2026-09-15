@@ -37,14 +37,8 @@ BOUNDARY_EXPLANATION_RE = re.compile(
 
 
 def _stable_sha256(value: Any) -> str:
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
+    from production_derivation import digest
+    return digest(value)
 
 
 def build_adjacent_continuity_audit(

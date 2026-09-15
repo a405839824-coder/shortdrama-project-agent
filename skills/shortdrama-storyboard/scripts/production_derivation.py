@@ -29,8 +29,24 @@ DEPENDENCIES = (
 )
 
 
+def _json_numbers(value):
+    """Bind JSON number values across runtimes without changing source text.
+
+    JavaScript represents 0.0 and 0 identically. Preserve all string bytes,
+    booleans, fractional numbers, sequence order and actual numeric changes.
+    Non-finite numbers still fail in the strict JSON encoder below.
+    """
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _json_numbers(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_numbers(item) for item in value]
+    return value
+
+
 def digest(value):
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+    return hashlib.sha256(json.dumps(_json_numbers(value), ensure_ascii=False, sort_keys=True,
                                     allow_nan=False, separators=(',', ':')).encode('utf-8')).hexdigest()
 
 

@@ -112,8 +112,8 @@ def _tick(value, path):
 
 
 def _hash(value):
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
-                                    allow_nan=False, separators=(",", ":")).encode()).hexdigest()
+    from production_derivation import digest
+    return digest(value)
 
 
 def _add(a, b): return [x + y for x, y in zip(a, b)]
