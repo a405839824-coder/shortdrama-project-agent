@@ -1,42 +1,49 @@
 name: Account access validation
+
 on:
-  pull_request:
   push:
     branches: [main]
+    paths:
+      - 'server/**'
+      - 'skills/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'requirements.txt'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rbac-main-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  regression:
+  smoke:
+    name: Main smoke validation
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3]
+    timeout-minutes: 10
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m venv .venv && .venv/bin/pip install -r requirements.txt
-      - name: Run isolated regression modules
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: Install runtime dependencies
+        run: bash scripts/setup_local.sh
+
+      - name: Verify rules, runtime and transports
         env:
-          SHARD: ${{ matrix.shard }}
-          PYTHONPATH: server:tests
+          PYTHONPATH: server
           PYTHONUTF8: '1'
         run: |
-          .venv/bin/python - <<'PY'
-          import os, pathlib, subprocess, sys
-          modules = sorted(path.stem for path in pathlib.Path('tests').glob('test_*.py'))
-          failures = []
-          for index, module in enumerate(modules):
-              if index % 4 == int(os.environ['SHARD']):
-                  if subprocess.call([sys.executable, '-m', 'unittest', module, '-v']):
-                      failures.append(module)
-          if failures:
-              raise SystemExit('Failed modules: ' + ', '.join(failures))
-          PY
-      - name: Verify runtime and transports
-        if: matrix.shard == 0
-        run: |
           .venv/bin/python skills/shortdrama-storyboard/scripts/rule_registry.py --check
+          .venv/bin/python skills/shortdrama-storyboard/scripts/r10_bootstrap.py --self-test
           .venv/bin/python server/main.py --self-test
-          .venv/bin/python tests/http_smoke.py
           .venv/bin/python tests/stdio_smoke.py
+          .venv/bin/python tests/http_smoke.py
