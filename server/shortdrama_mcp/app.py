@@ -19,6 +19,7 @@ from .config import Settings
 from .members import MEMBER_CONTRACT, load_registry
 from .external_storage import ExternalProjectStorage
 from .file_io import DEFAULT_BULK_RESPONSE_CHARS, preview_extracted_bulk
+from .formal_delivery import delivery_contract, inspect_formal_delivery
 from .models import (
     ArtifactReadRange,
     ChangeOperationInput,
@@ -151,6 +152,11 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "新生产还须读取production_prevention_contract，在独立冻结来源图中登记production_plan，绑定决定依据、人物知情、整镜交付及当前规则指纹；未知不能记为通过。"
             "新稿先通过production-authoring-request-v1提交来源与结构化决定；机位、初态、光影复用同一世界与拍摄决定。"
             "不得自行写第五列正式母版或第六列GPT指令；程序生成十列母版和R5逐镜阅读页。"
+            "ChatGPT与Codex新装和已有连接均只认同一服务端模板。交付前必须调用"
+            "read_project_artifact(section='formal_delivery')，核对当前回执和下载文件SHA256；"
+            "formal_delivery_ready不是true时不得计为正式完成或启动下一批。"
+            "校验失败、not_supported、连接失效或版本未知时不得捕获错误后本地拼接、"
+            "借助其他工具导出替代版或自制阅读页；保留草稿并报告精确阻断。"
             "摄影参数只在机位/运镜，声线及语速、停顿、重音、尾音只在音色对应子项；画面保留准确对白、口型和可见动作。"
             "禁止承接上一个镜头等代指、制作目的和全局限制混入剧情画面；缺依据须说明，不能猜测或静默删句。"
             "字段合规不代表来源、动作选择或语义已通过；兼容候选也必须执行服务端检查。"
@@ -241,6 +247,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                     project_id=project_id,
                     data={
                         "plugin_version": __version__,
+                        "formal_delivery_contract": delivery_contract(),
                         "account_access": access_profile,
                         "runtime_status": service.bootstrap.get("status"),
                         "content_storage": storage,
@@ -258,6 +265,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                 project_id=project_id,
                 data={
                     "plugin_version": __version__,
+                    "formal_delivery_contract": delivery_contract(),
                     "account_access": access_profile,
                     "runtime_status": service.bootstrap.get("status"),
                     "content_storage": storage,
@@ -283,6 +291,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             EXECUTION_PROGRESS_POLICY
         )
         response.data["account_access"] = access_profile
+        response.data["formal_delivery_contract"] = delivery_contract()
         return response
 
     @server.tool(
@@ -684,6 +693,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "可传if_none_match避免重复返回未变化文件。"
             "diagnose_storyboard=true时返回当前分镜只读机器诊断，可按diagnostic_episode_ids筛选；"
             "共享或未定位问题单列，历史证据保留，不签发独立审计结论，不受其他批次待修工单阻止。"
+            "section='formal_delivery'实时核验唯一模板、实际文件及签名生产/独审记录；"
+            "只有formal_delivery_ready=true才返回正式交付链接并允许计入完成。"
         ),
         annotations=_annotations(read_only=True),
         meta=meta("正在读取文件…", "文件内容已读取"),
@@ -705,6 +716,10 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     ) -> ToolResponse:
         namespace = request_namespace(settings)
         trace = WorkflowTrace()
+        if section == "formal_delivery":
+            if diagnose_storyboard or diagnostic_episode_ids is not None or bulk_ranges is not None:
+                raise ValueError("formal_delivery cannot be combined with diagnostics or bulk ranges")
+            return inspect_formal_delivery(service, namespace, project_id, artifact_id)
         if diagnose_storyboard:
             return service.diagnose_storyboard_artifact(
                 namespace, project_id, artifact_id, diagnostic_episode_ids)
