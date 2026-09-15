@@ -1278,17 +1278,65 @@ def _scene_scoped_report(
     """Run local gates on a scene and explicitly mark global gates N/A."""
 
     scoped_candidate = _scene_candidate_for_validation(candidate, scoped_shots)
+    from production_derivation import inspect_derivation
+    production_binding = inspect_derivation(candidate)
+    full_shots = candidate.get("shots", [])
+    # A recorded derivation binds the complete source/world/action graph. Slicing
+    # its shots or source ledger invalidates that proof and wrongly selects the
+    # legacy prose checker. Verify the original, then restrict the findings;
+    # neither a caller flag nor a detached/modified shot can borrow its proof.
+    exact_subset = (
+        bool(scoped_shots)
+        and len({str(row.get("shot_uid") or row.get("镜头编号")) for row in scoped_shots})
+        == len(scoped_shots)
+        and all(row in full_shots for row in scoped_shots)
+    )
+    recorded_context = (
+        production_binding.get("production_prevention_verified") is True
+        and exact_subset
+    )
     raw_report = validate_storyboard.validate_project(
-        scoped_candidate, mode="audit", timing_context=candidate, episode_fragment=True,
+        candidate if recorded_context else scoped_candidate,
+        mode="audit", timing_context=candidate, episode_fragment=True,
     )
     raw_issues = [
         copy.deepcopy(row)
         for row in raw_report.get("issues", [])
         if isinstance(row, dict)
     ]
+    if recorded_context:
+        scoped_refs = set().union(*(_shot_reference_ids(row) for row in scoped_shots))
+        local_indices = {
+            i + 1: scoped_shots.index(row) + 1
+            for i, row in enumerate(full_shots) if row in scoped_shots
+        }
+        selected_issues = []
+        for issue in raw_issues:
+            bound_ids = _issue_shot_ids(candidate, issue)
+            if bound_ids and not set(bound_ids) & scoped_refs:
+                continue
+            if bound_ids:
+                issue["shot_ids"] = bound_ids
+            issue["location"] = re.sub(
+                r"shots\[(\d+)\]",
+                lambda match: "shots[" + str(local_indices.get(int(match.group(1)), int(match.group(1)))) + "]",
+                str(issue.get("location") or ""),
+            )
+            selected_issues.append(issue)
+        raw_issues = selected_issues
+    elif production_binding.get("present"):
+        raw_issues.append({
+            "error_code": "E-GATE-001", "severity": "blocking", "blocking": True,
+            "location": "scene:production_derivation",
+            "evidence": "完整生成凭据未通过重算，或场景镜头不是其未修改的精确子集。",
+            "repair_action": "使用原始生成决定重建完整凭据后重新预检；不得让裁切或修改内容借用旧凭据。",
+        })
     applicable = [row for row in raw_issues if _scene_issue_is_applicable(row)]
     excluded = [row for row in raw_issues if not _scene_issue_is_applicable(row)]
     report = copy.deepcopy(raw_report)
+    report["scene_validation_basis"] = (
+        "verified_complete_production_context" if recorded_context else "scene_projection"
+    )
     report["validation_scope"] = "scene"
     report["issues"] = applicable
     report["shot_count"] = len(scoped_shots)
