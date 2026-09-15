@@ -131,9 +131,20 @@ def voice_content_findings(value, *, dialogue_rows=(), mask=None):
         findings.append({"code": ERROR_CODE, "path": "音色", "role": "unlabelled",
                          "excerpt": str(value)[:first_label.start()].strip(), "offset": [0, first_label.start()],
                          "message": "音色不接受固定标签之外的前置正文", "repair": "把发声决定填写在对应子项"})
+    from voice_sequence import has_markers,split_voice_sequence
+    sequence=None
+    if has_markers(str(value)):
+        sequence, errors=split_voice_sequence(dict(parts),dialogue_rows)
+        if errors:
+            findings.append({'code':ERROR_CODE,'path':'音色','role':'invalid_voice_sequence','status':'fail',
+                             'excerpt':str(value)[:120],'offset':[0,len(str(value))],
+                             'message':'; '.join(errors),'repair':'绑定实际逐句说话人并保留固定标签'})
+            return findings
     for label, body in parts:
-        findings.extend(_findings_for_value("音色", body, mask=mask,
-                                           subfield=label, dialogue_rows=dialogue_rows))
+        values=[(item[label],[dialogue_rows[i]]) for i,item in enumerate(sequence)] if sequence is not None else [(body,dialogue_rows)]
+        for segment,rows in values:
+            findings.extend(_findings_for_value("音色", segment, mask=mask,
+                                               subfield=label, dialogue_rows=rows))
         if label == "发声方式" and body:
             findings.append({"code": ERROR_CODE, "path": "音色.发声方式", "role": "unlabelled",
                              "excerpt": body, "offset": [0, len(body)],
@@ -150,9 +161,8 @@ def field_content_findings(shot, *, mask=None, dialogue_rows=()):
         # The full validator supplies its authoritative dialogue parser. Direct
         # render callers retain narrowly marked speech literals for role checks;
         # source/speaker fidelity is still checked by the full validator.
-        dialogue_rows = [("", m.group(1)) for m in re.finditer(
-            r'(?:说道|问道|答道|喊道|对白|台词|[\u3400-\u9fff]{1,12}\s*[:：])\s*[:：]?\s*“([^”]*)”',
-            str(shot.get("画面内容") or ""))]
+        from validate_storyboard import extract_dialogues
+        dialogue_rows = extract_dialogues(str(shot.get("画面内容") or ""))
     findings = []
     for field, spec in policy["fields"].items():
         if field not in shot or spec.get("verbatim_source"):

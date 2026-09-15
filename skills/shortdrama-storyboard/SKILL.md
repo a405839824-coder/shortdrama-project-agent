@@ -5,6 +5,13 @@ description: "Operate a full-lifecycle Chinese short-drama project Agent with th
 
 # Short-drama storyboard R10
 
+For current action/state, inter-shot staging, multi-speaker voice, inner speech
+and source-report receipt, read `references/source_actions_0537.md` and the live
+`production_prevention_contract.action_contract`. These extend executable
+decisions within the same unique template and do not waive source or delivery
+checks. Never turn a fall into voluntary lying down, dress the wrong person,
+declare a sound before contact, or omit a protected action through a bridge.
+
 ## Mandatory formal delivery on ChatGPT and Codex
 
 Every account and every fresh installation uses the same server-owned template.

@@ -107,9 +107,10 @@ def _obligations(candidate, compiled, derivation):
         for event in shot['actions']:
             uid = event.get('source_use_id')
             if uid in usage:
-                usage[uid].add(f'field:{sid}.画面内容')
-                if event.get('kind') == 'narrate':
+                if event.get('kind') in {'narrate', 'inner_voice'}:
                     usage[uid].add(f'field:{sid}.心理音轨')
+                else:
+                    usage[uid].add(f'field:{sid}.画面内容')
     shots = {shot['镜头编号']: shot for shot in candidate['shots']}
     for record in derivation['shots']:
         shot = shots[record['shot_id']]

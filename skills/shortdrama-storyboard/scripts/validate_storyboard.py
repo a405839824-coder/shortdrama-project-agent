@@ -687,6 +687,9 @@ def _voice_template_errors(
             "音色子模板必须按固定顺序且各出现一次："
             + "→".join(VOICE_TEMPLATE_LABELS)
         )
+    from voice_sequence import has_markers, validate_voice_sequence
+    if has_markers(text):
+        return list(dict.fromkeys(errors + validate_voice_sequence(parsed, dialogue_rows)))
     for label in VOICE_TEMPLATE_LABELS:
         if label == "发声方式":
             continue

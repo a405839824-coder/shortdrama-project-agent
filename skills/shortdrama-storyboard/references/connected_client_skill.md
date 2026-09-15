@@ -16,6 +16,11 @@ the exact missing capability without deleting source content to obtain PASS.
    `formal_delivery_contract`, `field_content_contract`, and
    `production_prevention_contract`. Missing current delivery support blocks
    formal delivery. Local cached rules and labels never override the server.
+   Read `production_prevention_contract.action_contract` for current executable
+   actions, source modes and sound bindings. Use `references/source_actions_0537.md`
+   for same-source posture/contact/doorway/garment actions, explicit omitted
+   staging, exact inner speech, report receipt and sequential speaker voices.
+   These additions preserve the same formal template and its delivery gates.
 2. Bind the project, work order, authoritative source and episode boundaries.
    Read the full authorized source. Preserve core plot, exact protected dialogue,
    speaker identity, causality and state transitions. Apply only the user's
