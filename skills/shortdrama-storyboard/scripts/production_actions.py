@@ -25,6 +25,7 @@ FIELDS = {
     'dress_actor': {'prop','hand','target_actor','part'},
     'undress_actor': {'prop','hand','target_actor'},
     'release_binding': {'prop','hand','target_actor'},
+    'assist_stand': {'target_actor','hand','target_part','point','landmarks','helper_point','helper_landmarks'},
     'wipe': {'prop', 'hand', 'part'},
     'contact_actor': {'hand', 'target_actor', 'target_part', 'mode'},
     'clap': {'count'},
@@ -40,7 +41,7 @@ EXPRESSIONS = {'平静', '微笑', '不悦', '压怒', '疼痛', '震惊', '得�
 PARTS = {'face', 'left_wrist', 'right_wrist', 'left_foot', 'right_foot', 'head', 'torso', 'left_hand', 'right_hand'}
 PART_TEXT = {'face': '面颊', 'left_wrist': '左手腕', 'right_wrist': '右手腕', 'left_foot': '左脚背',
              'right_foot': '右脚背', 'head': '头部', 'torso': '外衣', 'left_hand': '左手', 'right_hand': '右手'}
-SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding'}
+SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'}
 BRIDGE_KINDS = {'move_actor', 'turn', 'look', 'posture', 'hand_move', 'eye_state', 'hand_shape',
                 'expression', 'cross_passage', 'scene_light'}
 
@@ -113,8 +114,11 @@ def channels(action):
     a, k = action['actor'], action['kind']
     # Channels are calculated before preparation. Validate keys needed below
     # so malformed input fails closed as a domain error, never a raw TypeError.
-    for key in FIELDS[k] - {'landmarks','light','contact','breaks','count'}:
+    for key in FIELDS[k] - {'landmarks','helper_landmarks','light','contact','breaks','count'}:
         _p()._need(isinstance(action[key],str), 'action.'+key, 'requires named action parameter')
+    if k == 'assist_stand':
+        return {(who,part) for who in (a,action['target_actor'])
+                for part in ('position','body','head','left','right','gaze')}
     if k == 'scene_light': return {('scene', action['scene_id'])}
     if k == 'set_opening': return {('scene_openings','all'),(a,action['hand'])}
     if k in {'posture', 'fall', 'cross_passage', 'kowtow'}:
@@ -158,7 +162,56 @@ def prepare(world, action, info, path, *, bridge=False):
         p._need(action['hand'] in {'left', 'right'}, path, 'unknown hand')
         p._need(action['hand'] not in a['action_state']['contacts'] and not _contacted(world, action['actor'], action['hand']),
                 path, 'hand remains in an actual grasp/support contact')
-    if k in {'posture','fall'}:
+    if k == 'assist_stand':
+        target=world['actors'].get(action['target_actor'])
+        p._need(target and action['target_actor']!=action['actor'] and target['scene_id']==a['scene_id'],
+                path,'assisted standing requires another same-scene person')
+        expected={'actor':action['target_actor'],'part':action['target_part'],'mode':'support'}
+        p._need(action['hand'] in {'left','right'} and action['target_part'] in
+                {'left_wrist','right_wrist','left_hand','right_hand'},path,'unsupported support attachment')
+        p._need(a['action_state']['contacts']=={action['hand']:expected} and
+                _contacted(world,action['target_actor'])==[(action['actor'],action['hand'],expected)] and
+                not target['action_state']['contacts'] and not _contacted(world,action['actor']),
+                path,'requires the single actual support contact, without other constraints')
+        p._need(a['gaze'] is None and target['gaze'] is None,path,'clear both visual gazes before assisted standing')
+        p._need(not any(x['anchor']=={'actor':action['target_actor'],'binding':'wrists'}
+                       for x in world['props'].values()),path,'release wrist binding before assisted standing')
+        p._need(target['posture'] in {'躺卧','坐姿','蹲姿','跪姿'} and
+                a['posture'] in {'站立','坐姿','蹲姿'} and duration>=.8,path,'unsupported or rushed assisted stand')
+        for who,point_key,lm_key in [(action['target_actor'],'point','landmarks'),
+                                     (action['actor'],'helper_point','helper_landmarks')]:
+            person=world['actors'][who]; dest=world['points'].get(action[point_key]);lm=action[lm_key]
+            p._need(dest and dest['scene_id']==person['scene_id'] and
+                    p._distance(dest['position_xyz'],person['position_xyz'])<=1.2,
+                    path,'assisted stand cannot replace a walk or cross rooms')
+            p._need(not p._blocked(world,person['scene_id'],person['position_xyz'],dest['position_xyz']),
+                    path,'barrier blocks assisted stand')
+            p._obj(lm,{'eye_height','reach_origin_offset_xyz','hands'},path+'.'+lm_key)
+            h=p._num(lm['eye_height'],path); off=p._xyz(lm['reach_origin_offset_xyz'],path)
+            p._need(1<=h<=2.2 and math.hypot(*off[:2])<=.8 and abs(off[2]-h)<=.7,
+                    path,'incompatible standing landmarks')
+            p._obj(lm['hands'],{'left','right'},path)
+            for xyz in lm['hands'].values():
+                p._xyz(xyz,path);p._need(p._distance(xyz,off)<=person['reach_m']+.2,
+                                       path,'standing hand exceeds declared reach')
+        # Check every actual simulation sample, including the two-body support
+        # hand. No independent endpoint/prose patch is accepted.
+        for tick in range(action['start'],action['end']+1):
+            sample=copy.deepcopy(world)
+            for keys,value in effects(world,action,tick).items():
+                node=sample
+                for key in keys[:-1]:node=node[key]
+                node[keys[-1]]=value
+            helper=sample['actors'][action['actor']]
+            dest=body_point(sample['actors'][action['target_actor']],action['target_part'])
+            p._reach(sample,action['actor'],helper['scene_id'],dest,path)
+            for who in (action['actor'],action['target_actor']):
+                person=sample['actors'][who]
+                for hand in ('left','right'):
+                    p._need(p._distance(p._hand(person,hand),person['reach_origin_xyz'])<=person['reach_m']+.2,
+                            path,'intermediate assisted pose exceeds declared reach')
+            check_contacts(sample,path)
+    elif k in {'posture','fall'}:
         to='躺卧' if k=='fall' else action['to']
         p._need(to in POSTURES and to != a['posture'], path, 'requires a different supported posture')
         point = world['points'].get(action['point'])
@@ -213,7 +266,7 @@ def prepare(world, action, info, path, *, bridge=False):
             p._reach(world,action['actor'],scene,position,path)
             p._need(p._distance(p._hand(a,action['hand']),position)<=.2,path,'hand must reach actual binding')
         elif k == 'pick_up':
-            p._need(set(prop['anchor']) == {'point'}, path, 'pick_up requires an unheld prop')
+            p._need(set(prop['anchor']) in ({'point'},{'prop','offset_xyz'}), path, 'pick_up requires an unheld or supported prop')
             p._free_hand(world, action['actor'], action['hand'], path)
             p._reach(world, action['actor'], scene, position, path)
             p._need(p._distance(p._hand(a, action['hand']), position) <= .2, path, 'hand must reach prop before pickup')
@@ -315,7 +368,24 @@ def effects(initial, action, tick):
     result = {}; base = ('actors', who)
     def set_actor(key, value): result[base + (key,)] = copy.deepcopy(value)
     def state(key, value): result[base + ('action_state', key)] = copy.deepcopy(value)
-    if k in {'posture','fall'}:
+    if k == 'assist_stand':
+        changed={}
+        for who,point_key,lm_key in [(action['target_actor'],'point','landmarks'),
+                                     (who,'helper_point','helper_landmarks')]:
+            before=initial['actors'][who];dest=initial['points'][action[point_key]]['position_xyz'];lm=action[lm_key]
+            person=copy.deepcopy(before)
+            person.update(position_xyz=p._lerp(before['position_xyz'],dest,f),
+                posture='站立' if end else before['posture'],
+                eye_height=before['eye_height']+(lm['eye_height']-before['eye_height'])*f,
+                reach_origin_xyz=p._lerp(before['reach_origin_xyz'],p._add(dest,lm['reach_origin_offset_xyz']),f),
+                hands={h:p._lerp(before['hands'][h],lm['hands'][h],f) for h in ('left','right')})
+            changed[who]=person
+        helper=changed[action['actor']];target=changed[action['target_actor']]
+        p._set_hand(helper,action['hand'],body_point(target,action['target_part']))
+        for who,person in changed.items():
+            for key in ('position_xyz','posture','eye_height','reach_origin_xyz','hands'):
+                result[('actors',who,key)]=copy.deepcopy(person[key])
+    elif k in {'posture','fall'}:
         dest = initial['points'][action['point']]['position_xyz']; lm = action['landmarks']
         pos = p._lerp(a['position_xyz'], dest, f); set_actor('position_xyz', pos)
         set_actor('posture', ('躺卧' if k=='fall' else action['to']) if end else a['posture'])
@@ -416,6 +486,8 @@ def apply(world, action, info, tick):
 
 def sentence(action, info):
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
+    if k=='assist_stand':
+        return '扶起',f"{a}{hand}持续扶住{action['target_actor']}{PART_TEXT[action['target_part']]}并扶起{action['target_actor']}，帮助其起身站稳。"
     if k=='posture':
         verb={'站立':'起身','坐姿':'坐下','蹲姿':'蹲下','跪姿':'跪下','跪伏':'俯身','躬身':'躬身','躺卧':'躺下'}[action['to']]
         return verb, f"{a}{verb}，落在{action['point']}。"
@@ -477,6 +549,11 @@ def visible(sample, action):
     if k in {'head_gesture','kowtow'}:return bool(owner.get('head'))
     if k=='clap':return set(owner.get('hands',[]))=={'left','right'}
     if k=='contact_actor':return action['hand'] in owner.get('hands',[]) and part_visible(action['target_actor'],action['target_part'])
+    if k=='assist_stand':
+        target=view['actors'].get(action['target_actor'],{})
+        return bool(owner.get('head') and target.get('head') and
+                    action['hand'] in owner.get('hands',[]) and
+                    part_visible(action['target_actor'],action['target_part']))
     if k=='release_binding' and not all(part_visible(action['target_actor'],h+'_hand') for h in ('left','right')):return False
     if k=='drop_prop':
         contact=action['contact']
@@ -515,6 +592,8 @@ def fragment_sentence(action, info, lo, hi):
         return verb,text
     if k=='drop_prop': return '松开',f"{a}{hand}已松开{action['prop']}，{action['prop']}正在空中下落。"
     if k=='posture': return '转换姿态',f"{a}由{info['before']['posture']}向{action['to']}转换姿态。"
+    if k=='assist_stand':
+        return '扶起',f"{a}{hand}保持对{action['target_actor']}{PART_TEXT[action['target_part']]}的扶持并逐渐扶起{action['target_actor']}。"
     if k=='fall':return '跌向',f"{a}身体跌向{action['point']}。"
     if k=='cross_passage': return '过门',f"{a}正经{action['passage']}过门。"
     if k=='contact_actor':

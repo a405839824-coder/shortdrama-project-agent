@@ -178,7 +178,7 @@ def migrate_source_actions(payload: dict, source_compilation) -> dict:
             "semantic_status": SEMANTIC_STATUS, "requires_new_frozen_source_graph": True}
 
 
-def _protected_props(plans, sources):
+def _protected_props(plans, sources, world):
     """Only declared source objects, never names guessed from narrative prose."""
     result = {paper["carrier_id"] for paper in sources["written_objects_by_id"].values()}
     for step in plans.values():
@@ -190,6 +190,12 @@ def _protected_props(plans, sources):
         target = parameters.get("target")
         if type(target) is dict and target.get("kind") == "prop" and type(target.get("id")) is str:
             result.add(target["id"])
+    pending=list(result)
+    while pending:
+        anchor=world['props'].get(pending.pop(),{}).get('anchor',{})
+        parent=anchor.get('prop')
+        if isinstance(parent,str) and parent not in result:
+            result.add(parent);pending.append(parent)
     return result
 
 
@@ -217,7 +223,7 @@ def expand_source_actions(payload: dict, sources: dict, *, action_fields) -> tup
             for step in event["steps"]:
                 plans[(uid, step["step_id"])] = copy.deepcopy(step)
         _need({uid for uid, _ in plans} == physical, "source_action_plans", "every physical source use needs exactly one complete plan")
-    protected_props = _protected_props(plans, sources)
+    protected_props = _protected_props(plans, sources, payload['initial_world'])
     references, action_ids, writes, unbound_prop_edits = {}, set(), set(), []
     for si, row in enumerate(raw["shots"]):
         for ai, action in enumerate(row["actions"]):
@@ -291,7 +297,7 @@ def _target(world, ref):
         actor = world["actors"][ref["id"]]
         return [*actor["position_xyz"][:2], actor["position_xyz"][2] + actor["eye_height"]]
     anchor = world["props"][ref["id"]]["anchor"]
-    if 'free' in anchor or 'worn' in anchor or 'binding' in anchor:
+    if any(k in anchor for k in ('free','worn','binding','prop')):
         from production_decisions import _anchor
         return _anchor(world, world['props'][ref['id']])[1]
     return (world["points"][anchor["point"]]["position_xyz"] if "point" in anchor

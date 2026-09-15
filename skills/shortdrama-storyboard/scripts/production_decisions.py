@@ -157,8 +157,19 @@ def _rotated_origin(before, body_yaw):
                                          -v[0] * math.sin(angle) + v[1] * math.cos(angle), v[2]])
 
 
-def _anchor(world, prop):
+def _anchor(world, prop, seen=None):
     anchor = prop["anchor"]
+    if set(anchor)=={'prop','offset_xyz'}:
+        seen=set() if seen is None else set(seen)
+        _need(len(seen)<16,'prop.anchor','supported prop chain exceeds finite depth')
+        name=anchor['prop']
+        _need(name in world['props'] and name not in seen,'prop.anchor','unknown or cyclic supported prop')
+        seen.add(name)
+        carrier=world['props'][name]
+        _need(carrier.get('physical',{}).get('integrity','intact')=='intact',
+              'prop.anchor','supported prop cannot remain on a broken carrier')
+        scene,position=_anchor(world,carrier,seen)
+        return scene,_add(position,anchor['offset_xyz'])
     if set(anchor) == {"free"}:
         return anchor['free']['scene_id'], anchor['free']['position_xyz']
     if set(anchor) == {"point"}:
@@ -410,6 +421,12 @@ def _world(value, sources, *, check_source_refs=True):
         anchor = prop["anchor"]
         if isinstance(anchor, dict) and set(anchor) == {"point"}:
             _need(anchor["point"] in w["points"], "prop.anchor", "unknown anchor point")
+        elif isinstance(anchor,dict) and set(anchor)=={'prop','offset_xyz'}:
+            _need(isinstance(anchor['prop'],str) and anchor['prop'] in w['props'] and
+                  anchor['prop']!=identity,'prop.anchor','unknown or self-supported prop')
+            offset=_xyz(anchor['offset_xyz'],'prop.anchor.offset_xyz')
+            _need(math.hypot(*offset[:2])<=.3 and 0<=offset[2]<=.3,
+                  'prop.anchor.offset_xyz','supported prop needs a bounded surface offset')
         elif isinstance(anchor, dict) and set(anchor) == {'actor', 'worn'}:
             _need(anchor['actor'] in w['actors'] and anchor['worn'] in {'head', 'torso'}, 'prop.anchor', 'unknown worn actor/attachment')
             key=(anchor['actor'],'worn:'+anchor['worn'])
@@ -433,6 +450,7 @@ def _world(value, sources, *, check_source_refs=True):
                 _text(prop["written_ref"], "prop.written_ref")
     extended_actions.defaults(w)
     extended_actions.validate_world(w)
+    for prop in w['props'].values(): _anchor(w,prop)
     for identity, actor in w["actors"].items():
         if actor["gaze"] is not None:
             ref = actor["gaze"]; _, pos = _target(w, ref, "actor.gaze")
@@ -828,6 +846,7 @@ def _initial(world, view, sources):
         if prop['physical']['integrity']=='broken': rows.append(f'{identity}已碎裂。')
         if 'worn' in prop['anchor']: rows.append(f"{identity}穿戴在{prop['anchor']['actor']}{extended_actions.PART_TEXT[prop['anchor']['worn']]}。")
         if 'binding' in prop['anchor']: rows.append(f"{identity}捆住{prop['anchor']['actor']}双腕。")
+        if 'prop' in prop['anchor']: rows.append(f"{identity}承放在{prop['anchor']['prop']}上。")
         if prop["written_ref"] is not None:
             paper = sources["written_objects_by_id"][prop["written_ref"]]
             rows.append(f'{identity}当前纸面可读文字为“{paper["text"]}”。')
