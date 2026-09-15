@@ -14,6 +14,20 @@ if str(SERVER_DIR) not in sys.path:
 from shortdrama_mcp.app import create_mcp  # noqa: E402
 from shortdrama_mcp.config import Settings  # noqa: E402
 
+# Full two-episode canonicals include their source/action derivation. Keep a
+# finite transport ceiling without dropping that evidence to fit the SDK's 4 MiB default.
+MAX_MCP_REQUEST_BODY_BYTES = 32 * 1024 * 1024
+
+
+def create_http_app(server, settings: Settings):
+    return server.streamable_http_app(
+        streamable_http_path="/mcp",
+        json_response=True,
+        stateless_http=True,
+        host=settings.host,
+        max_request_body_size=MAX_MCP_REQUEST_BODY_BYTES,
+    )
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Short-drama project Agent MCP server")
@@ -35,12 +49,7 @@ def main() -> int:
     if args.http:
         import uvicorn
 
-        app = server.streamable_http_app(
-            streamable_http_path="/mcp",
-            json_response=True,
-            stateless_http=True,
-            host=settings.host,
-        )
+        app = create_http_app(server, settings)
         uvicorn.run(app, host=settings.host, port=settings.port, log_level="info")
         return 0
     server.run(transport="stdio")
