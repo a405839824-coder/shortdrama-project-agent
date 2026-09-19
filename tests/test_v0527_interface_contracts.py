@@ -195,23 +195,25 @@ class VisibleAnnotationContractTests(unittest.TestCase):
     def test_nested_annotations_keep_their_text_and_do_not_hide_four_people(self):
         text = '甲（面部（双眼，近眼）清楚）与乙(肩与背可见)、丙（正面）、丁（侧面）'
         expected = ['甲', '乙', '丙', '丁']
-        self.assertEqual(standalone._visible_character_names(text), expected)
-        self.assertEqual(_people(text, None)[0], expected)
+        self.assertEqual(standalone._visible_character_names(text, registered_people=expected), expected)
+        self.assertEqual(_people(text, expected)[0], expected)
         self.assertIn('甲（面部（双眼，近眼）清楚）', visible_subject_tokens(text))
         obj = compact_storyboard(); obj['shots'][0]['可见主体'] = text
+        obj['character_anchors'] = expected
         report = standalone.validate_project(obj, mode='audit')
         self.assertTrue(any(i['error_code'] == 'E-VIS-001' and '当前=4' in i['evidence'] for i in report['issues']))
 
     def test_unbalanced_parenthesis_does_not_swallow_later_people(self):
         for text in ('甲（面部，乙、丙、丁', '甲（面部),乙、丙、丁'):
             with self.subTest(text=text):
-                names = standalone._visible_character_names(text)
+                names = standalone._visible_character_names(text, registered_people=['甲', '乙', '丙', '丁'])
                 self.assertTrue(all(name in names for name in ('甲', '乙', '丙', '丁')))
 
     def test_server_scene_entry_still_rejects_four_annotated_people(self):
         from shortdrama_mcp.service import _scene_scoped_report
         obj = render_decisions(decisions())
         obj['shots'][0]['可见主体'] = '甲（面部，双眼）、乙（肩与背）、丙（正面）、丁（侧面）'
+        obj['character_anchors'] = ['甲', '乙', '丙', '丁']
         report, _ = _scene_scoped_report(obj, obj['shots'])
         self.assertTrue(any(i['error_code'] == 'E-VIS-001' and '当前=4' in i['evidence'] for i in report['issues']))
 
@@ -234,8 +236,8 @@ class VisibleAnnotationContractTests(unittest.TestCase):
             ('甲和和珅', ['甲', '和珅']),
         ):
             with self.subTest(text=text):
-                self.assertEqual(standalone._visible_character_names(text), expected)
-                self.assertEqual(_people(text, None)[0], expected)
+                self.assertEqual(standalone._visible_character_names(text, registered_people=expected), expected)
+                self.assertEqual(_people(text, expected)[0], expected)
 
     def test_hidden_extra_people_are_rejected_as_list_syntax_not_counted_by_guess(self):
         from shortdrama_mcp.service import _scene_scoped_report
@@ -252,8 +254,9 @@ class VisibleAnnotationContractTests(unittest.TestCase):
 
     def test_long_top_level_identities_cannot_disappear_from_count(self):
         text = 'AleksandrovichPetrov、BenjaminChristopher、CatherineAlexandra、DmitriKonstantin'
-        self.assertEqual(len(standalone._visible_character_names(text)), 4)
-        self.assertTrue(standalone._is_multi_person_visible(text))
+        cast = text.split('、')
+        self.assertEqual(len(standalone._visible_character_names(text, registered_people=cast)), 4)
+        self.assertTrue(standalone._is_multi_person_visible(text, registered_people=cast))
 
 
 if __name__ == '__main__':

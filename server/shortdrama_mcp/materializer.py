@@ -1080,6 +1080,8 @@ def _keyframe_generation_limits(value: str) -> str:
         "眼球轻微换焦与位移", "眼睑松紧按画面内容执行",
         "保留轻微眼球焦点调整和眼睑松紧变化",
         "眼球换焦或位移", "眼睑松紧变化",
+        "眼部动作按本镜已列事件执行",
+        "未列出眼部动作时保持已声明的自然状态，不额外添加模板动作",
     }
     negative = {
         "禁止无依据全程不眨眼", "禁止高频机械眨眼", "禁止多人同步眨眼",
@@ -1116,6 +1118,10 @@ def _keyframe_eye_process_hits(value: Any) -> list[str]:
     hits = []
     if re.search(r"(?:视频|动态画面)中(?:的)?[^。；;\n]*按画面内容(?:所列时点)?执行", text):
         hits.append("unprojected_video_policy")
+    if any(phrase in text for phrase in (
+        "眼部动作按本镜已列事件执行", "未列出眼部动作时保持已声明的自然状态",
+    )):
+        hits.append("unprojected_event_policy")
     for clause in re.split(r"[，,。；;\n]", text):
         # A still can require open eyes and explicitly exclude a half blink.
         # Such exclusion is not a command to animate eyelids.

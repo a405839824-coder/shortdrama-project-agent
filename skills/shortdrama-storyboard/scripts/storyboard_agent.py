@@ -466,7 +466,7 @@ def new_ledger(project_name: str, project_id: str | None = None, timestamp: str 
         "updated_at": now,
         "policy": {
             "preferred_auto_repair_rounds": 2,
-            "max_auto_repair_rounds": 3,
+            "max_auto_repair_rounds": None,
             "fail_current_blocks_next_episode": True,
             "human_approval_required_for_rule_activation": True,
             "human_signoff_required_for_archive": True,
@@ -994,7 +994,13 @@ def _parse_iso_timestamp(value: str) -> datetime:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
-def validate_event(event: Any, max_rounds: int = 3) -> list[str]:
+def validate_event(event: Any, max_rounds: int | None = None) -> list[str]:
+    """Validate observations; legacy max_rounds is not execution permission.
+
+    The optional argument remains callable for old consumers but no longer
+    imposes a historical round cap. Explicit host/user limits are checked by
+    the operation authorization layer, before any production or audit runs.
+    """
     errors: list[str] = []
     if not isinstance(event, dict):
         return ["event must be an object"]
@@ -1025,18 +1031,8 @@ def validate_event(event: Any, max_rounds: int = 3) -> list[str]:
     if event.get("task_type") not in TASK_TYPES:
         errors.append(f"unsupported task_type: {event.get('task_type')!r}")
     round_value = event.get("audit_round")
-    # A persisted machine observation is not another authorized automatic
-    # repair or an independent audit. Record the real count even when a later
-    # explicit repair succeeds after three failures; never reset the history.
-    repair_observation = (
-        event.get("assessment_contract") == "storyboard-quality-v2"
-        and event.get("audit_class") == "production_draft_preflight"
-        and event.get("task_type") == "production_draft_preflight"
-        and _is_canonical_identifier(event.get("repair_root_artifact_id"))
-    )
-    if (not isinstance(round_value, int) or isinstance(round_value, bool) or round_value < 1
-            or (not repair_observation and round_value > max_rounds)):
-        errors.append(f"audit_round must be an integer from 1 to {max_rounds}")
+    if not isinstance(round_value, int) or isinstance(round_value, bool) or round_value < 1:
+        errors.append("audit_round must be a positive integer")
     if event.get("result") not in RESULTS:
         errors.append(f"unsupported result: {event.get('result')!r}")
     checked = event.get("checked_shot_count")
@@ -1162,7 +1158,7 @@ def validate_ledger(
         policy = {}
     policy_expected = {
         "preferred_auto_repair_rounds": 2,
-        "max_auto_repair_rounds": 3,
+        "max_auto_repair_rounds": None,
         "fail_current_blocks_next_episode": True,
         "human_approval_required_for_rule_activation": True,
         "human_signoff_required_for_archive": True,
@@ -1180,6 +1176,8 @@ def validate_ledger(
         "hard_major_known_systemic_tolerance": 0,
     }
     for field, value in policy_expected.items():
+        if field == "max_auto_repair_rounds" and policy.get(field) == 3:
+            continue  # Read historical metadata without rewriting signed history.
         if (field in {"minimum_episode_correctness_percent", "minimum_episode_direct_usability_percent"}
                 and policy.get("minimum_episode_correctness_percent") == 96.0
                 and "minimum_episode_direct_usability_percent" not in policy):
@@ -1201,7 +1199,7 @@ def validate_ledger(
         else 0
     )
     for index, event in enumerate(events, 1):
-        event_validation_errors = validate_event(event, max_rounds=3)
+        event_validation_errors = validate_event(event)
         if index <= sealed_event_count:
             sealed_legacy_missing_semantic_bindings = {
                 f"independent_audit missing field: {field}"
@@ -1282,6 +1280,7 @@ def validate_ledger(
             errors.append(f"issues[{index}].root_cause_gate is invalid")
         if issue.get("repair_strategy") not in {
             "local_repair", "root_cause_repair_required", "upstream_rebuild_required",
+            "root_cause_review_recommended",
         }:
             errors.append(f"issues[{index}].repair_strategy is invalid")
         open_scope_keys = issue.get("open_scope_keys")
@@ -2066,8 +2065,6 @@ def _ledger_replay_errors(ledger: dict[str, Any]) -> list[str]:
                 errors.append(
                     f"authority_reopens[{index}] requires a fresh clean independent audit basis"
                 )
-            if int(state.get("last_audit_round", 0)) >= 3:
-                errors.append(f"authority_reopens[{index}] would exceed audit round three")
             state["closure_state"] = "reopened_by_independent_reaudit"
             state["can_advance"] = False
             state["pending_trigger_event_id"] = record.get("trigger_event_id")
@@ -2462,7 +2459,7 @@ def _ingest_event_in_place(
     )
     if ledger_errors:
         raise ValueError("invalid ledger: " + "; ".join(ledger_errors))
-    event_errors = validate_event(raw_event, int(ledger["policy"]["max_auto_repair_rounds"]))
+    event_errors = validate_event(raw_event)
     if event_errors:
         raise ValueError("invalid event: " + "; ".join(event_errors))
     duplicate = next(
@@ -2630,7 +2627,7 @@ def _ingest_event_in_place(
         recurrence_count = int(record.get("occurrence_count", 0))
         if recurrence_count >= 3 or record["consecutive_rounds"] >= 3:
             record["root_cause_gate"] = "required"
-            record["repair_strategy"] = "upstream_rebuild_required"
+            record["repair_strategy"] = "root_cause_review_recommended"
             record["recurrence_state"] = "systemic_three_rounds"
         elif recurrence_count >= 2 or record["consecutive_rounds"] >= 2:
             record["root_cause_gate"] = "recorded" if issue.get("root_cause") else "required"
@@ -2663,7 +2660,7 @@ def _ingest_event_in_place(
             row["pattern_observation_count"] = observation_count
             if systemic_same_draft:
                 row["root_cause_gate"] = "required"
-                row["repair_strategy"] = "upstream_rebuild_required"
+                row["repair_strategy"] = "root_cause_review_recommended"
                 row["recurrence_state"] = "systemic_same_draft"
             elif cross_batch_recurrence:
                 row["root_cause_gate"] = (
@@ -3012,10 +3009,6 @@ def _reopen_scope_for_independent_reaudit_in_place(
         raise ValueError(
             "independent re-audit may reopen only a clean scope awaiting human sign-off"
         )
-    if int(scope.get("last_audit_round", 0)) >= int(
-        ledger.get("policy", {}).get("max_auto_repair_rounds", 3)
-    ):
-        raise ValueError("independent re-audit cannot exceed the maximum audit round")
     last_event = next(
         (
             event for event in ledger.get("events", [])

@@ -878,6 +878,9 @@ def _eye_contract_faults(
     *,
     duration: float,
     strict: bool,
+    visible_names: list[str] | None = None,
+    non_person_names: list[str] | None = None,
+    legacy_components: bool = False,
 ) -> list[str]:
     """Validate each visible person, keeping the historical callable signature."""
     from picture_presentation import timing_view, PictureTimingError
@@ -887,6 +890,8 @@ def _eye_contract_faults(
         return [str(exc)]
     return eye_contract_faults(
         shot, duration=duration, strict=strict,
+        visible_names=visible_names, non_person_names=non_person_names,
+        legacy_components=legacy_components,
         dialogue_rows=extract_dialogues(shot.get("画面内容")),
     )
 
@@ -1395,6 +1400,8 @@ def _keyframe_generation_limits(value: str) -> str:
         "眼球轻微换焦与位移", "眼睑松紧按画面内容执行",
         "保留轻微眼球焦点调整和眼睑松紧变化",
         "眼球换焦或位移", "眼睑松紧变化",
+        "眼部动作按本镜已列事件执行",
+        "未列出眼部动作时保持已声明的自然状态，不额外添加模板动作",
     }
     negative = {
         "禁止无依据全程不眨眼", "禁止高频机械眨眼", "禁止多人同步眨眼",
@@ -1430,6 +1437,10 @@ def _keyframe_eye_process_hits(value: Any) -> list[str]:
     hits = []
     if re.search(r"(?:视频|动态画面)中(?:的)?[^。；;\n]*按画面内容(?:所列时点)?执行", text):
         hits.append("unprojected_video_policy")
+    if any(phrase in text for phrase in (
+        "眼部动作按本镜已列事件执行", "未列出眼部动作时保持已声明的自然状态",
+    )):
+        hits.append("unprojected_event_policy")
     for clause in re.split(r"[，,。；;\n]", text):
         # A still can require open eyes and explicitly exclude a half blink.
         # Such exclusion is not a command to animate eyelids.
@@ -1682,25 +1693,16 @@ def _transition_duplicate_faults(value: Any) -> list[str]:
     return faults
 
 
-def _visible_character_names(value: Any) -> list[str]:
-    # Use the same immediate-owner resolution as performance checks. A hand or
-    # face annotation must neither create a person nor erase the named owner.
-    from performance_checks import _people
-    names, _descriptions = _people(value, None)
-    # Performance's short-name lexer must not let a longer explicit top-level
-    # identity disappear from the person-count gate.
-    for raw in visible_subject_tokens(value):
-        candidate = re.split(r"[（(]", raw, maxsplit=1)[0].strip()
-        if re.fullmatch(r"[\u3400-\u9fffA-Za-z·]{13,}", candidate) and candidate not in names:
-            names.append(candidate)
-    return [name for name in names if not VISIBLE_NON_CHARACTER_RE.search(name)]
+def _visible_character_names(value: Any, *, registered_people: list[str] | None = None) -> list[str]:
+    from visible_entities import resolve_visible_subjects
+    return list(resolve_visible_subjects(value, people=registered_people).people)
 
 
-def _is_multi_person_visible(value: Any) -> bool:
+def _is_multi_person_visible(value: Any, *, registered_people: list[str] | None = None) -> bool:
     text = str(value or "")
     if re.search(r"两人|二人|双人|三人|多人|群像", text):
         return True
-    return len(_visible_character_names(text)) > 1
+    return len(_visible_character_names(text, registered_people=registered_people)) > 1
 
 
 def _start_result_faults(start_state: Any, picture_content: Any) -> list[str]:
@@ -3561,6 +3563,9 @@ def validate_project(
     # Only a full successful recompile can select actual event applicability.
     # A caller-written flag, a changed candidate, and legacy inputs cannot.
     planned_performance = production_binding.get('production_prevention_verified') is True
+    from visible_entities import project_entity_registry, resolve_visible_subjects
+    registered_people, registered_non_people = project_entity_registry(obj)
+    entity_mapping_rows = []
 
     for index, raw in enumerate(raw_shots, 1):
         location = f"shots[{index}]"
@@ -3598,6 +3603,22 @@ def validate_project(
             ))
         shot, used_aliases = normalize_shot(raw, aliases)
         normalized_shots.append(shot)
+        entities = resolve_visible_subjects(shot.get('可见主体'),
+            people=registered_people, non_people=registered_non_people,
+            speakers=[name for name, _ in extract_dialogues(shot.get('画面内容'))],
+            evidence_texts=[shot.get('画面内容'), shot.get('起始状态')])
+        entity_mapping_rows.append({'shot_id': str(shot.get('镜头编号', '')),
+            'people': list(entities.people), 'non_people': list(entities.non_people),
+            'background_people': list(entities.background_people),
+            'unknown': list(entities.unknown), 'conflicts': list(entities.conflicts),
+            'status': 'pending' if entities.faults else 'resolved'})
+        if entities.faults:
+            mapping_issue = _issue(catalog, 'E-VIS-001', f'{location}.可见主体',
+                '；'.join(entities.faults),
+                repair='根据角色/道具登记或源文补齐身份类型映射；保留原分镜，不为未知主体补写眼神、眨眼等动作。',
+                blocking=True, severity='fail', template_gate_id='THG-06')
+            mapping_issue['classification'] = 'input_mapping'
+            issues.append(mapping_issue)
         for old, new in used_aliases:
             issues.append(_issue(catalog, "E-INTEGRATION-003", location, f"使用旧字段 {old!r}，已兼容映射到 {new!r}。", severity="warning"))
         for field in required_fields:
@@ -3770,7 +3791,7 @@ def validate_project(
                     location,
                     f"R10-SPC-1提示词仍含已删除的冗长9:16固定短语：{forbidden_prompt.group(0)!r}",
                 ))
-            visible_characters = _visible_character_names(visible)
+            visible_characters = list(entities.people)
             annotation_faults = visible_subject_annotation_faults(visible)
             if annotation_faults:
                 issues.append(_issue(
@@ -3888,22 +3909,20 @@ def validate_project(
         elif core_emotion and len(categories) < 4:
             issues.append(_issue(catalog, "E-EXPRESSION-002", f"{location}.画面内容", f"重要情绪镜只有 {len(categories)} 类细节：{categories}", severity="warning"))
 
-        eye_faults = [] if planned_performance else _eye_contract_faults(
+        eye_faults = [] if planned_performance or entities.faults else _eye_contract_faults(
             shot,
             duration=duration,
             strict=strict_contract,
+            visible_names=list(entities.people), non_person_names=list(entities.non_people),
+            legacy_components=False,
         )
         if eye_faults:
             issues.append(_issue(
                 catalog,
                 "E-EXPRESSION-003",
                 f"{location}.画面内容/起始状态/生成限制",
-                "眼神、眼睑与眨眼执行链不完整：" + "；".join(eye_faults),
-                repair=(
-                    "在画面时间轴中写视线起点→眼球先换焦→头部随后轻跟/不跟→眼睑变化→"
-                    "具体眨眼时机或有理由不眨眼→镜尾视线；生成限制补齐呆滞、机械与同步禁项，"
-                    "静态关键帧只写自然睁眼或原文明确闭眼。"
-                ),
+                "已写眼部事件或可见性存在冲突：" + "；".join(eye_faults),
+                repair="核对明确写出的视线、可见性及眨眼事件，修正冲突；自然静止不需要补换焦、眼睑变化或眨眼模板。",
                 template_gate_id="THG-13",
             ))
 
@@ -4030,7 +4049,9 @@ def validate_project(
                 # that generated this picture. A magic phrase is not proof.
                 if visible_speakers and not planned_performance and "不看镜头" not in image_content:
                     issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "R10-SPC-1对白人物未明确不看镜头。"))
-                reaction_faults = [] if planned_performance else listener_reaction_faults(execution_shot, duration=duration, dialogue_rows=dialogue_rows)
+                reaction_faults = [] if planned_performance or entities.faults else listener_reaction_faults(
+                    execution_shot, duration=duration, dialogue_rows=dialogue_rows,
+                    visible_names=list(entities.people), non_person_names=list(entities.non_people))
                 if reaction_faults:
                     issues.append(_issue(catalog, "E-PERFORMANCE-001", f"{location}.画面内容", "多人对白镜未写听者错峰反应。" + "；".join(reaction_faults)))
         elif strict_contract and not VOICE_NO_DIALOGUE_RE.fullmatch(str(shot.get("音色") or "").strip()):
@@ -4151,12 +4172,16 @@ def validate_project(
         if not isinstance(review, dict) or review.get("最终归档") != "approved" or is_empty(review.get("签名")):
             issues.append(_issue(catalog, "E-ARCHIVE-001", "human_review", "归档模式缺approved状态或真实签名。"))
 
+    gate_metrics['entity_mapping'] = {'contract': 'visible-entity-mapping-v1',
+        'status': 'pending' if any(row['status'] == 'pending' for row in entity_mapping_rows) else 'resolved',
+        'shots': entity_mapping_rows,
+        'semantic_identity_review': 'separate_independent_review_required'}
     if production_binding['present']:
         gate_metrics['production_derivation'] = {
             'valid': production_binding['valid'],
             'source_obligations': len(production_binding['source_obligations']),
             'semantic_audit': 'separate_independent_review_required',
-            'performance_check_basis': 'recompiled_plan_events' if planned_performance else 'legacy_prose_contract',
+            'performance_check_basis': 'recompiled_plan_events' if planned_performance else 'declared_event_consistency',
         }
         for fault in production_binding['faults']:
             issues.append(_issue(catalog, 'E-GATE-001', fault['path'], fault['message']))

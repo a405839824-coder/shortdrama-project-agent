@@ -22,11 +22,12 @@ class RepairHistoryServiceTests(unittest.IsolatedAsyncioTestCase):
         await h.call("get_agent_status", {"project_id": project, "full_self_test": True})
         base = h.broken_storyboard()
         # The archived counts are explicit synthetic observations. A fresh
-        # eye-performance finding is independently machine read.
+        # eye-performance finding is independently machine read. Natural zero
+        # blinks are now legal, so use an actual same-endpoint shift conflict.
         old = {"round": 1, "initial_issue_count": 3, "residual_issue_count": 2,
                "introduced_issue_count": 1, "repeat_rounds": 1, "action": "local_fix"}
         base["shots"][0]["光源来源"] = "右侧木格窗透入的日光"
-        base["shots"][0]["画面内容"] = base["shots"][0]["画面内容"].replace("自然短眨一次", "保持不眨眼")
+        base["shots"][0]["画面内容"] = base["shots"][0]["画面内容"].replace("视线从门框移向桌面信件", "视线从桌面信件移向桌面信件")
         base, _ = service_module._prepare_compact_storyboard_for_commit(base)
         observed = validate_storyboard.validate_project(base)
         old["issue_repeat_counts"] = {key: 7 for key in machine_issue_map(
@@ -58,7 +59,7 @@ class RepairHistoryServiceTests(unittest.IsolatedAsyncioTestCase):
         candidate["prevention_evidence"]["repair_history"] = [{"forged": True}]
         failing = copy.deepcopy(candidate)
         failing["shots"][0]["光源来源"] = "右侧木格窗透入的日光"
-        failing["shots"][0]["画面内容"] = failing["shots"][0]["画面内容"].replace("自然短眨一次", "保持不眨眼")
+        failing["shots"][0]["画面内容"] = failing["shots"][0]["画面内容"].replace("视线从门框移向桌面信件", "视线从桌面信件移向桌面信件")
         failed = await h.call("commit_storyboard", {"project_id": project,
             "work_order_id": repair_order, "source_artifact_id": source["artifact_id"],
             "repair_package_id": audit["data"]["repair_package"]["repair_package_id"],

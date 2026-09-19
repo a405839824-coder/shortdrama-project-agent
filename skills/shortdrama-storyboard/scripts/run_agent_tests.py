@@ -419,13 +419,13 @@ def test_second_round_root_cause_and_candidate() -> None:
     assert_true(ledger["rule_candidates"][0]["status"] == "proposed", "candidate starts proposed")
 
 
-def test_third_round_upstream_rebuild() -> None:
+def test_third_round_root_cause_review() -> None:
     ledger = fresh()
     agent.ingest_event(ledger, event("EV-1", 1))
     agent.ingest_event(ledger, event("EV-2", 2, "residual"))
     agent.ingest_event(ledger, event("EV-3", 3, "residual"))
     issue = ledger["issues"][0]
-    assert_true(issue["repair_strategy"] == "upstream_rebuild_required", "third round requires upstream rebuild")
+    assert_true(issue["repair_strategy"] == "root_cause_review_recommended", "third round prompts review without forcing a rebuild")
     assert_true(issue["max_consecutive_rounds"] == 3, "third round count")
 
 
@@ -438,10 +438,16 @@ def test_duplicate_event_is_idempotent() -> None:
     assert_true(ledger == before, "duplicate must not mutate ledger")
 
 
-def test_hard_round_limit() -> None:
-    invalid = event("EV-4", 4, "residual")
-    errors = agent.validate_event(invalid, 3)
-    assert_true(any("audit_round" in error for error in errors), "round four must fail")
+def test_round_count_preserves_observations() -> None:
+    ledger = fresh()
+    for number in range(1, 5):
+        current = event(f"EV-{number}", number, "initial" if number == 1 else "residual")
+        assert_true(agent.validate_event(current, 3) == [], "legacy policy must not discard round four")
+        agent.ingest_event(ledger, current)
+    assert_true([e["audit_round"] for e in ledger["events"]] == [1, 2, 3, 4], "preserve all rounds")
+    assert_true(agent.validate_ledger(ledger) == [], "fourth round ledger remains valid")
+    for number in (0, -1, True, 1.5):
+        assert_true(agent.validate_event(event("EV-invalid", number)), "reject invalid round numbers")
 
 
 def test_fail_current_blocks_advance() -> None:
@@ -1683,9 +1689,9 @@ TESTS: list[tuple[str, Callable[[], None]]] = [
     ("init_and_validate", test_init_and_validate),
     ("first_occurrence_no_candidate", test_first_occurrence_no_candidate),
     ("second_round_root_cause_and_candidate", test_second_round_root_cause_and_candidate),
-    ("third_round_upstream_rebuild", test_third_round_upstream_rebuild),
+    ("third_round_root_cause_review", test_third_round_root_cause_review),
     ("duplicate_event_is_idempotent", test_duplicate_event_is_idempotent),
-    ("hard_round_limit", test_hard_round_limit),
+    ("round_count_preserves_observations", test_round_count_preserves_observations),
     ("fail_current_blocks_advance", test_fail_current_blocks_advance),
     ("clean_pass_requires_human_signoff", test_clean_pass_requires_human_signoff),
     ("clean_pass_blocks_cross_window_continuation", test_clean_pass_blocks_cross_window_continuation),

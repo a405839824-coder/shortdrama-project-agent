@@ -1,6 +1,7 @@
 """Account permissions, separate from the independent production/audit actors."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
@@ -14,9 +15,16 @@ from mcp.types import CallToolResult, TextContent
 from . import auth
 from .config import Settings
 from .members import MemberIdentity, current_member, load_registry, resolve_member
+from .tool_audit import call_metadata, exception_metadata, reason_for, result_metadata
 
 
 ACCESS_CONTRACT = "admin-producer-v1"
+_LOGGER = logging.getLogger(__name__)
+_AUDIT_COLUMNS = (
+    "trace_id", "response_trace_id", "stage", "error_code", "error_type",
+    "business_status", "work_order_id", "artifact_id", "plugin_version",
+    "rules_fingerprint", "runtime_fingerprint",
+)
 # Explicit allowlists: new tools, operations and artifact types fail closed.
 PRODUCER_TOOLS = frozenset({
     "get_agent_status", "create_project", "begin_project_task", "import_source_file",
@@ -93,6 +101,12 @@ class AccessStore:
                     outcome TEXT NOT NULL, reason TEXT NOT NULL
                 );
             """)
+            # Serialize migration across workers; preserve every existing row.
+            db.execute("BEGIN IMMEDIATE")
+            existing = {row["name"] for row in db.execute("PRAGMA table_info(access_audit)")}
+            for column in _AUDIT_COLUMNS:
+                if column not in existing:
+                    db.execute(f"ALTER TABLE access_audit ADD COLUMN {column} TEXT")
 
     def connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30)
@@ -128,19 +142,23 @@ class AccessStore:
 
     @staticmethod
     def _audit(db: sqlite3.Connection, principal: Principal, tool: str,
-               project_id: str | None, outcome: str, reason: str) -> None:
+               project_id: str | None, outcome: str, reason: str,
+               metadata: dict[str, Any] | None = None) -> None:
+        metadata = metadata or {}
+        columns = ",".join(_AUDIT_COLUMNS)
+        placeholders = ",".join("?" for _ in range(8 + len(_AUDIT_COLUMNS)))
         db.execute(
-            "INSERT INTO access_audit (occurred_at,issuer,subject,role,tool,project_id,outcome,reason) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO access_audit (occurred_at,issuer,subject,role,tool,project_id,outcome,reason,"
+            f"{columns}) VALUES ({placeholders})",
             (datetime.now(timezone.utc).isoformat(), principal.issuer, principal.subject,
              principal.role, tool[:128], str(project_id)[:128] if project_id else None,
-             outcome, reason[:1024]),
+             outcome, reason[:1024], *(metadata.get(column) for column in _AUDIT_COLUMNS)),
         )
 
     def audit(self, principal: Principal, tool: str, project_id: str | None,
-              outcome: str, reason: str = "") -> None:
+              outcome: str, reason: str = "", *, metadata: dict[str, Any] | None = None) -> None:
         with closing(self.connect()) as db, db:
-            self._audit(db, principal, tool, project_id, outcome, reason)
+            self._audit(db, principal, tool, project_id, outcome, reason, metadata)
 
     def manage(self, actor: Principal, action: str, subject: str | None = None,
                role: str | None = None, enabled: bool = True) -> dict[str, Any]:
@@ -163,7 +181,12 @@ class AccessStore:
                 return {"bootstrap_admin_subjects": list(self.settings.admin_subjects), "users": rows,
                         "unassigned_authenticated_user_role": "producer"}
             if action == "audit":
-                return {"events": [dict(row) for row in db.execute(
+                return {"diagnostic_contract": "tool-access-audit-v2",
+                        "outcome_semantics": "tool_dispatch_only_not_content_or_formal_acceptance",
+                        "trace_id_semantics": "ACC_dispatch_correlation_not_production_certificate",
+                        "reference_semantics": "explicit_request_or_response_ids_not_verified_bindings",
+                        "legacy_diagnostics": "null_means_not_recorded_no_backfilled_failure_cause",
+                        "events": [dict(row) for row in db.execute(
                     "SELECT * FROM access_audit WHERE issuer=? ORDER BY id DESC LIMIT 100", (issuer,)
                 )]}
             if action != "set" or not subject or len(subject) > 512 or role not in {"admin", "producer"}:
@@ -233,23 +256,47 @@ class AccessControlledMCPServer(MCPServer):
 
     async def call_tool(self, name: str, arguments: dict[str, Any], context=None):
         principal = None
+        diagnostic = call_metadata(arguments, self.storyboard_service)
+        registered = self._tool_manager.get_tool(name)
+        audit_name = registered.name if registered is not None else "unregistered_tool"
+
+        def record(outcome: str, details: dict[str, Any]) -> None:
+            # Prefer explicit request references; fill generated IDs only from the
+            # returned server envelope. Neither is a production/audit certificate.
+            metadata = dict(diagnostic)
+            for key, value in details.items():
+                if value is not None and (key not in {"project_id", "work_order_id", "artifact_id"}
+                                          or metadata.get(key) is None):
+                    metadata[key] = value
+            self.access.audit(principal, audit_name, metadata.get("project_id"), outcome,
+                              reason_for(metadata, outcome), metadata=metadata)
+
+        def record_terminal(outcome: str, details: dict[str, Any]) -> None:
+            try:
+                record(outcome, details)
+            except Exception:
+                # Preserve the exact returned result / original SDK exception if
+                # the sink fails after execution. Never log the sink exception.
+                _LOGGER.error("access_audit_write_failed trace_id=%s tool_outcome=%s",
+                              diagnostic["trace_id"], outcome)
+
         try:
             principal = self.access.principal()
             authorize(principal, name, arguments, self.storyboard_service)
         except PermissionError as exc:
             if principal is not None:
-                self.access.audit(principal, name, arguments.get("project_id"), "denied", str(exc))
+                record_terminal("denied", exception_metadata(exc, name, stage="authorization"))
             return CallToolResult(is_error=True, content=[TextContent(
                 type="text", text=f"Permission denied: {exc}")])
-        self.access.audit(principal, name, arguments.get("project_id"), "started")
+        record("started", {"stage": "tool_dispatch"})
         identity_context = current_member.set(principal.member)
         try:
             result = await super().call_tool(name, arguments, context)
-        except Exception:
-            self.access.audit(principal, name, arguments.get("project_id"), "error")
+        except Exception as exc:
+            record_terminal("error", exception_metadata(exc, name, stage="tool_execution"))
             raise
         finally:
             current_member.reset(identity_context)
-        self.access.audit(principal, name, arguments.get("project_id"),
-                          "error" if getattr(result, "is_error", False) else "success")
+        record_terminal("error" if getattr(result, "is_error", False) else "success",
+                        result_metadata(result, name))
         return result

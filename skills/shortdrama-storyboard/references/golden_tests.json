@@ -1489,9 +1489,20 @@
       ],
       "expected_status": "fail",
       "expected_error_codes": [
-        "E-EXPRESSION-003"
+        "E-VIS-001"
       ],
-      "forbidden_error_codes": []
+      "forbidden_error_codes": [],
+      "historical_expectation": {
+        "expected_status": "fail",
+        "expected_error_codes": [
+          "E-EXPRESSION-003"
+        ],
+        "through_version": "0.5.43"
+      },
+      "expectation_revision": {
+        "version": "0.5.45",
+        "reason": "两人尚未绑定具体身份，优先报告input_mapping；新增登记人物的同步眨眼反例继续验证内容检查。"
+      }
     },
     {
       "test_id": "G-R10-MOTION-VAGUE",
@@ -1869,12 +1880,23 @@
       "fixture_id": "valid_book_split",
       "mode": "audit",
       "mutations": [],
-      "expected_status": "pass",
-      "expected_error_codes": [],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-VIS-001"
+      ],
       "forbidden_error_codes": [
         "E-VIS-005",
         "E-EXPRESSION-001"
-      ]
+      ],
+      "historical_expectation": {
+        "expected_status": "pass",
+        "expected_error_codes": [],
+        "through_version": "0.5.43"
+      },
+      "expectation_revision": {
+        "version": "0.5.45",
+        "reason": "书页与墨字类型、右手主人未绑定；保留原文并将映射缺证单列，不能假定它是人物眼部问题。"
+      }
     },
     {
       "test_id": "G-R10-ARCHIVE-NO-SIGNOFF",
@@ -2478,11 +2500,20 @@
           "value": "女主推门后一直看着桌上的信件，镜尾仍看着信件。"
         }
       ],
-      "expected_status": "fail",
-      "expected_error_codes": [
-        "E-EXPRESSION-003"
-      ],
-      "forbidden_error_codes": []
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [],
+      "historical_expectation": {
+        "expected_status": "fail",
+        "expected_error_codes": [
+          "E-EXPRESSION-003"
+        ],
+        "through_version": "0.5.43"
+      },
+      "expectation_revision": {
+        "version": "0.5.45",
+        "reason": "PP-05允许保持同一视线；缺少眨眼决定不是实际眼部错误。"
+      }
     },
     {
       "test_id": "G-R10-THG13-STIFF-GAZE-FAIL",
@@ -2495,11 +2526,20 @@
           "value": "女主推门后目光锁住桌上的信件并保持凝视；开口前自然短眨一次；镜尾视线落在信件上。"
         }
       ],
-      "expected_status": "fail",
-      "expected_error_codes": [
-        "E-EXPRESSION-003"
-      ],
-      "forbidden_error_codes": []
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [],
+      "historical_expectation": {
+        "expected_status": "fail",
+        "expected_error_codes": [
+          "E-EXPRESSION-003"
+        ],
+        "through_version": "0.5.43"
+      },
+      "expectation_revision": {
+        "version": "0.5.45",
+        "reason": "原文仅保持凝视且写明自然眨眼，不能由缺动作链推断僵直；按实际事件核验。"
+      }
     },
     {
       "test_id": "G-R10-THG13-JUSTIFIED-NO-BLINK-PASS",
@@ -2529,11 +2569,20 @@
           "value": "禁止字幕、额外配乐、现代物件与额外角色；保持人物脸和服装一致"
         }
       ],
-      "expected_status": "fail",
-      "expected_error_codes": [
-        "E-EXPRESSION-003"
-      ],
-      "forbidden_error_codes": []
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [],
+      "historical_expectation": {
+        "expected_status": "fail",
+        "expected_error_codes": [
+          "E-EXPRESSION-003"
+        ],
+        "through_version": "0.5.43"
+      },
+      "expectation_revision": {
+        "version": "0.5.45",
+        "reason": "当前规则不强制每镜重复眼部限制套话。"
+      }
     },
     {
       "test_id": "G-R10-THG14-ADJACENT-FULL-PASS",
@@ -2607,6 +2656,66 @@
       "expected_status": "fail",
       "expected_error_codes": [
         "E-CONTINUITY-001"
+      ],
+      "forbidden_error_codes": []
+    },
+    {
+      "test_id": "G-R10-ENTITY-BOOK-EXPLICIT-PASS",
+      "fixture_id": "valid_book_split",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.可见主体",
+          "value": "道具：书页；物件：墨字；女主（仅右手食指可见）"
+        }
+      ],
+      "expected_status": "pass",
+      "expected_error_codes": [],
+      "forbidden_error_codes": [
+        "E-VIS-005",
+        "E-EXPRESSION-001",
+        "E-EXPRESSION-003"
+      ]
+    },
+    {
+      "test_id": "G-R10-ENTITY-REGISTERED-SYNC-FAIL",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.可见主体",
+          "value": "女主（面部可见）；女配（面部可见）"
+        },
+        {
+          "op": "set",
+          "path": "shots.0.动作与表演",
+          "value": "两人同时眨眼，嘴角收住，目光相对，双手停下，肩颈僵住"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-EXPRESSION-003"
+      ],
+      "forbidden_error_codes": [
+        "E-VIS-001"
+      ]
+    },
+    {
+      "test_id": "G-R10-EYE-SAME-ENDPOINT-FAIL",
+      "fixture_id": "valid_base",
+      "mode": "audit",
+      "mutations": [
+        {
+          "op": "set",
+          "path": "shots.0.画面内容",
+          "value": "女主视线从门框移向门框。"
+        }
+      ],
+      "expected_status": "fail",
+      "expected_error_codes": [
+        "E-EXPRESSION-003"
       ],
       "forbidden_error_codes": []
     }

@@ -13,6 +13,7 @@ from .file_io import extract_xlsx
 from .materializer import MOTHER_TEMPLATE_COLUMNS
 from .models import ToolResponse
 from .production_plan import model_production_contract
+from .audit_coverage import verify_certificate_coverage
 
 
 CONTRACT = "formal-storyboard-delivery-v1"
@@ -30,7 +31,8 @@ def delivery_contract():
         "renderer": "server_generated_master_and_same_source_R5",
         "verification": "read_project_artifact(section='formal_delivery')",
         "formal_delivery_requires": ["registered_server_storyboard", "exact_file_bytes",
-            "current_template", "signed_production_preflight", "current_independent_audit_pass"],
+            "current_template", "signed_production_preflight", "current_independent_audit_pass",
+            "signed_current_semantic_obligation_coverage"],
         "client_must_match_download_sha256": True,
         "fallback_export_allowed": False,
         "unverified_counts_as_complete": False,
@@ -56,6 +58,7 @@ def inspect_formal_delivery(service, namespace, project_id, artifact_id):
         "rule_registry_sha256": contract["rule_registry_sha256"],
         "template_verified": False, "production_preflight_verified": False,
         "independent_audit_verified": False, "formal_delivery_ready": False,
+        "semantic_obligation_coverage_verified": False,
         "counts_as_complete": False, "allows_next_batch": False,
         "issues": [],
     }
@@ -107,6 +110,8 @@ def inspect_formal_delivery(service, namespace, project_id, artifact_id):
             namespace, project_id, hub, str(record["work_order_id"]))
         if audit.get("artifact_id") != artifact_id or audit.get("canonical_sha256") != canonical_hash:
             raise ValueError("formal_delivery_independent_audit_wrong_artifact")
+        receipt["semantic_obligation_coverage"] = verify_certificate_coverage(service, storyboard, audit)
+        receipt["semantic_obligation_coverage_verified"] = True
         receipt["independent_audit_verified"] = True
         receipt["independent_audit_certificate_id"] = audit["certificate_id"]
         receipt["formal_delivery_ready"] = True

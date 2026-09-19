@@ -13,6 +13,7 @@ if str(SERVER_DIR) not in sys.path:
 
 from shortdrama_mcp.app import create_mcp  # noqa: E402
 from shortdrama_mcp.config import Settings  # noqa: E402
+from shortdrama_mcp.startup_restore import restore_release_runtime_if_requested  # noqa: E402
 
 # Full two-episode canonicals include their source/action derivation. Keep a
 # finite transport ceiling without dropping that evidence to fit the SDK's 4 MiB default.
@@ -41,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     settings = Settings.from_env()
+    if not args.self_test:
+        restore_release_runtime_if_requested(settings)
     server, service = create_mcp(settings)
     if args.self_test:
         report = service.agent_status("local-single-user", full_self_test=True)

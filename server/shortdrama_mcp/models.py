@@ -237,6 +237,56 @@ class SemanticAuditConclusionInput(BaseModel):
     summary: str = Field(min_length=1, max_length=4_000)
 
 
+class SemanticAuditObservationInput(BaseModel):
+    """A literal, current field excerpt supporting an auditor's judgement."""
+
+    model_config = ConfigDict(extra="forbid")
+    reference: str = Field(min_length=1, max_length=256)
+    quote: str = Field(max_length=2_000)
+
+
+class SemanticAuditCheckInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    obligation_id: str = Field(min_length=1, max_length=256)
+    dependency_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    status: Literal["pass", "fail_current", "not_applicable", "unknown"]
+    judgement: str = Field(min_length=12, max_length=2_000)
+    observations: list[SemanticAuditObservationInput] = Field(min_length=1, max_length=64)
+    issue_ids: list[str] = Field(default_factory=list, max_length=64)
+
+
+class SemanticAuditCoverageInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    contract: Literal["semantic-obligation-coverage-v1"]
+    manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    checks: list[SemanticAuditCheckInput] = Field(min_length=1, max_length=16_384)
+
+
+class SemanticAuditCoveragePageInput(BaseModel):
+    """Bound staging transport; it never represents an audit PASS."""
+    model_config = ConfigDict(extra="forbid")
+    contract: Literal["semantic-obligation-pages-v1"]
+    action: Literal["append", "finalize"]
+    manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    collection_key: str | None = Field(default=None, min_length=1, max_length=64)
+    collection_id: str | None = Field(default=None, min_length=1, max_length=128)
+    offset: int = Field(default=0, ge=0, le=16_384)
+    checks: list[SemanticAuditCheckInput] = Field(default_factory=list, max_length=64)
+    page_ids: list[str] = Field(default_factory=list, max_length=16_384)
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> "SemanticAuditCoveragePageInput":
+        if self.action == "append":
+            if not self.checks or self.page_ids or bool(self.collection_key) == bool(self.collection_id):
+                raise ValueError("audit_coverage_page_append_invalid")
+            if self.collection_key and self.offset != 0:
+                raise ValueError("audit_coverage_collection_must_start_at_zero")
+        elif (not self.collection_id or self.collection_key or self.checks or self.offset or
+              not self.page_ids or len(self.page_ids) != len(set(self.page_ids))):
+            raise ValueError("audit_coverage_page_finalize_invalid")
+        return self
+
+
 class SemanticAuditInput(BaseModel):
     """Independent semantic review required on an uncached audit path.
 
@@ -256,6 +306,10 @@ class SemanticAuditInput(BaseModel):
     layers: list[SemanticAuditLayerInput] = Field(min_length=8, max_length=8)
     issues: list[SemanticAuditIssueInput] = Field(default_factory=list, max_length=512)
     conclusion: SemanticAuditConclusionInput
+    # Optional at the transport boundary so an old window receives an actionable
+    # service error, rather than an unexplainable cached-schema rejection.
+    coverage: SemanticAuditCoverageInput | None = None
+    coverage_page: SemanticAuditCoveragePageInput | None = None
 
     @model_validator(mode="after")
     def validate_complete_review(self) -> "SemanticAuditInput":

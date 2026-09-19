@@ -25,6 +25,8 @@ from production_derivation import attach_derivation, inspect_derivation
 from source_decisions import compile_source_decisions
 from shortdrama_mcp.models import SEMANTIC_AUDIT_LAYER_NAMES
 from shortdrama_mcp.service import StoryboardService, canonical_storyboard_sha256, _stable_json_bytes
+from shortdrama_mcp.audit_coverage import build_obligations, coverage_context
+from semantic_audit_helpers import synthetic_coverage
 from test_v0527_production_decisions import action, production_fixture, performance_fixture
 import test_v0527_source_decisions as source_controls
 
@@ -121,6 +123,9 @@ class SourceDecisionIndependentAuditTests(unittest.TestCase):
                                    "pair_ids": [], "failed_pair_count": 0, "proof_verified": True}}}
         self.service = object.__new__(StoryboardService)
         self.service._validator_fingerprint = "a" * 64
+        self.service._ruleset_fingerprint = "b" * 64
+        self.service._runtime_fingerprint = "c" * 64
+        self.service._schema_fingerprint = "d" * 64
 
     def source_layer(self):
         return next(row for row in self.submission["layers"] if row["layer"] == "源文对白")
@@ -133,8 +138,14 @@ class SourceDecisionIndependentAuditTests(unittest.TestCase):
                                      for ref in layer["evidence_ids"]]
 
     def attach(self):
+        # Current test-only coverage accompanies the independently constructed
+        # source-decision evidence; it cannot replace missing source references.
+        submitted = copy.deepcopy(self.submission)
+        submitted["coverage"] = synthetic_coverage(
+            build_obligations(self.storyboard, coverage_context(self.service))
+        )
         return self.service._attach_independent_evidence_matrix(
-            self.report, self.storyboard, self.submission,
+            self.report, self.storyboard, submitted,
         )
 
     def test_current_source_obligations_close_only_in_enriched_report(self):

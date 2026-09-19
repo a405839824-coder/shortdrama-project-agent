@@ -88,6 +88,9 @@ VIDEO_EYE_POLICY = (
     "视频中的眼球换焦、眼球位移、眼睑松紧变化、眨眼按画面内容所列时点执行；"
     "禁止无依据全程不眨眼；禁止僵直瞪视；禁止高频机械眨眼；禁止多人同步眨眼。"
 )
+CURRENT_VIDEO_EYE_POLICY = (
+    "眼部动作按本镜已列事件执行；未列出眼部动作时保持已声明的自然状态，不额外添加模板动作。"
+)
 PSYCHOLOGICAL_SAFETY = (
     "人物不张嘴，不驱动口型，不生成字幕；不计入角色对白时长，"
     "完整计入实际音轨占时。"
@@ -128,11 +131,14 @@ def _labels(value: Any, path: str) -> list[str]:
 
 
 def eye_blocks(*, subject: str | None, visibility: str, state: str | None,
-               source_basis: str | None = None, planned_events: bool = False) -> dict[str, str]:
+               source_basis: str | None = None, planned_events: bool = False,
+               legacy_components: bool = False) -> dict[str, str]:
     """Return separate append fragments for the actual initial eye decision.
 
     source_closed requires an authored source basis but does not verify it or
     put that unobservable explanation into an image instruction.
+    Current generation allows natural stillness. The original policy text is
+    retained only for explicit legacy replay, not selected by a missing plan.
     """
     visibility = _choice(visibility, {"visible", "hidden", "no_people"}, "visibility")
     if visibility == "no_people":
@@ -151,9 +157,9 @@ def eye_blocks(*, subject: str | None, visibility: str, state: str | None,
         return {"initial_state_append": f"{name}双眼合拢。", "generation_limits_append": ""}
     if source_basis is not None:
         raise ContractBlockError("source_basis: only source_closed accepts this argument")
-    if planned_events:
+    if planned_events or not legacy_components:
         return {'initial_state_append': f'{name}双眼自然睁开，不处于半眨眼瞬间；{name}眼神自然聚焦。',
-                'generation_limits_append': '眼部动作按本镜已列事件执行；未列出眼部动作时保持已声明的自然状态，不额外添加模板动作。'}
+                'generation_limits_append': CURRENT_VIDEO_EYE_POLICY}
     return {"initial_state_append": f"{name}双眼自然睁开，不处于半眨眼瞬间；{name}眼神自然聚焦。",
             "generation_limits_append": f"{name}眼神自然聚焦；" + VIDEO_EYE_POLICY}
 

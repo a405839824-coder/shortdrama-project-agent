@@ -39,6 +39,8 @@ PROJECT_RECORD_KINDS = {
     "authority_continuations",
     "workbook_migrations",
     "narrative_records",
+    "audit_coverage_collections",
+    "audit_coverage_pages",
 }
 SIGNED_ONLY_PROJECT_RECORD_KINDS = PROJECT_RECORD_KINDS - {
     "handoffs",
@@ -58,6 +60,8 @@ PROJECT_RECORD_PRIMARY_ID_KEYS = {
     "authority_continuations": "continuation_id",
     "workbook_migrations": "workbook_migration_id",
     "narrative_records": "record_id",
+    "audit_coverage_collections": "collection_id",
+    "audit_coverage_pages": "page_id",
 }
 DEFAULT_SUCCESSOR_LEASE_SECONDS = 300
 MAX_SUCCESSOR_LEASE_SECONDS = 86_400
@@ -4400,7 +4404,7 @@ class ProjectStore:
         record.setdefault("created_at", utc_stamp())
         path = directory / clean_kind / f"{clean_id}.json"
         with self.project_write_lock(namespace, project_id):
-            if clean_kind in {"draft_observations", "narrative_records"} and path.exists():
+            if clean_kind in {"draft_observations", "narrative_records", "audit_coverage_collections", "audit_coverage_pages"} and path.exists():
                 existing = self.get_project_record(namespace, project_id, kind=clean_kind, record_id=clean_id)
                 left = {k: v for k, v in existing.items() if k != "integrity_hmac"}
                 right = {k: v for k, v in record.items() if k != "integrity_hmac"}
@@ -4470,7 +4474,7 @@ class ProjectStore:
         """
 
         clean_kind = self._project_record_kind(kind)
-        if clean_kind == "narrative_records":
+        if clean_kind in {"narrative_records", "audit_coverage_collections", "audit_coverage_pages"}:
             raise ValueError("narrative_record_immutable: append a new narrative record")
         clean_id = safe_id(record_id, "record_id")
         path = self.project_dir(namespace, project_id) / clean_kind / f"{clean_id}.json"

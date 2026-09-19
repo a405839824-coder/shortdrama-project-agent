@@ -12,6 +12,7 @@ import math
 import re
 from typing import Any, Iterable, Sequence
 from picture_presentation import timing_view, PictureTimingError
+from visible_entities import resolve_visible_subjects, visible_subject_tokens
 
 
 STAGE_RE = re.compile(r"【(?P<start>\d+\.\d)—(?P<end>\d+\.\d)秒】(?P<body>.*?)(?=【\d+\.\d—\d+\.\d秒】|\Z)", re.S)
@@ -19,7 +20,6 @@ QUOTE_RE = re.compile(r'“([^”\n]+)”|‘([^’\n]+)’|"([^"\n]+)"|「([^�
 DIALOGUE_RE = re.compile(r'(?:^|[；;。！？!?，,、】])\s*(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})说道[：:]?\s*[“"](?P<line>[^”"\n]+)[”"]')
 FACE_SCALE_RE = re.compile(r"大特写|特写|近景|中近景|胸部以上|腰部以上")
 FACE_RE = re.compile(r"面部|眼睛|眼神|眼睑|眼球|眼眸|双眼|侧脸|人物反应")
-NON_PERSON_RE = re.compile(r"^(?:无|无人|无人物|(?:无人物|无人|没有人物|没有人)入画|不适用|书页|书上内容|桌面|账本|杯盏|茶杯|茶盏|信件|信封|木盒|礼匣|门窗|道具|场景|环境|远处行人|背景人群|普通人群|背景生态)$")
 HIDDEN_RE = re.compile(r"(?:面部|眼睛|双眼|眼部)(?:(?:和|与)(?:面部|眼睛|双眼|眼部))?(?:全程|始终|均|都)?(?:不可见|不入画|不在画面|被遮挡|完全遮挡)|(?:仅|只)(?:露出|拍到|可见)?(?:背影|侧背|后脑|双手|手部|胸腹衣襟)|背向机位|(?:全程|始终)(?:背影|背对镜头)")
 VISIBLE_RE = re.compile(r"(?:面部|眼睛|双眼|眼部|侧脸)(?:清楚|清晰|完整)?可见")
 FOCUS_RE = re.compile(r"(?:眼球|视线|目光|焦点).{0,14}(?:换焦|位移|焦点调整|微调)|(?:轻微|细微)(?:调整|转动)眼球")
@@ -284,77 +284,14 @@ def emphasis_binding_faults(emphasis: Any, dialogue_rows: Sequence[tuple[str, st
     return emphasis_bindings(emphasis, dialogue_rows, speaker=speaker)[1]
 
 
-def visible_subject_tokens(value: Any) -> list[str]:
-    """Split a visible-subject list only outside matched role annotations.
-
-    Keep annotations with their person for visibility checks. Unmatched or
-    mismatched parentheses do not hide later names from the person-count gate.
-    This parses list punctuation, not narrative identities or face semantics.
-    """
-    text = str(value or "")
-    stack: list[tuple[str, int]] = []
-    spans: list[tuple[int, int]] = []
-    pairs = {")": "(", "）": "（"}
-    for index, char in enumerate(text):
-        if char in "(（":
-            stack.append((char, index))
-        elif char in pairs:
-            if stack and stack[-1][0] == pairs[char]:
-                _opening, start = stack.pop()
-                spans.append((start, index))
-            else:
-                stack.clear()
-    protected = {index for start, end in spans for index in range(start, end + 1)}
-    tokens: list[str] = []
-    start = 0
-    index = 0
-    while index < len(text):
-        char = text[index]
-        connector = "以及" if text.startswith("以及", index) else char
-        punctuation = char in "、，,；;+＋"
-        word_join = connector in {"以及", "和", "与", "及"}
-        # A leading 和 can be the surname in 和珅. Treat a word connector as
-        # a separator only after an actual left item, not at a name's start.
-        if index not in protected and (punctuation or word_join and text[start:index].strip()):
-            if text[start:index].strip():
-                tokens.append(text[start:index].strip())
-            index += len(connector) if word_join else 1
-            start = index
-            continue
-        index += 1
-    if text[start:].strip():
-        tokens.append(text[start:].strip())
-    return tokens
-
-
 def _people(visible: Any, explicit: Sequence[str] | None) -> tuple[list[str], dict[str, str]]:
-    raw = str(visible or "")
-    tokens = visible_subject_tokens(raw)
-    names = _dedupe(str(name).strip() for name in explicit if str(name).strip()) if explicit else []
-    descriptions: dict[str, str] = {}
-    owner: str | None = None
-    for token in tokens:
-        name = re.sub(r"^[\s]*(?:画面|前景|中景|后景|左侧|右侧|中央|左边|右边)[:：\s]*", "", token)
-        if re.match(r"^(?:" + BODY_PART_PATTERN + r")(?:清楚|清晰|完整|自然|可见|不可见|被遮挡|全程|始终|仅在|食指|与|和|及|、|$)", name):
-            # A body-part enumeration continues only the immediately preceding
-            # resolved person, never all named people in the shot.
-            if owner is not None:
-                descriptions[owner] = descriptions.get(owner, owner) + "、" + token
-            continue
-        name = re.split(r"[（(]|(?:的)?(?:" + BODY_PART_PATTERN + r"|仅|只|背向|背对)", name, maxsplit=1)[0].strip()
-        name = re.sub(r"(?:等|共)?[一二两三四五六七八九十\d]+(?:名|位)?(?:人物|人)$", "", name).strip()
-        if not name or NON_PERSON_RE.fullmatch(name) or COLLECTIVE_RE.match(name):
-            owner = None
-            continue
-        if re.fullmatch(r"[\u3400-\u9fffA-Za-z·]{1,12}", name) and (not explicit or name in names):
-            names.append(name)
-            owner = name
-            descriptions[name] = (descriptions[name] + "、" + token) if name in descriptions else token
-        else:
-            owner = None
-    for name in names:
-        descriptions.setdefault(name, name)
-    return _dedupe(names), descriptions
+    """Compatibility adapter for the shared evidence-based entity resolver.
+
+    Unresolved labels are deliberately absent here, not interpreted as props.
+    Executable callers must inspect resolution.faults to keep them blocking.
+    """
+    resolved = resolve_visible_subjects(visible, people=explicit)
+    return list(resolved.people), resolved.descriptions
 
 
 def visible_subject_annotation_faults(value: Any) -> list[str]:
@@ -417,6 +354,8 @@ def _clauses(text: Any, names: Sequence[str], duration: float) -> list[Clause]:
 def listener_reaction_faults(
     shot: dict[str, Any], *, duration: float,
     dialogue_rows: Sequence[tuple[str, str] | dict[str, Any]],
+    visible_names: Sequence[str] | None = None,
+    non_person_names: Sequence[str] | None = None,
 ) -> list[str]:
     """Bind a visible listener's real response to the earlier speech.
 
@@ -429,8 +368,13 @@ def listener_reaction_faults(
         shot = timing_view(shot)
     except PictureTimingError as exc:
         return [str(exc)]
-    names, _ = _people(shot.get('可见主体'), None)
     rows = _rows(dialogue_rows)
+    entities = resolve_visible_subjects(shot.get('可见主体'), people=visible_names,
+        non_people=non_person_names, speakers=[name for name, _ in rows],
+        evidence_texts=[shot.get('画面内容'), shot.get('起始状态')])
+    if entities.faults:
+        return entities.faults
+    names = list(entities.people)
     if len(names) < 2 or not rows:
         return []
     clauses = _clauses(shot.get('画面内容'), names, duration)
@@ -553,7 +497,7 @@ def eye_visibility_timeline_scan(text: str, *, duration: float, visible_subjects
     """
     if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
         return text
-    names, _ = _people(visible_subjects, None)
+    names = list(resolve_visible_subjects(visible_subjects, evidence_texts=[text]).people)
     ranges = []
     for name in names:
         for match in eye_visibility_window_matches(text, name, require_subject=True):
@@ -730,14 +674,18 @@ def eye_contract_faults(
     duration: float,
     strict: bool = True,
     visible_names: Sequence[str] | None = None,
+    non_person_names: Sequence[str] | None = None,
     dialogue_rows: Sequence[tuple[str, str] | dict[str, Any]] | None = None,
+    legacy_components: bool = False,
 ) -> list[str]:
     """Validate each identified person's actual continuous visible intervals.
 
     ``visible_names`` may supply already-authoritatively-resolved identities;
     otherwise identities are read from 可见主体. A bounded visibility exception
     can be authored as ``甲眼睛仅在0.0—1.5秒清楚可见``. An unbounded claim of
-    "可见1秒" cannot waive a four-second visible-face contract.
+    "可见1秒" cannot waive a four-second visible-face contract. Current callers
+    inspect actual events. ``legacy_components=True`` is only for explicitly
+    selected historical replay, never the default production obligation.
     """
     try:
         shot = timing_view(shot)
@@ -746,16 +694,20 @@ def eye_contract_faults(
     if not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
         return ["眼部检查需要有效正数镜头时长"]
     visible = str(shot.get("可见主体") or "")
-    names, descriptions = _people(visible, visible_names)
+    picture = str(shot.get("画面内容") or "")
+    raw_rows = dialogue_rows if dialogue_rows is not None else [(match.group("speaker"), match.group("line")) for match in DIALOGUE_RE.finditer(picture)]
+    entities = resolve_visible_subjects(visible, people=visible_names, non_people=non_person_names,
+        speakers=[name for name, _ in _rows(raw_rows)],
+        evidence_texts=[picture, shot.get('起始状态')])
+    names, descriptions = list(entities.people), entities.descriptions
     identity_faults = _identity_faults(visible, names)
+    identity_faults.extend(entities.faults)
     if not names:
         if duration >= 2 and FACE_SCALE_RE.search(str(shot.get("镜头类型") or "")) and _positive(re.compile(r"人|面部|眼睛|侧脸"), visible):
             return _dedupe(identity_faults + ["可见人脸未绑定具体人物身份，不能执行逐人眼部检查"])
         return identity_faults
-    picture = str(shot.get("画面内容") or "")
     clauses = _eye_clauses(picture, names, duration)
     start_clauses = _eye_clauses(shot.get("起始状态"), names, duration)
-    raw_rows = dialogue_rows if dialogue_rows is not None else [(match.group("speaker"), match.group("line")) for match in DIALOGUE_RE.finditer(picture)]
     speakers = {name for name, _ in _rows(raw_rows)}
     limits = str(shot.get("生成限制") or "")
     faults = list(identity_faults)
@@ -802,6 +754,34 @@ def eye_contract_faults(
             label = f"{name}[{begin:g}—{end:g}秒]"
             own = [clause for clause in own_all if clause.start < end and clause.end > begin]
             body = "；".join(clause.text for clause in own)
+            if not legacy_components:
+                # Current prose inspection checks authored events, not an
+                # invented eye-action quota. Missing structured production
+                # evidence is handled by its own mapping/derivation gate.
+                events, event_faults = _blink_events(own)
+                faults.extend(f"{label}{fault}" for fault in event_faults)
+                maximum = 1 if end - begin <= 5 else (2 if end - begin <= 10 else None)
+                count = sum(event['count'] for event in events)
+                if maximum is not None and count > maximum:
+                    faults.append(f"{label}可见区间眨眼上限应为{maximum}次，当前逐事件累计{count}次")
+                held = [m.group('target') for c in own for m in _positive(
+                    re.compile(r'(?:视线|目光|眼神)(?:持续|始终|继续)(?:落在|停在|聚焦于)(?P<target>[^，,；;。！？!?\n]*)'), c.text)]
+                initial = [m.group('target') for c in start_clauses if c.owner == name
+                           for m in _positive(GAZE_TARGET_RE, c.text)]
+                if held and (any(_gaze_target_label(target) is None for target in held)
+                             or initial and len(set(initial + held)) != 1 and not _gaze_paths(body)):
+                    faults.append(f"{label}持续注视声明与起始视线目标冲突或目标未明确，须核验视线承接")
+                for clause in own:
+                    # Check asserted movement separately from a legal hold.
+                    # A rejected/negated movement is not a demand to add one.
+                    declared_paths = _action_matches(GAZE_PATH_RE, clause.text)
+                    if declared_paths and len(_gaze_paths(clause.text)) < len(declared_paths):
+                        faults.append(f"{label}已写视线移动的起点与目标相同或目标未解析，须核验实际视线事件")
+                    incomplete_move = re.compile(r'(?:眼球|视线|目光|眼神)[^，,；;。！？!?\n]{0,18}?(?P<verb>移向|转向|换焦至|换焦到|移焦至|移焦到)(?P<target>[^，,；;。！？!?\n]*)')
+                    for move in _action_matches(incomplete_move, clause.text):
+                        if _gaze_target_label(move.group('target')) is None:
+                            faults.append(f"{label}已写视线移动但目标未明确，须核验实际目标")
+                continue
             # Join only this actor's clauses. Other people and spoken words cannot
             # contribute any eye-chain component or no-blink exemption.
             sequential_path, head_led = _sequential_eye_path(own)
@@ -860,7 +840,7 @@ def eye_contract_faults(
                     faults.append(f"{label}起始状态未声明自然睁眼且避开半眨，亦无源文明确闭眼依据")
     if len(set(visible_people)) > 1:
         faults.extend(_stagger_faults(all_events, clauses, picture))
-    if not eligible_people:
+    if not eligible_people or not legacy_components:
         return _dedupe(faults)
     for pattern, message in [
         (r"眼神自然聚焦", "生成限制缺‘眼神自然聚焦’"),

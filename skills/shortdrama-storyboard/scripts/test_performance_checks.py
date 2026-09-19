@@ -3,6 +3,9 @@ import copy
 import unittest
 
 from performance_checks import emphasis_binding_faults, emphasis_bindings, eye_contract_faults
+from functools import partial
+# Frozen historical component checks; production defaults to authored events.
+eye_contract_faults = partial(eye_contract_faults, legacy_components=True)
 
 
 LIMITS = "眼神自然聚焦；眼球换焦或位移；眼睑松紧变化；禁止无依据全程不眨眼；禁止僵直瞪视；禁止高频机械眨眼；禁止多人同步眨眼。"
@@ -81,7 +84,7 @@ class EyeContractTests(unittest.TestCase):
         shot = eye_shot()
         shot["可见主体"] = "甲、乙、丙"
         shot["起始状态"] = "三人双眼自然睁开，不处于半眨眼瞬间。"
-        faults = eye_contract_faults(shot, duration=4.0)
+        faults = eye_contract_faults(shot, duration=4.0, visible_names=['甲', '乙', '丙'])
         self.assertTrue(any(fault.startswith("乙[") for fault in faults))
         self.assertTrue(any(fault.startswith("丙[") for fault in faults))
 

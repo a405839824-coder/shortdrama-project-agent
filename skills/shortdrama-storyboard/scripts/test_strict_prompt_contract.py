@@ -36,6 +36,7 @@ def strict_fixture() -> dict[str, Any]:
     obj = copy.deepcopy(suite["fixtures"]["valid_compact_master"])
     inject_pg1_fixture_evidence(obj)
     upgrade_fixture_to_compact(obj)
+    obj['character_anchors'] = ['江氏', '邹氏', '许氏']
     obj["source_lock"].update({
         "output_contract": "R10-SPC-1",
         "target_model": "Seedance 2.5",
@@ -177,6 +178,7 @@ def main() -> int:
         mutate: Callable[[dict[str, Any]], None] | None,
         expected_code: str | None,
         expected_gate_id: str | None = None,
+        forbidden_codes: tuple[str, ...] = (),
     ) -> None:
         obj = copy.deepcopy(base)
         if mutate:
@@ -187,6 +189,7 @@ def main() -> int:
             passed = not any(issue.get("severity") == "fail" for issue in report["issues"])
         else:
             passed = expected_code in codes and (expected_gate_id is None or expected_gate_id in gate_ids)
+        passed = passed and not set(forbidden_codes).intersection(codes)
         results.append({
             "test_id": test_id,
             "passed": passed,
@@ -195,6 +198,7 @@ def main() -> int:
             "actual_status": report["status"],
             "actual_error_codes": codes,
             "actual_template_gate_ids": gate_ids,
+            "forbidden_error_codes": list(forbidden_codes),
         })
 
     run_code_test("SPC-VALID", None, None)
@@ -328,8 +332,18 @@ def main() -> int:
             "【0.8—3.3秒】江氏说道：\u201c大嫂，没来晚吧？\u201d"
             "【3.3—4.0秒】镜尾江氏仍看着邹氏。",
         ),
-        "E-EXPRESSION-003",
-        "THG-13",
+        # The frozen prose holds a real target; missing mandatory eye template
+        # components was the <=0.5.43 assertion, not a current content error.
+        # It still removes the listener response, so that separate guard stays.
+        "E-PERFORMANCE-001",
+        forbidden_codes=("E-EXPRESSION-003",),
+    )
+    run_code_test(
+        "SPC-THG13-ACTUAL-SAME-ENDPOINT-SHIFT",
+        lambda obj: obj['shots'][0].__setitem__('画面内容',
+            obj['shots'][0]['画面内容'].replace('江氏视线从膝上袖口移向邹氏面部',
+                '江氏视线从邹氏面部移向邹氏面部')),
+        'E-EXPRESSION-003', 'THG-13',
     )
     run_code_test(
         "SPC-THG14-ADJACENT-PAIR-PROOF",

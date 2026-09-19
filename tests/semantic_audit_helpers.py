@@ -6,6 +6,7 @@ from typing import Any
 from shortdrama_mcp.auth import request_namespace
 from shortdrama_mcp.canonical import stable_json_hash
 from shortdrama_mcp.models import SEMANTIC_AUDIT_LAYER_NAMES
+from shortdrama_mcp.audit_coverage import build_obligations, coverage_context, CONTRACT
 from shortdrama_mcp.service import canonical_storyboard_sha256
 
 
@@ -15,7 +16,7 @@ def semantic_audit_for_artifact(
     project_id: str,
     artifact_id: str,
 ) -> dict[str, Any]:
-    """Build an explicit clean review with the artifact's current evidence refs.
+    """Build SYNTHETIC test declarations, never evidence of real story quality.
 
     This only supplies the test's independent review.  The production pair
     proof, authored shot fields, and validator findings remain unchanged.
@@ -69,24 +70,41 @@ def semantic_audit_for_artifact(
     layer_evidence["源文对白"].extend(
         f"source-unit:{source_unit_id}" for source_unit_id in source_unit_ids
     )
+    manifest = build_obligations(storyboard, coverage_context(service))
+    coverage = synthetic_coverage(manifest)
     return {
         "canonical_sha256": canonical_sha256,
         "reviewed_shot_count": len(shots),
         "reviewed_batch_count": len(batches),
         "reviewed_adjacent_pair_count": len(pair_ids),
         "adjacent_pair_order_sha256": stable_json_hash(pair_ids),
+        "coverage": coverage,
         "layers": [
             {
                 "layer": layer,
                 "status": "pass",
-                "summary": f"{layer}已独立复核并绑定具体实体证据。",
+                "summary": f"合成软件测试声明：{layer}；不证明真实内容正确率。",
                 "evidence_ids": layer_evidence[layer],
             }
             for layer in SEMANTIC_AUDIT_LAYER_NAMES
         ],
         "issues": [],
-        "conclusion": {"status": "pass", "summary": "八层语义复核完整且未发现问题。"},
+        "conclusion": {"status": "pass", "summary": "合成软件测试输入；不代表实际独立语义审计。"},
     }
+
+
+def synthetic_coverage(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Test-only fixture; never imported by the server or production authoring."""
+    return {"contract": CONTRACT, "manifest_sha256": manifest["manifest_sha256"],
+            "checks": [{
+                "obligation_id": row["obligation_id"],
+                "dependency_sha256": row["dependency_sha256"],
+                "status": "pass",
+                "judgement": "合成软件验收声明，仅检查义务绑定与覆盖机制，不证明实际内容正确。",
+                "observations": [{"reference": ref, "quote": manifest["_values"][ref][:100]}
+                                 for ref in row["required_observation_refs"]],
+                "issue_ids": [],
+            } for row in manifest["obligations"]]}
 
 
 def failing_semantic_audit_for_artifact(

@@ -3,6 +3,9 @@ import unittest
 
 from test_v0527_dynamic_eye_decisions import compile_shot
 from performance_checks import eye_contract_faults
+from functools import partial
+# Frozen historical component checks; production defaults to authored events.
+eye_contract_faults = partial(eye_contract_faults, legacy_components=True)
 
 
 class SameTargetFocusTests(unittest.TestCase):

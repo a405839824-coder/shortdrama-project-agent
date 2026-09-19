@@ -72,14 +72,17 @@ Write unsupported genuine states through the full authoring contract.
 
 Apply each actor's static fragment only to that actor's actual initial state.
 Open-eye focus is named, so a second actor's source-closed eyes remain closed.
-For `visible/natural_open`, the same actor-bound natural focus is also emitted
-in `generation_limits_append`, where the formal performance contract requires
-it. The initial-state phrase alone does not satisfy that separate field check.
+For `visible/natural_open`, current generation preserves the declared natural
+state when no eye event is authored. It does not require a repeated focus phrase,
+an eye movement, an eyelid change or a blink solely to fill a checklist.
+`legacy_components=True` explicitly reproduces the historical policy text and
+its separate focus-field check; it is not selected by a missing event plan.
 Closed, hidden, and no-person branches emit no generation eye fragment. Compose
 actors separately; do not replace their names with a blanket open-eye rule.
 The exact registered video policy belongs only in `生成限制`; formal output keeps
 it and GPT projection removes its dynamic clauses. The helper supplies no blink
-time or movement. Actual eye actions still belong in the timed `画面内容` phases.
+time or movement. Actual visible eye actions belong in `画面内容`; numeric event
+timing is kept in the internal execution data, not inserted into that field.
 It does not infer a later visible face from a hidden initial eye state.
 
 ## Psychological audio and transitions

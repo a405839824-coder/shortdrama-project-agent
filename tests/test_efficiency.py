@@ -525,9 +525,9 @@ class EfficiencyContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(checked["data"]["runtime_test_certificate_valid"])
         certificate = checked["data"]["runtime_test_certificate"]
         self.assertEqual(certificate["certificate_type"], "runtime_full_regression")
-        self.assertEqual(certificate["tests"]["golden_tests"]["test_pass_count"], 82)
+        self.assertEqual(certificate["tests"]["golden_tests"]["test_pass_count"], 85)
         self.assertEqual(
-            certificate["tests"]["strict_prompt_tests"]["test_pass_count"], 75
+            certificate["tests"]["strict_prompt_tests"]["test_pass_count"], 76
         )
         self.assertEqual(certificate["tests"]["public_scene_tests"]["test_pass_count"], 11)
         self.assertEqual(certificate["tests"]["agent_tests"]["test_pass_count"], 38)

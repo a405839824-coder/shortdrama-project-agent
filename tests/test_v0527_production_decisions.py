@@ -317,7 +317,7 @@ class ProductionDecisionTests(unittest.TestCase):
         shot = _render_decisions(result["typed_decisions"])["shots"][0]
         faults = eye_contract_faults(shot, duration=4, dialogue_rows=[("甲", uses["uses"][0]["text"])])
         self.assertFalse(any("眨眼未绑定数值时点" in x or "眨眼次数与明确数值时点" in x for x in faults))
-        self.assertTrue(any("缺上/下眼睑松紧变化" in x for x in faults))
+        self.assertFalse(any("缺上/下眼睑松紧变化" in x for x in faults))  # No forced eyelid event in current production.
         self.assertEqual(listener_reaction_faults(shot, duration=4, dialogue_rows=[("甲", uses["uses"][0]["text"])]), [])
         event = result["typed_decisions"]["shots"][0]["events"][0]
         self.assertIn("乙在3.2秒", event["basis"])

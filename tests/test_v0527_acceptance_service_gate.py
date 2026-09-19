@@ -76,12 +76,25 @@ class AcceptanceServiceGateTests(unittest.TestCase):
         for offset, (event, outcome) in enumerate(zip(appended, ("started", "error")), 1):
             self.assertEqual(event["id"], last_id + offset)
             datetime.fromisoformat(event["occurred_at"])
-            self.assertEqual({k: v for k, v in event.items() if k not in {"id", "occurred_at"}}, {
+            original_fields = {"issuer", "subject", "role", "tool", "project_id", "outcome"}
+            self.assertEqual({k: event[k] for k in original_fields}, {
                 "issuer": "local", "subject": "local-single-user", "role": "admin",
-                "tool": tool, "project_id": self.project, "outcome": outcome, "reason": "",
+                "tool": tool, "project_id": self.project, "outcome": outcome,
             })
-        # Access logging proves that the handler failed, not why. The tests
-        # below separately assert the precise control error and frozen counters.
+            self.assertRegex(event["trace_id"], r"^ACC-[0-9a-f]{32}$")
+            self.assertEqual(event["stage"], "tool_dispatch" if outcome == "started" else "tool_execution")
+            self.assertEqual(event["rules_fingerprint"], self.service._ruleset_fingerprint)
+            self.assertEqual(event["runtime_fingerprint"], self.service._runtime_fingerprint)
+            reason = json.loads(event["reason"])
+            self.assertEqual(reason["tool_outcome"], outcome)
+            self.assertEqual(reason["trace_id"], event["trace_id"])
+            self.assertEqual(reason["stage"], event["stage"])
+            if outcome == "error":
+                self.assertIsNotNone(event["error_code"])
+                self.assertEqual(reason["error_code"], event["error_code"])
+        self.assertEqual(appended[0]["trace_id"], appended[1]["trace_id"])
+        # Diagnostics are now content-free and correlated. Exact controller
+        # errors and frozen counters remain independently asserted below.
 
     def enable(self, *, operation="preflight_storyboard_draft", arguments=None, lease=True):
         args = arguments if arguments is not None else self.fixture.arguments()

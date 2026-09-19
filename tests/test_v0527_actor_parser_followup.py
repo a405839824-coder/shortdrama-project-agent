@@ -17,6 +17,9 @@ if str(SKILL_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SKILL_SCRIPTS))
 import validate_storyboard as validator
 from performance_checks import _people, eye_contract_faults, listener_reaction_faults
+from functools import partial
+# Frozen historical component checks; production defaults to authored events.
+eye_contract_faults = partial(eye_contract_faults, legacy_components=True)
 
 
 CASES = json.loads((Path(__file__).parent / 'fixtures/v0527_actor_parser_followup_controls.json').read_text('utf-8'))['cases']
@@ -35,12 +38,17 @@ def eye_target(faults, probe):
 def run_case(case):
     value = copy.deepcopy(case['input'])
     if case['kind'] == 'eye':
-        faults = validator._eye_contract_faults(value, duration=case['duration'], strict=True)
+        faults = validator._eye_contract_faults(value, duration=case['duration'], strict=True,
+            visible_names=['甲', '乙', '丙'], non_person_names=['木盒'], legacy_components=True)
         target = eye_target(faults, case['probe'])
     else:
         rows = validator.extract_dialogues(value['shots'][0]['画面内容'])
         assert rows == [('甲', '请坐。')], rows  # prove this consumer actually runs
-        report = validator.validate_project(value, mode='audit')
+        # These frozen cases author 甲/乙/丙 as actors. Supply that known cast
+        # explicitly now that bare short labels no longer imply human identity.
+        inspected = copy.deepcopy(value)
+        inspected['character_anchors'] = ['甲', '乙', '丙']
+        report = validator.validate_project(inspected, mode='audit')
         faults = [i for i in report['issues'] if i['error_code'] == 'E-PERFORMANCE-001'
                   and '多人对白镜未写听者错峰反应' in i['evidence']]
         target = bool(faults)
@@ -73,7 +81,8 @@ class NaturalActorParserBoundaries(unittest.TestCase):
         shot = copy.deepcopy(BY_ID['P03-DIALOGUEBOUND']['input']['shots'][0])
         shot['可见主体'] = visible
         shot['画面内容'] = shot['画面内容'].replace('不看镜头。', '不看镜头。' + response)
-        return listener_reaction_faults(shot, duration=4.0, dialogue_rows=[('甲', '请坐。')])
+        return listener_reaction_faults(shot, duration=4.0, dialogue_rows=[('甲', '请坐。')],
+            visible_names=['甲', '乙', '丙'])
 
     def test_from_to_synonyms_are_positive_with_distinct_points(self):
         for path in ('甲视线由案边轻微移焦到门框', '甲眼球从案边缓慢换焦至门框',
@@ -113,7 +122,10 @@ class NaturalActorParserBoundaries(unittest.TestCase):
     def test_zero_person_exact_forms_do_not_hide_real_names_or_later_people(self):
         self.assertEqual(_people('无人物入画；木盒（封口完整）', None)[0], [])
         self.assertEqual(_people('无忌（面部清晰可见）', None)[0], ['无忌'])
-        self.assertEqual(_people('无人物入画；甲（面部清晰可见）', None)[0], ['甲'])
+        from visible_entities import resolve_visible_subjects
+        contradictory = resolve_visible_subjects('无人物入画；甲（面部清晰可见）')
+        self.assertEqual(contradictory.conflicts, ('甲',))
+        self.assertTrue(contradictory.faults)
 
     def test_chest_above_is_not_a_hands_only_crop(self):
         shot = copy.deepcopy(BY_ID['E01']['input'])

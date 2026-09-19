@@ -51,6 +51,13 @@ def render_views(registry):
         result["field_content_contract.md"] = render_field_contract(runtime["field_content_policy"])
     if "production_prevention_policy" in runtime:
         result["production_prevention_contract.md"] = render_production_contract(runtime["production_prevention_policy"])
+    if "workflow_integrity_policy" in runtime:
+        policy = runtime["workflow_integrity_policy"]
+        result["workflow_integrity_contract.md"] = "\n".join([
+            "# 审计与交付完整性合同", "", "由 rule_registry.json 生成；不得单独编辑。",
+            "", "合同：" + policy["contract"], "",
+            *["- " + value for value in policy["instructions"]], "",
+        ])
     conflicts = {row["conflict_id"]: row for row in registry["conflicts"]}
     gate_ids = [row["gate_id"] for row in runtime["gates"]["template_hard_gates"]]
     for filename, (key, _) in VIEW_KEYS.items():
@@ -141,6 +148,35 @@ def _unique(rows, field, label, failures):
     return set(ids)
 
 
+def _historical_migration_matches(registry, kind, identity, previous, current):
+    """Allow only the reviewed eye-policy transition, with both sides pinned.
+
+    The historical baseline remains immutable. This is not an arbitrary
+    registry-authored waiver: every other historical rule/error stays exact.
+    """
+    permitted = {
+        'atomic_semantic_definitions': 'AR-R10-EXPR-003',
+        'error_semantic_definitions': 'E-EXPRESSION-003',
+    }
+    if permitted.get(kind) != identity:
+        return False
+    migrations = registry.get('historical_rule_migrations', {})
+    if not isinstance(migrations, dict) or set(migrations) != {'eye-event-applicability-v1'}:
+        return False
+    migration = migrations['eye-event-applicability-v1']
+    if (not isinstance(migration, dict) or not migration.get('reason')
+            or migration.get('legacy_applies_to_current_generation') is not False
+            or migration.get('basis') != 'production_prevention_policy:PP-05'
+            or registry['runtime'].get('blink_policy', {}).get('contract') != 'eye-event-applicability-v1'):
+        return False
+    for family, required_id in permitted.items():
+        if set(migration.get(family, {})) != {required_id}:
+            return False
+    hashes = migration[kind][identity]
+    return (hashes.get('baseline_sha256') == registry_sha256(previous)
+            and hashes.get('current_sha256') == registry_sha256(current))
+
+
 def check_registry_definition(registry, reference_root=None):
     """Validate ID sets, applicability, definitions, parameters and references."""
     failures = []
@@ -161,11 +197,15 @@ def check_registry_definition(registry, reference_root=None):
                 failures.append('historical baseline: critical runtime policy changed without migration: '+key)
         for row in registry.get('atomic_rules', []):
             expected = baseline.get('atomic_semantic_definitions', {}).get(row.get('rule_id'))
-            if expected is not None and {k:row.get(k) for k in expected} != expected:
+            current_definition = {k:row.get(k) for k in expected} if expected is not None else None
+            if (expected is not None and current_definition != expected and not
+                    _historical_migration_matches(registry, 'atomic_semantic_definitions', row['rule_id'], expected, current_definition)):
                 failures.append('historical baseline: rule semantics or trigger changed: ' + row['rule_id'])
         for row in registry.get('errors', []):
             expected=baseline.get('error_semantic_definitions',{}).get(row.get('error_code'))
-            if expected is not None and {k:row.get(k) for k in expected} != expected:
+            current_definition = {k:row.get(k) for k in expected} if expected is not None else None
+            if (expected is not None and current_definition != expected and not
+                    _historical_migration_matches(registry, 'error_semantic_definitions', row['error_code'], expected, current_definition)):
                 failures.append('historical baseline: error or repair guidance changed: '+row['error_code'])
     if registry.get("registry_contract") != "r10-rule-registry-v1":
         failures.append("unsupported registry contract")

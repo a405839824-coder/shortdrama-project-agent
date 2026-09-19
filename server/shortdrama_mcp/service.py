@@ -33,10 +33,16 @@ from .canonical import (
     compact_storyboard_canonical,
 )
 from .config import Settings
+from .audit_coverage import (
+    coverage_context, normalize_coverage_transport, validate_coverage,
+    verify_certificate_coverage,
+)
+from .audit_coverage_pages import process_coverage_page, assert_no_pending_coverage
 from .field_content import model_field_contract
 from .production_plan import model_production_contract
 from .production_route import require_current_production
 from .formal_delivery import CONTRACT as FORMAL_DELIVERY_CONTRACT, delivery_contract, inspect_formal_delivery, verified_batch
+from .workflow_state import observed_workflow
 from .acceptance_service import controlled_acceptance_operation
 from .delta import (
     changed_shot_fields,
@@ -593,7 +599,7 @@ PATCH_FORBIDDEN_FIELD_TERMS = (
 AUDIT_GATE_IDS = tuple(f"G{index}" for index in range(14))
 AUDIT_LAYER_NAMES = SEMANTIC_AUDIT_LAYER_NAMES
 SEMANTIC_AUDIT_CONTRACT_VERSION = (
-    "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting"
+    "semantic-audit-v9-server-owned-obligation-coverage"
 )
 STRICT_OUTPUT_CONTRACT = "R10-SPC-1"
 SEMANTIC_AUDIT_CONTRACT_FINGERPRINT = sha256_bytes(
@@ -3144,7 +3150,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         submission["adjacent_pair_order_sha256"] = str(
             submission["adjacent_pair_order_sha256"]
         ).lower()
-        return submission
+        return normalize_coverage_transport(submission)
 
     def _attach_independent_evidence_matrix(
         self,
@@ -3710,6 +3716,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             and all(row["status"] == "pass" for row in layer_matrix.values())
         )
         submission_hash = sha256_bytes(_stable_json_bytes(submission))
+        obligation_coverage = validate_coverage(
+            storyboard, submission, coverage_context(self)
+        )
         quality = _draft_quality_metrics(storyboard, issues)
         source_issue_count = sum(
             _issue_category(str(item.get("error_code") or "")) == "源文对白"
@@ -3718,6 +3727,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         enriched["semantic_audit"] = submission
         enriched["semantic_audit_sha256"] = submission_hash
         enriched["independent_evidence_matrix"] = {
+            "semantic_obligation_coverage": obligation_coverage,
             "preventive_gate_results": gate_matrix,
             "audit_layer_results": layer_matrix,
             "quality_thresholds": {
@@ -4814,6 +4824,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "advisory_only": True,
                 "affects_audit_verdict": False,
             },
+            "workflow_integrity_contract": copy.deepcopy(
+                validate_storyboard.load_runtime_rules().get("workflow_integrity_policy", {})
+            ),
             "runtime": report,
             "output_contract": STRICT_OUTPUT_CONTRACT,
             "target_model": "Seedance 2.5",
@@ -5117,6 +5130,14 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 f"｜项目{hub.get('project_name')}"
                 f"｜开放问题模式{data['issues'].get('open_issue_count', 0)}"
             )
+            from .audit_coverage_pages import coverage_progress
+            latest_artifact = (data.get("latest_storyboard") or {}).get("artifact_id")
+            data["audit_coverage_progress"] = coverage_progress(
+                self, namespace, project_id, artifact_id=latest_artifact
+            )
+            data["audit_coverage_pending"] = data["audit_coverage_progress"]["pending_count"] > 0
+            data["workflow_state"] = observed_workflow(data)
+            summary += "｜" + data["workflow_state"]["label"]
         return ToolResponse(status=response_status, summary=summary, project_id=project_id, data=data)
 
     def _resolve_performance_diagnostic_links(
@@ -11726,13 +11747,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 and event.get("audit_cycle_id") == draft_cycle_id
             ]
             audit_round = len(prior_draft_events) + 1
-            if audit_round > int(
-                ledger_snapshot.get("policy", {}).get("max_auto_repair_rounds", 3)
-            ):
-                raise ValueError(
-                    "draft_preflight_round_limit: three failed/corrected attempts require "
-                    "upstream root-cause rebuild and a new work order"
-                )
+            # AR-R10-PG1-016: count real observations without resetting their
+            # lineage or rejecting a repaired candidate solely for its number.
+            # Explicit host/user finite acceptance stays at the operation gate.
             previous_issue_signatures = {
                 (
                     str(row.get("error_code") or ""),
@@ -14009,9 +14026,15 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
 
         if not source_artifact_id:
             return
-        source_record, _source_path = self.store.get_artifact(
-            namespace, project_id, source_artifact_id
-        )
+        try:
+            source_record, _source_path = self.store.get_artifact(
+                namespace, project_id, source_artifact_id
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "source_artifact_missing_or_invalid: explicit source_artifact_id "
+                "must resolve inside the current namespace and project"
+            ) from exc
         # A successful independent audit makes its signed XLSX overlay the
         # authoritative latest storyboard.  The overlay is still a projection
         # of the same bound canonical storyboard, so it must receive exactly
@@ -14497,12 +14520,6 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             and event.get("audit_class", AUDIT_CLASS_PRODUCTION_PREFLIGHT) == audit_class
         ]
         audit_round = 1 + max((int(event.get("audit_round", 0)) for event in prior_events), default=0)
-        if audit_round > 3:
-            return {
-                "status": "blocked",
-                "reason": "maximum three audit/repair rounds reached; rebuild the upstream structure",
-                "audit_cycle_id": cycle_id,
-            }
         event = {
             "event_id": event_id or _new_id("EVT"),
             "timestamp": utc_stamp(),
@@ -14793,6 +14810,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     ),
                     "semantic_audit_contract": SEMANTIC_AUDIT_CONTRACT_VERSION,
                     "semantic_audit_sha256": semantic_submission_hash,
+                    "semantic_obligation_coverage": copy.deepcopy(
+                        evidence_matrix.get("semantic_obligation_coverage")
+                    ),
+                    "audit_coverage_page_receipt": copy.deepcopy(
+                        report.get("audit_coverage_page_receipt")
+                    ),
                     "reviewed_shot_count": int(
                         semantic_submission.get("reviewed_shot_count", -1)
                     ),
@@ -15052,6 +15075,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             != SEMANTIC_AUDIT_CONTRACT_VERSION
         ):
             raise ValueError("independent_audit_certificate_environment_stale")
+        verify_certificate_coverage(self, storyboard, certificate)
         return certificate, artifact_record
 
     @staticmethod
@@ -16898,6 +16922,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 SEMANTIC_AUDIT_CONTRACT_VERSION
             ),
             "semantic_audit_sha256": semantic_sha256,
+            "semantic_obligation_coverage": evidence_matrix.get(
+                "semantic_obligation_coverage"
+            ),
+            "audit_coverage_page_receipt": report.get("audit_coverage_page_receipt"),
             "reviewed_shot_count": int(
                 semantic_submission.get("reviewed_shot_count", -1)
             ),
@@ -21895,9 +21923,6 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     for scope in ledger.get("scope_states", [])
                     if scope.get("file_name") == f"failed-draft-{work_order_id}"
                     and scope.get("open_issue_ids")
-                    and int(scope.get("last_audit_round", 0)) < int(
-                        ledger.get("policy", {}).get("max_auto_repair_rounds", 3)
-                    )
                 ]
                 for draft_scope in legacy_draft_scopes:
                     closure_key = sha256_bytes(
@@ -23437,6 +23462,23 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             raise ValueError(
                 "handoff_state_conflict: consumed production handoff belongs to a different audit work order"
             )
+        coverage_page_receipt = None
+        if semantic_audit is not None:
+            semantic_audit = self._normalized_semantic_audit_submission(semantic_audit)
+            if semantic_audit.get("coverage_page") is not None:
+                staged = process_coverage_page(
+                    self, namespace, project_id, storyboard=storyboard, artifact=record,
+                    audit_work_order=audit_work_order, handoff=handoff,
+                    fingerprints=fingerprints, submission=semantic_audit,
+                )
+                if isinstance(staged, ToolResponse):
+                    return staged
+                coverage_page_receipt = staged.pop("_server_coverage_page_receipt")
+                semantic_audit = staged
+        if coverage_page_receipt is None:
+            assert_no_pending_coverage(
+                self, namespace, project_id, storyboard, artifact_id, fingerprints
+            )
         if (
             handoff.get("status") == "consumed"
             or handoff.get("reaudit_kind")
@@ -23483,6 +23525,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                         fingerprints=fingerprints,
                     )
                 )
+                if (completed_reaudit_receipt is not None and coverage_page_receipt is not None
+                        and completed_reaudit_receipt.get("audit_coverage_page_receipt") != coverage_page_receipt):
+                    completed_reaudit_receipt = None
                 if completed_reaudit_receipt is not None:
                     # The signed certificate is a durable completion receipt
                     # for this normalized semantic submission.  Replaying the
@@ -23618,6 +23663,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
         cache_hit = cached_certificate is not None
         if cached_certificate is not None:
+            if (coverage_page_receipt is not None and
+                    cached_certificate.get("audit_coverage_page_receipt") != coverage_page_receipt):
+                raise ValueError("audit_coverage_page_receipt_requires_force_recheck: a different collection is a new audit, not cached completion")
             if (
                 not self.store.project_record_is_signed(cached_certificate)
                 or
@@ -23642,6 +23690,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "cached independent audit certificate has no bound semantic review"
                 )
             certificate = cached_certificate
+            verify_certificate_coverage(self, storyboard, certificate)
             # A cache/recovery response is bound to the original signed audit
             # trace.  Reusing it avoids manufacturing request telemetry that
             # would mutate authority during an otherwise read-only replay.
@@ -23661,6 +23710,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 storyboard,
                 semantic_audit,
             )
+            if coverage_page_receipt is not None:
+                report["audit_coverage_page_receipt"] = coverage_page_receipt
         completed_consumed_replay = bool(
             cached_certificate is not None
             and
@@ -25041,7 +25092,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             _stable_json_bytes(report)
         ):
             raise ValueError("independent_audit_required: certificate report fingerprint mismatch")
+        verify_certificate_coverage(self, storyboard, certificate)
         cert_fingerprints = certificate.get("fingerprints") or {}
+        assert_no_pending_coverage(
+            self, namespace, project_id, storyboard, artifact_id, current_fingerprints
+        )
         expected_subset = {
             "source": current_fingerprints["source_bytes"],
             "boundary": current_fingerprints["episode_boundary"],

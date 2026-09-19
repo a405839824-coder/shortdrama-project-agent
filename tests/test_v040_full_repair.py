@@ -791,8 +791,8 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
         from shortdrama_mcp.service import storyboard_agent
         ordinary = copy.deepcopy(saved[-1])
         ordinary.pop("repair_root_artifact_id")
-        self.assertTrue(any("audit_round" in error for error in storyboard_agent.validate_event(ordinary)))
-        self.assertEqual(ledger["policy"]["max_auto_repair_rounds"], 3)
+        self.assertFalse(any("audit_round" in error for error in storyboard_agent.validate_event(ordinary)))
+        self.assertIsNone(ledger["policy"]["max_auto_repair_rounds"])
         final = await self.call("audit_storyboard", {"project_id": self.project_id,
             "artifact_id": fixed["artifact_id"], "work_order_id": self.original_audit_order,
             "handoff_artifact_id": fixed["data"]["handoff"]["handoff_id"]})

@@ -18,6 +18,8 @@ import validate_storyboard  # noqa: E402
 def public_fixture() -> dict[str, Any]:
     suite = json.loads((ROOT / "references" / "golden_tests.json").read_text(encoding="utf-8"))
     obj = copy.deepcopy(suite["fixtures"]["valid_base"])
+    obj['character_anchors'] = ['女主']
+    obj['scene_anchors'] = ['街道出口可见', '宵禁空街出口可见']
     shot = obj["shots"][0]
     shot.update({
         "镜头类型": "全景建立镜",

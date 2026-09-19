@@ -22,6 +22,8 @@ from shortdrama_mcp.service import (  # noqa: E402
     canonical_storyboard_sha256,
 )
 from shortdrama_mcp.storage import sha256_bytes  # noqa: E402
+from shortdrama_mcp.audit_coverage import build_obligations, coverage_context  # noqa: E402
+from semantic_audit_helpers import synthetic_coverage  # noqa: E402
 
 
 class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
@@ -96,12 +98,21 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
         }
         self.service = object.__new__(StoryboardService)
         self.service._validator_fingerprint = "a" * 64
+        self.service._ruleset_fingerprint = "b" * 64
+        self.service._runtime_fingerprint = "c" * 64
+        self.service._schema_fingerprint = "d" * 64
 
     def attach(self, submission: dict[str, Any] | None = None) -> dict[str, Any]:
+        # Synthetic declarations only: these tests isolate the existing pair,
+        # lighting and voice checks while honoring the current coverage input.
+        submitted = copy.deepcopy(submission or self.submission)
+        submitted["coverage"] = synthetic_coverage(
+            build_obligations(self.storyboard, coverage_context(self.service))
+        )
         return self.service._attach_independent_evidence_matrix(
             copy.deepcopy(self.report),
             copy.deepcopy(self.storyboard),
-            copy.deepcopy(submission or self.submission),
+            submitted,
         )
 
     def spatial_layer(self, submission: dict[str, Any]) -> dict[str, Any]:
@@ -112,7 +123,7 @@ class AdjacentContinuitySemanticAuditTests(unittest.TestCase):
         proof = enriched["independent_evidence_matrix"]["adjacent_continuity"]
         self.assertEqual(
             SEMANTIC_AUDIT_CONTRACT_VERSION,
-            "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting",
+            "semantic-audit-v9-server-owned-obligation-coverage",
         )
         self.assertEqual(proof["expected_pair_count"], 2)
         self.assertEqual(proof["reviewed_pair_count"], 2)
