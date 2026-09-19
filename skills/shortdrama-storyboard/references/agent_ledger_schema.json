@@ -54,7 +54,7 @@
       ],
       "properties": {
         "preferred_auto_repair_rounds": {"const": 2},
-        "max_auto_repair_rounds": {"const": 3},
+        "max_auto_repair_rounds": {"enum": [null, 3], "description": "null is current; 3 is read-only historical metadata, not an execution or audit round limit. Explicit host/user limits are enforced separately."},
         "fail_current_blocks_next_episode": {"const": true},
         "human_approval_required_for_rule_activation": {"const": true},
         "human_signoff_required_for_archive": {"const": true},
@@ -236,18 +236,6 @@
         "issues": {"type": "array", "items": {"$ref": "#/$defs/event_issue"}}
       },
       "allOf": [
-        {
-          "if": {
-            "required": ["assessment_contract", "audit_class", "task_type", "repair_root_artifact_id"],
-            "properties": {
-              "assessment_contract": {"const": "storyboard-quality-v2"},
-              "audit_class": {"const": "production_draft_preflight"},
-              "task_type": {"const": "production_draft_preflight"},
-              "repair_root_artifact_id": {"$ref": "#/$defs/identifier"}
-            }
-          },
-          "else": {"properties": {"audit_round": {"maximum": 3}}}
-        },
         {
           "if": {"properties": {"result": {"const": "pass"}}, "required": ["result"]},
           "then": {
@@ -478,7 +466,25 @@
             "adjacent_pair_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100}
           }
         },
-        "semantic_audit_contract": {"enum": ["semantic-audit-v2-compact-master", "semantic-audit-v3-adjacent-continuity", "semantic-audit-v4-adjacent-continuity-structured-voice", "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue", "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes", "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting", "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting"]},
+        "semantic_audit_contract": {"enum": ["semantic-audit-v2-compact-master", "semantic-audit-v3-adjacent-continuity", "semantic-audit-v4-adjacent-continuity-structured-voice", "semantic-audit-v5-adjacent-continuity-structured-voice-source-fact-dialogue", "semantic-audit-v6-adjacent-continuity-structured-voice-conversation-scenes", "semantic-audit-v7-adjacent-continuity-structured-voice-conversation-t2i-lighting", "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting", "semantic-audit-v9-server-owned-obligation-coverage"]},
+        "semantic_obligation_coverage": {
+          "type": "object",
+          "required": ["contract", "manifest_sha256", "canonical_sha256", "context", "expected_count", "reviewed_count", "coverage_percent", "failed_count", "checks_sha256", "meaning"],
+          "properties": {
+            "contract": {"const": "semantic-obligation-coverage-v1"},
+            "manifest_sha256": {"$ref": "#/$defs/sha256"},
+            "canonical_sha256": {"$ref": "#/$defs/sha256"},
+            "context": {"type": "object"},
+            "expected_count": {"type": "integer", "minimum": 1},
+            "reviewed_count": {"type": "integer", "minimum": 1},
+            "coverage_percent": {"const": 100},
+            "failed_count": {"type": "integer", "minimum": 0},
+            "checks_sha256": {"$ref": "#/$defs/sha256"},
+            "meaning": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        "audit_coverage_page_receipt": {"type": ["object", "null"]},
         "semantic_audit_sha256": {"$ref": "#/$defs/sha256"},
         "reviewed_shot_count": {"type": "integer", "minimum": 0},
         "reviewed_batch_count": {"const": 0, "deprecated": true},
@@ -672,7 +678,14 @@
       "allOf": [
         {
           "if": {
-            "properties": {"semantic_audit_contract": {"const": "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting"}},
+            "properties": {"semantic_audit_contract": {"const": "semantic-audit-v9-server-owned-obligation-coverage"}},
+            "required": ["semantic_audit_contract"]
+          },
+          "then": {"required": ["semantic_obligation_coverage"]}
+        },
+        {
+          "if": {
+            "properties": {"semantic_audit_contract": {"enum": ["semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting", "semantic-audit-v9-server-owned-obligation-coverage"]}},
             "required": ["semantic_audit_contract"]
           },
           "then": {
@@ -1116,7 +1129,8 @@
           "enum": [
             "local_repair",
             "root_cause_repair_required",
-            "upstream_rebuild_required"
+            "upstream_rebuild_required",
+            "root_cause_review_recommended"
           ]
         },
         "occurrence_locations": {

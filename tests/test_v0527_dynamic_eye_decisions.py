@@ -11,6 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT/'skills/shortdrama-storyboard/scripts'), str(ROOT/'server'), str(ROOT/'tests')]
 from authoring_contract_blocks import dynamic_eye_blocks, ContractBlockError, eye_blocks
 from performance_checks import eye_contract_faults
+from functools import partial
+# Frozen historical component checks; production defaults to authored events.
+eye_contract_faults = partial(eye_contract_faults, legacy_components=True)
 from timing_events import validate_events
 from test_v0527_authoring_contract_blocks import shot
 import validate_storyboard as validator

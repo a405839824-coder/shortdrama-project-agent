@@ -172,6 +172,7 @@ def verify_bundled(self_test: bool) -> dict:
         root / "scripts" / "timing_events.py",
         root / "scripts" / "dialogue_occurrences.py",
         root / "scripts" / "performance_checks.py",
+        root / "scripts" / "visible_entities.py",
         root / "scripts" / "lighting_checks.py",
         root / "scripts" / "test_rule_upgrade.py",
     ]
@@ -222,7 +223,7 @@ def verify_bundled(self_test: bool) -> dict:
         "error_codes": 78,
         "atomic_rules": 165,
         "templates": 50,
-        "golden_tests": 82,
+        "golden_tests": 85,
     }
     policy = runtime.get("preventive_gate_policy", {})
     preventive_counts = {

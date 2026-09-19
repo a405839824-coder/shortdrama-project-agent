@@ -210,6 +210,9 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256, requ
         except (TypeError, ValueError, KeyError, AttributeError) as exc:
             c.exception("typed_input_contracts", exc)
         from performance_checks import eye_contract_faults, listener_reaction_faults
+        world = raw.get('initial_world', {})
+        cast = list(world.get('actors', {}))
+        props = list(world.get('props', {})) + list(world.get('points', {}))
 
         # These are real privately lowered shot fields, not authored PASS tags
         # or a fabricated schema-positive candidate. No whole canonical is made.
@@ -230,12 +233,14 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256, requ
                 # chain and a reaction from every listener; it is not an extra
                 # source of obligations for deterministic planned output.
                 faults = [] if planned_performance else eye_contract_faults(
-                    shot, duration=row['duration'], strict=True, dialogue_rows=dialogue_rows)
+                    shot, duration=row['duration'], strict=True, dialogue_rows=dialogue_rows,
+                    visible_names=cast, non_person_names=props)
                 reactions = [] if planned_performance else listener_reaction_faults(
-                    shot, duration=row['duration'], dialogue_rows=dialogue_rows)
-                findings = [{"code": "E-EXPRESSION-003", "path": f"shots[{index}].actions",
+                    shot, duration=row['duration'], dialogue_rows=dialogue_rows,
+                    visible_names=cast, non_person_names=props)
+                findings = [{"code": "E-VIS-001" if message.startswith('input_mapping') else "E-EXPRESSION-003", "path": f"shots[{index}].actions",
                              "message": message} for message in faults]
-                findings.extend({"code": "E-PERFORMANCE-001", "path": f"shots[{index}].actions",
+                findings.extend({"code": "E-VIS-001" if message.startswith('input_mapping') else "E-PERFORMANCE-001", "path": f"shots[{index}].actions",
                                  "message": message} for message in reactions)
                 windows = copy.deepcopy(traces[row["shot_id"]].get("eye_visibility_ticks", {}))
                 c.add(stage, findings, shot_id=row["shot_id"], visibility=windows,

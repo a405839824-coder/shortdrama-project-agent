@@ -149,14 +149,15 @@ class ProductionInputTests(unittest.TestCase):
                         report["issues"])
         self.assertTrue(any(row["check"] == "required_performance" for row in report["not_checked"]))
 
-    def test_visible_missing_performance_remains_blocked_without_automatic_actions(self):
+    def test_visible_natural_hold_needs_no_automatic_eye_actions(self):
         raw, graph, _ = source_input()
         before = copy.deepcopy(raw)
         report = self.inspect(raw, graph)
-        self.assertFalse(report["ready_for_canonical"])
+        self.assertTrue(report["ready_for_canonical"], report['issues'])
         messages = [row["message"] for row in report["issues"] if row["code"] == "E-EXPRESSION-003"]
-        self.assertTrue(any("眼睑" in message for message in messages))
-        self.assertTrue(any("眨眼" in message for message in messages))
+        # <=0.5.43 required invented eyelid/blink components on this unchanged
+        # fixture. PP-05 checks actual events and leaves naturalness to review.
+        self.assertEqual(messages, [])
         self.assertEqual(raw, before)
 
     def test_legitimate_hidden_eyes_do_not_require_visible_eye_actions(self):
@@ -197,7 +198,7 @@ class ProductionInputTests(unittest.TestCase):
         report = json.loads((folder / "check_coverage.json").read_bytes())
         codes = {row["code"] for row in report["issues"]}
         self.assertIn("project_schema", codes)
-        self.assertIn("E-EXPRESSION-003", codes)
+        self.assertNotIn("E-EXPRESSION-003", codes)  # No invented eye-action quota.
         self.assertIsNone(result["semantic_accuracy_percent"])
 
     def test_legacy_typed_record_keeps_its_original_entry(self):

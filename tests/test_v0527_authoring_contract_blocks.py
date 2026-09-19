@@ -8,7 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'server'), str(ROOT / 'skills/shortdrama-storyboard/scripts')]
 from authoring_contract_blocks import (
-    ContractBlockError, VIDEO_EYE_POLICY, eye_blocks, interior_lighting_blocks,
+    ContractBlockError, VIDEO_EYE_POLICY, CURRENT_VIDEO_EYE_POLICY, eye_blocks, interior_lighting_blocks,
     psychological_safety_suffix, transition_block,
 )
 from shortdrama_mcp.materializer import compile_formal_merged_field, compile_gpt_keyframe_instruction
@@ -38,7 +38,8 @@ def shot(kind='face', audio='none', night=False):
     visibility = 'no_people' if kind == 'object' else 'hidden' if kind in ['back','hands'] else 'visible'
     eye = eye_blocks(subject=None if kind == 'object' else '甲', visibility=visibility,
                      state=state if visibility=='visible' else None,
-                     source_basis='原文明确甲已经睡着。' if kind == 'closed' else None)
+                     source_basis='原文明确甲已经睡着。' if kind == 'closed' else None,
+                     legacy_components=True)  # Preserve original author-fragment replay.
     args = light_args(night)
     if kind == 'object': args['receiving_surfaces'] = ['纸签', '木案']
     elif kind == 'hands': args['receiving_surfaces'] = ['甲的双手', '木案']
@@ -130,7 +131,9 @@ class AuthoringContractBlocksTests(unittest.TestCase):
         self.assertNotIn('眼睑松紧变化',static)
 
     def test_named_focus_satisfies_the_generation_field_not_only_initial_state(self):
-        from performance_checks import eye_contract_faults
+        from functools import partial
+        from performance_checks import eye_contract_faults as current_eye_contract_faults
+        eye_contract_faults = partial(current_eye_contract_faults, legacy_components=True)
         value=shot()
         message='生成限制缺‘眼神自然聚焦’'
         before=copy.deepcopy(value)
@@ -142,11 +145,32 @@ class AuthoringContractBlocksTests(unittest.TestCase):
         # chain. Other failures must remain; the helper cannot invent actions.
         self.assertEqual([x for x in eye_contract_faults(before,duration=4.0) if x!=message],
                          eye_contract_faults(value,duration=4.0))
+        # The historical field-duplication check is not a current action quota.
+        self.assertNotIn(message,current_eye_contract_faults(before,duration=4.0))
+
+    def test_current_default_preserves_natural_state_without_legacy_action_policy(self):
+        from performance_checks import eye_contract_faults
+        current=eye_blocks(subject='甲',visibility='visible',state='natural_open')
+        self.assertEqual(current['generation_limits_append'],CURRENT_VIDEO_EYE_POLICY)
+        historical=eye_blocks(subject='甲',visibility='visible',state='natural_open',legacy_components=True)
+        self.assertEqual(historical['generation_limits_append'],'甲眼神自然聚焦；'+VIDEO_EYE_POLICY)
+        value=shot()
+        value['生成限制']=value['生成限制'].replace(historical['generation_limits_append'],current['generation_limits_append'])
+        value['画面内容']='甲双手静放膝上，双眼自然睁开，目光停在画外乙的袖口。'
+        self.assertEqual(eye_contract_faults(value,duration=4.0),[])
+        formal,static=self.projections(value)
+        self.assertIn(CURRENT_VIDEO_EYE_POLICY.rstrip('。'),formal)
+        self.assertNotIn(CURRENT_VIDEO_EYE_POLICY.rstrip('。'),static)
+        value['画面内容']='甲目光从画外乙的袖口移向画外乙的袖口。'
+        self.assertTrue(eye_contract_faults(value,duration=4.0))
+        value['生成限制']=value['生成限制'].replace('眼部动作按本镜已列事件执行；','眼部动作按本镜已列事件执行，并抬手；')
+        for fn in [validator.project_gpt_keyframe,lambda s:compile_gpt_keyframe_instruction(s,assume_compact=True)]:
+            with self.assertRaisesRegex(ValueError,'keyframe_static_contract_violation'):fn(value)
 
     def test_mixed_visible_open_and_source_closed_eyes_keep_actor_scope(self):
         value=shot('closed')
         value['可见主体']='甲、乙'
-        opened=eye_blocks(subject='乙',visibility='visible',state='natural_open')
+        opened=eye_blocks(subject='乙',visibility='visible',state='natural_open',legacy_components=True)
         value['起始状态']+='乙坐在木椅上。'+opened['initial_state_append']
         value['生成限制']+=opened['generation_limits_append']
         self.assertIn('乙眼神自然聚焦',value['生成限制'])

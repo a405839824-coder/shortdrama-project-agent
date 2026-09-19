@@ -17,6 +17,8 @@ from production_derivation import inspect_derivation
 from production_plan_test_support import with_plan
 from production_input import inspect_production_input
 from shortdrama_mcp.service import StoryboardService
+from shortdrama_mcp.audit_coverage import build_obligations, coverage_context
+from semantic_audit_helpers import synthetic_coverage
 from shortdrama_mcp.production_route import require_current_production, check_borrow_permissions
 from validate_storyboard import validate_project
 from test_efficiency import valid_storyboard
@@ -106,6 +108,12 @@ class RuleClosureTests(unittest.TestCase):
         proof=inspect_derivation(candidate);self.assertTrue(proof['valid'],proof['faults'])
         sub=submission_for(candidate,proof['source_obligations'])
         service=object.__new__(StoryboardService);service._validator_fingerprint='a'*64
+        service._ruleset_fingerprint='b'*64
+        service._runtime_fingerprint='c'*64
+        service._schema_fingerprint='d'*64
+        # Synthetic current declarations do not discharge the separate episode
+        # review IDs tested below; all existing negative assertions remain.
+        sub['coverage']=synthetic_coverage(build_obligations(candidate,coverage_context(service)))
         report={'status':'pass','issues':[],'quality_metrics':{'adjacent_continuity':{
             'expected_pair_count':0,'reviewed_pair_count':0,'ordered_pair_sha256':sub['adjacent_pair_order_sha256'],
             'pair_ids':[],'failed_pair_count':0,'proof_verified':True}}}

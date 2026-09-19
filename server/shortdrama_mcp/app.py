@@ -20,6 +20,7 @@ from .members import MEMBER_CONTRACT, load_registry
 from .external_storage import ExternalProjectStorage
 from .file_io import DEFAULT_BULK_RESPONSE_CHARS, preview_extracted_bulk
 from .formal_delivery import delivery_contract, inspect_formal_delivery
+from .diagnostic_view import diagnostic_page
 from .models import (
     ArtifactReadRange,
     ChangeOperationInput,
@@ -693,6 +694,10 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "可传if_none_match避免重复返回未变化文件。"
             "diagnose_storyboard=true时返回当前分镜只读机器诊断，可按diagnostic_episode_ids筛选；"
             "共享或未定位问题单列，历史证据保留，不签发独立审计结论，不受其他批次待修工单阻止。"
+            "诊断按offset/limit/max_chars分页，必须沿page.next_call读完；"
+            "结构映射、依赖缺证和内容候选问题分别统计，总告警不是内容错误率。"
+            "section='audit_obligations'分页获取当前分镜的逐项独审义务与指纹。"
+            "section='audit_evidence:证书ID'分页读取该精确产物已签证据；历史证据读取不代表当前通过。"
             "section='formal_delivery'实时核验唯一模板、实际文件及签名生产/独审记录；"
             "只有formal_delivery_ready=true才返回正式交付链接并允许计入完成。"
         ),
@@ -716,13 +721,35 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     ) -> ToolResponse:
         namespace = request_namespace(settings)
         trace = WorkflowTrace()
+        if section and section.startswith("audit_evidence:"):
+            from .audit_evidence_view import read_audit_evidence
+            if diagnose_storyboard or diagnostic_episode_ids is not None or bulk_ranges is not None or if_none_match is not None:
+                raise ValueError("audit_evidence cannot be combined with diagnostics, bulk ranges or ETag reads")
+            parts = section.split(":")
+            if len(parts) not in {2, 3} or not parts[1] or (len(parts) == 3 and not parts[2].isdigit()):
+                raise ValueError("audit_evidence_section_invalid")
+            return read_audit_evidence(service, namespace, project_id, artifact_id, parts[1],
+                offset=offset, limit=limit, max_chars=max_chars,
+                detail_index=int(parts[2]) if len(parts) == 3 else None)
+        if section == "audit_obligations":
+            if diagnose_storyboard or diagnostic_episode_ids is not None or bulk_ranges is not None:
+                raise ValueError("audit_obligations cannot be combined with diagnostics or bulk ranges")
+            from .audit_coverage import read_audit_obligations
+            return read_audit_obligations(service, namespace, project_id, artifact_id,
+                offset=offset, limit=limit, max_chars=max_chars)
         if section == "formal_delivery":
             if diagnose_storyboard or diagnostic_episode_ids is not None or bulk_ranges is not None:
                 raise ValueError("formal_delivery cannot be combined with diagnostics or bulk ranges")
             return inspect_formal_delivery(service, namespace, project_id, artifact_id)
         if diagnose_storyboard:
-            return service.diagnose_storyboard_artifact(
+            if bulk_ranges is not None or if_none_match is not None:
+                raise ValueError("diagnostics use page.next_call, not bulk_ranges or if_none_match")
+            diagnostic = service.diagnose_storyboard_artifact(
                 namespace, project_id, artifact_id, diagnostic_episode_ids)
+            return diagnostic_page(diagnostic, section=section, offset=offset,
+                limit=limit, max_chars=max_chars)
+        if section and section.startswith("diagnostic:"):
+            raise ValueError("diagnostic section requires diagnose_storyboard=true")
         if diagnostic_episode_ids is not None:
             raise ValueError("diagnostic_episode_ids requires diagnose_storyboard=true")
         record: dict[str, Any] | None = None
@@ -1123,6 +1150,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         title="审计并记录分镜",
         description=(
             "独立审计已存在的分镜文件时调用。首次或指纹变化后的审计必须提交semantic_audit："
+            "先read_project_artifact(section=audit_obligations)读取完整当前义务与提交合同；"
+            "大批次用coverage_page逐页暂存，再显式finalize全部页，coverage_pending不是审计通过。"
+            "旧schema可用该读取响应提供的版本化evidence_ids封套，仍执行相同校验。"
             "绑定准确canonical哈希、全表镜头数、N-1相邻镜头组数与有序pair清单SHA-256；"
             "空间连续层必须按canonical顺序逐组提交全部pair:左镜->右镜证据，覆盖率必须100%。"
             "禁项与声音层必须按canonical顺序提交每个带对白镜的field:镜头编号.音色证据，"
@@ -1140,7 +1170,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "缓存命中时才可省略semantic_audit。同一安全缓存键重复审计不增加轮次。"
         ),
         annotations=_annotations(read_only=False),
-        meta=meta("正在全表审计…", "审计结果已记录"),
+        meta=meta("正在处理审计证据…", "审计步骤已记录"),
         structured_output=True,
     )
     async def audit_storyboard(
@@ -1153,7 +1183,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         force_machine_recheck: bool = False,
         semantic_audit: SemanticAuditInput | None = None,
     ) -> ToolResponse:
-        return service.audit_storyboard(
+        from .audit_evidence_view import compact_audit_response
+        response = service.audit_storyboard(
             request_namespace(settings),
             project_id=project_id,
             artifact_id=artifact_id,
@@ -1168,6 +1199,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             ),
             request_session_id=_window_session_id(ctx),
         )
+        return compact_audit_response(response)
 
     @server.tool(
         name="complete_task_validation",
