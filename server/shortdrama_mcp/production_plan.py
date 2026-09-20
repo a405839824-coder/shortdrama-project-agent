@@ -8,3 +8,5 @@ assert _spec is not None and _spec.loader is not None
 _module = module_from_spec(_spec)
 _spec.loader.exec_module(_module)
 model_production_contract = _module.model_production_contract
+shot_rhythm_statistics = _module.shot_rhythm_statistics
+shot_policy = _module.shot_policy

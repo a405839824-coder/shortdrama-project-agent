@@ -46,9 +46,9 @@ RULES = (
      ("可见主体", "画面内容", "原文支撑句"), ("可见主体", "画面内容", "原文支撑句"), True),
     ("performance_variation", "表演链", "横向比较整批与相邻镜表演；重复须有叙事依据，不能为差异化编造行为。",
      ("可见主体", "画面内容", "功能类型"), ("画面内容",), True),
-    ("timing_capacity", "镜头节奏", "检查对白动作声音容量。常规≤4秒；4—6秒逐条核对冻结例外、来源、持续内容、估计/实测依据、≤4秒拆法及具体损失、单任务负载与延长段价值；6—8秒仅固定稳定信息阅读且无说话/表演/运镜；>8秒重拆。长对白不自动例外，切机位保持逐字及声音连续。不得把形式填全或估计当实测通过；画面正文无制作时间码。",
+    ("timing_capacity", "镜头节奏", "检查对白动作声音容量。4秒是规划目标；4—6秒含完整短句自然收尾，逐条核对来源、完整表达、真实切点、保留/拆分损益、估计/实测依据及延长段价值，不能强制补表情获取例外；6—8秒仅固定稳定信息阅读且无说话/表演/运镜；>8秒重拆。不按秒数或标点机械切镜；复核实际cut_anchor及候选字符位置，不将估计当词音实测对齐。声画同步事件不重复相加，不统一添加首尾停顿；切机位保持逐字及声音连续。不得把形式填全或估计当实测通过；画面正文无制作时间码。",
      ("时长", "画面内容", "音色", "心理音轨", "环境音效"), ("时长", "画面内容"), False),
-    ("rhythm_transition", "镜头节奏", "核对design.framing_reason/cut_reason与实际信息、关系、表演、动作及容量；中近景+近景约60%为整集软目标，特写另计，不能改标签凑数。多人关系镜按需要建立；正反打无硬配额。固定或单一简单运动须有用途且在执行器能力内，静态GPT不写运镜。",
+    ("rhythm_transition", "镜头节奏", "核对design.framing_reason/cut_reason/cut_anchor与实际信息、关系、表演、动作及容量；中近景+近景约60%为整集软目标，特写另计，不能改标签凑数。多人关系镜按需要建立；正反打无硬配额。固定或单一简单运动须有用途且在执行器能力内，静态GPT不写运镜。",
      ("功能类型", "镜头类型", "转场类型", "切镜/转场提示词", "画面内容"), ("镜头类型", "切镜/转场提示词"), True),
     ("field_ownership", "正式母版单镜执行完整性", "逐字段检查内容归属：画面只写可见行为，机位只写机位，音色只写声音属性；导演解释、心理目的和限制各归指定字段。",
      tuple(COMPACT_SHOT_FIELDS), tuple(COMPACT_SHOT_FIELDS), False),
@@ -58,16 +58,16 @@ RULES = (
      ("画面内容", "音色", "心理音轨", "环境音效"), ("画面内容", "音色", "环境音效"), True),
     ("generation_limits", "禁项与声音", "核对人物/道具/雾化/音乐等限制及否定语义，不能把禁止项当成实际发生的内容。",
      ("生成限制", "可见主体", "画面内容", "环境音效", "环境动态"), ("生成限制", "画面内容"), False),
-    ("coverage_statistics", "统计闭合", "核对本镜的源文覆盖、编号、累计时长及全表顺序统计，不能把未检查当通过。",
+    ("coverage_statistics", "统计闭合", "核对本镜源文覆盖、编号、累计时长及全表顺序；有rhythm_evidence时必须观察整批实际镜数、平均时长、分布和重复切镜理由，检查句尾碎镜、准备/等待模板、凑比例及单镜过载。3—4秒均值和镜数参考不是合格门槛，片段不冒充整集，未检查不能当通过。",
      ("镜头编号", "时长", "累计时长", "覆盖原文", "场景连续性ID"), ("镜头编号", "累计时长", "覆盖原文"), False),
 )
 DESIGN_FIELDS = {
     'camera_visibility': ('framing_reason', 'spatial_anchors'),
-    'state_continuity': ('spatial_anchors', 'cut_reason'),
+    'state_continuity': ('spatial_anchors', 'cut_reason', 'cut_anchor'),
     'grounded_performance': ('performance',),
     'performance_variation': ('performance',),
-    'timing_capacity': ('duration_exception',),
-    'rhythm_transition': ('framing_reason', 'cut_reason'),
+    'timing_capacity': ('duration_exception', 'cut_anchor'),
+    'rhythm_transition': ('framing_reason', 'cut_reason', 'cut_anchor'),
     'sound_consistency': ('performance',),
 }
 
@@ -110,6 +110,21 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
     except (KeyError, TypeError, ValueError):
         designs = {}  # Historical inputs lack a current production design.
         narrative = None
+    # Compute from the actual artifact, not a producer's prewritten statistics.
+    from .production_plan import shot_rhythm_statistics, shot_policy
+    from episode_rules import episode_id
+    labels = {v: k for k, v in shot_policy()['framing'].items()}
+    rhythm_rows = [{'shot_id': sid, 'episode_id': episode_id(shot, storyboard),
+                   'duration_seconds': shot.get('时长'),
+                   'frame': labels.get(shot.get('镜头类型'), shot.get('镜头类型')),
+                   'design': designs.get(sid, {})} for sid, shot in zip(ids, shots)]
+    try:
+        rhythm = shot_rhythm_statistics(rhythm_rows, scope=storyboard.get('prevention_evidence', {}).get('episode_contract', {}).get('scope', 'fragment'))
+    except (TypeError, ValueError):
+        rhythm = [{'status': 'insufficient_evidence', 'reason': 'actual episode timing is unavailable; review artifact fields'}]
+    rhythm_ref = 'batch:shot_rhythm'
+    values[rhythm_ref] = json.dumps(rhythm, ensure_ascii=False, sort_keys=True)
+    field_hashes[rhythm_ref] = stable_json_hash(values[rhythm_ref])
     facts_by_shot = {}
     if narrative:
         source_uses = {u['id']: u['fact_ids'] for u in storyboard.get('prevention_evidence', {}).get('source_decisions', {}).get('uses', [])}
@@ -140,6 +155,10 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
                 row['dependency_fields'][ref] = stable_json_hash(text)
                 row['required_observation_refs'].append(ref)
                 row['planning_evidence'] = {'reference': ref, 'text': text}
+            if index == 0 and rule == 'coverage_statistics':
+                row['dependency_fields'][rhythm_ref] = field_hashes[rhythm_ref]
+                row['required_observation_refs'].append(rhythm_ref)
+                row['rhythm_evidence'] = {'reference': rhythm_ref, 'text': values[rhythm_ref]}
             if rule == 'scene_causality' and narrative:
                 segments = [s for s in narrative['segments'] if sid in s['shot_ids']]
                 shot_facts = facts_by_shot.get(sid, set())
@@ -393,6 +412,8 @@ def _compact_obligation(row: dict[str, Any], neighbor_ids: list[str]) -> dict[st
         result["neighbor_shot_ids"] = neighbor_ids
     if 'planning_evidence' in row:
         result['planning_evidence'] = row['planning_evidence']
+    if 'rhythm_evidence' in row:
+        result['rhythm_evidence'] = row['rhythm_evidence']
     return result
 
 
@@ -436,7 +457,7 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
             "read_contract": {
                 "row_fields": "Use rule_definitions[row.rule_id] for layer, question, dependency fields and required observation fields.",
                 "dependencies": "Expand dependency_fields with row.shot_id, then neighbor_dependency_fields with each row.neighbor_shot_ids (absent means none), using reference_pattern.",
-                "observations": "Expand required_observation_fields with row.shot_id. Also observe planning_evidence.reference when present, quoting its text and judging the actual design against the source and rendered fields. Read actual artifact content and submit literal excerpts plus a separate judgement; definitions alone are not review evidence.",
+                "observations": "Expand required_observation_fields with row.shot_id. Also observe planning_evidence.reference and rhythm_evidence.reference when present, quoting their text and judging the actual design and whole-batch rhythm against the source and rendered fields. Read actual artifact content and submit literal excerpts plus a separate judgement; definitions alone are not review evidence.",
                 "fingerprints": "Return each obligation_id and dependency_sha256 unchanged. Per-field hashes stay server-side; full manifest identity and validation are unchanged.",
                 "consistency": "All pages must have the same manifest_sha256 and rule_definitions_sha256. If either changes, restart at offset=0; never combine versions.",
                 "applicability": "Natural stillness, silent shots and prop-only frames are valid when supported, not omissions. Unresolved checks cannot pass.",

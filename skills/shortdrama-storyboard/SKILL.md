@@ -140,7 +140,7 @@ Retain source/plan changes and all production attempts. `pass` describes only th
 supported checks; insufficient evidence, unsupported capabilities, source meaning
 and natural performance must not be converted into a success percentage.
 
-The current plan is v2 with mandatory `narrative`; read the live
+The current plan is v3 with mandatory `narrative` and grounded `design.cut_anchor`; read the live
 `scene_narrative_policy` and `references/scene_narrative_contract.md`.
 Freeze scene segments, source-backed story time, entry recognition and every fact
 dependency's actual audience delivery or intentional, sourced later payoff.
@@ -432,3 +432,5 @@ Keep evidence concrete: include shot ID, field, source sentence, computed durati
 
 Read `references/shot_design_contract.md` and the live `production_prevention_contract.shot_design_policy` before planning. Freeze each shot's design, real scene anchors, grounded performance and duration exception before rendering. Ordinary shots are at most four seconds; longer shots require the registered per-shot exception. A long line alone is not an exception. Preserve exact dialogue across camera changes. Close-class framing (medium_close/face) is an approximately 60% episode style target, never a forced quota.
 The master keeps A–J in place and adds K (`光影`) with all four labelled lighting values. E omits those lighting paragraphs and the literal `可见主体：` label but preserves names; F retains static lighting and identity. Copy E plus K for video execution. Never paste internal design reasoning into E/F. Old ten-column workbooks remain read-only compatibility inputs, not a current export choice.
+
+0.5.49新生产读取在线v3计划与shot_design v2：4秒目标不触发自动切镜，4—6秒完整短句有独立通道；cut_anchor与备选绑定实际台词/动作，镜数是参考，整批节奏必须独审。沿用同一计时、状态与十一列表格，不输出内部理由。6秒以上对白和未支持运镜/音频能力保持限制。本轮按用户要求未测试，不宣称内容验收或首稿98%。见docs/UPGRADE_0.5.49.md。

@@ -21,7 +21,7 @@
 
 `production_plan` 必须恰好有 `contract`、`context`、`decisions`、`knowledge`、`shots`、`narrative` 六项。
 
-- `contract`：`storyboard-production-plan-v2`；旧v1不再用于当前新生产，不自动补齐缺失信息。
+- `contract`：`storyboard-production-plan-v3`；旧v1/v2不再用于当前新生产，不自动补齐缺失信息。
 - `narrative`：场景时间、切场作用、观众因果交付和有源悬念，见 [scene_narrative_contract.md](scene_narrative_contract.md)。源文事实图必须保留必要触发/获知/决定/结果；源文存在不表示已在分镜中交付。
 - `context`：`rule_registry_sha256`、`template_contract_sha256`、`source_sha256`、`initial_world_sha256`。前两项来自当前状态工具；`source_sha256` 与来源图的 `sources` 一致，源文本实际指纹也必须相符；初始世界指纹为 UTF-8、键排序、无多余空白、保留中文的有限 JSON SHA256。
 - 规则、来源或初始世界变化后，旧计划失效。源图自身的字节哈希由原有请求参数和项目资料哈希另行双重校验，不在图内自指。
@@ -85,3 +85,7 @@
 人物初态 `action_state.expression`与expression动作目标必须从在线 `action_contract.expression_poses`选择可见姿态，不再默认补平静；其余action_state形状保持既有合同。
 `camera.frame`支持wide/medium/medium_close/face/face_detail/hands/object，中近景和近景计入60%观察；实际取景面积及可读性仍须独审。
 当前重放只支持固定机位与镜间换位；单次连续运镜未建模时明确拒绝，不绕过为自由文本。支持多人入画，但模型只检查声明的人体点位，不能冒充像素遮挡验收。
+
+## 0.5.49 自然时长与切点
+
+新生产design必填cut_anchor，全部实际切点及alternative_cuts在重放前核对身份/位置。4—6秒complete_dialogue按实际声音事件与简单表演放行，不强制补动作。整集shot_design_statistics是实际时长/镜数观察；审计首条coverage_statistics必须读取batch:shot_rhythm。完整形状见生成的shot_design_contract.md。旧版alternative_cuts_seconds退役，不把数字组合当自然切点。

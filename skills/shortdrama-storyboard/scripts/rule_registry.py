@@ -176,6 +176,14 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
     if not isinstance(migrations, dict):
         return False
     if kind == 'critical_runtime_policies' and identity == 'production_prevention_policy':
+        migration = migrations.get('shot-rhythm-0549', {})
+        hashes = migration.get(kind, {}).get(identity, {})
+        if (migration.get('basis') == 'user-authorized-shot-rhythm-2026-09-20'
+                and migration.get('legacy_applies_to_current_generation') is False
+                and current.get('shot_design_policy', {}).get('contract') == 'shortdrama-shot-design-v2'
+                and hashes.get('baseline_sha256') == registry_sha256(previous)
+                and hashes.get('current_sha256') == registry_sha256(current)):
+            return True
         migration = migrations.get('scene-causality-0547', {})
         hashes = migration.get(kind, {}).get(identity, {})
         if (migration.get('basis') == 'user-authorized-scene-causality-2026-09-20'
@@ -196,7 +204,7 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
         hashes = migration.get(kind, {}).get(identity, {})
         return (migration.get('basis') == 'user-authorized-shot-design-2026-09-20'
                 and migration.get('legacy_applies_to_current_generation') is False
-                and registry['runtime']['production_prevention_policy'].get('shot_design_policy', {}).get('contract') == 'shortdrama-shot-design-v1'
+                and registry['runtime']['production_prevention_policy'].get('shot_design_policy', {}).get('contract') in {'shortdrama-shot-design-v1', 'shortdrama-shot-design-v2'}
                 and hashes.get('baseline_sha256') == registry_sha256(previous)
                 and hashes.get('current_sha256') == registry_sha256(current))
     if permitted.get(kind) != identity:
@@ -254,7 +262,7 @@ def check_registry_definition(registry, reference_root=None):
     version = registry["runtime_version"]
     revision = registry["plugin_version"]
     production = runtime.get('production_prevention_policy', {})
-    if production.get('contract') != 'storyboard-production-prevention-v1' or production.get('plan_contract') != 'storyboard-production-plan-v2':
+    if production.get('contract') != 'storyboard-production-prevention-v1' or production.get('plan_contract') != 'storyboard-production-plan-v3':
         failures.append('production prevention: required contract missing')
     else:
         wanted = {f'PP-{i:02}' for i in range(1, 14)}
