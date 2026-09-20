@@ -127,6 +127,8 @@ class SourceCompilation:
                     'do initial knowledge and belief/pretence have actual source support',
                     'do director choices preserve the fact and make the whole shot deliverable'],
                 'related_shots': [shot['shot_id'] for shot in plan['shots'] if set(shot['purpose_fact_ids']) & set(use.fact_ids)],
+                'scene_narrative_review': {'required': True, 'plan_sha256': plan_digest(plan['narrative']),
+                    'question': 'Read the authorized source and audience-facing shots separately: are all necessary triggers, receipts, decisions and results represented; is withholding intentional and grounded? Source visibility is not audience delivery.'},
                 'semantic_status': SEMANTIC_STATUS,
             }
         return {"id": "source-decision:" + hashlib.sha256(_json_bytes(payload)).hexdigest(),

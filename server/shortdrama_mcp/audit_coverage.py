@@ -39,6 +39,9 @@ RULES = (
      ("光影", "光源来源", "光源方向", "色温倾向", "环境动态"), ("光影", "光源来源"), True),
     ("state_continuity", "空间连续", "核对本镜起态、站位、门线、道具和相邻镜末态；首镜核对源文起态。",
      ("空间站位描述", "起始状态", "画面内容", "可见主体", "场景连续性ID"), ("空间站位描述", "起始状态", "画面内容"), True),
+    ("scene_causality", "空间连续", "先对照完整授权原文核对事实图是否遗漏触发、获知、决定或结果，再只读观众能看到/听到的分镜：为何切场、时间是否同时、地点是否可辨、行动前因是否实际交付？核对因果上下游的实际镜头及旧集引用；原文有不代表观众已知。短场景、反应、伏笔和有源悬念允许保留，不能强补对白或行走空镜。悬念须有揭示位置，跨批兑现仍待核对；并行两地不共享未来状态，声音桥不授予异地听取。",
+     ("空间站位描述", "起始状态", "画面内容", "心理音轨", "切镜/转场提示词", "原文支撑句"),
+     ("画面内容", "切镜/转场提示词", "原文支撑句"), True),
     ("grounded_performance", "表演链", "核对design.performance的来源、人物、当前刺激与前态是否支持实际可见表情及肢体选择；发言不能默认平静平淡，也不能套统一夸张模板。静止或无人物可成立，不强制眨眼、反应或手势；动作必须在本景别可见。",
      ("可见主体", "画面内容", "原文支撑句"), ("可见主体", "画面内容", "原文支撑句"), True),
     ("performance_variation", "表演链", "横向比较整批与相邻镜表演；重复须有叙事依据，不能为差异化编造行为。",
@@ -103,8 +106,16 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
     try:
         graph = json.loads(storyboard['prevention_evidence']['production_derivation']['source_graph_json'])
         designs = {s['shot_id']: s['design'] for s in graph['production_plan']['shots']}
+        narrative = graph['production_plan'].get('narrative')
     except (KeyError, TypeError, ValueError):
         designs = {}  # Historical inputs lack a current production design.
+        narrative = None
+    facts_by_shot = {}
+    if narrative:
+        source_uses = {u['id']: u['fact_ids'] for u in storyboard.get('prevention_evidence', {}).get('source_decisions', {}).get('uses', [])}
+        facts_by_shot = {s['shot_id']: set(s['purpose_fact_ids']) |
+            {fid for uid in s['source_use_ids'] for fid in source_uses.get(uid, [])}
+            for s in graph['production_plan']['shots']}
     rows = []
     for index, (sid, shot) in enumerate(zip(ids, shots)):
         for rule, layer, question, fields, observed, adjacent in RULES:
@@ -129,6 +140,30 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
                 row['dependency_fields'][ref] = stable_json_hash(text)
                 row['required_observation_refs'].append(ref)
                 row['planning_evidence'] = {'reference': ref, 'text': text}
+            if rule == 'scene_causality' and narrative:
+                segments = [s for s in narrative['segments'] if sid in s['shot_ids']]
+                shot_facts = facts_by_shot.get(sid, set())
+                links = [x for x in narrative['causal_links'] if x['fact_id'] in shot_facts or
+                         x['requires_fact_id'] in shot_facts or sid in (x['establishment_shot_id'], x['reveal_shot_id'])]
+                ref = f'plan:{sid}.scene_causality'
+                planning = {'segments': segments, 'causal_links': links,
+                    'prior_deliveries': [x for x in narrative['prior_deliveries'] if x['id'] in
+                                        {link['prior_delivery_id'] for link in links}]}
+                text = json.dumps(planning, ensure_ascii=False, sort_keys=True)
+                values[ref] = text
+                row['dependency_fields'][ref] = stable_json_hash(text)
+                row['required_observation_refs'].append(ref)
+                row['planning_evidence'] = {'reference': ref, 'text': text}
+                related = {s for segment in segments for s in segment['shot_ids']}
+                related.update(x[k] for x in links for k in ('establishment_shot_id', 'reveal_shot_id') if x[k])
+                involved = {x[k] for x in links for k in ('fact_id', 'requires_fact_id')}
+                related.update(other for other, facts in facts_by_shot.items() if facts & involved)
+                for other in (other for other in ids if other in related):
+                    for field in ('画面内容', '起始状态', '原文支撑句'):
+                        dep = f'field:{other}.{field}'
+                        row['dependency_fields'][dep] = field_hashes[dep]
+                        if dep not in row['required_observation_refs']:
+                            row['required_observation_refs'].append(dep)
             # There is no previous-shot obligation on the first shot. The state
             # check itself still applies to its own source-defined opening.
             row["dependency_sha256"] = stable_json_hash({

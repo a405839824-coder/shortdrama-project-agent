@@ -1020,6 +1020,11 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
         first_view = _view(world, cam, row["scene_id"])
         try:
             fields, staging = _fields(world, row, cam, first_view, sources)
+            if sources.get('production_plan') and row['transition']['relation'] != 'continuous':
+                # Project only place/visible identity into the editing field;
+                # the causal reasoning remains in the internal frozen plan.
+                fields.update(transition_block(method='hard_cut',
+                    destination_place=world['scenes'][row['scene_id']]['label']))
         except ContractBlockError as exc:
             raise ProductionDecisionError(path + ".initial_contract_blocks", str(exc)) from exc
         visible_current_paper_refs = []

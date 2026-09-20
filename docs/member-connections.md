@@ -1,5 +1,7 @@
 # 小团队共用 Google 的成员连接方案
 
+0.5.47生产补充：管理员与员工共用服务端场景因果合同。新生产读取`production_prevention_contract.scene_narrative_policy`并冻结v2计划；服务端部署不证明员工旧窗口已经按该流程完成实际生产。本次未运行员工验收。
+
 适用版本：0.5.30。启用开关默认关闭；不能把代码检查通过或代码部署成功当成员工已接入。
 
 员工各自使用自己的 ChatGPT，授权时可以选择同一个 Google。管理员为每位成员建立一个独立的 Auth0 confidential OAuth application，将它的 Client ID 和 Client Secret 只配置到该成员自己的 ChatGPT 插件连接。你的管理员连接使用另一套凭据。服务端按签名 access token 的 `iss + azp` 和允许的 `sub` 查找成员，再决定角色及项目空间。

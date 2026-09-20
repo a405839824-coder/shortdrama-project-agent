@@ -11420,6 +11420,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             candidate, _identity = _prepare_compact_storyboard_for_commit(storyboard)
             _assert_r10_spc1_output_contract(candidate)
             self._require_current_production(candidate, work_order=work_order, scope_kind=scope_kind,
+                                       load_artifact=lambda aid: self.store.get_artifact(namespace, project_id, aid)[1].read_bytes(),
                                        workbook_migration=workbook_migration,
                                        source_kind=str((self._selected_dialogue_source_entry(hub) or {}).get('source_role') or '').removeprefix('source:'),
                                        borrow_permissions=self._project_borrow_permissions(namespace, project_id))
@@ -20878,6 +20879,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "workbook_source_atoms_sha256": plan["proof"]["atom_sha256"],
             })
         self._require_current_production(storyboard, work_order=work_order_snapshot, scope_kind='full',
+                                   load_artifact=lambda aid: self.store.get_artifact(namespace, project_id, aid)[1].read_bytes(),
                                    workbook_migration=workbook_migration,
                                    source_kind=str((self._selected_dialogue_source_entry(hub_snapshot) or {}).get('source_role') or '').removeprefix('source:'),
                                    borrow_permissions=self._project_borrow_permissions(namespace, project_id))

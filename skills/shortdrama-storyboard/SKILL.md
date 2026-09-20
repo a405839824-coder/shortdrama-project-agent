@@ -140,6 +140,18 @@ Retain source/plan changes and all production attempts. `pass` describes only th
 supported checks; insufficient evidence, unsupported capabilities, source meaning
 and natural performance must not be converted into a success percentage.
 
+The current plan is v2 with mandatory `narrative`; read the live
+`scene_narrative_policy` and `references/scene_narrative_contract.md`.
+Freeze scene segments, source-backed story time, entry recognition and every fact
+dependency's actual audience delivery or intentional, sourced later payoff.
+Do not infer audience knowledge from the novel, invent causal bridges, or force
+every brief reaction/setup to repeat a full dramatic arc. Read the complete source
+first, then read only the audience-facing shots to detect compression gaps.
+Prior-episode knowledge needs same-project historical canonical references;
+the server checks exact artifact bytes and quoted fields. Future payoffs remain
+pending. Parallel scenes cannot read future actor/prop/scene state; J/L audio
+overlaps and flashback replay are not supported by this renderer.
+
 For new storyboards within the supported physical model, read `references/source_decisions.md`,
 `references/production_decisions.md`, and `references/production_prevention.md`. Use the
 `production-decisions-v1` entry. In MCP, read `references/production_authoring_request.md`

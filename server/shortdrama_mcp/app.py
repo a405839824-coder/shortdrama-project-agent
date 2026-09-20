@@ -151,6 +151,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "新写分镜必须遵守R10-SPC-1：EP##-###编号、单集累计重置；画面内容不写数字制作时间标记，计时只保留在内部绑定。"
             "先读取get_agent_status返回的field_content_contract；27字段只能写各自职责内容，音色按11个固定标签填写。"
             "新生产还须读取production_prevention_contract，在独立冻结来源图中登记production_plan，绑定决定依据、人物知情、整镜交付及当前规则指纹；未知不能记为通过。"
+            "当前production_plan为v2，另须冻结narrative：逐场时间与切场依据、实际入场识别、全部事实因果边的观众交付或有源悬念；同时异地按剧情时间核对，旧集已知须在线读取实际分镜依据。不能补造前因或把来源引用当成已呈现。"
             "新稿先通过production-authoring-request-v1提交来源与结构化决定；机位、初态、光影复用同一世界与拍摄决定。"
             "必须读取production_prevention_contract.shot_design_policy：常规单镜≤4秒，长镜逐条提交冻结例外，台词长不自动豁免；近景类约60%为软目标。"
             "冻结每镜design的景别切换依据、真实空间参照、表演与音色选择；人物表情不默认补平静，空间按画面左右中与参照物定位。"

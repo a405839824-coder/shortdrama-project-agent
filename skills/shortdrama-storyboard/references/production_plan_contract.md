@@ -19,9 +19,10 @@
 
 ## 顶层结构
 
-`production_plan` 必须恰好有 `contract`、`context`、`decisions`、`knowledge`、`shots` 五项。
+`production_plan` 必须恰好有 `contract`、`context`、`decisions`、`knowledge`、`shots`、`narrative` 六项。
 
-- `contract`：`storyboard-production-plan-v1`。
+- `contract`：`storyboard-production-plan-v2`；旧v1不再用于当前新生产，不自动补齐缺失信息。
+- `narrative`：场景时间、切场作用、观众因果交付和有源悬念，见 [scene_narrative_contract.md](scene_narrative_contract.md)。源文事实图必须保留必要触发/获知/决定/结果；源文存在不表示已在分镜中交付。
 - `context`：`rule_registry_sha256`、`template_contract_sha256`、`source_sha256`、`initial_world_sha256`。前两项来自当前状态工具；`source_sha256` 与来源图的 `sources` 一致，源文本实际指纹也必须相符；初始世界指纹为 UTF-8、键排序、无多余空白、保留中文的有限 JSON SHA256。
 - 规则、来源或初始世界变化后，旧计划失效。源图自身的字节哈希由原有请求参数和项目资料哈希另行双重校验，不在图内自指。
 
@@ -51,7 +52,7 @@
 - `uses`：每个真实动作恰好一项 `{action_id, actor, fact_ids, stance, evidence_fact_ids}`；来源动作涉及的事实不能从这里删掉。`known` 要求有已知事实依据；`reported` 要求已经通过实际听取事件收到该信息；`suspected`、`mistaken`、`pretended` 要求非空事实与证据，仍须独立核对；`narrator` 仅用于无场内角色的客观旁白；`not_applicable` 只能对应不使用事实的动作。
 
 检查采用实际事件顺序，同一时刻先完成听取，再检查依赖动作。听到某种说法只登记为已收到信息，不自动升级为事实已经证实；猜测、误解和伪装也不变为世界真相。不强制自然眨眼或无信息动作借用剧情事实。
-非线性重排或同一事件重新取景的认知回放需要故事时间模型，当前新增计划入口报告 `not_supported`；不把连续继承规则硬套成已经正确。
+支持状态独立的同时异地场景，实际获知按narrative的剧情时间计量。倒叙、非线性重排或同一事件重新取景的认知回放仍报告 `not_supported`；不把有限平行剪辑能力当完整时间旅行模型。
 
 ## 整镜交付 shots
 
