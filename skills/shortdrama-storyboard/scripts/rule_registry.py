@@ -51,6 +51,13 @@ def render_views(registry):
         result["field_content_contract.md"] = render_field_contract(runtime["field_content_policy"])
     if "production_prevention_policy" in runtime:
         result["production_prevention_contract.md"] = render_production_contract(runtime["production_prevention_policy"])
+        design = runtime['production_prevention_policy'].get('shot_design_policy')
+        if design:
+            result['shot_design_contract.md'] = '\n'.join([
+                '# 单镜规划与展示合同', '', '由 rule_registry.json 生成；不得单独编辑。', '',
+                '合同：' + design['contract'], '', *['- ' + x for x in design['instructions']], '',
+                '## 结构与数值', '', '```json', json.dumps({k:v for k,v in design.items() if k != 'instructions'}, ensure_ascii=False, indent=2), '```', '',
+            ])
     if "workflow_integrity_policy" in runtime:
         policy = runtime["workflow_integrity_policy"]
         result["workflow_integrity_contract.md"] = "\n".join([
@@ -149,7 +156,7 @@ def _unique(rows, field, label, failures):
 
 
 def _historical_migration_matches(registry, kind, identity, previous, current):
-    """Allow only the reviewed eye-policy transition, with both sides pinned.
+    """Allow only named reviewed transitions, with both sides pinned.
 
     The historical baseline remains immutable. This is not an arbitrary
     registry-authored waiver: every other historical rule/error stays exact.
@@ -158,10 +165,25 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
         'atomic_semantic_definitions': 'AR-R10-EXPR-003',
         'error_semantic_definitions': 'E-EXPRESSION-003',
     }
-    if permitted.get(kind) != identity:
-        return False
     migrations = registry.get('historical_rule_migrations', {})
-    if not isinstance(migrations, dict) or set(migrations) != {'eye-event-applicability-v1'}:
+    if not isinstance(migrations, dict):
+        return False
+    reviewed = {
+        'atomic_semantic_definitions': {'AR-R10-GLOBAL-004', 'AR-R10-TEMPLATE-001', 'AR-R10-BATCH-001',
+            'AR-R10-PG1-017', 'AR-R10-PG1-028', 'AR-R10-FIELD-001', 'AR-R10-EPISODE-006'},
+        'error_semantic_definitions': {'E-STAT-001', 'E-SEEDANCE-VERSION-001', 'E-DUPLICATE-GENERATION-001', 'E-EPISODE-RHYTHM-001'},
+        'critical_runtime_policies': {'field_content_policy', 'production_prevention_policy'},
+        'episode_policy': {'episode_rule_policy'},
+    }
+    if identity in reviewed.get(kind, set()):
+        migration = migrations.get('shot-design-0546', {})
+        hashes = migration.get(kind, {}).get(identity, {})
+        return (migration.get('basis') == 'user-authorized-shot-design-2026-09-20'
+                and migration.get('legacy_applies_to_current_generation') is False
+                and registry['runtime']['production_prevention_policy'].get('shot_design_policy', {}).get('contract') == 'shortdrama-shot-design-v1'
+                and hashes.get('baseline_sha256') == registry_sha256(previous)
+                and hashes.get('current_sha256') == registry_sha256(current))
+    if permitted.get(kind) != identity:
         return False
     migration = migrations['eye-event-applicability-v1']
     if (not isinstance(migration, dict) or not migration.get('reason')
@@ -190,10 +212,13 @@ def check_registry_definition(registry, reference_root=None):
         if missing: failures.append('historical rule preservation: missing '+', '.join(sorted(missing)))
         if [s['number'] for s in baseline['master_sections']]!=list(range(149)):
             failures.append('historical baseline: complete 0..148 source chapter mapping required')
-        if registry.get('runtime',{}).get('episode_rule_policy') != baseline['episode_policy']:
+        if (registry.get('runtime',{}).get('episode_rule_policy') != baseline['episode_policy'] and not
+                _historical_migration_matches(registry, 'episode_policy', 'episode_rule_policy',
+                    baseline['episode_policy'], registry['runtime']['episode_rule_policy'])):
             failures.append('historical baseline: episode thresholds, scope or retirement decisions changed without migration')
         for key,expected in baseline.get('critical_runtime_policies',{}).items():
-            if registry.get('runtime',{}).get(key) != expected:
+            if (registry.get('runtime',{}).get(key) != expected and not
+                    _historical_migration_matches(registry, 'critical_runtime_policies', key, expected, registry['runtime'].get(key))):
                 failures.append('historical baseline: critical runtime policy changed without migration: '+key)
         for row in registry.get('atomic_rules', []):
             expected = baseline.get('atomic_semantic_definitions', {}).get(row.get('rule_id'))

@@ -14,10 +14,12 @@ from openpyxl import load_workbook
 
 from .canonical import normalize_json, stable_json_hash
 from .file_io import (
-    CANONICAL_SIDECAR_SHEET, MOTHER_TEMPLATE_COLUMNS,
+    CANONICAL_SIDECAR_SHEET,
     _normalized_mother_headers, _parse_function_scene_cell, _validate_zip_archive,
 )
-from .materializer import COMPACT_SHOT_FIELDS, FORMAL_MERGED_ATOMIC_FIELDS
+from .materializer import (COMPACT_SHOT_FIELDS,
+    LEGACY_MOTHER_TEMPLATE_COLUMNS as MOTHER_TEMPLATE_COLUMNS,
+    LEGACY_FORMAL_MERGED_ATOMIC_FIELDS as FORMAL_MERGED_ATOMIC_FIELDS)
 
 WORKBOOK_MIGRATION_TARGET = "workbook-canonical-v1"
 WORKBOOK_MIGRATION_PHASE = "legacy_workbook_canonical_migration"

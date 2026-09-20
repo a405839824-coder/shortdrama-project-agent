@@ -167,7 +167,7 @@ def _inspect_episodes(obj, shots=None, *, timing=None, rules=None, production_ve
         for limit,name,threshold in [(1,'short_under_1_percent','short_under_1_percent'),(2,'short_under_2_percent','short_under_2_percent')]:
             count=sum(d<limit for _,_,d in rows)
             rate=Decimal(count)*100/len(rows);details[name]=float(rate)
-            if complete and rate<seconds(p[threshold]):
+            if complete and p.get('short_shot_enforcement', 'minimum') == 'minimum' and rate<seconds(p[threshold]):
                 fault('E-EPISODE-RHYTHM-001','episode:'+ep,f'{name}={rate} below {p[threshold]}; only source-grounded functional cuts are valid')
         spans=[]
         for u in utterances:
@@ -377,7 +377,7 @@ def inspect_planned_budget(raw):
             if total>seconds(p['max_seconds']) or complete and total<seconds(p['min_seconds']):
                 findings.append({'code':'E-EPISODE-DURATION-001','path':'episode:'+ep,
                     'message':f'planned {total}s outside applicable episode budget; replan before prose rendering'})
-            if complete:
+            if complete and p.get('short_shot_enforcement', 'minimum') == 'minimum':
                 for n,key in [(1,'short_under_1_percent'),(2,'short_under_2_percent')]:
                     if sum(d<n for d in durations[ep])*100 < seconds(p[key])*len(durations[ep]):
                         findings.append({'code':'E-EPISODE-RHYTHM-001','path':'episode:'+ep,
@@ -410,7 +410,7 @@ def review_obligations(obj):
         sids=[str(s.get('镜头编号') or s.get('shot_id')) for s in shots]
         checks=[('opening_face','机位可见性','核对核心角色确在原文场景，开头3秒面部可辨且占画面至少30%；眼部点可见不是面积证据。',['机位','起始状态']),
                 ('beat_semantics','源文对白','逐项核对开篇、推进、末尾钩子或终局闭合、连续道具动作最长22秒和承接；排除同义改写冒充新推进。',['画面内容']),
-                ('short_function','源文对白','逐个核对短镜有来源和叙事功能，重复空镜或重复反应不得凑比例；对白分布和无对白空档符合源文。',['画面内容','心理音轨']),
+                ('short_function','源文对白','逐个核对短镜有来源和叙事功能；不执行极短镜最低配额。按实际景别统计中近景及近景约60%的软目标，特写单列；偏差核对剧情理由，不得凑镜。对白连续拆镜须逐字拼回并核对声音连续、机位变化和演员状态。',['镜头类型','画面内容','心理音轨','切镜/转场提示词']),
                 ('source_budget','源文对白','逐来源核对plot/montage/detail/description分类和细节合理基准时长；导演选择不能发明事实。',['画面内容','原文支撑句'])]
         if any(r.get('target_episode')==eid for r in evidence.get('borrow_ledger',[]) if isinstance(r,dict)):
             checks.append(('borrowing','源文对白','核对真实借用授权原件、来源所属集、偿还及后续边界；检查连三集或末三集限制的项目适用依据，不能仅凭候选人自报授权。',['画面内容','原文支撑句']))

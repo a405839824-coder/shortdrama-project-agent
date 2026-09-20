@@ -1,4 +1,4 @@
-"""One declared 0.5.45 transfer, before a server can accept requests.
+"""One declared release transfer, before a server can accept requests.
 
 This never executes persistent-volume code. The operator must freeze the old
 writer before arming a signed manifest. A consumed manifest is never replayed:
@@ -17,8 +17,9 @@ import sqlite3
 import tarfile
 import tempfile
 
-CONTRACT = "library-runtime-transfer-0545-v1"
-DIRECTORY = ".upgrade-0545"
+TARGET_VERSION = "0.5.46"
+CONTRACT = "library-runtime-transfer-0546-v1"
+DIRECTORY = ".upgrade-0546"
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 MAX_FILES = 100_000
@@ -94,7 +95,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str) -> dict | None
     if (transfer / "manifest.consumed.json").exists():
         raise ValueError("startup_restore_already_consumed")
     manifest = json.loads(marker.read_text(encoding="utf-8"))
-    if (manifest.get("contract") != CONTRACT or manifest.get("target_version") != version or version != "0.5.45"
+    if (manifest.get("contract") != CONTRACT or manifest.get("target_version") != version or version != TARGET_VERSION
             or manifest.get("runtime_root") != str(runtime_root)
             or manifest.get("data_dir") != str(data_dir)
             or manifest.get("old_writer_frozen") is not True):
@@ -115,7 +116,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str) -> dict | None
     if not isinstance(expected, dict) or not 1 <= len(expected) <= MAX_FILES or not any(n.endswith("/hub.json") for n in expected):
         raise ValueError("startup_restore_empty_or_invalid_manifest")
     runtime_root.parent.mkdir(parents=True, exist_ok=True)
-    stage = Path(tempfile.mkdtemp(prefix=".shortdrama-restore-0545-", dir=runtime_root.parent))
+    stage = Path(tempfile.mkdtemp(prefix=".shortdrama-restore-", dir=runtime_root.parent))
     try:
         seen, expanded = set(), 0
         with tarfile.open(archive_path, "r:gz") as archive:

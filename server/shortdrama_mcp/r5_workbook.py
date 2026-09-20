@@ -16,7 +16,7 @@ from .picture_presentation import display_picture
 
 MASTER_NAME = "正式分镜母版"
 GUIDE_NAME = "使用与来源"
-WIDTHS = (15, 9, 11, 30, 150, 105, 52, 27, 30, 66)
+WIDTHS = (15, 9, 11, 30, 150, 105, 52, 27, 30, 66, 70)
 
 
 def _label_value(label, value):
@@ -39,7 +39,8 @@ def _episode_name(shot):
     return f"{safe or '未标集'}_逐镜阅读"
 
 
-def reading_matrices(storyboard, formal_rows):
+def reading_matrices(storyboard, formal_rows, *, _legacy_layout=False):
+    column_count = "十" if _legacy_layout else "十一"
     groups = OrderedDict()
     for shot, projected in zip(storyboard.get("shots", []), formal_rows, strict=True):
         groups.setdefault(_episode_name(shot), []).append((shot, projected))
@@ -48,12 +49,12 @@ def reading_matrices(storyboard, formal_rows):
         rows = [_span(name.replace("_逐镜阅读", "") + "｜完整分镜脚本"),
                 _span(f"{len(items)}镜｜{sum(float(s.get('时长') or 0) for s, _ in items):g}秒"),
                 _span("审计结论以“00_范围与审计”页绑定的当前版本记录为准。"),
-                _span(f"可复制的十列母版见“{MASTER_NAME}”页；累计时长按分集计算。"),
+                _span(f"可复制的{column_count}列母版见“{MASTER_NAME}”页；累计时长按分集计算。"),
                 _span("")]
         for shot, projected in items:
             rows.append(_span(f"{shot['镜头编号']}　{shot['时长']}s / 累计 {shot['累计时长']}s　｜　{shot.get('功能类型', '')}"))
             rows.append(_label_value("场景连续性ID", shot.get("场景连续性ID")))
-            rows.append(_label_value("景别／可见主体", f"{shot.get('镜头类型', '')}｜{shot.get('可见主体', '')}"))
+            rows.append(_label_value("景别／可见主体" if _legacy_layout else "景别与人物", f"{shot.get('镜头类型', '')}｜{shot.get('可见主体', '')}"))
             for field in ("空间站位描述", "起始状态", "机位", "运镜方式"):
                 rows.append(_label_value(field, shot.get(field)))
             picture = display_picture(shot)
@@ -92,11 +93,12 @@ def reading_matrices(storyboard, formal_rows):
         sheets[name] = rows
     sheets[GUIDE_NAME] = [
         _span("使用与来源"),
-        _label_value("正式母版", "十列固定；逐镜阅读页与正式母版、GPT关键帧使用同一份分镜数据。"),
+        _label_value("正式母版", f"{column_count}列固定；逐镜阅读页与正式母版、GPT关键帧使用同一份分镜数据。"),
         _label_value("画面内容", "自然动作与准确对白；制作时间标记保存在内部绑定中，时长和累计时长列继续保留。"),
         _label_value("审计状态", "查看“00_范围与审计”页；生成或导出完成不表示独立审计通过。"),
         _label_value("原文来源", "逐镜核对“覆盖原文”“原文依据类型”“原文支撑句”；本页不补造缺失来源。"),
-        _label_value("模板", "用户提供的第36—37集R5模板结构；原件及原文均不改写。"),
+        _label_value("模板", "用户提供的第36—37集R5模板结构；原件及原文均不改写。" if _legacy_layout else
+                     "R5模板按授权升级：原A—J列顺序保留，K列独立光影；E列不再拼接光影或显示可见主体标签。"),
     ]
     return sheets
 

@@ -116,7 +116,7 @@
       "approval_policy": "required_before_mutation",
       "group": "变更管理",
       "operation": "change_impact",
-      "output": "原文、节拍、认知、场景状态、27字段单镜母版、声音、十列投影和统计影响矩阵",
+      "output": "原文、节拍、认知、场景状态、27字段单镜母版、声音、十一列投影和统计影响矩阵",
       "status": "supported"
     },
     {
@@ -130,7 +130,7 @@
       "approval_policy": "explicit_execute",
       "group": "分镜工作流",
       "operation": "storyboard_create",
-      "output": "R10.1 compact 27字段正式分镜、章节/原文映射、完整眼部表演链、相邻镜头N-1逐组连续性证明、公共场景人物与环境音生态，以及精确十列XLSX；逐镜生成限制和GPT投影显式9:16竖屏，GPT仅保留单帧可见语义，四项光影按场景真实来源闭合，普通室内清透且门窗状态锁定，室外氛围光仅在真实介质与光源成立时启用，THG-01至THG-17通过；正式分镜母版是唯一单镜执行母版，生产XLSX审计状态为PENDING_AUDIT",
+      "output": "R10.1 compact 27字段正式分镜、章节/原文映射、完整眼部表演链、相邻镜头N-1逐组连续性证明、公共场景人物与环境音生态，以及精确十一列XLSX；逐镜生成限制和GPT投影显式9:16竖屏，GPT仅保留单帧可见语义，四项光影按场景真实来源闭合，普通室内清透且门窗状态锁定，室外氛围光仅在真实介质与光源成立时启用，THG-01至THG-17通过；正式分镜母版是唯一单镜执行母版，生产XLSX审计状态为PENDING_AUDIT",
       "status": "supported"
     },
     {
@@ -151,7 +151,7 @@
       "approval_policy": "read_only",
       "group": "审计闭环",
       "operation": "storyboard_audit",
-      "output": "任意认证窗口以独立审计authority按semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting对精确compact canonical提交八层语义证据；绑定镜头数、N-1相邻对数量和有序pair SHA-256，空间层按序覆盖全部pair:left->right，表演层复核眼部链，禁项与声音层按序覆盖每个带对白镜的field:镜头编号.音色，源文对白层按Source Ledger顺序覆盖每个source-unit:单元ID并按序覆盖事实转化对白目标镜，机位可见性层按canonical与固定字段顺序覆盖每镜的光影、光源来源、光源方向、色温倾向，并验证普通室内清透/门窗状态或有依据的局部介质与室外氛围光；服务端与源文对白v6权威、新鲜机器N-1证明、THG-15音色、THG-16对白转化及THG-17静帧光影门禁交叉校验并创建不可变签名audit overlay新工件/后继工作簿；原生产XLSX和已消费root不就地改写，审计过程禁止再生成内容",
+      "output": "任意认证窗口以独立审计authority按semantic-audit-v9-server-owned-obligation-coverage对精确compact canonical提交八层语义证据；绑定镜头数、N-1相邻对数量和有序pair SHA-256，空间层按序覆盖全部pair:left->right，表演层复核眼部链，禁项与声音层按序覆盖每个带对白镜的field:镜头编号.音色，源文对白层按Source Ledger顺序覆盖每个source-unit:单元ID并按序覆盖事实转化对白目标镜，机位可见性层按canonical与固定字段顺序覆盖每镜的光影、光源来源、光源方向、色温倾向，并验证普通室内清透/门窗状态或有依据的局部介质与室外氛围光；服务端与源文对白v6权威、新鲜机器N-1证明、THG-15音色、THG-16对白转化及THG-17静帧光影门禁交叉校验并创建不可变签名audit overlay新工件/后继工作簿；原生产XLSX和已消费root不就地改写，审计过程禁止再生成内容",
       "status": "supported"
     },
     {
@@ -327,7 +327,7 @@
     "cumulative_time_scope": "episode_local",
     "display_shot_id_pattern": "^EP\\d{2}-\\d{3}$",
     "export_only_projection": "GPT关键帧生成指令",
-    "eye_performance_contract": "face_visible_2s_requires_timed_gaze_focus_eyelid_blink_or_justified_no_blink_end_gaze_and_static_open_eye_state",
+    "eye_performance_contract": "actual_authored_events_only; no compulsory blink_or_gesture_quota; independent_grounded_performance_review",
     "forbid_new_writes": [
       "人物调度",
       "动作与表演",
@@ -341,21 +341,39 @@
     ],
     "legacy_ledger_replay_checkpoint": "hmac_signed_committed_migration_journal_plus_before_after_ledger_cas",
     "legacy_policy": "read_only_migration_to_compact_successor",
-    "mother_template_column_count": 10,
+    "mother_template_column_count": 11,
     "output_contract": "R10-SPC-1",
-    "plugin_version": "0.5.45",
+    "plugin_version": "0.5.46",
     "production_audit_status": "PENDING_AUDIT",
     "required_per_shot_aspect_phrase": "9:16竖屏",
     "schema_version": "R10.1",
     "seedance_25_timeline_stage_count": 3,
-    "semantic_audit_contract_version": "semantic-audit-v8-adjacent-continuity-structured-voice-conversation-t2i-indoor-lighting",
-    "single_execution_master": "正式分镜母版",
+    "semantic_audit_contract_version": "semantic-audit-v9-server-owned-obligation-coverage",
+    "single_execution_master": "正式分镜母版E列及同镜K列光影",
     "source_dialogue_authority": "server_registered_source_payload_sha_hub_authority_entry_and_artifact_metadata_role_cross_binding",
     "source_dialogue_grammar_version": "source-dialogue-closed-grammar-v6.3",
     "source_dialogue_parser_version": "source-dialogue-authority-v6",
     "t2i_lighting_contract": "static_observable_single_frame_semantics_plus_scene_grounded_light_source_direction_effect_indoor_clarity_outdoor_atmosphere_split_and_four_field_audit_evidence_v2",
     "template_hard_gates": "THG-01..THG-17",
-    "voice_template_contract": "fixed_voice_template_v1_in_音色_with_all_dialogue_shots_field_evidence_in_audio_audit_layer"
+    "voice_template_contract": "fixed_voice_template_v1_in_音色_with_all_dialogue_shots_field_evidence_in_audio_audit_layer",
+    "mother_template_columns": [
+      "分镜序号",
+      "时长",
+      "累计时长",
+      "功能类型/场景连续性ID",
+      "正式分镜母版",
+      "GPT关键帧生成指令",
+      "参考图锚定",
+      "覆盖原文",
+      "原文依据类型",
+      "原文支撑句",
+      "光影"
+    ],
+    "projection_contract": "shortdrama-projector/0.5.46",
+    "formal_master_lighting": false,
+    "lighting_column": "K:光影",
+    "formal_visible_subject_label": false,
+    "lighting_projection": "四项内部数据投影至K列和GPT；E列不含光影段落"
   },
   "content_storage_architecture": {
     "historical_byte_policy": "preserve_every_record_byte_in_library_snapshot_including_the_eleven_handoff_chains",
@@ -602,8 +620,6 @@
     "advance_gap_max_seconds": 25,
     "ending_window_seconds": 12,
     "dialogue_min_percent": 35,
-    "short_under_1_percent": 8,
-    "short_under_2_percent": 15,
     "carryover_max_shots": 2,
     "carryover_max_seconds": 5,
     "montage_shot_percent_max": 20,
@@ -637,12 +653,87 @@
       "series_7200_seconds": "project-specific historical target; no global total",
       "complexity_score_3": "typed action resources, state transitions and camera constraints; engine calibration still required",
       "forced_reaction_blinks_or_holds": "actual events and justified concurrent timing only",
-      "visible_three_timecodes": "internal event clock; no visible numeric picture timecodes"
+      "visible_three_timecodes": "internal event clock; no visible numeric picture timecodes",
+      "short_shot_minimum_quotas": "原<1秒≥8%、<2秒≥15%退出当前生成；改为来源驱动的统计观察，2026-09-20用户授权"
     },
     "source_refs": [
       "S10 lines510-517/1192/1347",
       "S01 chapters18/19/80/85",
       "latest user requested 90–180; audit correction authorized 2026-09-14"
+    ],
+    "short_shot_enforcement": "observation_only"
+  },
+  "shot_design_policy": {
+    "contract": "shortdrama-shot-design-v1",
+    "normal_max_seconds": 4,
+    "dynamic_max_seconds": 6,
+    "reading_max_seconds": 8,
+    "close_class_target_percent": 60,
+    "close_class_frames": [
+      "medium_close",
+      "face"
+    ],
+    "framing": {
+      "wide": "宽景",
+      "medium": "中景",
+      "medium_close": "中近景",
+      "face": "面部近景",
+      "face_detail": "面部特写",
+      "hands": "手部特写",
+      "object": "物件特写"
+    },
+    "style_enforcement": "advisory_with_grounded_review; never a shot quota",
+    "exception_kinds": {
+      "emotional_change": "必须同画面持续看见有依据的关键情绪变化",
+      "simple_action": "一个简单动作在正常速度下连续闭合",
+      "meaningful_wait": "等待本身传递必要剧情，具有对象和可见起止",
+      "continuous_reveal": "一次简单连续揭示不可替代的关系；当前固定机位重放不支持，必须重拆",
+      "information_reading": "稳定清晰且确需整体阅读的有源信息"
+    },
+    "complex_actions": [
+      "transfer",
+      "cross_passage",
+      "contact_actor",
+      "assist_stand",
+      "fall",
+      "dress_actor",
+      "undress_actor",
+      "release_binding",
+      "scene_light"
+    ],
+    "design_shape": {
+      "framing_reason": "具体景别与本镜信息/表演/关系/动作的依据",
+      "cut_reason": "具体切换目的；首镜说明首次呈现依据",
+      "spatial_anchors": "{每个首帧实际入画人物/道具: 已登记且有来源/设定依据的场景point名称}",
+      "performance": "[{actor,fact_ids,stimulus,visible_choice,gesture_choice,voice_choice}]；覆盖实际入画人物和所有说话者；无人物时[]",
+      "duration_exception": "null或{kind,fact_ids,continuous_content,required_seconds,timing_basis,measurement:estimate|measured,alternative_cuts_seconds,alternative_loss,after_four,complexity}"
+    },
+    "output": {
+      "canonical_fields": 27,
+      "visible_columns": 11,
+      "lighting_column": "K:光影",
+      "formal_lighting": false,
+      "formal_visible_subject_label": false,
+      "keyframe_lighting_fields": 4
+    },
+    "instructions": [
+      "先完整读取原文与锁定设定，再按事实、知情、世界状态、当前刺激、镜头任务、景别机位、声画容量关联规划；缺依据保持未知，不以导演选择补造事实。",
+      "AI仿真人常规单镜≤4秒；2—4秒是对白规划参考，不是最低时长。反应/插入/关系镜按真实信息需求选时长，不强行每4秒切一次，也不设置小于1秒或2秒的最低镜数比例。",
+      "中近景与近景约占整集镜数60%，优先用于说话人物；特写单列不并入近景类。关系交代、身体动作、道具交接需要可见空间时扩大景别。其余40%不固定分配，不靠标签或无意义镜头凑比例；正反打没有强制百分比。",
+      "三人及以上先按需要交代真实关系，发言时选择说话者、主要听者或有剧情作用的第三人反应；可用双人/多人镜，不强制每镜全员同框。画外人物仍保留身份、知情、姿态、持物与位置；不得改成不具名群演。",
+      "空间站位必须同时给出画面左/中/右与实际场景参照物关系；参照物登记为有依据的point。屏幕左右随机位重算，世界位置不随切镜漂移。数值坐标留在内部重放，不把内部推导说明写入画面。",
+      "人物发言的可见表情、肢体动作和音色须受人物、对象、当前台词刺激与前态支持；不能默认统一平静克制，也不能用统一夸张替代。静止和克制在具体情境中可以成立，不能强制每镜加手势、眨眼或反应。",
+      "新生产显式选择可见表情姿态，人物初态不默认补平静。表情动作由同一状态机承接。整体横向检查重复姿态与声调，具体是否自然仍须独立判断；有限姿态库不代表任意表演均已支持。",
+      "基础声线保持角色身份；当前表达、语速节奏、重音、音量和尾音按交流目的变化，不能统一平淡、统一喊叫或一味压低。声音属性仅写音色；内部解释和审计依据不得写入画面或GPT。",
+      "长连续台词按原句出现身份与连续字符跨度拆镜，保留每个字、标点、说话人和顺序，不加速或删词硬塞。优先换合理机位；有意义时声音可跨听者反应继续，画外声不伪造口型；同步检查音轨连续与前后姿态。",
+      "一个镜头一个主要叙事任务，允许自然同步的脸部、身体、说话，不统一叠加开头准备和镜尾等待。切换须有信息、关系、表演、动作或容量理由。",
+      "4秒<时长≤6秒仅限已列明的逐镜例外；必须提交来源、需要连续保留的内容、所需秒数与估计/实测依据、等总时长且每镜≤4秒的替代切法及具体损失、低复杂度与4秒之后仍有价值的内容。填满文字不代表例外语义成立。",
+      "6秒<时长≤8秒仅固定机位、固定构图的静态/低动态信息阅读，不安排人物连续说话、动态表演或运镜；当前重放要求有源文字在全镜可见。>8秒默认拆镜。按实际数值判定，不四舍五入掩盖超时，不补齐到6/8秒。",
+      "对白字数多、人物多、动作多、电影感、凑比例或生成平台档位均不单独成立为长镜例外。所有例外继续满足身份、来源、时空、声音、光影、可见性；整集仍90—180秒且原文完整。",
+      "固定或一次简单运镜须服务实际目标；不得叠加推拉摇移、为快节奏强迫运镜。当前结构化重放支持固定机位及镜间换机位，连续运镜暂不支持，返回not_supported，不能写成已执行或改用自由canonical绕过。",
+      "正式母版原A—J列保留位置，K列光影含光影/光源来源/光源方向/色温倾向四段。E列移除这四段及可见主体标签，但保留真实人物名称；F列仍保留四项静态光影和人物身份。内部27字段不删。",
+      "画面内容只写可拍到的动作、表情、视线、道具和准确对白；不得恢复数字制作时间码、承接上一镜、为下一镜准备、导演解释或心理目的。各字段只承载其所属内容，静态GPT不含动作过程/声音/运镜。",
+      "例外、景别和表演依据留在冻结生产计划design及审计证据；不新增用户表格的解释列。机器负责支持的身份、时序、可见点位与字段边界，语义必要性和自然度由独立逐镜全维审计判断；不据此承诺首批98%。"
     ]
   }
 }

@@ -38,6 +38,17 @@ CONTINUOUS = set(FIELDS)
 POSTURES = {'站立': (1.0, 2.2), '坐姿': (.6, 1.6), '蹲姿': (.3, 1.2),
             '跪姿': (.5, 1.4), '跪伏': (.05, .5), '躬身': (.5, 1.8), '躺卧': (.05, .8)}
 EXPRESSIONS = {'平静', '微笑', '不悦', '压怒', '疼痛', '震惊', '得意', '疑惑', '委屈', '畏惧', '恭敬', '悲伤'}
+# Current authored poses describe visible facial state; old emotion names stay
+# readable for historical inputs. A pose is selected, never filled by default.
+EXPRESSION_POSES = (
+    '眉眼舒展，唇线自然', '眉梢微抬，嘴角上扬', '眼角弯起，嘴角扬开',
+    '眉心收紧，唇线绷直', '眉峰压低，下颌收紧', '眉心微蹙，唇角下压',
+    '眉梢抬高，双眼睁大', '双眼微睁，嘴唇微张', '一侧眉梢抬起，唇角轻收',
+    '眉尾下压，嘴角下垂', '眼眶泛红，唇线轻颤', '眉心微紧，嘴角勉强上提',
+    '眉峰微挑，一侧嘴角上扬', '眼睑微敛，嘴角收住', '眉头舒开，唇角微扬',
+    '眉心紧蹙，嘴角绷住', '双眼睁大，唇角向下', '眉尾抬起，嘴唇微张',
+)
+EXPRESSIONS.update(EXPRESSION_POSES)
 PARTS = {'face', 'left_wrist', 'right_wrist', 'left_foot', 'right_foot', 'head', 'torso', 'left_hand', 'right_hand'}
 PART_TEXT = {'face': '面颊', 'left_wrist': '左手腕', 'right_wrist': '右手腕', 'left_foot': '左脚背',
              'right_foot': '右脚背', 'head': '头部', 'torso': '外衣', 'left_hand': '左手', 'right_hand': '右手'}
@@ -495,7 +506,8 @@ def sentence(action, info):
     if k=='hand_move': return '移至',f"{a}{hand}移至{action['to']}。"
     if k=='eye_state': return ('闭上双眼',f'{a}闭上双眼。') if action['to']=='closed' else ('睁开双眼',f'{a}睁开双眼。')
     if k=='hand_shape': return ('握紧拳头',f'{a}{hand}握紧拳头。') if action['to']=='fist' else ('展开',f'{a}{hand}展开。')
-    if k=='expression': return '神情转为',f"{a}神情转为{action['to']}。"
+    if k=='expression':
+        return ('表情变化', f"{a}{action['to']}。") if action['to'] in EXPRESSION_POSES else ('神情转为', f"{a}神情转为{action['to']}。")
     if k=='cross_passage': return '迈入',f"{a}经{action['passage']}迈入{info['destination_scene']}。"
     if k=='pick_up': return '拿起',f"{a}{hand}拿起{action['prop']}。"
     if k=='put_down': return '放到',f"{a}{hand}将{action['prop']}放到{action['to']}。"
@@ -525,14 +537,15 @@ def sentence(action, info):
     return '时空衔接',''
 
 
-def static_actor(actor, name):
+def static_actor(actor, name, *, face_visible=True):
     state=actor['action_state']; rows=[]
     for part in state['wet_parts']: rows.append(f'{name}{PART_TEXT[part]}留有水渍。')
     for hand,shape in state['hand_shapes'].items():
         if shape=='fist': rows.append(f"{name}{'左手' if hand=='left' else '右手'}握拳。")
     for hand,c in state['contacts'].items():
         rows.append(f"{name}{'左手' if hand=='left' else '右手'}仍{'抓住' if c['mode']=='grasp' else '扶住'}{c['actor']}{PART_TEXT[c['part']]}。")
-    if state['expression']!='平静': rows.append(f"{name}神情{state['expression']}。")
+    if face_visible and state['expression'] != '平静':
+        rows.append(f"{name}{state['expression']}。" if state['expression'] in EXPRESSION_POSES else f"{name}神情{state['expression']}。")
     return ''.join(rows)
 
 

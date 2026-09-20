@@ -16,6 +16,16 @@ import re
 REFERENCE_ROOT = Path(__file__).resolve().parents[1] / "references"
 CONTRACT = "storyboard-field-content-v1"
 ERROR_CODE = "E-FIELD-CONTENT-001"
+LIGHTING_FIELDS = ("光影", "光源来源", "光源方向", "色温倾向")
+FORMAL_EXECUTION_FIELDS = (
+    "空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "音色", "心理音轨",
+    "环境音效", "环境动态", "生成限制", "转场类型", "切镜/转场提示词",
+)
+
+
+def project_lighting(shot, text):
+    """Keep the server and standalone export on the same four-section column."""
+    return "\n\n".join(f"{field}：{text(shot.get(field))}" for field in LIGHTING_FIELDS)
 
 
 @lru_cache(maxsize=1)
@@ -237,7 +247,8 @@ def model_field_contract():
             "embedded_heading_policy": policy["embedded_heading_policy"],
             "owned_clause_patterns": policy.get("owned_clause_patterns", {}),
             "speaking_gaze_policy": policy.get("speaking_gaze_policy"),
-            "workbook": {"formal_sheet": "正式分镜母版", "reading_sheets": "每集_逐镜阅读", "source_sheet": "使用与来源", "visible_columns": 10},
+            "workbook": {"formal_sheet": "正式分镜母版", "reading_sheets": "每集_逐镜阅读", "source_sheet": "使用与来源", "visible_columns": 11,
+                         "lighting_column": "K:光影", "formal_cell_lighting": False, "visible_subject_label": False},
             "new_production_entry": policy["new_production_entry"],
             "legacy_canonical": "兼容候选仍执行全部字段检查；不因此视为已验证结构化生成",
             "limits": "已支持的字段结构和角色检查；原文理解、表演选择等开放语义仍须独立审查；不能据此声称98%"}
