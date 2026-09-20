@@ -10,6 +10,9 @@ _spec.loader.exec_module(_module)
 
 CONTRACT = _module.CONTRACT
 ERROR_CODE = _module.ERROR_CODE
+LIGHTING_FIELDS = _module.LIGHTING_FIELDS
+FORMAL_EXECUTION_FIELDS = _module.FORMAL_EXECUTION_FIELDS
+project_lighting = _module.project_lighting
 FieldContentError = _module.FieldContentError
 field_policy = _module.field_policy
 field_content_findings = _module.field_content_findings

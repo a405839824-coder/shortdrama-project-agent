@@ -35,6 +35,7 @@ from .materializer import (
     GPT_KEYFRAME_FIELD,
     LEGACY_STANDALONE_FIELDS,
     MOTHER_TEMPLATE_COLUMNS,
+    LEGACY_MOTHER_TEMPLATE_COLUMNS,
     formal_mother_template_rows,
     legacy_v050_mother_template_rows,
     legacy_v053_mother_template_rows,
@@ -80,13 +81,15 @@ CANONICAL_SIDECAR_HEADERS = [
     "audit_page_sha256",
 ]
 LEGACY_CANONICAL_SIDECAR_HEADERS = CANONICAL_SIDECAR_HEADERS[:-3]
-CURRENT_PROJECTION_CONTRACT = "shortdrama-projector/0.5.32"
+CURRENT_PROJECTION_CONTRACT = "shortdrama-projector/0.5.46"
+R5_LEGACY_PROJECTION_CONTRACT = "shortdrama-projector/0.5.32"
 PREVIOUS_PROJECTION_CONTRACT = "shortdrama-projector/0.5.5"
 from . import frozen_projector_0531
 from .r5_workbook import MASTER_NAME, WIDTHS, reading_matrices, write_reading_sheets
 LEGACY_PROJECTION_CONTRACT = "shortdrama-projector/0.5.0"
 CONTROLLED_HISTORICAL_PROJECTION_CONTRACTS = frozenset(
-    {CURRENT_PROJECTION_CONTRACT, PREVIOUS_PROJECTION_CONTRACT, "shortdrama-projector/0.5.4"}
+    {CURRENT_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT,
+     PREVIOUS_PROJECTION_CONTRACT, "shortdrama-projector/0.5.4"}
 )
 
 
@@ -366,7 +369,7 @@ def _canonical_storyboard_from_sidecar(
         allowed_projection_contracts = (
             _allowed_projection_contracts
             if _allowed_projection_contracts is not None
-            else frozenset({CURRENT_PROJECTION_CONTRACT, PREVIOUS_PROJECTION_CONTRACT})
+            else frozenset({CURRENT_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT, PREVIOUS_PROJECTION_CONTRACT})
         )
         if projection_contract not in allowed_projection_contracts:
             raise _canonical_sidecar_error("projection contract marker mismatch")
@@ -601,11 +604,11 @@ def _normalized_mother_headers(headers: Any) -> list[str]:
 
 
 def _mother_sheet_candidates(sheets: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    expected = _normalized_mother_headers(MOTHER_TEMPLATE_COLUMNS)
+    expected = [MOTHER_TEMPLATE_COLUMNS, LEGACY_MOTHER_TEMPLATE_COLUMNS]
     return [
         sheet
         for sheet in sheets
-        if _normalized_mother_headers(sheet.get("headers", [])) == expected
+        if _normalized_mother_headers(sheet.get("headers", [])) in expected
     ]
 
 
@@ -642,10 +645,10 @@ def _projection_cell_identity(value: Any) -> str:
 
 
 def projection_rows_sha256(rows: list[dict[str, Any]]) -> str:
-    """Hash the exact ten-column projection under UTF-8 NFC + LF identity."""
+    """Hash trusted projected rows under their exact versioned column layout."""
 
     identities = [
-        [_projection_cell_identity(row.get(header)) for header in MOTHER_TEMPLATE_COLUMNS]
+        [_projection_cell_identity(row.get(header)) for header in _projection_columns(rows)]
         for row in rows
     ]
     payload = json.dumps(
@@ -692,12 +695,19 @@ def _assert_visible_projection_matches(
 def _rows_for_projection(storyboard, contract):
     if contract in {PREVIOUS_PROJECTION_CONTRACT, "shortdrama-projector/0.5.4"}:
         return frozen_projector_0531.formal_mother_template_rows(storyboard)
+    if contract == R5_LEGACY_PROJECTION_CONTRACT:
+        return formal_mother_template_rows(storyboard, _legacy_layout=True)
     return formal_mother_template_rows(storyboard)
 
 
+def _projection_columns(rows):
+    return MOTHER_TEMPLATE_COLUMNS if rows and "光影" in rows[0] else LEGACY_MOTHER_TEMPLATE_COLUMNS
+
+
 def _assert_auxiliary_sheets(sheets, storyboard, expected_rows, contract):
-    current = contract == CURRENT_PROJECTION_CONTRACT
-    expected_aux = reading_matrices(storyboard, expected_rows) if current else {}
+    current = contract in {CURRENT_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT}
+    expected_aux = reading_matrices(storyboard, expected_rows,
+        _legacy_layout=contract == R5_LEGACY_PROJECTION_CONTRACT) if current else {}
     names = [str(sheet.get("name") or "") for sheet in sheets
              if sheet.get("name") != CANONICAL_SIDECAR_SHEET]
     expected_names = ["00_范围与审计", MASTER_NAME if current else "正式生产母版", *expected_aux]
@@ -715,7 +725,7 @@ def _visible_projection_contract(sheets: list[dict[str, Any]]) -> str:
     candidates = _mother_sheet_candidates(sheets)
     if len(candidates) != 1:
         raise _canonical_sidecar_error(
-            "visible formal-master projection must contain exactly one ten-column sheet"
+            "visible formal-master projection must contain exactly one versioned master sheet"
         )
     headers = [str(value or "").strip() for value in candidates[0].get("headers", [])]
     return "current" if FORMAL_MERGED_FIELD in headers else "legacy"
@@ -730,11 +740,13 @@ def _assert_visible_projection_rows_match(
     candidates = _mother_sheet_candidates(sheets)
     if len(candidates) != 1:
         raise _canonical_sidecar_error(
-            "visible formal-master projection must contain exactly one ten-column sheet"
+            "visible formal-master projection must contain exactly one versioned master sheet"
         )
     sheet = candidates[0]
     actual_headers = list(sheet.get("headers", []))
-    expected_headers = list(MOTHER_TEMPLATE_COLUMNS)
+    expected_headers = list(_projection_columns(expected_rows))
+    if _normalized_mother_headers(actual_headers) != expected_headers:
+        raise _canonical_sidecar_error("visible columns differ from the signed projection contract")
     actual_rows = list(sheet.get("rows", []))
     if len(actual_rows) != len(expected_rows):
         raise _canonical_sidecar_error(
@@ -883,6 +895,8 @@ def workbook_to_storyboard(
         raise ValueError("workbook contains duplicate formal-master sheets")
     mother_sheet = mother_sheets[0] if mother_sheets else None
     if mother_sheet:
+        if _normalized_mother_headers(mother_sheet.get("headers", [])) == MOTHER_TEMPLATE_COLUMNS:
+            raise _canonical_sidecar_error("the current eleven-column workbook requires its canonical sidecar")
         shots = _compact_shots_from_mother_sheet(mother_sheet)
         total_duration = metadata.get("total_duration")
         if total_duration in (None, "") and shots:
@@ -1106,7 +1120,7 @@ def extract_xlsx_for_controlled_handoff_revalidation(
         (mother_sheet.get("matrix") or [[]])[0]
     )
     if compatibility_applied and exact_header_row != list(
-        MOTHER_TEMPLATE_COLUMNS
+        LEGACY_MOTHER_TEMPLATE_COLUMNS
     ):
         raise _canonical_sidecar_error(
             "transitional workbook header is not the exact short ten-column contract"

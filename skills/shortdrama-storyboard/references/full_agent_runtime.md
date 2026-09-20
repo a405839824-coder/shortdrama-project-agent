@@ -182,7 +182,7 @@ Invalidate by impact, while preserving the R10 regression rules:
 - episode boundary, cognition transition, scene topology, or core shot-plan change invalidates the affected scene or episode;
 - runtime, rule, schema, validator, script, dependency/environment, parser, or target-model change invalidates every dependent certificate and triggers the full defined regression suites.
 
-Unchanged auditor-issued shot/scene certificates may support impact regression only when their sub-fingerprints and upstream dependencies are unchanged. Always rerun global source coverage, episode entry/exit, cognition, total duration, numbering, formulas, statistics, exact ten-column order, and retired-field absence before a final verdict.
+Unchanged auditor-issued shot/scene certificates may support impact regression only when their sub-fingerprints and upstream dependencies are unchanged. Always rerun global source coverage, episode entry/exit, cognition, total duration, numbering, formulas, statistics, exact eleven-column order, and retired-field absence before a final verdict.
 
 ### Separate content checks from system regression
 
@@ -296,7 +296,7 @@ Any approved story or script change must evaluate these downstream consumers:
 9. Character, scene, costume, prop, position, and lighting anchors.
 10. Keyframe prompts or generated frames.
 11. Voice, psychological audio, ambience, BGM cues, and transitions.
-12. Audit statistics, change notes, and exact ten-column export projection.
+12. Audit statistics, change notes, and exact eleven-column export projection.
 
 When the authoritative input is a novel chapter, also propagate and validate the complete-read proof, chapter event map, causal graph, character state changes, protected-dialogue mappings, source treatment ledger, adaptation budget, beat plan, and previous/next boundary context. Any upstream change that alters an event, causal link, cognition transition, or protected line invalidates the dependent beats and shots.
 
@@ -304,7 +304,7 @@ Regenerate only the affected units plus boundary neighbors when the upstream str
 
 ### Addition
 
-Insert the new beat into the script, establish start/end state, generate only the required 27-field shots, update numbering or stable insertion IDs, recalculate duration, project the ten-column export, and audit both boundaries.
+Insert the new beat into the script, establish start/end state, generate only the required 27-field shots, update numbering or stable insertion IDs, recalculate duration, project the eleven-column export, and audit both boundaries.
 
 ### Modification
 
@@ -332,7 +332,7 @@ Recalculate dialogue capacity, shot load, rhythm, source coverage, continuity, n
 - Design music cues after picture lock from the whole-scene emotional key, narrative function, time motion, frequency space, and audible scene image. In formal/GPT single-shot text, the literal `BGM` is forbidden and the negative constraint is `禁止额外配乐`; music cues remain a separate downstream workflow.
 - Design dialogue delivery with sound strength, rhythm, breath, pause, emphasis, and ending tone.
 - Treat public-scene ambience as a mandatory production layer rather than optional decoration. Reject generic-only “环境声/街道嘈杂声”, anonymous extras with clear full dialogue, modern or era-incompatible sound sources, and same-scene crowd/audio continuity jumps.
-- Convert or export files through the appropriate document or spreadsheet workflow while preserving the 27-field atomic order, exact ten-column projection and formulas; verify canonical→projection→XLSX→reverse parse under UTF-8 NFC+LF and preserve every multiline dialogue row.
+- Convert or export files through the appropriate document or spreadsheet workflow while preserving the 27-field atomic order, exact eleven-column projection and formulas; verify canonical→projection→XLSX→reverse parse under UTF-8 NFC+LF and preserve every multiline dialogue row.
 - Split production into traceable episode, scene, shot, keyframe, voice, ambience, and BGM packages. For an explicit downstream i2v delivery, pass the committed `正式分镜母版` directly and create only the required transport metadata or adapter on demand; never create or persist a competing video narrative, Seedance text, or batch artifact.
 
 ## Audit, repair, and learn

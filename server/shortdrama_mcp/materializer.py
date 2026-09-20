@@ -7,7 +7,8 @@ from typing import Any, Iterable
 
 from .written_payload import discover_current_written_payloads, context_instruction_text
 from .picture_presentation import display_picture
-from .field_content import assert_field_content, r5_keyframe_sections
+from .field_content import (assert_field_content, r5_keyframe_sections, LIGHTING_FIELDS,
+                            FORMAL_EXECUTION_FIELDS, project_lighting)
 
 
 FORMAL_MERGED_FIELD = "正式分镜母版"
@@ -56,7 +57,7 @@ COMPACT_SHOT_FIELDS = [
     "原文支撑句",
 ]
 
-MOTHER_TEMPLATE_COLUMNS = [
+LEGACY_MOTHER_TEMPLATE_COLUMNS = [
     "分镜序号",
     "时长",
     "累计时长",
@@ -68,10 +69,11 @@ MOTHER_TEMPLATE_COLUMNS = [
     "原文依据类型",
     "原文支撑句",
 ]
+MOTHER_TEMPLATE_COLUMNS = [*LEGACY_MOTHER_TEMPLATE_COLUMNS, "光影"]
 
 # Narrative execution fields are listed here; the shot/timing header and the
 # combined shot-type/visible-subject paragraph are added explicitly above them.
-FORMAL_MERGED_ATOMIC_FIELDS = (
+LEGACY_FORMAL_MERGED_ATOMIC_FIELDS = (
     "空间站位描述",
     "起始状态",
     "机位",
@@ -89,6 +91,7 @@ FORMAL_MERGED_ATOMIC_FIELDS = (
     "转场类型",
     "切镜/转场提示词",
 )
+FORMAL_MERGED_ATOMIC_FIELDS = FORMAL_EXECUTION_FIELDS
 
 GPT_KEYFRAME_ATOMIC_FIELDS = (
     "镜头类型",
@@ -120,7 +123,7 @@ GPT_KEYFRAME_SCRUB_FIELDS = {
 LEGACY_V050_FORMAL_FIELDS = (
     "镜头类型",
     "可见主体",
-    *FORMAL_MERGED_ATOMIC_FIELDS,
+    *LEGACY_FORMAL_MERGED_ATOMIC_FIELDS,
 )
 LEGACY_V050_GPT_FIELDS = (
     "镜头类型",
@@ -1277,6 +1280,7 @@ def compile_formal_merged_field(
     shot: dict[str, Any],
     *,
     assume_compact: bool = False,
+    _legacy_layout: bool = False,
 ) -> str:
     """Compile the compact execution cell without adding semantic content."""
 
@@ -1303,10 +1307,10 @@ def compile_formal_merged_field(
         f"镜头序号：{shot_id}{timing}" if shot_id else "镜头序号：",
         (
             f"镜头类型：{_text(compact.get('镜头类型'))}｜"
-            f"可见主体：{_text(compact.get('可见主体'))}"
+            f"{'可见主体：' if _legacy_layout else ''}{_text(compact.get('可见主体'))}"
         ),
     ]
-    for field in FORMAL_MERGED_ATOMIC_FIELDS:
+    for field in (LEGACY_FORMAL_MERGED_ATOMIC_FIELDS if _legacy_layout else FORMAL_MERGED_ATOMIC_FIELDS):
         value = display_picture(compact) if field == "画面内容" else _text(compact.get(field))
         paragraphs.append(f"音色：\n\n{value}" if field == "音色" else f"{field}：{value}")
     formal = "\n\n".join(paragraphs)
@@ -2012,8 +2016,9 @@ def formal_mother_template_rows(
     storyboard: dict[str, Any],
     *,
     assume_compact: bool = False,
+    _legacy_layout: bool = False,
 ) -> list[dict[str, Any]]:
-    """Build the exact ten-column workbook projection from a lean canonical."""
+    """Project one canonical; the old layout is read-only workbook compatibility."""
 
     compact = storyboard if assume_compact else migrate_storyboard_to_compact(storyboard)
     shots = compact.get("shots")
@@ -2030,6 +2035,7 @@ def formal_mother_template_rows(
                 FORMAL_MERGED_FIELD: compile_formal_merged_field(
                     shot,
                     assume_compact=True,
+                    _legacy_layout=_legacy_layout,
                 ),
                 GPT_KEYFRAME_FIELD: compile_gpt_keyframe_instruction(
                     shot,
@@ -2039,6 +2045,7 @@ def formal_mother_template_rows(
                 "覆盖原文": shot.get("覆盖原文"),
                 "原文依据类型": shot.get("原文依据类型"),
                 "原文支撑句": shot.get("原文支撑句"),
+                **({} if _legacy_layout else {"光影": project_lighting(shot, _text)}),
             }
         )
     return rows

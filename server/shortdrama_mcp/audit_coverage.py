@@ -33,31 +33,40 @@ NEXT_STEP = (
 RULES = (
     ("source_fidelity", "源文对白", "逐字核对授权对白、叙述转译和源文事实；没有依据不得补剧情。",
      ("画面内容", "覆盖原文", "原文依据类型", "原文支撑句"), ("画面内容", "原文支撑句"), False),
-    ("camera_visibility", "机位可见性", "机位、景别与主体位置是否允许拍到所写动作；机位字段只描述机位。",
+    ("camera_visibility", "机位可见性", "机位、景别与主体位置是否允许拍到所写动作；站位必须同时定位画面左/中/右与真实场景参照物，换机位重新推导屏幕方向。多人场景按说者、主要听者、关键反应取景，不能丢失画外人物世界状态或用群演替换实名角色；机位字段只描述机位。",
      ("机位", "镜头类型", "可见主体", "空间站位描述", "画面内容"), ("机位", "画面内容"), False),
     ("observable_lighting", "机位可见性", "核对光源、方向、色温与可见光影一致且无无依据室内雾化。",
      ("光影", "光源来源", "光源方向", "色温倾向", "环境动态"), ("光影", "光源来源"), True),
     ("state_continuity", "空间连续", "核对本镜起态、站位、门线、道具和相邻镜末态；首镜核对源文起态。",
      ("空间站位描述", "起始状态", "画面内容", "可见主体", "场景连续性ID"), ("空间站位描述", "起始状态", "画面内容"), True),
-    ("grounded_performance", "表演链", "核对表演是否受源文/人物/当前刺激支撑；静止或无人物均可成立，不强制眨眼、反应或手势。",
+    ("grounded_performance", "表演链", "核对design.performance的来源、人物、当前刺激与前态是否支持实际可见表情及肢体选择；发言不能默认平静平淡，也不能套统一夸张模板。静止或无人物可成立，不强制眨眼、反应或手势；动作必须在本景别可见。",
      ("可见主体", "画面内容", "原文支撑句"), ("可见主体", "画面内容", "原文支撑句"), True),
     ("performance_variation", "表演链", "横向比较整批与相邻镜表演；重复须有叙事依据，不能为差异化编造行为。",
      ("可见主体", "画面内容", "功能类型"), ("画面内容",), True),
-    ("timing_capacity", "镜头节奏", "检查时长能容纳对白、动作、声音先后；画面正文不得出现制作时间码。",
+    ("timing_capacity", "镜头节奏", "检查对白动作声音容量。常规≤4秒；4—6秒逐条核对冻结例外、来源、持续内容、估计/实测依据、≤4秒拆法及具体损失、单任务负载与延长段价值；6—8秒仅固定稳定信息阅读且无说话/表演/运镜；>8秒重拆。长对白不自动例外，切机位保持逐字及声音连续。不得把形式填全或估计当实测通过；画面正文无制作时间码。",
      ("时长", "画面内容", "音色", "心理音轨", "环境音效"), ("时长", "画面内容"), False),
-    ("rhythm_transition", "镜头节奏", "核对镜头功能、景别组合和切换是否成立，不机械堆叠同类镜头。",
+    ("rhythm_transition", "镜头节奏", "核对design.framing_reason/cut_reason与实际信息、关系、表演、动作及容量；中近景+近景约60%为整集软目标，特写另计，不能改标签凑数。多人关系镜按需要建立；正反打无硬配额。固定或单一简单运动须有用途且在执行器能力内，静态GPT不写运镜。",
      ("功能类型", "镜头类型", "转场类型", "切镜/转场提示词", "画面内容"), ("镜头类型", "切镜/转场提示词"), True),
     ("field_ownership", "正式母版单镜执行完整性", "逐字段检查内容归属：画面只写可见行为，机位只写机位，音色只写声音属性；导演解释、心理目的和限制各归指定字段。",
      tuple(COMPACT_SHOT_FIELDS), tuple(COMPACT_SHOT_FIELDS), False),
-    ("standalone_execution", "正式母版单镜执行完整性", "核对本镜独立执行信息齐全，不能用承接上一镜等代替本镜起态；母版与静态关键帧对应且静帧无动作过程。",
+    ("standalone_execution", "正式母版单镜执行完整性", "核对本镜E列执行内容与K列四项光影及F列静态关键帧同源完整。E列不拼光影、不显示可见主体标签，身份仍须明确。不能用承接上一镜等代替本镜起态；关键帧无动作过程。",
      ("可见主体", "空间站位描述", "起始状态", "画面内容", "参考图锚定", "生成限制"), ("起始状态", "画面内容", "参考图锚定"), False),
-    ("sound_consistency", "禁项与声音", "核对说话者、台词、音色/心理音轨、声音时序与画面一致；无对白镜允许无声，不强制添加声音。",
+    ("sound_consistency", "禁项与声音", "核对说话者、逐字台词、音色/心理音轨、连续拆镜声音及口型。基础声线保持身份稳定；当前语气、重音、节奏、音量、尾音依据当前交流，不统一平淡或喊叫；声音属性只入音色。无对白镜允许无声，不强制添加声音。",
      ("画面内容", "音色", "心理音轨", "环境音效"), ("画面内容", "音色", "环境音效"), True),
     ("generation_limits", "禁项与声音", "核对人物/道具/雾化/音乐等限制及否定语义，不能把禁止项当成实际发生的内容。",
      ("生成限制", "可见主体", "画面内容", "环境音效", "环境动态"), ("生成限制", "画面内容"), False),
     ("coverage_statistics", "统计闭合", "核对本镜的源文覆盖、编号、累计时长及全表顺序统计，不能把未检查当通过。",
      ("镜头编号", "时长", "累计时长", "覆盖原文", "场景连续性ID"), ("镜头编号", "累计时长", "覆盖原文"), False),
 )
+DESIGN_FIELDS = {
+    'camera_visibility': ('framing_reason', 'spatial_anchors'),
+    'state_continuity': ('spatial_anchors', 'cut_reason'),
+    'grounded_performance': ('performance',),
+    'performance_variation': ('performance',),
+    'timing_capacity': ('duration_exception',),
+    'rhythm_transition': ('framing_reason', 'cut_reason'),
+    'sound_consistency': ('performance',),
+}
 
 
 def coverage_context(service: Any) -> dict[str, str]:
@@ -91,6 +100,11 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
         for sid, shot in zip(ids, shots) for field in COMPACT_SHOT_FIELDS
     }
     field_hashes = {ref: stable_json_hash(value) for ref, value in values.items()}
+    try:
+        graph = json.loads(storyboard['prevention_evidence']['production_derivation']['source_graph_json'])
+        designs = {s['shot_id']: s['design'] for s in graph['production_plan']['shots']}
+    except (KeyError, TypeError, ValueError):
+        designs = {}  # Historical inputs lack a current production design.
     rows = []
     for index, (sid, shot) in enumerate(zip(ids, shots)):
         for rule, layer, question, fields, observed, adjacent in RULES:
@@ -108,6 +122,13 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
                 "allowed_statuses": ["pass", "fail_current"],
                 "applicability": "Required review; natural stillness, silent shots and prop-only frames are valid when supported, not omissions.",
             }
+            if sid in designs and rule in DESIGN_FIELDS:
+                ref = f'plan:{sid}.{rule}'
+                text = json.dumps({k: designs[sid].get(k) for k in DESIGN_FIELDS[rule]}, ensure_ascii=False, sort_keys=True)
+                values[ref] = text
+                row['dependency_fields'][ref] = stable_json_hash(text)
+                row['required_observation_refs'].append(ref)
+                row['planning_evidence'] = {'reference': ref, 'text': text}
             # There is no previous-shot obligation on the first shot. The state
             # check itself still applies to its own source-defined opening.
             row["dependency_sha256"] = stable_json_hash({
@@ -335,6 +356,8 @@ def _compact_obligation(row: dict[str, Any], neighbor_ids: list[str]) -> dict[st
     result = {key: row[key] for key in ("obligation_id", "shot_id", "rule_id", "dependency_sha256")}
     if neighbor_ids:
         result["neighbor_shot_ids"] = neighbor_ids
+    if 'planning_evidence' in row:
+        result['planning_evidence'] = row['planning_evidence']
     return result
 
 
@@ -378,7 +401,7 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
             "read_contract": {
                 "row_fields": "Use rule_definitions[row.rule_id] for layer, question, dependency fields and required observation fields.",
                 "dependencies": "Expand dependency_fields with row.shot_id, then neighbor_dependency_fields with each row.neighbor_shot_ids (absent means none), using reference_pattern.",
-                "observations": "Expand required_observation_fields with row.shot_id. Read actual artifact content and submit literal excerpts plus a separate judgement; definitions alone are not review evidence.",
+                "observations": "Expand required_observation_fields with row.shot_id. Also observe planning_evidence.reference when present, quoting its text and judging the actual design against the source and rendered fields. Read actual artifact content and submit literal excerpts plus a separate judgement; definitions alone are not review evidence.",
                 "fingerprints": "Return each obligation_id and dependency_sha256 unchanged. Per-field hashes stay server-side; full manifest identity and validation are unchanged.",
                 "consistency": "All pages must have the same manifest_sha256 and rule_definitions_sha256. If either changes, restart at offset=0; never combine versions.",
                 "applicability": "Natural stillness, silent shots and prop-only frames are valid when supported, not omissions. Unresolved checks cannot pass.",

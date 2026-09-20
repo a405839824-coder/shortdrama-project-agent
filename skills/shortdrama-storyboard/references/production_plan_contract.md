@@ -74,3 +74,13 @@
 旧来源图和低层纯函数可以继续用于历史证据检查，其生产计划状态明确为 `insufficient_evidence`。新 MCP 生产及官方生产 CLI 不允许省略计划。旧式 typed CLI 不是生产计划入口，不能被标为新生产验收；交付仍受既有预检、权限及独立审计约束。
 
 每条规则需同时验证缺陷反例和相近合法情况。自动检查器误判时修检查器，不改坏正确内容。按来源前提、决定、时空事件、输出、检查器和证据缺口定位问题，不限制修正轮数。
+
+## 0.5.46 逐镜设计绑定
+
+每镜新增必填 `design`，精确形状及数值来源见 [shot_design_contract.md](shot_design_contract.md) 和在线 `production_prevention_contract.shot_design_policy`。
+`framing_reason/cut_reason`说明实际用途；`spatial_anchors`为每个首帧入画主体指定一个已有、有来源依据、同场景的point。
+`performance`覆盖本镜实际入画角色与说话者：逐人填写 `actor/fact_ids/stimulus/visible_choice/gesture_choice/voice_choice`；无声/无手势可成立，但须符合事实和前态。原因只留内部。
+`duration_exception`普通镜为null；超4秒须填逐镜来源、确切所需时长、估计/实测依据、具体拆法及损失。程序不会以非空文字认证语义正确。
+人物初态 `action_state.expression`与expression动作目标必须从在线 `action_contract.expression_poses`选择可见姿态，不再默认补平静；其余action_state形状保持既有合同。
+`camera.frame`支持wide/medium/medium_close/face/face_detail/hands/object，中近景和近景计入60%观察；实际取景面积及可读性仍须独审。
+当前重放只支持固定机位与镜间换位；单次连续运镜未建模时明确拒绝，不绕过为自由文本。支持多人入画，但模型只检查声明的人体点位，不能冒充像素遮挡验收。

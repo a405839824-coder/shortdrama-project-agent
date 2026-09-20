@@ -18,7 +18,7 @@ FIELD = 'production_derivation'
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEPENDENCIES = (
     'production_derivation.py', 'production_decisions.py', 'source_decisions.py', 'production_input.py',
-    'production_environment.py', 'source_action_plans.py',
+    'production_environment.py', 'production_actions.py', 'source_action_plans.py',
     'production_plan.py', 'episode_rules.py', 'field_content.py',
     'author_storyboard.py', 'authoring_preflight.py', 'production_state.py',
     'staging_geometry.py', 'staging_text_bindings.py', 'authoring_contract_blocks.py',

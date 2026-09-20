@@ -22,7 +22,8 @@ from episode_rules import chapter_required, delivery_text, inspect_episodes, ins
 from written_payload import discover_current_written_payloads, context_instruction_text
 import repair_observations
 from field_content import (assert_field_content, field_content_findings,
-                           voice_content_findings, r5_keyframe_sections)
+                           voice_content_findings, r5_keyframe_sections,
+                           FORMAL_EXECUTION_FIELDS, project_lighting)
 from continuity_checks import state_equal
 from performance_checks import eye_contract_faults, emphasis_binding_faults, visible_subject_tokens, visible_subject_annotation_faults, listener_reaction_faults
 from lighting_checks import affirmative_matches, lighting_context_faults, scene_lighting_continuity_faults
@@ -52,6 +53,7 @@ COMPACT_SHOT_FIELDS = [
 COMPACT_MOTHER_COLUMNS = [
     "分镜序号", "时长", "累计时长", "功能类型/场景连续性ID", "正式分镜母版",
     "GPT关键帧生成指令", "参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句",
+    "光影",
 ]
 DEPRECATED_SHOT_FIELDS = {
     "运镜主体", "运镜功能", "人物调度", "动作与表演", "台词", "发声方式", "标点语气",
@@ -477,11 +479,7 @@ def _aperture_reference_keys(value: str, kind: str) -> list[str]:
     return keys
 
 
-FORMAL_MASTER_FIELD_ORDER = [
-    "空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "音色", "心理音轨",
-    "环境音效", "环境动态", "光影", "光源来源", "光源方向", "色温倾向", "生成限制",
-    "转场类型", "切镜/转场提示词",
-]
+FORMAL_MASTER_FIELD_ORDER = FORMAL_EXECUTION_FIELDS
 
 VOICE_DIMENSION_PATTERNS = {
     "声音强弱": re.compile(r"声音|音量|放轻|压低|变亮|变稳|抬高"),
@@ -1149,7 +1147,7 @@ def project_formal_master(shot: dict[str, Any]) -> str:
         f"（{_format_seconds(projected.get('时长'))}s；"
         f"累计{_format_seconds(projected.get('累计时长'))}s）",
         f"镜头类型：{_projection_text(projected.get('镜头类型'))}｜"
-        f"可见主体：{_projection_text(projected.get('可见主体'))}",
+        f"{_projection_text(projected.get('可见主体'))}",
     ]
     from picture_presentation import display_picture
     for field in FORMAL_MASTER_FIELD_ORDER:
@@ -1647,7 +1645,7 @@ def project_gpt_keyframe(shot: dict[str, Any]) -> str:
 
 
 def project_export_row(shot: dict[str, Any]) -> dict[str, Any]:
-    """Return one exact ten-column export row without persisting projections."""
+    """Return one exact eleven-column export row without persisting projections."""
     function = _projection_text(shot.get("功能类型"))
     scene = _projection_text(shot.get("场景连续性ID"))
     function_scene = "\n".join(
@@ -1669,6 +1667,7 @@ def project_export_row(shot: dict[str, Any]) -> dict[str, Any]:
         "覆盖原文": shot.get("覆盖原文", ""),
         "原文依据类型": shot.get("原文依据类型", ""),
         "原文支撑句": shot.get("原文支撑句", ""),
+        "光影": project_lighting(shot, _projection_text),
     }
 
 

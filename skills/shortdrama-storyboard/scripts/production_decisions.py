@@ -227,7 +227,8 @@ def _camera(world, camera, scene, path):
           right[0] * forward[1] - right[1] * forward[0]]
     hfov = _num(camera["hfov_deg"], path); vfov = _num(camera["vfov_deg"], path)
     _need(1 <= hfov <= 150 and 1 <= vfov <= 150, path, "supported FOV is 1–150 degrees")
-    _need(camera["frame"] in {"wide", "medium", "face", "hands", "object"}, path, "unsupported framing type")
+    from production_plan import shot_policy
+    _need(camera["frame"] in shot_policy()['framing'], path, "unsupported framing type")
     return {"origin": origin, "target": list(target), "forward": forward, "right": right, "up": up,
             "hx": math.tan(math.radians(hfov / 2)), "vy": math.tan(math.radians(vfov / 2))}
 
@@ -254,7 +255,6 @@ def _view(world, camera, scene):
     for identity, prop in world["props"].items():
         ps, position = _anchor(world, prop)
         if ps == scene and _in_frame(world, scene, camera, position): props.append(identity)
-    _need(len(actors) <= 3, "camera.visible_subjects", "more than three actors have visible modelled landmarks")
     return {"actors": actors, "props": props}
 
 
@@ -822,7 +822,41 @@ def _audio_segments(text, pieces, shot_id, profile, path):
     return segments
 
 
-def _initial(world, view, sources):
+def _screen_place(position, camera):
+    vector = _sub(position, camera['origin']); depth = _dot(vector, camera['forward'])
+    if depth <= EPS:
+        return '画外摄影机后方'
+    x = _dot(vector, camera['right']) / depth / camera['hx']
+    if abs(x) > 1 + EPS:
+        return '画外左侧' if x < 0 else '画外右侧'
+    return '画面中部' if abs(x) <= 1 / 3 else '画面左侧' if x < 0 else '画面右侧'
+
+
+def _spatial_description(world, row, camera, view, sources):
+    """Camera-relative layout from the same world; never invent scene objects."""
+    plan = sources.get('production_plan')
+    if plan is None:
+        return None
+    spec = next(s for s in plan['shots'] if s['shot_id'] == row['shot_id'])
+    anchors = spec['design']['spatial_anchors']; descriptions = []
+    subjects = {name: world['actors'][name]['position_xyz'] for name in view['actors']}
+    subjects.update({name: _anchor(world, world['props'][name])[1] for name in view['props']})
+    _need(set(anchors) == set(subjects), 'shot.design.spatial_anchors', 'anchors must exactly cover initial visible subjects')
+    for name, position in subjects.items():
+        anchor = anchors[name]
+        _need(anchor != name and anchor in world['points'] and world['points'][anchor]['scene_id'] == row['scene_id'],
+              'shot.design.spatial_anchors', 'requires a different registered point in this scene')
+        reference = world['points'][anchor]['position_xyz']; delta = _sub(position, reference)
+        lateral, depth = _dot(delta, camera['right']), _dot(delta, camera['forward'])
+        sides = []
+        if abs(lateral) > .1: sides.append('左' if lateral < 0 else '右')
+        if abs(depth) > .1: sides.append('后' if depth > 0 else '前')
+        relative = '的画面' + ''.join(sides) + '侧' if sides else '近旁'
+        descriptions.append(f"{name}位于{_screen_place(position, camera)}，在{anchor}{relative}。")
+    return ''.join(descriptions)
+
+
+def _initial(world, view, sources, camera=None):
     rows, limits, names = [], [], []
     for identity, shown in view["actors"].items():
         actor = world["actors"][identity]
@@ -830,9 +864,12 @@ def _initial(world, view, sources):
         parts += ["左手" if h == "left" else "右手" for h in shown["hands"]]
         if shown["feet"]: parts.append("足部")
         names.append(f"{identity}（{'、'.join(parts)}）")
-        rows.append(f"{identity}位于{_coord(actor['position_xyz'])}，{actor['posture']}，身体朝{_direction(actor['body_yaw'])}，头部朝{_direction(actor['head_yaw'])}。")
-        rows.append(extended_actions.static_actor(actor, identity))
-        for hand in shown["hands"]: rows.append(f"{identity}{'左手' if hand == 'left' else '右手'}位于{_coord(_hand(actor, hand))}。")
+        place = _screen_place(_eye(actor) if shown['head'] else actor['position_xyz'], camera) if camera else _coord(actor['position_xyz'])
+        rows.append(f"{identity}位于{place}，{actor['posture']}，身体朝{_direction(actor['body_yaw'])}，头部朝{_direction(actor['head_yaw'])}。")
+        rows.append(extended_actions.static_actor(actor, identity, face_visible=shown['eye_visible']))
+        for hand in shown["hands"]:
+            place = _screen_place(_hand(actor, hand), camera) if camera else _coord(_hand(actor, hand))
+            rows.append(f"{identity}{'左手' if hand == 'left' else '右手'}位于{place}。")
         eyes = eye_blocks(subject=identity, visibility="visible" if shown["eye_visible"] else "hidden",
                           state=("source_closed" if actor["eye_state"] == "closed" else "natural_open") if shown["eye_visible"] else None,
                           source_basis="初态明确闭眼决定" if shown["eye_visible"] and actor["eye_state"] == "closed" else None,
@@ -842,7 +879,7 @@ def _initial(world, view, sources):
             rows.append(f"{identity}视线落在{actor['gaze']['ref']['id']}。")
     for identity in view["props"]:
         prop = world["props"][identity]; _, position = _anchor(world, prop)
-        rows.append(f"{identity}位于{_coord(position)}。")
+        rows.append(f"{identity}位于{_screen_place(position, camera) if camera else _coord(position)}。")
         if prop['physical']['integrity']=='broken': rows.append(f'{identity}已碎裂。')
         if 'worn' in prop['anchor']: rows.append(f"{identity}穿戴在{prop['anchor']['actor']}{extended_actions.PART_TEXT[prop['anchor']['worn']]}。")
         if 'binding' in prop['anchor']: rows.append(f"{identity}捆住{prop['anchor']['actor']}双腕。")
@@ -855,7 +892,8 @@ def _initial(world, view, sources):
 
 
 def _fields(world, row, cam, view, sources):
-    static, visible, eye_limits = _initial(world, view, sources)
+    planned = sources.get('production_plan') is not None
+    static, visible, eye_limits = _initial(world, view, sources, cam if planned else None)
     scene = world["scenes"][row["scene_id"]]; light = scene["light"]
     source_vec = _sub(light["position_xyz"], cam["target"])
     _need(math.hypot(*light["position_xyz"][:2]) > EPS, "scene.light", "light world direction undefined at the common scene origin")
@@ -885,8 +923,9 @@ def _fields(world, row, cam, view, sources):
         token = "relation" + str(i)
         bindings.append({"id": token, "kind": "screen_relation", "actor": names[i], "relative_to": names[0]})
         relation_tokens.append("[[staging:" + token + "]]")
-    framing = {"wide": "宽景", "medium": "中景", "face": "面部近景", "hands": "手部特写", "object": "物件特写"}[row["camera"]["frame"]]
-    if row["camera"]["frame"] == "face":
+    from production_plan import shot_policy
+    framing = shot_policy()['framing'][row['camera']['frame']]
+    if row["camera"]["frame"] in {"medium_close", "face", "face_detail"}:
         _need(any(v["eye_visible"] for v in view["actors"].values()) and
               not any(v["feet"] for v in view["actors"].values()), "camera.frame",
               "face close-up requires a visible front-facing head and excludes foot landmarks; facial area still requires independent review")
@@ -895,8 +934,10 @@ def _fields(world, row, cam, view, sources):
     if row["camera"]["frame"] == "object": _need(not view["actors"], "camera.frame", "object-only frame contains actor landmarks")
     tilt = math.degrees(math.asin(cam["forward"][2]))
     fields = {**{key: row["editorial"][key] for key in METADATA_FIELDS}, "场景连续性ID": row["continuity_id"], "镜头类型": framing,
-              "可见主体": visible, "空间站位描述": scene["label"] + "。" + blocks["spatial_state_append"] +
-                  "".join(f"{name}位于{_coord(point['position_xyz'])}。" for name, point in world["points"].items() if point["scene_id"] == row["scene_id"]),
+              "可见主体": visible, "空间站位描述": scene["label"] + "。" +
+                  (("日间。" if light['period'] == 'day' else "夜间。") + scene['door_window_state'] if planned else blocks['spatial_state_append']) +
+                  (_spatial_description(world, row, cam, view, sources) if planned else
+                   "".join(f"{name}位于{_coord(point['position_xyz'])}。" for name, point in world["points"].items() if point["scene_id"] == row["scene_id"])),
               "起始状态": "\n".join(relation_tokens + [static]),
               "机位": "[[staging:camera]]" + f"摄影机离地{cam['origin'][2]:g}米，{'仰角' if tilt >= 0 else '俯角'}{abs(tilt):.1f}度；水平视角{row['camera']['hfov_deg']:g}度，垂直视角{row['camera']['vfov_deg']:g}度。",
               "运镜方式": "固定镜头", "音色": voice_block(mode="silent", dialogue_rows=[]), "心理音轨": "无。",
@@ -1206,7 +1247,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                 sample = samples[a]
                 phases[i]['text'] = ''.join(f"{name}保持{sample['world']['actors'][name]['posture']}。"
                                            for name in sample['view']['actors'])
-                phases[i]['text'] += ''.join(f"{name}位于{_coord(_anchor(sample['world'], sample['world']['props'][name])[1])}。"
+                phases[i]['text'] += ''.join(f"{name}位于{_screen_place(_anchor(sample['world'], sample['world']['props'][name])[1], cam) if sources.get('production_plan') else _coord(_anchor(sample['world'], sample['world']['props'][name])[1])}。"
                                             for name in sample['view']['props'])
                 if not phases[i]['text']:
                     phases[i]['text'] = f"{start_world['scenes'][row['scene_id']]['label']}空景。"

@@ -32,7 +32,7 @@ the exact missing capability without deleting source content to obtain PASS.
    structured decisions through `preflight_storyboard_draft`. Scene and full
    preflight must succeed. Unknown and not_supported are not passing results.
 4. Use `commit_storyboard` and the plugin's independent audit/repair workflow.
-   Only the server renders the 27 fields into the fixed ten-column formal master,
+   Only the server renders the 27 fields into the fixed eleven-column formal master,
    same-source R5 reading pages, and static keyframe instructions. Do not manually
    write E/F, redesign the reading layout, or catch rejection and splice text.
 5. Before formal delivery, call `read_project_artifact` with the exact server
@@ -52,3 +52,8 @@ The plugin cannot physically prevent other ChatGPT/Codex tools from writing
 files. Such files have no formal delivery qualification. Host delivery and
 automation controllers must verify the online receipt; this package does not
 claim to sandbox the entire host or to prove real employee login acceptance.
+
+## Current 0.5.46 shot design and output
+
+Read `references/shot_design_contract.md` and the live `production_prevention_contract.shot_design_policy` before planning. Freeze each shot's design, real scene anchors, grounded performance and duration exception before rendering. Ordinary shots are at most four seconds; longer shots require the registered per-shot exception. A long line alone is not an exception. Preserve exact dialogue across camera changes. Close-class framing (medium_close/face) is an approximately 60% episode style target, never a forced quota.
+The master keeps A–J in place and adds K (`光影`) with all four labelled lighting values. E omits those lighting paragraphs and the literal `可见主体：` label but preserves names; F retains static lighting and identity. Copy E plus K for video execution. Never paste internal design reasoning into E/F. Old ten-column workbooks remain read-only compatibility inputs, not a current export choice.

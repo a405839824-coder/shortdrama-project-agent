@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from functools import lru_cache
 from pathlib import Path
 import re
 
@@ -21,8 +22,13 @@ def digest(value):
     return number_stable_digest(value)
 
 
+@lru_cache(maxsize=1)
 def policy():
     return json.loads((REF / 'rule_registry.json').read_text(encoding='utf-8'))['runtime']['production_prevention_policy']
+
+
+def shot_policy():
+    return policy()['shot_design_policy']
 
 
 def runtime_context():
@@ -30,7 +36,8 @@ def runtime_context():
     runtime = registry['runtime']
     return {'rule_registry_sha256': digest(registry),
             'template_contract_sha256': digest({'fields': runtime['canonical_shot_fields'],
-                                                'content': runtime['field_content_policy']})}
+                                                'content': runtime['field_content_policy'],
+                                                'layout': runtime['compact_master_contract']})}
 
 
 def model_production_contract():
@@ -43,8 +50,10 @@ def model_production_contract():
     return {'contract': p['contract'], 'plan_contract': CONTRACT,
             'required_for': ['new_mcp_production_authoring', 'direct_canonical_new_production', 'official_production_cli'],
             'episode_contract': episode_policy(),
+            'shot_design_policy': shot_policy(),
             'action_contract':{'reference':'references/source_actions_0537.md',
                 'parameters':{k:sorted(v) for k,v in sorted(ACTION_FIELDS.items())},
+                'expression_poses': production_actions.EXPRESSION_POSES,
                 'source_modes':sorted(MODES),'postures':sorted(production_actions.POSTURES),
                 'frozen_source_required':sorted(production_actions.SOURCE_REQUIRED),
                 'bridge_kinds':sorted(production_actions.BRIDGE_KINDS),
@@ -77,7 +86,8 @@ def model_production_contract():
                     'initial': ['{actor,fact_ids,evidence_fact_ids}'],
                     'acquisitions': ['{id,actor,fact_ids,evidence_fact_ids,action_id,mode:heard|source_report}'],
                     'uses': ['{action_id,actor,fact_ids,stance,evidence_fact_ids}; every actual action exactly once']},
-                'shots': ['{shot_id,purpose_fact_ids,required_action_ids,audio_action_ids,source_use_ids,visible}']},
+                'shots': ['{shot_id,purpose_fact_ids,required_action_ids,audio_action_ids,source_use_ids,visible,design}'],
+                'shot_design': shot_policy()['design_shape']},
             'decision_partitions': ['each initial_world/scenes|actors|props|points entry',
                 'each shot camera|ticks|transition|editorial|shot_id|shot_uid|episode_id|scene_id|continuity_id|source_unit_ids',
                 'each shot action'],
@@ -208,7 +218,8 @@ def validate_source_plan(plan, facts, source_texts, source_hashes):
         if entry['stance'] == 'not_applicable':
             need(not entry['fact_ids'], p + '.knowledge.uses', 'not_applicable cannot conceal factual knowledge use')
     for shot in registry(plan['shots'], 'shot_id', p + '.shots').values():
-        obj(shot, {'shot_id', 'purpose_fact_ids', 'required_action_ids', 'audio_action_ids', 'source_use_ids', 'visible'}, p + '.shots')
+        obj(shot, {'shot_id', 'purpose_fact_ids', 'required_action_ids', 'audio_action_ids', 'source_use_ids', 'visible', 'design'}, p + '.shots')
+        validate_design(shot['design'], facts, p + '.shots.' + shot['shot_id'] + '.design')
         ids(shot['purpose_fact_ids'], p + '.shots.purpose_fact_ids', facts, nonempty=True)
         for key in ('required_action_ids', 'audio_action_ids', 'source_use_ids'):
             ids(shot[key], p + '.shots.' + key)
@@ -227,6 +238,74 @@ def validate_source_plan(plan, facts, source_texts, source_hashes):
     return copy.deepcopy(plan)
 
 
+def validate_design(design, facts, path):
+    """Bind reviewable choices before rendering; prose is evidence, not a verdict."""
+    obj(design, {'framing_reason', 'cut_reason', 'spatial_anchors', 'performance', 'duration_exception'}, path)
+    def text(value, at):
+        need(isinstance(value, str) and bool(value.strip()), at, 'a concrete authored reason is required', 'insufficient_evidence')
+    for key in ('framing_reason', 'cut_reason'):
+        text(design[key], path + '.' + key)
+    need(isinstance(design['spatial_anchors'], dict), path + '.spatial_anchors', 'subject to actual scene anchor mapping required')
+    for subject, anchor in design['spatial_anchors'].items():
+        text(subject, path); text(anchor, path)
+    for actor, item in registry(design['performance'], 'actor', path + '.performance').items():
+        obj(item, {'actor', 'fact_ids', 'stimulus', 'visible_choice', 'gesture_choice', 'voice_choice'}, path + '.performance')
+        ids(item['fact_ids'], path + '.performance.fact_ids', facts, nonempty=True)
+        for key in ('stimulus', 'visible_choice', 'gesture_choice', 'voice_choice'):
+            text(item[key], path + '.performance.' + key)
+    exception = design['duration_exception']
+    if exception is None:
+        return
+    obj(exception, {'kind', 'fact_ids', 'continuous_content', 'required_seconds', 'timing_basis',
+                    'measurement', 'alternative_cuts_seconds', 'alternative_loss', 'after_four', 'complexity'}, path + '.duration_exception')
+    p = shot_policy()
+    need(exception['kind'] in p['exception_kinds'], path, 'unsupported duration exception')
+    ids(exception['fact_ids'], path + '.duration_exception.fact_ids', facts, nonempty=True)
+    from episode_rules import seconds
+    need(seconds(exception['required_seconds']) > p['normal_max_seconds'], path, 'exception needs an actual duration above the normal limit')
+    need(exception['measurement'] in {'estimate', 'measured'}, path, 'distinguish estimated from measured time')
+    cuts = exception['alternative_cuts_seconds']
+    need(isinstance(cuts, list) and len(cuts) >= 2 and
+         all(0 < seconds(x) <= p['normal_max_seconds'] for x in cuts), path,
+         'compare a concrete alternative made of positive shots at most four seconds')
+    need(sum(map(seconds, cuts)) == seconds(exception['required_seconds']), path, 'alternative must preserve the full timeline')
+    for key in ('continuous_content', 'timing_basis', 'alternative_loss', 'after_four', 'complexity'):
+        text(exception[key], path + '.duration_exception.' + key)
+
+
+def check_duration_design(row, design, path):
+    """Single numeric gate; independent review still decides necessity and meaning."""
+    from episode_rules import seconds
+    p = shot_policy(); duration = seconds(row['ticks'][-1]) / 10
+    exception = design['duration_exception']
+    need(duration <= p['reading_max_seconds'], path, 'shot exceeds eight seconds; replan without losing source content')
+    if duration <= p['normal_max_seconds']:
+        need(exception is None, path, 'ordinary shots do not need an exception')
+        return
+    need(exception is not None, path, 'over-four-second shot requires a frozen per-shot exception', 'insufficient_evidence')
+    need(seconds(exception['required_seconds']) == duration, path, 'exception duration differs from the actual shot clock')
+    actions = row['actions']; kind = exception['kind']
+    active = [a for a in actions if a['kind'] not in {'hold', 'blink', 'look', 'breath', 'eyelid', 'focus_adjust', 'blink_restraint'}]
+    need(len({a.get('actor') for a in active if a.get('actor')}) <= 1 and
+         sum(a['kind'] in {'speak', 'narrate', 'inner_voice'} for a in actions) <= 1 and
+         not any(a['kind'] in p['complex_actions'] for a in actions), path, 'long shot cannot hide multiple speakers, complex contact or scene changes')
+    if duration > p['dynamic_max_seconds']:
+        need(kind == 'information_reading' and not active and
+             row['camera']['frame'] == 'object', path,
+             'six-to-eight seconds is reserved for fixed, non-speaking information reading')
+    if kind == 'emotional_change':
+        need(any(a['kind'] == 'expression' and a['end'] > p['normal_max_seconds'] * 10 for a in actions), path, 'emotional exception needs an actual visible change extending beyond four seconds')
+    elif kind == 'simple_action':
+        need(len(active) == 1 and active[0]['kind'] not in {'speak', 'narrate', 'inner_voice'} and
+             active[0]['end'] > p['normal_max_seconds'] * 10, path, 'one continuous action, not long dialogue or concatenated actions, must need the extra time')
+    elif kind == 'meaningful_wait':
+        need(not active, path, 'waiting exception cannot cover speech or a stack of actions')
+    elif kind == 'information_reading':
+        need(not active and row['camera']['frame'] == 'object', path, 'reading exception needs a stable object shot without speech/performance')
+    elif kind == 'continuous_reveal':
+        need(False, path, 'moving-camera reveal is not supported by the current fixed-camera replay; split the shot', 'not_supported')
+
+
 class ProductionPlanGuard:
     """Use actual simulated views/events; never trust a producer-written PASS."""
     def __init__(self, payload, source):
@@ -236,6 +315,10 @@ class ProductionPlanGuard:
         if self.plan is None:
             return
         self.actors = set(payload['initial_world']['actors'])
+        from production_actions import EXPRESSION_POSES
+        for actor, state in payload['initial_world']['actors'].items():
+            need(state.get('action_state', {}).get('expression') in EXPRESSION_POSES,
+                 'initial_world.actors.' + actor, 'new production requires an explicit visible expression pose; no implicit calm default', 'insufficient_evidence')
         p = '$graph.production_plan'
         need(self.plan['context']['initial_world_sha256'] == digest(payload['initial_world']), p + '.context.initial_world_sha256', 'initial world changed after planning')
         expected = decision_values(payload)
@@ -247,6 +330,8 @@ class ProductionPlanGuard:
             need(digest(value) == digest(authored[path]['value']), path, 'decision differs from independently frozen plan')
         self.shots = {s['shot_id']: s for s in self.plan['shots']}
         need(set(self.shots) == {s['shot_id'] for s in payload['shots']}, p + '.shots', 'whole-shot plan coverage differs', 'insufficient_evidence')
+        for row in payload['shots']:
+            check_duration_design(row, self.shots[row['shot_id']]['design'], p + '.shots.' + row['shot_id'])
         self.uses = {u['action_id']: u for u in self.plan['knowledge']['uses']}
         action_ids = [a['id'] for shot in payload['shots'] for a in
                       [*shot['transition'].get('bridge',{}).get('actions',[]),*shot['actions']]]
@@ -262,7 +347,11 @@ class ProductionPlanGuard:
 
     def check_bridge(self, row, actions):
         if self.plan is None: return
+        from production_actions import EXPRESSION_POSES
         for action in actions:
+            if action['kind'] == 'expression':
+                need(action['to'] in EXPRESSION_POSES, '$graph.production_plan.bridge',
+                     'bridge expression changes must use visible poses')
             u=self.uses[action['id']]
             need(u['actor']==action['actor'] and u['stance']=='not_applicable' and not u['fact_ids'],
                  '$graph.production_plan.bridge','omitted staging cannot grant or consume plot knowledge')
@@ -272,6 +361,25 @@ class ProductionPlanGuard:
             return
         p = '$graph.production_plan.shots.' + row['shot_id']
         spec = self.shots[row['shot_id']]
+        check_duration_design({**row, 'actions': actions}, spec['design'], p)
+        first = samples[0]; world = first['world']
+        subjects = set(first['view']['actors']) | set(first['view']['props'])
+        anchors = spec['design']['spatial_anchors']
+        need(set(anchors) == subjects, p + '.spatial_anchors', 'each actual initial visible subject needs its own registered scene anchor')
+        for subject, anchor in anchors.items():
+            need(anchor != subject and anchor in world['points'], p + '.spatial_anchors', 'reference must be a different actual scene point')
+            need(world['points'][anchor]['scene_id'] == row['scene_id'], p + '.spatial_anchors', 'anchor must belong to this physical scene')
+            owned = next(d for d in self.plan['decisions'] if d['path'] == '/initial_world/points/' + anchor.replace('~', '~0').replace('/', '~1'))
+            need(bool(owned['fact_ids'] or owned['source_spans']), p + '.spatial_anchors', 'scene reference object needs source/setting support, not an invented camera target', 'insufficient_evidence')
+        performance = {item['actor']: item for item in spec['design']['performance']}
+        speakers = {a['actor'] for a in actions if a['kind'] == 'speak'}
+        visible_actors = set().union(*(set(s['view']['actors']) for s in samples))
+        need(set(performance) == visible_actors | speakers, p + '.performance', 'every visible actor and speaker needs a grounded performance choice; offscreen actors remain in world state')
+        from production_actions import EXPRESSION_POSES
+        need(all(a.get('to') in EXPRESSION_POSES for a in actions if a['kind'] == 'expression'), p + '.performance', 'expression changes must use visible poses, not abstract emotion labels')
+        if spec['design']['duration_exception'] and spec['design']['duration_exception']['kind'] == 'information_reading':
+            required = [v for v in spec['visible'] if v['kind'] == 'current_written' and v['start'] == 0 and v['end'] == row['ticks'][-1]]
+            need(bool(required), p, 'reading exception needs current source-bound text visible for the entire shot')
         need(row['transition']['relation'] not in {'prerequisite_reordering', 'same_event_reframing'},
              p + '.knowledge', 'nonlinear chronology needs an explicit story-time knowledge model', 'not_supported')
         actual = {a['id']: a for a in actions}
@@ -358,6 +466,9 @@ class ProductionPlanGuard:
         delivered = {fid for uid in spec['source_use_ids'] for fid in self.source['uses_by_id'][uid]['fact_ids']}
         need(set(spec['purpose_fact_ids']) <= delivered, p + '.purpose_fact_ids', 'shot purpose has no actual declared delivery')
         self.reports.append({'shot_id': row['shot_id'], 'status': 'pass',
+                             'episode_id': row['episode_id'], 'frame': row['camera']['frame'],
+                             'duration_seconds': row['ticks'][-1] / 10,
+                             'design': copy.deepcopy(spec['design']),
                              'visibility_checks': len(spec['visible']), 'actual_audio_ids': sorted(audio),
                              'source_use_ids': sorted(spec['source_use_ids'])})
 
@@ -367,7 +478,20 @@ class ProductionPlanGuard:
                     'reason': 'legacy low-level input has no frozen production plan',
                     'semantic_status': 'pending_independent_review', 'semantic_accuracy_percent': None}
         need(self.granted == {x['id'] for x in self.plan['knowledge']['acquisitions']}, '$graph.production_plan.knowledge', 'unexecuted knowledge acquisition')
+        statistics = []
+        for episode in dict.fromkeys(s['episode_id'] for s in self.reports):
+            shots = [s for s in self.reports if s['episode_id'] == episode]
+            extended = [s for s in shots if s['duration_seconds'] > shot_policy()['normal_max_seconds']]
+            total = sum(s['duration_seconds'] for s in shots)
+            statistics.append({'episode_id': episode, 'shot_count': len(shots),
+                'close_class_percent': 100 * sum(s['frame'] in shot_policy()['close_class_frames'] for s in shots) / len(shots),
+                'close_class_target_percent': shot_policy()['close_class_target_percent'],
+                'style_status': 'observation_only_pending_semantic_review',
+                'over_four_count': len(extended), 'over_four_shot_percent': 100 * len(extended) / len(shots),
+                'over_four_seconds': sum(s['duration_seconds'] for s in extended),
+                'over_four_time_percent': 100 * sum(s['duration_seconds'] for s in extended) / total})
         return {'contract': POLICY_CONTRACT, 'status': 'pass', 'plan_sha256': digest(self.plan),
+                'shot_design_statistics': statistics,
                 'context': copy.deepcopy(self.plan['context']), 'shots': copy.deepcopy(self.reports),
                 'scope': 'frozen decision identity; declared source and knowledge bindings; modelled landmark/time/audio feasibility',
                 'semantic_status': 'pending_independent_review', 'semantic_accuracy_percent': None,
