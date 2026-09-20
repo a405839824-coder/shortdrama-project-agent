@@ -58,6 +58,13 @@ def render_views(registry):
                 '合同：' + design['contract'], '', *['- ' + x for x in design['instructions']], '',
                 '## 结构与数值', '', '```json', json.dumps({k:v for k,v in design.items() if k != 'instructions'}, ensure_ascii=False, indent=2), '```', '',
             ])
+        narrative = runtime['production_prevention_policy'].get('scene_narrative_policy')
+        if narrative:
+            result['scene_narrative_contract.md'] = '\n'.join([
+                '# 场景时间与叙事因果合同', '', '由 rule_registry.json 生成；不得单独编辑。', '',
+                '合同：' + narrative['contract'], '', *['- ' + x for x in narrative['instructions']], '',
+                '## 输入结构', '', '```json', json.dumps(narrative['shape'], ensure_ascii=False, indent=2), '```', '',
+            ])
     if "workflow_integrity_policy" in runtime:
         policy = runtime["workflow_integrity_policy"]
         result["workflow_integrity_contract.md"] = "\n".join([
@@ -168,6 +175,15 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
     migrations = registry.get('historical_rule_migrations', {})
     if not isinstance(migrations, dict):
         return False
+    if kind == 'critical_runtime_policies' and identity == 'production_prevention_policy':
+        migration = migrations.get('scene-causality-0547', {})
+        hashes = migration.get(kind, {}).get(identity, {})
+        if (migration.get('basis') == 'user-authorized-scene-causality-2026-09-20'
+                and migration.get('legacy_applies_to_current_generation') is False
+                and current.get('scene_narrative_policy', {}).get('contract') == 'scene-narrative-v1'
+                and hashes.get('baseline_sha256') == registry_sha256(previous)
+                and hashes.get('current_sha256') == registry_sha256(current)):
+            return True
     reviewed = {
         'atomic_semantic_definitions': {'AR-R10-GLOBAL-004', 'AR-R10-TEMPLATE-001', 'AR-R10-BATCH-001',
             'AR-R10-PG1-017', 'AR-R10-PG1-028', 'AR-R10-FIELD-001', 'AR-R10-EPISODE-006'},
@@ -238,13 +254,15 @@ def check_registry_definition(registry, reference_root=None):
     version = registry["runtime_version"]
     revision = registry["plugin_version"]
     production = runtime.get('production_prevention_policy', {})
-    if production.get('contract') != 'storyboard-production-prevention-v1' or production.get('plan_contract') != 'storyboard-production-plan-v1':
+    if production.get('contract') != 'storyboard-production-prevention-v1' or production.get('plan_contract') != 'storyboard-production-plan-v2':
         failures.append('production prevention: required contract missing')
     else:
-        wanted = {f'PP-{i:02}' for i in range(1, 13)}
+        wanted = {f'PP-{i:02}' for i in range(1, 14)}
         found = _unique(production.get('rules', []), 'id', 'production prevention', failures)
         if found != wanted:
-            failures.append('production prevention: complete PP-01..PP-12 set required')
+            failures.append('production prevention: complete PP-01..PP-13 set required')
+        if production.get('scene_narrative_policy', {}).get('contract') != 'scene-narrative-v1':
+            failures.append('production prevention: scene narrative contract missing')
         for row in production['rules']:
             for key in ('title','inputs','prevention','on_failure','exceptions','enforcement','counterexample','limits','invalidates'):
                 if not row.get(key): failures.append('production prevention: incomplete rule ' + row['id'] + '.' + key)

@@ -9,6 +9,7 @@ RELATIONS = {"later_same_place": "同一地点省略时间后的场景切换",
              "prerequisite_reordering": "按先决条件重排的场景切换",
              "same_event_reframing": "同一事件重新取景的场景切换",
              "different_place": "地点变化的场景切换",
+             "simultaneous_different_place": "同时异地的平行场景切换",
              "episode_boundary": "跨集场景切换"}
 
 

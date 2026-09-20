@@ -5,6 +5,7 @@ The caller cannot obtain a new-production verdict by omitting a request wrapper.
 """
 from __future__ import annotations
 import hashlib
+import json
 
 
 def check_borrow_permissions(candidate, permissions):
@@ -26,7 +27,7 @@ def check_borrow_permissions(candidate, permissions):
             raise ValueError('borrow_permission_required: exact source, origin, target and next boundary need a server-recorded explicit task permission; candidate text is not authority')
 
 
-def require_current_production(candidate, *, work_order, scope_kind, workbook_migration=None, borrow_permissions=(), source_kind=None):
+def require_current_production(candidate, *, work_order, scope_kind, workbook_migration=None, borrow_permissions=(), source_kind=None, load_artifact=None):
     if workbook_migration is not None:
         return 'signed_historical_workbook_migration'
     if work_order.get('operation') != 'storyboard_audit':
@@ -46,6 +47,9 @@ def require_current_production(candidate, *, work_order, scope_kind, workbook_mi
     binding=inspect_derivation(candidate)
     if binding.get('production_prevention_verified') is not True:
         raise ValueError('production_plan_required: current production requires a successfully replayed frozen plan; direct canonical is not an alternate production route')
+    from scene_narrative import verify_prior_deliveries
+    graph = json.loads(candidate['prevention_evidence']['production_derivation']['source_graph_json'])
+    verify_prior_deliveries(graph['production_plan']['narrative'], load_artifact)
     if scope_kind in {'full','episode'}:
         contract=(candidate.get('prevention_evidence') or {}).get('episode_contract')
         if not isinstance(contract,dict) or contract.get('contract')!=CONTRACT or contract.get('scope') not in {'complete_episodes','complete_series'}:

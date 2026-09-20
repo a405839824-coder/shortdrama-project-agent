@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 import re
 
-CONTRACT = 'storyboard-production-plan-v1'
+CONTRACT = 'storyboard-production-plan-v2'
 POLICY_CONTRACT = 'storyboard-production-prevention-v1'
 REF = Path(__file__).resolve().parents[1] / 'references'
 
@@ -51,6 +51,7 @@ def model_production_contract():
             'required_for': ['new_mcp_production_authoring', 'direct_canonical_new_production', 'official_production_cli'],
             'episode_contract': episode_policy(),
             'shot_design_policy': shot_policy(),
+            'scene_narrative_policy': p['scene_narrative_policy'],
             'action_contract':{'reference':'references/source_actions_0537.md',
                 'parameters':{k:sorted(v) for k,v in sorted(ACTION_FIELDS.items())},
                 'expression_poses': production_actions.EXPRESSION_POSES,
@@ -87,7 +88,8 @@ def model_production_contract():
                     'acquisitions': ['{id,actor,fact_ids,evidence_fact_ids,action_id,mode:heard|source_report}'],
                     'uses': ['{action_id,actor,fact_ids,stance,evidence_fact_ids}; every actual action exactly once']},
                 'shots': ['{shot_id,purpose_fact_ids,required_action_ids,audio_action_ids,source_use_ids,visible,design}'],
-                'shot_design': shot_policy()['design_shape']},
+                'shot_design': shot_policy()['design_shape'],
+                'narrative': p['scene_narrative_policy']['shape']},
             'decision_partitions': ['each initial_world/scenes|actors|props|points entry',
                 'each shot camera|ticks|transition|editorial|shot_id|shot_uid|episode_id|scene_id|continuity_id|source_unit_ids',
                 'each shot action'],
@@ -160,7 +162,7 @@ def validate_source_plan(plan, facts, source_texts, source_hashes):
     """Validate a supplied frozen plan against real source bytes, never prose inference."""
     p = '$graph.production_plan'
     active = policy()
-    obj(plan, {'contract', 'context', 'decisions', 'knowledge', 'shots'}, p)
+    obj(plan, {'contract', 'context', 'decisions', 'knowledge', 'shots', 'narrative'}, p)
     need(plan['contract'] == CONTRACT, p + '.contract', 'unsupported production plan contract', 'not_supported')
     expected = runtime_context()
     obj(plan['context'], {*expected, 'source_sha256', 'initial_world_sha256'}, p + '.context')
@@ -235,6 +237,8 @@ def validate_source_plan(plan, facts, source_texts, source_hashes):
             marker = (requirement['kind'], requirement['subject'], lo, hi)
             need(marker not in seen, p + '.shots.visible', 'duplicate visibility requirement')
             seen.add(marker)
+    from scene_narrative import validate_narrative
+    validate_narrative(plan['narrative'], plan['shots'], facts, source_texts)
     return copy.deepcopy(plan)
 
 
@@ -330,6 +334,8 @@ class ProductionPlanGuard:
             need(digest(value) == digest(authored[path]['value']), path, 'decision differs from independently frozen plan')
         self.shots = {s['shot_id']: s for s in self.plan['shots']}
         need(set(self.shots) == {s['shot_id'] for s in payload['shots']}, p + '.shots', 'whole-shot plan coverage differs', 'insufficient_evidence')
+        from scene_narrative import SceneNarrativeGuard
+        self.narrative = SceneNarrativeGuard(payload, self.plan, source)
         for row in payload['shots']:
             check_duration_design(row, self.shots[row['shot_id']]['design'], p + '.shots.' + row['shot_id'])
         self.uses = {u['action_id']: u for u in self.plan['knowledge']['uses']}
@@ -337,7 +343,7 @@ class ProductionPlanGuard:
                       [*shot['transition'].get('bridge',{}).get('actions',[]),*shot['actions']]]
         ids(action_ids, 'shots.actions')
         need(set(self.uses) == set(action_ids), p + '.knowledge.uses', 'every actual action needs its knowledge applicability', 'insufficient_evidence')
-        self.known, self.reported = set(), set()
+        self.known, self.reported, self.reported_at = set(), set(), {}
         for entry in self.plan['knowledge']['initial']:
             need(entry['actor'] in self.actors, p + '.knowledge.initial', 'unknown initial actor')
             self.known.update((entry['actor'], fid) for fid in entry['fact_ids'])
@@ -347,6 +353,7 @@ class ProductionPlanGuard:
 
     def check_bridge(self, row, actions):
         if self.plan is None: return
+        self.narrative.check_bridge(row, actions)
         from production_actions import EXPRESSION_POSES
         for action in actions:
             if action['kind'] == 'expression':
@@ -417,6 +424,10 @@ class ProductionPlanGuard:
                     need(set(acquisition['evidence_fact_ids'])<=set(actual_use['fact_ids']),p+'.knowledge','report evidence is not delivered')
                 # Hearing an assertion establishes receipt, not its truth.
                 self.reported.update((acquisition['actor'], fid) for fid in acquisition['fact_ids'])
+                moment = self.narrative.clock[sid] + a['end']
+                for fid in acquisition['fact_ids']:
+                    key = (acquisition['actor'], fid)
+                    self.reported_at[key] = min(moment, self.reported_at.get(key, moment))
                 self.granted.add(acquisition['id'])
             for a in actions:
                 if a['start'] != tick:
@@ -434,6 +445,8 @@ class ProductionPlanGuard:
                         need(all((a['actor'], fid) in self.known for fid in u['fact_ids']), p + '.knowledge', 'character uses knowledge before its acquisition')
                     if u['stance'] == 'reported':
                         need(all((a['actor'], fid) in self.reported for fid in u['fact_ids']), p + '.knowledge', 'character uses a report before actually hearing it')
+                        need(all(self.reported_at[(a['actor'], fid)] <= self.narrative.clock[row['shot_id']] + a['start']
+                                 for fid in u['fact_ids']), p + '.knowledge', 'parallel editing cannot grant information from a later story instant')
         for requirement in spec['visible']:
             lo, hi, identity = requirement['start'], requirement['end'], requirement['subject']
             need(hi <= row['ticks'][-1], p + '.visible', 'required visibility lies outside this shot')
@@ -465,6 +478,7 @@ class ProductionPlanGuard:
         need(set(spec['source_use_ids']) <= consumed, p + '.source_use_ids', 'required information has no actual source use in this shot')
         delivered = {fid for uid in spec['source_use_ids'] for fid in self.source['uses_by_id'][uid]['fact_ids']}
         need(set(spec['purpose_fact_ids']) <= delivered, p + '.purpose_fact_ids', 'shot purpose has no actual declared delivery')
+        self.narrative.check_shot(row, samples, actions, action_records)
         self.reports.append({'shot_id': row['shot_id'], 'status': 'pass',
                              'episode_id': row['episode_id'], 'frame': row['camera']['frame'],
                              'duration_seconds': row['ticks'][-1] / 10,
@@ -491,9 +505,11 @@ class ProductionPlanGuard:
                 'over_four_seconds': sum(s['duration_seconds'] for s in extended),
                 'over_four_time_percent': 100 * sum(s['duration_seconds'] for s in extended) / total})
         return {'contract': POLICY_CONTRACT, 'status': 'pass', 'plan_sha256': digest(self.plan),
+                'scene_narrative': self.narrative.finish(),
                 'shot_design_statistics': statistics,
                 'context': copy.deepcopy(self.plan['context']), 'shots': copy.deepcopy(self.reports),
                 'scope': 'frozen decision identity; declared source and knowledge bindings; modelled landmark/time/audio feasibility',
                 'semantic_status': 'pending_independent_review', 'semantic_accuracy_percent': None,
                 'independent_review_required': ['source entailment and coverage', 'director choice and performance',
-                                                'belief and initial knowledge evidence', 'full occlusion and audio measurement']}
+                                                'belief and initial knowledge evidence', 'full occlusion and audio measurement',
+                                                'complete scene causal graph, viewer comprehension and deliberate suspense']}
