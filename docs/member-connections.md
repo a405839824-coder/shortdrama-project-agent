@@ -1,6 +1,6 @@
 # 小团队共用 Google 的成员连接方案
 
-0.5.47生产补充：管理员与员工共用服务端场景因果合同。新生产读取`production_prevention_contract.scene_narrative_policy`并冻结v2计划；服务端部署不证明员工旧窗口已经按该流程完成实际生产。本次未运行员工验收。
+0.5.49生产补充：管理员与员工共用服务端场景因果及时长合同。新生产读取`production_prevention_contract.scene_narrative_policy`与`shot_design_policy`并冻结v3计划；服务端部署不证明员工旧窗口已经按该流程完成实际生产。本次未运行员工验收。
 
 适用版本：0.5.30。启用开关默认关闭；不能把代码检查通过或代码部署成功当成员工已接入。
 
@@ -96,3 +96,5 @@ python scripts/configure_member_connections.py /secure/reviewed-members.json
 实现基于 OpenAI 的 [OAuth / predefined client 协议](https://developers.openai.com/plugins/build/auth)、[连接与刷新流程](https://developers.openai.com/plugins/deploy/connect-chatgpt)，以及 Auth0 的 [客户端认证](https://auth0.com/docs/secure/application-credentials)和[授权类型](https://auth0.com/docs/get-started/applications/application-grant-types)。每位成员独立 confidential client 是本项目的设计选择。
 
 本地验证包含 RSA 签名 token 的 HTTP `/mcp` 调用、10 个成员空间、权限拒绝、禁用、错误配置、Google 绑定、历史 owner 空间及配置切换期间身份一致性。它不等于真实员工账号接入、Auth0 续期成功、生产部署或 10 人重任务并发性能验收。
+
+0.5.49新生产读取在线v3计划与shot_design v2：4秒目标不触发自动切镜，4—6秒完整短句有独立通道；cut_anchor与备选绑定实际台词/动作，镜数是参考，整批节奏必须独审。沿用同一计时、状态与十一列表格，不输出内部理由。6秒以上对白和未支持运镜/音频能力保持限制。本轮按用户要求未测试，不宣称内容验收或首稿98%。见docs/UPGRADE_0.5.49.md。

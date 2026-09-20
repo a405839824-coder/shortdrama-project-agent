@@ -16,6 +16,7 @@ from shortdrama_mcp.materializer import (MOTHER_TEMPLATE_COLUMNS, LEGACY_MOTHER_
 class ShotDesignRegression(unittest.TestCase):
     def test_duration_boundaries_and_false_dialogue_exception(self):
         design = {'framing_reason': 'read the source note', 'cut_reason': 'new evidence',
+                  'cut_anchor': {'kind': 'opening', 'shot_id': 'EP01-001', 'action_id': None, 'source_use_id': None, 'char_offset': None, 'tick': 0},
                   'spatial_anchors': {}, 'performance': [], 'duration_exception': None}
         row = {'ticks': [0, 10, 20, 40], 'camera': {'frame': 'object'}, 'actions': []}
         check_duration_design(row, design, 'shot')
@@ -24,7 +25,7 @@ class ShotDesignRegression(unittest.TestCase):
         design['duration_exception'] = {'kind': 'information_reading', 'fact_ids': ['F1'],
             'continuous_content': 'source note visible as a whole', 'required_seconds': 7,
             'timing_basis': 'reading estimate', 'measurement': 'estimate',
-            'alternative_cuts_seconds': [3.5, 3.5], 'alternative_loss': 'the juxtaposed source words leave the frame',
+            'alternative_cuts': [], 'alternative_loss': 'no event or speech boundary inside the source note; independent reading review required',
             'after_four': 'finish reading the same note', 'complexity': 'fixed object shot'}
         row['ticks'][-1] = 70
         validate_design(design, {'F1'}, 'design')
@@ -33,7 +34,7 @@ class ShotDesignRegression(unittest.TestCase):
         with self.assertRaises(ProductionPlanError): check_duration_design(row, design, 'shot')
         row['actions'] = []; row['ticks'][-1] = 81
         with self.assertRaises(ProductionPlanError): check_duration_design(row, design, 'shot')
-        broken = copy.deepcopy(design); broken['duration_exception']['alternative_cuts_seconds'] = [3, 3]
+        broken = copy.deepcopy(design); broken['duration_exception']['alternative_cuts'] = [3, 3]
         with self.assertRaises(ProductionPlanError): validate_design(broken, {'F1'}, 'design')
 
     def test_layout_and_required_design_evidence(self):

@@ -42,11 +42,15 @@ def frozen_plan(payload, graph, texts):
         anchor = shot['camera']['target']
         design = {'framing_reason': '合成控制：固定机位观察已登记的主体和源文信息。',
             'cut_reason': '合成控制：在明确的本镜信息边界切换。',
+            'cut_anchor': {'kind': 'opening' if index == 0 else 'scene' if any(shot[k] != payload['shots'][index-1][k] for k in ('scene_id','continuity_id','episode_id')) else 'event',
+                'shot_id': shot['shot_id'], 'action_id': None, 'source_use_id': None, 'char_offset': None, 'tick': 0},
             'spatial_anchors': {name: anchor for name in sorted(subjects)},
             'performance': [{'actor': name, 'fact_ids': purpose,
                 'stimulus': '合成控制所列源文信息。', 'visible_choice': '眉眼舒展，唇线自然',
                 'gesture_choice': '只执行已列实际动作。', 'voice_choice': '按实际音轨；无发声时无音色。'}
                 for name in sorted(set(view['actors']) | speakers)], 'duration_exception': None}
+        if design['cut_anchor']['kind'] == 'event':
+            design['cut_anchor']['action_id'] = next(a['id'] for a in shot['actions'] if a['start'] == 0)
         shots.append({'shot_id':shot['shot_id'],'purpose_fact_ids':purpose,
                       'required_action_ids':[a['id'] for a in shot['actions']],
                       'audio_action_ids':[a['id'] for a in shot['actions'] if a['kind'] in {'speak','narrate','inner_voice'}],

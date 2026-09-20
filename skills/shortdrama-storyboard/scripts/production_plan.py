@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 import re
 
-CONTRACT = 'storyboard-production-plan-v2'
+CONTRACT = 'storyboard-production-plan-v3'
 POLICY_CONTRACT = 'storyboard-production-prevention-v1'
 REF = Path(__file__).resolve().parents[1] / 'references'
 
@@ -243,11 +243,12 @@ def validate_source_plan(plan, facts, source_texts, source_hashes):
 
 def validate_design(design, facts, path):
     """Bind reviewable choices before rendering; prose is evidence, not a verdict."""
-    obj(design, {'framing_reason', 'cut_reason', 'spatial_anchors', 'performance', 'duration_exception'}, path)
+    obj(design, {'framing_reason', 'cut_reason', 'cut_anchor', 'spatial_anchors', 'performance', 'duration_exception'}, path)
     def text(value, at):
         need(isinstance(value, str) and bool(value.strip()), at, 'a concrete authored reason is required', 'insufficient_evidence')
     for key in ('framing_reason', 'cut_reason'):
         text(design[key], path + '.' + key)
+    validate_cut_anchor(design['cut_anchor'], path + '.cut_anchor')
     need(isinstance(design['spatial_anchors'], dict), path + '.spatial_anchors', 'subject to actual scene anchor mapping required')
     for subject, anchor in design['spatial_anchors'].items():
         text(subject, path); text(anchor, path)
@@ -260,23 +261,78 @@ def validate_design(design, facts, path):
     if exception is None:
         return
     obj(exception, {'kind', 'fact_ids', 'continuous_content', 'required_seconds', 'timing_basis',
-                    'measurement', 'alternative_cuts_seconds', 'alternative_loss', 'after_four', 'complexity'}, path + '.duration_exception')
+                    'measurement', 'alternative_cuts', 'alternative_loss', 'after_four', 'complexity'}, path + '.duration_exception')
     p = shot_policy()
     need(exception['kind'] in p['exception_kinds'], path, 'unsupported duration exception')
     ids(exception['fact_ids'], path + '.duration_exception.fact_ids', facts, nonempty=True)
     from episode_rules import seconds
     need(seconds(exception['required_seconds']) > p['normal_max_seconds'], path, 'exception needs an actual duration above the normal limit')
     need(exception['measurement'] in {'estimate', 'measured'}, path, 'distinguish estimated from measured time')
-    cuts = exception['alternative_cuts_seconds']
-    need(isinstance(cuts, list) and len(cuts) >= 2 and
-         all(0 < seconds(x) <= p['normal_max_seconds'] for x in cuts), path,
-         'compare a concrete alternative made of positive shots at most four seconds')
-    need(sum(map(seconds, cuts)) == seconds(exception['required_seconds']), path, 'alternative must preserve the full timeline')
+    cuts = exception['alternative_cuts']
+    need(isinstance(cuts, list), path, 'alternative cuts must bind actual events or speech; [] means no suitable cut, pending independent review')
+    for cut in cuts:
+        obj(cut, {'anchor', 'benefit', 'loss'}, path + '.alternative_cuts')
+        validate_cut_anchor(cut['anchor'], path + '.alternative_cuts.anchor')
+        need(cut['anchor']['kind'] in {'dialogue', 'event'}, path, 'alternative must be an actual internal dialogue/event position')
+        text(cut['benefit'], path); text(cut['loss'], path)
+    need(len({digest(cut['anchor']) for cut in cuts}) == len(cuts), path, 'duplicate alternative cut')
     for key in ('continuous_content', 'timing_basis', 'alternative_loss', 'after_four', 'complexity'):
         text(exception[key], path + '.duration_exception.' + key)
 
 
-def check_duration_design(row, design, path):
+def validate_cut_anchor(anchor, path):
+    obj(anchor, {'kind', 'shot_id', 'action_id', 'source_use_id', 'char_offset', 'tick'}, path)
+    need(anchor['kind'] in {'opening', 'scene', 'dialogue', 'event'}, path, 'unknown cut anchor kind')
+    need(type(anchor['tick']) is int and 0 <= anchor['tick'] <= 36000, path, 'cut tick must be integer tenths')
+    need(isinstance(anchor['shot_id'], str) and bool(anchor['shot_id']), path, 'cut needs an actual shot identity')
+    if anchor['kind'] in {'opening', 'scene'}:
+        need(anchor['tick'] == 0 and all(anchor[k] is None for k in ('action_id', 'source_use_id', 'char_offset')), path, 'opening/scene anchor uses frame zero, not a fictional event')
+    else:
+        need(isinstance(anchor['action_id'], str) and bool(anchor['action_id']), path, 'event identity required')
+        if anchor['kind'] == 'dialogue':
+            need(isinstance(anchor['source_use_id'], str) and bool(anchor['source_use_id']) and
+                 type(anchor['char_offset']) is int and anchor['char_offset'] >= 0, path, 'dialogue needs source-use identity and exact character offset')
+        else:
+            need(anchor['source_use_id'] is None and anchor['char_offset'] is None, path, 'event anchors do not invent speech offsets')
+
+
+def check_cut_anchor(anchor, row, previous, uses, path, *, alternative=False):
+    """Resolve declared positions; neither an ID nor a tick proves a good edit."""
+    validate_cut_anchor(anchor, path)
+    target = row if anchor['shot_id'] == row['shot_id'] else previous
+    need(target is not None and anchor['shot_id'] == target['shot_id'], path, 'cut must reference this shot or its actual immediate predecessor')
+    tick = anchor['tick']
+    if alternative:
+        need(target is row and 0 < tick < row['ticks'][-1], path, 'alternative must lie strictly inside the current shot')
+    else:
+        need(tick == (0 if target is row else target['ticks'][-1]), path, 'actual cut must bind the real shot boundary')
+    kind = anchor['kind']
+    if kind == 'opening':
+        need(previous is None and target is row and not alternative, path, 'opening cannot bypass subsequent cuts')
+        return
+    if kind == 'scene':
+        need(previous is not None and target is row and not alternative and
+             any(row[k] != previous[k] for k in ('scene_id', 'continuity_id', 'episode_id')), path, 'scene cut requires an actual scene, time/continuity or episode boundary')
+        return
+    action = next((a for a in target['actions'] if a['id'] == anchor['action_id']), None)
+    need(action is not None, path, 'cut event does not exist in the referenced shot')
+    if kind == 'event':
+        need(tick in (action['start'], action['end']), path, 'event cut must bind the actual start or end')
+        return
+    use = uses.get(action.get('source_use_id'))
+    need(action['kind'] in {'speak', 'narrate', 'inner_voice'} and use is not None and
+         anchor['source_use_id'] == action['source_use_id'], path, 'dialogue anchor must bind actual delivered audio and its source')
+    offset = anchor['char_offset']; size = len(use['text'])
+    need(0 <= offset <= size and action['start'] <= tick <= action['end'], path, 'dialogue position outside the actual utterance')
+    if offset in (0, size):
+        need(tick == (action['start'] if offset == 0 else action['end']), path, 'utterance endpoint must match its event clock')
+    else:
+        need(alternative and action['start'] < tick < action['end'], path, 'an internal word position is only a proposed cut, not an executed boundary')
+    # ponytail: internal character/tick alignment remains an estimate until the
+    # existing audio audit checks the actual recording; no second timing model.
+
+
+def check_duration_design(row, design, path, uses=None):
     """Single numeric gate; independent review still decides necessity and meaning."""
     from episode_rules import seconds
     p = shot_policy(); duration = seconds(row['ticks'][-1]) / 10
@@ -287,26 +343,63 @@ def check_duration_design(row, design, path):
         return
     need(exception is not None, path, 'over-four-second shot requires a frozen per-shot exception', 'insufficient_evidence')
     need(seconds(exception['required_seconds']) == duration, path, 'exception duration differs from the actual shot clock')
-    actions = row['actions']; kind = exception['kind']
+    actions = row['actions']; kind = exception['kind']; uses = uses or {}
     active = [a for a in actions if a['kind'] not in {'hold', 'blink', 'look', 'breath', 'eyelid', 'focus_adjust', 'blink_restraint'}]
-    need(len({a.get('actor') for a in active if a.get('actor')}) <= 1 and
+    principal = [a for a in active if a['kind'] != 'expression']
+    need(len({a.get('actor', uses.get(a.get('source_use_id'), {}).get('actor')) for a in principal
+              if a.get('actor', uses.get(a.get('source_use_id'), {}).get('actor'))}) <= 1 and
          sum(a['kind'] in {'speak', 'narrate', 'inner_voice'} for a in actions) <= 1 and
          not any(a['kind'] in p['complex_actions'] for a in actions), path, 'long shot cannot hide multiple speakers, complex contact or scene changes')
     if duration > p['dynamic_max_seconds']:
         need(kind == 'information_reading' and not active and
              row['camera']['frame'] == 'object', path,
              'six-to-eight seconds is reserved for fixed, non-speaking information reading')
-    if kind == 'emotional_change':
+    if kind == 'complete_dialogue':
+        speech = [a for a in actions if a['kind'] == 'speak']
+        need(len(speech) == 1 and speech[0]['end'] - speech[0]['start'] > p['normal_max_seconds'] * 10 and
+             speech[0]['end'] == row['ticks'][-1], path, 'natural completion requires one actual over-four-second utterance ending at the shot end; no padding or invented emotional change')
+        need(all(a['kind'] in p['dialogue_support_actions'] for a in actions), path, 'natural completion must remain a supported simple performance; movement/contact needs replanning')
+    elif kind == 'emotional_change':
         need(any(a['kind'] == 'expression' and a['end'] > p['normal_max_seconds'] * 10 for a in actions), path, 'emotional exception needs an actual visible change extending beyond four seconds')
     elif kind == 'simple_action':
-        need(len(active) == 1 and active[0]['kind'] not in {'speak', 'narrate', 'inner_voice'} and
-             active[0]['end'] > p['normal_max_seconds'] * 10, path, 'one continuous action, not long dialogue or concatenated actions, must need the extra time')
+        need(len(principal) == 1 and principal[0]['kind'] not in {'speak', 'narrate', 'inner_voice'} and
+             principal[0]['end'] > p['normal_max_seconds'] * 10, path, 'one continuous action, not long dialogue or concatenated actions, must need the extra time')
     elif kind == 'meaningful_wait':
         need(not active, path, 'waiting exception cannot cover speech or a stack of actions')
     elif kind == 'information_reading':
         need(not active and row['camera']['frame'] == 'object', path, 'reading exception needs a stable object shot without speech/performance')
     elif kind == 'continuous_reveal':
         need(False, path, 'moving-camera reveal is not supported by the current fixed-camera replay; split the shot', 'not_supported')
+
+
+def shot_rhythm_statistics(rows, *, scope='fragment'):
+    """Describe actual clocks/patterns without manufacturing a quality verdict."""
+    from collections import Counter
+    from math import ceil, floor
+    from episode_rules import seconds
+    p = shot_policy(); result = []
+    for episode in dict.fromkeys(s['episode_id'] for s in rows):
+        shots = [s for s in rows if s['episode_id'] == episode]
+        durations = [seconds(s['duration_seconds']) for s in shots]
+        total = sum(durations); count = len(shots)
+        need(total > 0 and all(d > 0 for d in durations), 'shot_rhythm_statistics', 'positive actual shot durations required')
+        low, high = p['planning_average_seconds']
+        bounds = [max(1, ceil(total / seconds(high))), max(1, floor(total / seconds(low)))]
+        bounds[1] = max(bounds)
+        extended = [d for d in durations if d > seconds(p['normal_max_seconds'])]
+        reasons = Counter(s.get('design', {}).get('cut_reason', '') for s in shots)
+        result.append({'episode_id': episode, 'scope': scope, 'shot_count': count,
+            'seconds': float(total), 'average_shot_seconds': float(total / count),
+            'planning_shot_range': bounds, 'planning_average_seconds': [low, high],
+            'count_reference_status': 'outside_reference_review_content' if not bounds[0] <= count <= bounds[1] else 'within_reference_not_quality_pass',
+            'duration_histogram_seconds': dict(sorted(Counter(str(d.normalize()) for d in durations).items())),
+            'repeated_cut_reasons': [reason for reason, n in reasons.items() if reason and n > 1],
+            'close_class_percent': 100 * sum(s['frame'] in p['close_class_frames'] for s in shots) / count,
+            'close_class_target_percent': p['close_class_target_percent'],
+            'style_status': 'observation_only_pending_semantic_review',
+            'over_four_count': len(extended), 'over_four_shot_percent': 100 * len(extended) / count,
+            'over_four_seconds': float(sum(extended)), 'over_four_time_percent': float(100 * sum(extended) / total)})
+    return result
 
 
 class ProductionPlanGuard:
@@ -318,6 +411,7 @@ class ProductionPlanGuard:
         if self.plan is None:
             return
         self.actors = set(payload['initial_world']['actors'])
+        self.episode_scope = payload.get('project', {}).get('prevention_evidence', {}).get('episode_contract', {}).get('scope', 'fragment')
         from production_actions import EXPRESSION_POSES
         for actor, state in payload['initial_world']['actors'].items():
             need(state.get('action_state', {}).get('expression') in EXPRESSION_POSES,
@@ -335,8 +429,14 @@ class ProductionPlanGuard:
         need(set(self.shots) == {s['shot_id'] for s in payload['shots']}, p + '.shots', 'whole-shot plan coverage differs', 'insufficient_evidence')
         from scene_narrative import SceneNarrativeGuard
         self.narrative = SceneNarrativeGuard(payload, self.plan, source)
+        previous = None
         for row in payload['shots']:
-            check_duration_design(row, self.shots[row['shot_id']]['design'], p + '.shots.' + row['shot_id'])
+            design = self.shots[row['shot_id']]['design']; at = p + '.shots.' + row['shot_id']
+            check_duration_design(row, design, at, source['uses_by_id'])
+            check_cut_anchor(design['cut_anchor'], row, previous, source['uses_by_id'], at + '.cut_anchor')
+            for cut in (design['duration_exception'] or {}).get('alternative_cuts', []):
+                check_cut_anchor(cut['anchor'], row, None, source['uses_by_id'], at + '.alternative_cuts', alternative=True)
+            previous = row
         self.uses = {u['action_id']: u for u in self.plan['knowledge']['uses']}
         action_ids = [a['id'] for shot in payload['shots'] for a in
                       [*shot['transition'].get('bridge',{}).get('actions',[]),*shot['actions']]]
@@ -367,7 +467,7 @@ class ProductionPlanGuard:
             return
         p = '$graph.production_plan.shots.' + row['shot_id']
         spec = self.shots[row['shot_id']]
-        check_duration_design({**row, 'actions': actions}, spec['design'], p)
+        check_duration_design({**row, 'actions': actions}, spec['design'], p, self.source['uses_by_id'])
         first = samples[0]; world = first['world']
         subjects = set(first['view']['actors']) | set(first['view']['props'])
         anchors = spec['design']['spatial_anchors']
@@ -491,18 +591,7 @@ class ProductionPlanGuard:
                     'reason': 'legacy low-level input has no frozen production plan',
                     'semantic_status': 'pending_independent_review', 'semantic_accuracy_percent': None}
         need(self.granted == {x['id'] for x in self.plan['knowledge']['acquisitions']}, '$graph.production_plan.knowledge', 'unexecuted knowledge acquisition')
-        statistics = []
-        for episode in dict.fromkeys(s['episode_id'] for s in self.reports):
-            shots = [s for s in self.reports if s['episode_id'] == episode]
-            extended = [s for s in shots if s['duration_seconds'] > shot_policy()['normal_max_seconds']]
-            total = sum(s['duration_seconds'] for s in shots)
-            statistics.append({'episode_id': episode, 'shot_count': len(shots),
-                'close_class_percent': 100 * sum(s['frame'] in shot_policy()['close_class_frames'] for s in shots) / len(shots),
-                'close_class_target_percent': shot_policy()['close_class_target_percent'],
-                'style_status': 'observation_only_pending_semantic_review',
-                'over_four_count': len(extended), 'over_four_shot_percent': 100 * len(extended) / len(shots),
-                'over_four_seconds': sum(s['duration_seconds'] for s in extended),
-                'over_four_time_percent': 100 * sum(s['duration_seconds'] for s in extended) / total})
+        statistics = shot_rhythm_statistics(self.reports, scope=self.episode_scope)
         return {'contract': POLICY_CONTRACT, 'status': 'pass', 'plan_sha256': digest(self.plan),
                 'scene_narrative': self.narrative.finish(),
                 'shot_design_statistics': statistics,

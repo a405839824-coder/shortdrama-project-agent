@@ -5,7 +5,7 @@
 合同：scene-narrative-v1
 
 - 生成分镜前先读完整授权原文，在事实图depends_on/conditions保留必要触发、获知、决定、结果；原文有不代表观众已知。模型不得以删去依赖、降为非必要或director_choice补造剧情来获得通过。
-- production_plan v2必填narrative；全部镜头按实际剪辑顺序唯一归入连续场景段，跨地点、时间跳跃、连续性ID或集号变更必须另起段。每段声明时间、切场作用、实际入场识别主体与来源事实，至少一项实际信息交付。
+- production_plan v3必填narrative；全部镜头按实际剪辑顺序唯一归入连续场景段，跨地点、时间跳跃、连续性ID或集号变更必须另起段。每段声明时间、切场作用、实际入场识别主体与来源事实，至少一项实际信息交付。
 - time.start_tick使用内部0.1秒剧情时间；与成片累计时长分开。同时异地须以simultaneous关联此前场景段、时间区间相交、地点不同，并使用simultaneous_different_place转场。时间依据必须引用实际原文事实；同场状态只按剧情时间前进。
 - 当前支持状态可独立重放的异地平行剪辑。读取未来人物/道具/场景、跨场走位倒流、同一事件重复取景和倒叙未建模时返回not_supported，不能改标签绕过。跨场物理行动保留原状态链。
 - 每条来源事实depends_on和conditions边必须有causal_links：shown引用实际先行交付镜；prior_delivery引用同项目历史canonical的文件哈希、镜号、观众字段及原句；withheld引用实际后续揭示镜或授权未来原文跨度。无依据保持不足，不能编造报信、书信、行走或对白。
