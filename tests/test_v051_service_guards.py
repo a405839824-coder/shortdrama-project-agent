@@ -21,6 +21,7 @@ from shortdrama_mcp.config import Settings
 from shortdrama_mcp.file_io import storyboard_to_xlsx
 
 from semantic_audit_helpers import semantic_audit_for_artifact
+from historical_workbook_fixtures import previous_workbook
 from test_efficiency import valid_storyboard
 
 
@@ -6032,66 +6033,71 @@ class V051ServiceGuardTests(unittest.TestCase):
         )
 
     def test_xlsx_without_canonical_sidecar_cannot_be_independently_audited(self) -> None:
-        project_id = self._project("no-sidecar")
-        payload = storyboard_to_xlsx(
-            valid_storyboard(), {"status": "pass", "issues": []}, assume_compact=True
-        )
-        workbook = load_workbook(io.BytesIO(payload), data_only=False)
-        self.assertIn(file_io.CANONICAL_SIDECAR_SHEET, workbook.sheetnames)
-        workbook.remove(workbook[file_io.CANONICAL_SIDECAR_SHEET])
-        output = io.BytesIO()
-        workbook.save(output)
-        workbook.close()
-        record = self.service.store.save_artifact_bytes(
-            self.namespace,
-            project_id,
-            output.getvalue(),
-            file_name="legacy-no-sidecar.xlsx",
-            artifact_type="storyboard",
-            version="v1",
-            metadata={
-                "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            },
-        )
-        audit_id, audit_session = self._begin_audit(
-            project_id, str(record["artifact_id"]), "no-sidecar"
-        )
-        artifact_count = len(
-            self.service.store.list_artifacts(self.namespace, project_id)
-        )
-        certificates_before = self.service.store.list_project_records(
-            self.namespace, project_id, kind="certificates"
-        )
-
-        with self.assertRaisesRegex(
-            ValueError, "canonical_projection_migration_required"
+        for layout, export, expected_error in (
+            ("current", storyboard_to_xlsx, "current eleven-column workbook requires its canonical sidecar"),
+            ("historical", previous_workbook, "canonical_projection_migration_required"),
         ):
-            self.service.audit_storyboard(
-                self.namespace,
-                project_id=project_id,
-                artifact_id=str(record["artifact_id"]),
-                audit_cycle_id=None,
-                work_order_id=audit_id,
-                semantic_audit=None,
-                request_session_id=audit_session,
-            )
+            with self.subTest(layout=layout):
+                project_id = self._project(layout + "-no-sidecar")
+                payload = export(
+                    valid_storyboard(), {"status": "pass", "issues": []}, assume_compact=True
+                )
+                workbook = load_workbook(io.BytesIO(payload), data_only=False)
+                self.assertIn(file_io.CANONICAL_SIDECAR_SHEET, workbook.sheetnames)
+                workbook.remove(workbook[file_io.CANONICAL_SIDECAR_SHEET])
+                output = io.BytesIO()
+                workbook.save(output)
+                workbook.close()
+                record = self.service.store.save_artifact_bytes(
+                    self.namespace,
+                    project_id,
+                    output.getvalue(),
+                    file_name=layout + "-no-sidecar.xlsx",
+                    artifact_type="storyboard",
+                    version="v1",
+                    metadata={
+                        "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    },
+                )
+                audit_id, audit_session = self._begin_audit(
+                    project_id, str(record["artifact_id"]), "no-sidecar"
+                )
+                artifact_count = len(
+                    self.service.store.list_artifacts(self.namespace, project_id)
+                )
+                certificates_before = self.service.store.list_project_records(
+                    self.namespace, project_id, kind="certificates"
+                )
 
-        self.assertEqual(
-            len(self.service.store.list_artifacts(self.namespace, project_id)),
-            artifact_count,
-        )
-        self.assertEqual(
-            self.service.store.list_project_records(
-                self.namespace, project_id, kind="handoffs"
-            ),
-            [],
-        )
-        self.assertEqual(
-            self.service.store.list_project_records(
-                self.namespace, project_id, kind="certificates"
-            ),
-            certificates_before,
-        )
+                with self.assertRaisesRegex(
+                    ValueError, expected_error
+                ):
+                    self.service.audit_storyboard(
+                        self.namespace,
+                        project_id=project_id,
+                        artifact_id=str(record["artifact_id"]),
+                        audit_cycle_id=None,
+                        work_order_id=audit_id,
+                        semantic_audit=None,
+                        request_session_id=audit_session,
+                    )
+
+                self.assertEqual(
+                    len(self.service.store.list_artifacts(self.namespace, project_id)),
+                    artifact_count,
+                )
+                self.assertEqual(
+                    self.service.store.list_project_records(
+                        self.namespace, project_id, kind="handoffs"
+                    ),
+                    [],
+                )
+                self.assertEqual(
+                    self.service.store.list_project_records(
+                        self.namespace, project_id, kind="certificates"
+                    ),
+                    certificates_before,
+                )
 
 
 if __name__ == "__main__":

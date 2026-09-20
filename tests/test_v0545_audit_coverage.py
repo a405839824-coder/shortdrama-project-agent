@@ -53,8 +53,9 @@ class CoverageUnitTests(unittest.TestCase):
 
     def test_all_current_checks_are_bound_and_covered(self):
         receipt = self.validate()
-        self.assertEqual(receipt['expected_count'], 39)
-        self.assertEqual(receipt['reviewed_count'], 39)
+        self.assertEqual(receipt['expected_count'], 42)
+        self.assertEqual(receipt['reviewed_count'], 42)
+        self.assertEqual(sum(r['rule_id'] == 'scene_causality' for r in self.manifest['obligations']), 3)
         ownership = next(r for r in self.manifest['obligations'] if r['rule_id'] == 'field_ownership')
         self.assertEqual(len(ownership['required_observation_refs']), 27)
 
@@ -112,7 +113,7 @@ class CoverageUnitTests(unittest.TestCase):
         normalized = normalize_coverage_transport(legacy)
         # Transport order is irrelevant to semantics, but stable hashes bind
         # the exact accepted order instead of reusing a different submission.
-        self.assertEqual(self.validate(normalized)['reviewed_count'], 39)
+        self.assertEqual(self.validate(normalized)['reviewed_count'], 42)
         for mutation in ('conflict', 'duplicate', 'reorder', 'missing', 'wrong_layer', 'duplicate_json'):
             value = copy.deepcopy(legacy)
             layer = value['layers'][0]

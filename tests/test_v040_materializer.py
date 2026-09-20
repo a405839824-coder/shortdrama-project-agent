@@ -43,6 +43,7 @@ EXPECTED_COMPACT_COLUMNS = [
     "覆盖原文",
     "原文依据类型",
     "原文支撑句",
+    "光影",
 ]
 
 
@@ -71,7 +72,8 @@ class CompactMasterMaterializerTests(unittest.TestCase):
         self.assertNotIn("调用方伪造", str(first))
 
     def test_projection_contains_dialogue_performance_tone_and_four_light_fields(self) -> None:
-        shot = valid_storyboard()["shots"][0]
+        storyboard = valid_storyboard()
+        shot = storyboard["shots"][0]
         shot["画面内容"] = (
             "[0.0–0.8s] 苏清柳先看向右侧主位，垂眸整理袖口；"
             "[0.8–3.1s] 她重新抬眼，眉眼稳定，以平静语气说："
@@ -94,6 +96,7 @@ class CompactMasterMaterializerTests(unittest.TestCase):
 
         merged = compile_formal_merged_field(shot)
         keyframe = compile_gpt_keyframe_instruction(shot)
+        lighting = formal_mother_template_rows(storyboard)[0]["光影"]
 
         self.assertIn("空间站位描述：", merged)
         self.assertIn("起始状态：", merged)
@@ -103,7 +106,8 @@ class CompactMasterMaterializerTests(unittest.TestCase):
         self.assertIn("口型与精确台词一致", merged)
         self.assertIn(f"音色：\n\n{shot['音色']}", merged)
         for field in ("光影", "光源来源", "光源方向", "色温倾向"):
-            self.assertIn(f"{field}：{shot[field]}", merged)
+            self.assertIn(f"{field}：{shot[field]}", lighting)
+            self.assertNotIn(f"{field}：", merged)
         for removed in ("人物调度：", "动作与表演：", "台词：", "标点语气："):
             self.assertNotIn(removed, merged)
         self.assertNotIn("发声方式", shot)
@@ -139,7 +143,7 @@ class CompactMasterMaterializerTests(unittest.TestCase):
             ["累计时长", "total_duration"],
         )
 
-    def test_xlsx_has_exact_compact_ten_columns_and_no_batch_sheet(self) -> None:
+    def test_xlsx_has_exact_compact_eleven_columns_and_no_batch_sheet(self) -> None:
         storyboard = compact_storyboard_canonical(valid_storyboard())
         workbook_bytes = storyboard_to_xlsx(storyboard, {"issues": []})
         workbook = load_workbook(io.BytesIO(workbook_bytes), read_only=True, data_only=False)

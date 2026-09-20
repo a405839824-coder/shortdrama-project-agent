@@ -240,6 +240,7 @@ class ProductionStateChain:
     def __init__(self, initial_state: dict, *, label: str, reason: str):
         first = StateSnapshot(initial_state, label=label, reason=reason)
         self._history = (first,)
+        self._known_entities = _identities(first.to_dict())
 
     @property
     def current(self) -> StateSnapshot:
@@ -251,8 +252,8 @@ class ProductionStateChain:
 
     def advance(self, next_state: dict, *, label: str, reason: str) -> StateSnapshot:
         _require(label not in {s.label for s in self._history}, "snapshot.label", "history label already exists")
-        known = set().union(*(_identities(s.to_dict()) for s in self._history))
-        candidate = StateSnapshot(next_state, label=label, reason=reason, known_entities=known)
+        candidate = StateSnapshot(next_state, label=label, reason=reason, known_entities=self._known_entities)
+        self._known_entities.update(_identities(candidate.to_dict()))
         self._history = (*self._history, candidate)
         return candidate
 

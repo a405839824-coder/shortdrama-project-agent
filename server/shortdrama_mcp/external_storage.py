@@ -375,12 +375,16 @@ class ExternalProjectStorage:
             if install:
                 target = self._mounted_project_dir(namespace, project_id)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                with self.store.lock(
-                    f"library-project-mount-{self.store.namespace_key(namespace)}-{project_id}"
-                ):
+                with self.store.project_write_lock(namespace, project_id):
                     if target.exists():
-                        shutil.rmtree(target)
-                    os.replace(extracted, target)
+                        mounted_sha256, _, _ = self.tree_manifest(target)
+                        if not hmac.compare_digest(mounted_sha256, actual_tree_sha256):
+                            raise ValueError(
+                                "library_project_unsynced_changes: export and commit a new Library "
+                                "snapshot before remount"
+                            )
+                    else:
+                        os.replace(extracted, target)
             return actual_tree_sha256, file_count, actual_size
 
     def mount_snapshot(
@@ -413,12 +417,13 @@ class ExternalProjectStorage:
         if self.mode != "library":
             raise ValueError("library_project_mode_inactive")
         project_dir = self._mounted_project_dir(namespace, project_id)
-        tree_sha256, file_count, expanded_size = self.tree_manifest(project_dir)
         export_id = f"LEX-{uuid.uuid4().hex[:24]}"
         path = self.exports_dir / f"{export_id}.tgz"
         prefix = self._archive_prefix(namespace, project_id).rstrip("/")
-        with tarfile.open(path, "w:gz", compresslevel=6) as archive:
-            archive.add(project_dir, arcname=prefix, recursive=True)
+        with self.store.project_write_lock(namespace, project_id):
+            tree_sha256, file_count, expanded_size = self.tree_manifest(project_dir)
+            with tarfile.open(path, "w:gz", compresslevel=6) as archive:
+                archive.add(project_dir, arcname=prefix, recursive=True)
         bundle_sha256 = sha256_bytes(path.read_bytes())
         value = {
             "export_id": export_id,
@@ -574,21 +579,19 @@ class ExternalProjectStorage:
     def unmount(self, namespace: str, project_id: str) -> dict[str, Any]:
         if self.mode != "library":
             raise ValueError("library_project_mode_inactive")
-        registry = self._read_registry(namespace, project_id)
-        project_dir = self._mounted_project_dir(namespace, project_id)
-        if not project_dir.is_dir():
-            return {"project_id": project_id, "status": "already_unmounted"}
-        tree_sha256, _count, _size = self.tree_manifest(project_dir)
-        if not hmac.compare_digest(
-            tree_sha256, str(registry.get("tree_sha256") or "")
-        ):
-            raise ValueError(
-                "library_project_unsynced_changes: export and commit a new Library "
-                "snapshot before unmount"
-            )
-        with self.store.lock(
-            f"library-project-mount-{self.store.namespace_key(namespace)}-{project_id}"
-        ):
+        with self.store.project_write_lock(namespace, project_id):
+            registry = self._read_registry(namespace, project_id)
+            project_dir = self._mounted_project_dir(namespace, project_id)
+            if not project_dir.is_dir():
+                return {"project_id": project_id, "status": "already_unmounted"}
+            tree_sha256, _count, _size = self.tree_manifest(project_dir)
+            if not hmac.compare_digest(
+                tree_sha256, str(registry.get("tree_sha256") or "")
+            ):
+                raise ValueError(
+                    "library_project_unsynced_changes: export and commit a new Library "
+                    "snapshot before unmount"
+                )
             shutil.rmtree(project_dir)
         return {"project_id": project_id, "status": "unmounted"}
 

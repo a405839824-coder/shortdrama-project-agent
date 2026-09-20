@@ -137,8 +137,8 @@ assert 'validate_storyboard' not in sys.modules
 
     def report(self):
         data,g,t=fixture('report');data['initial_world']['actors']['乙']=copy.deepcopy(data['initial_world']['actors']['甲'])
-        row=data['shots'][0];row['ticks']=[0,10,30,60];row['actions'][0].update(start=0,end=40)
-        row['actions'].append(action('hold',id='reaction',actor='乙',start=40,end=55,after=['audio']))
+        row=data['shots'][0];row['ticks']=[0,10,30,40];row['actions'][0].update(start=0,end=30)
+        row['actions'].append(action('hold',id='reaction',actor='乙',start=30,end=38,after=['audio']))
         g['production_plan']=frozen_plan(data,g,t);k=g['production_plan']['knowledge'];k['initial']=[]
         k['uses'][-1].update(fact_ids=['F1'],stance='reported',evidence_fact_ids=['F1'])
         k['acquisitions']=[{'id':'receipt','actor':'乙','fact_ids':['F1'],'evidence_fact_ids':['F1'],'action_id':'audio','mode':'source_report'}]
@@ -157,7 +157,7 @@ assert 'validate_storyboard' not in sys.modules
             if change=='channel':g['facts'][0]['channel']='narration'
             if change=='narration':data['project']['prevention_evidence']['source_decisions']['uses'][0]['text']='乙听到全部真相。'
             if change=='before':
-                data['shots'][0]['actions'][-1].update(start=35,after=[])
+                data['shots'][0]['actions'][-1].update(start=25,after=[])
                 g['production_plan']['decisions']=frozen_plan(data,g,t)['decisions']
             if change=='heard_thought':g['production_plan']['knowledge']['acquisitions'][0]['mode']='heard'
             with self.subTest(change=change),self.assertRaises((SourceDecisionError,ProductionDecisionError)):compile_render(data,g,t)

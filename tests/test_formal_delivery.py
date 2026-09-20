@@ -10,6 +10,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from shortdrama_mcp.app import create_mcp
 from shortdrama_mcp.formal_delivery import CONTRACT, inspect_formal_delivery
+from shortdrama_mcp.materializer import MOTHER_TEMPLATE_COLUMNS
 from test_account_access import settings_for, token_for
 import test_v0535_production_contract as current_contract_tests
 
@@ -27,7 +28,8 @@ class FreshEmployeeDeliveryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(data["account_access"]["role"], "producer")
                     policy = data["formal_delivery_contract"]
                     self.assertEqual(policy["contract"], CONTRACT)
-                    self.assertEqual(len(policy["columns"]), 10)
+                    self.assertEqual(policy["columns"], MOTHER_TEMPLATE_COLUMNS)
+                    self.assertEqual(len(policy["columns"]), 11)
                     self.assertFalse(policy["fallback_export_allowed"])
                     self.assertFalse(policy["unverified_counts_as_complete"])
                     denied = await server.call_tool("commit_project_artifact", {"artifact_type":"template"})

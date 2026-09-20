@@ -70,13 +70,16 @@ class EpisodeRulesTests(unittest.TestCase):
         raw['shots'][0]['ticks'][-1]=1800
         self.assertEqual(inspect_planned_budget(raw),[])
 
-    def test_short_thresholds_are_strict_not_less_or_equal(self):
+    def test_short_thresholds_are_strict_observations_without_shot_quotas(self):
         self.obj['shots'][0]['时长']=1
-        self.assertIn('E-EPISODE-RHYTHM-001',self.codes())
+        self.assertEqual(self.inspect()['episodes'][0]['short_under_1_percent'],5)
+        self.assertNotIn('E-EPISODE-RHYTHM-001',self.codes())
         self.obj['shots'][0]['时长']=.999
+        self.assertEqual(self.inspect()['episodes'][0]['short_under_1_percent'],10)
         self.assertNotIn('E-EPISODE-RHYTHM-001',self.codes())
         self.obj['shots'][2]['时长']=2;self.obj['shots'][3]['时长']=2
-        self.assertIn('E-EPISODE-RHYTHM-001',self.codes())
+        self.assertEqual(self.inspect()['episodes'][0]['short_under_2_percent'],10)
+        self.assertNotIn('E-EPISODE-RHYTHM-001',self.codes())
 
     def test_dialogue_uses_union_not_duplicate_tracks_or_psychology(self):
         before=self.inspect()['episodes'][0]['dialogue_seconds']

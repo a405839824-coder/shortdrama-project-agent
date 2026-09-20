@@ -7,6 +7,7 @@ from shortdrama_mcp.materializer import (
     MOTHER_TEMPLATE_COLUMNS,
     compile_formal_merged_field,
     compile_gpt_keyframe_instruction,
+    formal_mother_template_rows,
 )
 
 
@@ -55,7 +56,7 @@ class StrictContractServerTests(unittest.TestCase):
         self.assertTrue(
             formal.startswith(
                 "镜头序号：EP08-001（3.0s；累计3.0s）\n\n"
-                "镜头类型：双人中近景｜可见主体：江氏、邹氏"
+                "镜头类型：双人中近景｜江氏、邹氏"
             )
         )
         expected_order = (
@@ -68,16 +69,18 @@ class StrictContractServerTests(unittest.TestCase):
             "心理音轨",
             "环境音效",
             "环境动态",
-            "光影",
-            "光源来源",
-            "光源方向",
-            "色温倾向",
             "生成限制",
             "转场类型",
             "切镜/转场提示词",
         )
         positions = [formal.index(f"\n\n{field}：") for field in expected_order]
         self.assertEqual(positions, sorted(positions))
+        row = formal_mother_template_rows({"shots": [shot]}, assume_compact=True)[0]
+        self.assertEqual(len(row), 11)
+        self.assertEqual(MOTHER_TEMPLATE_COLUMNS[10], "光影")
+        for field in ("光影", "光源来源", "光源方向", "色温倾向"):
+            self.assertNotIn(f"\n\n{field}：", formal)
+            self.assertIn(f"{field}：{shot[field]}", row["光影"])
         for forbidden in ("【0.0—", "说道：", "请大嫂放心", "口型", "音量", "环境音效"):
             self.assertNotIn(forbidden, keyframe)
 

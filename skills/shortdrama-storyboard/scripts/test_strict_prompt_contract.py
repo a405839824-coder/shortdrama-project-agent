@@ -548,9 +548,11 @@ def main() -> int:
         and formal.startswith(expected_first_line + "\n\n镜头类型：")
         and all(f"\n\n{field}：" in formal for field in (
             "空间站位描述", "起始状态", "机位", "运镜方式", "画面内容", "音色", "心理音轨",
-            "环境音效", "环境动态", "光影", "光源来源", "光源方向", "色温倾向", "生成限制",
+            "环境音效", "环境动态", "生成限制",
             "转场类型", "切镜/转场提示词",
         ))
+        and all(f"{field}：" in row["光影"] and f"\n\n{field}：" not in formal
+                for field in ("光影", "光源来源", "光源方向", "色温倾向"))
         and "\n\n音色：\n\n基础声线：" in formal
         and formal.count("9:16竖屏") == 1
         and gpt.count("9:16竖屏") == 1

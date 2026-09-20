@@ -32,7 +32,7 @@ class SceneProductionContextTests(unittest.TestCase):
                 self.assertEqual(report['issues'], [], report['issues'])
                 self.assertEqual(report['scene_validation_basis'], 'verified_complete_production_context')
                 self.assertTrue(report['quality_metrics']['production_derivation']['valid'])
-                self.assertEqual(report['shot_count'], 10)
+                self.assertEqual(report['shot_count'], len(selected))
                 self.assertEqual(scoped['shots'], selected)
         self.assertEqual(self.candidate, before)
 

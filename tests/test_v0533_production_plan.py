@@ -56,12 +56,12 @@ class ProductionPlanTests(unittest.TestCase):
 
     def test_policy_has_all_inputs_failure_exception_and_counterexample_contracts(self):
         p=policy()
-        self.assertEqual([r['id'] for r in p['rules']],[f'PP-{i:02}' for i in range(1,13)])
+        self.assertEqual([r['id'] for r in p['rules']],[f'PP-{i:02}' for i in range(1,14)])
         for rule in p['rules']:
             for field in ('inputs','prevention','on_failure','exceptions','enforcement','counterexample','limits','invalidates'):
                 self.assertTrue(rule[field])
         self.assertIsNone(model_production_contract()['semantic_accuracy_percent'])
-        self.assertEqual(set(model_production_contract()['plan_shape']), {'contract','context','decisions','knowledge','shots'})
+        self.assertEqual(set(model_production_contract()['plan_shape']), {'contract','context','decisions','knowledge','shots','shot_design','narrative'})
 
     def test_good_plan_uses_actual_compiler_and_never_self_signs_semantics(self):
         before=copy.deepcopy((self.data,self.graph))
@@ -126,7 +126,7 @@ class ProductionPlanTests(unittest.TestCase):
 
     def test_missing_whole_shot_or_action_applicability_fails(self):
         original=copy.deepcopy(self.plan['shots']); self.plan['shots']=[]
-        self.rejects('whole-shot plan coverage'); self.plan['shots']=original
+        self.rejects('unknown identity'); self.plan['shots']=original
         self.plan['knowledge']['uses'].pop()
         self.rejects('every actual action')
 
@@ -309,7 +309,7 @@ class ProductionPlanMcpTests(unittest.TestCase):
         response=self.f.mcp('get_agent_status',{'full_self_test':False})
         contract=response['data']['production_prevention_contract']
         self.assertEqual(contract['context'],runtime_context())
-        self.assertEqual(len(contract['rules']),12)
+        self.assertEqual(len(contract['rules']),13)
         self.assertEqual(contract['plan_contract'],CONTRACT)
 
     def test_real_mcp_rejects_decision_drift_before_artifact_creation(self):

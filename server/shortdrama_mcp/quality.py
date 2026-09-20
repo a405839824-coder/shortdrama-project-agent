@@ -53,7 +53,8 @@ def measure_quality(storyboard, issues, *, resolve_ids: Callable,
     """
     shots = [s for s in storyboard.get("shots", []) if isinstance(s, dict)]
     identities = [str(s.get("镜头编号") or s.get("shot_uid") or "") for s in shots]
-    identity_valid = bool(shots) and all(identities) and len(set(identities)) == len(shots)
+    identity_set = set(identities)
+    identity_valid = bool(shots) and all(identities) and len(identity_set) == len(shots)
     domains = {name: set() for name in ("content", "contract", "workflow", "advisory")}
     counts = Counter()
     unlocated = Counter()
@@ -65,12 +66,12 @@ def measure_quality(storyboard, issues, *, resolve_ids: Callable,
         domain = issue_domain(issue)
         counts[domain] += 1
         ids = set(resolve_ids(storyboard, issue))
-        valid_ids = ids & set(identities)
+        valid_ids = ids & identity_set
         domains[domain].update(valid_ids)
         if domain == "advisory":
             continue
         actionable.append(issue)
-        if not valid_ids or ids - set(identities):
+        if not valid_ids or ids - identity_set:
             unlocated[domain] += 1
         severity = str(issue.get("severity") or "fail").lower()
         hard_count += int(bool(issue.get("blocking", severity in {"fail", "error", "blocking"}))
@@ -115,7 +116,7 @@ def measure_quality(storyboard, issues, *, resolve_ids: Callable,
     measured = correct is not None and usable is not None and minimum is not None and minimum_usability is not None
     grade = "unavailable" if not measured else "C"
     def at_least(affected, threshold, scope=None):
-        ids = set(identities) if scope is None else scope
+        ids = identity_set if scope is None else scope
         return bool(ids) and 100 * (len(ids) - len(ids & affected)) >= threshold * len(ids)
     # Compare integer counts before rounding display percentages. A displayed
     # 98.00 may still be below 98 and must not promote a candidate to A.

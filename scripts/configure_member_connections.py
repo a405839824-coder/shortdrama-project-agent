@@ -10,13 +10,14 @@ import json
 import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from filelock import FileLock
+
+from atomic_io import write_json_atomic as write_atomic
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 from shortdrama_mcp.config import Settings
@@ -76,19 +77,6 @@ def verify_auth0(registry: dict, token: str) -> None:
         with opener.open(request, timeout=20) as response:
             client = json.load(response)
         validate_client(client, member["client_id"])
-
-
-def write_atomic(path: Path, registry: dict) -> None:
-    descriptor, name = tempfile.mkstemp(prefix=".member-connections-", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(registry, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(name, path)
-    finally:
-        Path(name).unlink(missing_ok=True)
 
 
 def main() -> int:

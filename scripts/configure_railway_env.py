@@ -5,6 +5,8 @@ import argparse
 from pathlib import Path
 from urllib.parse import urlparse
 
+from atomic_io import write_text_atomic
+
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,7 +22,7 @@ def _https_origin(value: str, label: str) -> str:
         raise ValueError(f"{label} 不能包含账号、查询参数或片段")
     if parsed.path not in {"", "/"}:
         raise ValueError(f"{label} 不能包含路径")
-    if parsed.port:
+    if parsed.port is not None:
         raise ValueError(f"{label} 不能包含端口")
     return f"https://{parsed.hostname.lower()}"
 
@@ -50,10 +52,7 @@ def write_environment(output: Path, content: str, *, force: bool = False) -> Pat
     output = output.resolve()
     if output.exists() and not force:
         raise FileExistsError(f"{output} 已存在；确认后使用 --force 覆盖")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_name(f".{output.name}.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    temporary.replace(output)
+    write_text_atomic(output, content)
     return output
 
 

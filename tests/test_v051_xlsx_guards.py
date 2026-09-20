@@ -21,6 +21,7 @@ from shortdrama_mcp.materializer import (
     FORMAL_MERGED_FIELD,
     GPT_KEYFRAME_FIELD,
     LEGACY_FORMAL_MERGED_FIELD,
+    LEGACY_MOTHER_TEMPLATE_COLUMNS,
     MOTHER_TEMPLATE_COLUMNS,
     legacy_v050_mother_template_rows,
     legacy_v053_mother_template_rows,
@@ -300,7 +301,7 @@ class V051XlsxGuardTests(unittest.TestCase):
         )
         headers = [
             alternate_header if value == FORMAL_MERGED_FIELD else value
-            for value in MOTHER_TEMPLATE_COLUMNS
+            for value in LEGACY_MOTHER_TEMPLATE_COLUMNS
         ]
         row = {
             "分镜序号": "EP01-001",

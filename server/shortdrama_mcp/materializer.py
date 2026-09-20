@@ -7,7 +7,7 @@ from typing import Any, Iterable
 
 from .written_payload import discover_current_written_payloads, context_instruction_text
 from .picture_presentation import display_picture
-from .field_content import (assert_field_content, r5_keyframe_sections, LIGHTING_FIELDS,
+from .field_content import (assert_field_content, r5_keyframe_sections, LIGHTING_FIELDS as LIGHTING_FIELDS,
                             FORMAL_EXECUTION_FIELDS, project_lighting)
 
 

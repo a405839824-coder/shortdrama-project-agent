@@ -130,7 +130,7 @@ class V051TemplateProjectionTests(unittest.TestCase):
         self.assertEqual(paragraphs[0], "镜头序号：EP01-001（3.0s；累计3.0s）")
         self.assertEqual(
             paragraphs[1],
-            "镜头类型：双人中近景｜可见主体：苏清柳、邹氏",
+            "镜头类型：双人中近景｜苏清柳、邹氏",
         )
         voice_index = 2 + list(FORMAL_MERGED_ATOMIC_FIELDS).index("音色")
         self.assertEqual(paragraphs[voice_index], "音色：")

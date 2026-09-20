@@ -48,7 +48,7 @@ class StartupRestoreTests(unittest.TestCase):
                 archive.addfile(extra_member)
         payload = buffer.getvalue()
         (self.transfer / 'runtime.tar.gz').write_bytes(payload)
-        self.manifest = {'contract': restore.CONTRACT, 'target_version': '0.5.45',
+        self.manifest = {'contract': restore.CONTRACT, 'target_version': restore.TARGET_VERSION,
             'data_dir': str(self.data), 'runtime_root': str(self.runtime), 'old_writer_frozen': True,
             'files': {k: hashlib.sha256(v).hexdigest() for k, v in files.items()},
             'archive_sha256': hashlib.sha256(payload).hexdigest(),
@@ -60,7 +60,7 @@ class StartupRestoreTests(unittest.TestCase):
         (self.transfer / 'manifest.json').write_bytes(restore._json_bytes(self.manifest))
 
     def run_restore(self):
-        return restore._restore(self.data, self.runtime, version='0.5.45')
+        return restore._restore(self.data, self.runtime, version=restore.TARGET_VERSION)
 
     def test_complete_bytes_and_protected_roles_preserved(self):
         protected = restore.protected_fingerprints(self.data)
@@ -142,7 +142,7 @@ class StartupRestoreTests(unittest.TestCase):
         with patch.object(restore.os, 'replace', side_effect=fail_publish):
             with self.assertRaises(OSError): self.run_restore()
         self.assertFalse(self.runtime.exists())
-        self.assertFalse(list(self.root.glob('.shortdrama-restore-0545-*')))
+        self.assertFalse(list(self.root.glob('.shortdrama-restore-*')))
         self.assertTrue(self.run_restore()['restored'])
 
     def test_crash_after_publish_can_resume_only_exact_tree(self):

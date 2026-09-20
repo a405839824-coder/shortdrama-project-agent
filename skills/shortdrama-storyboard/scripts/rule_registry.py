@@ -201,7 +201,7 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
                 and hashes.get('current_sha256') == registry_sha256(current))
     if permitted.get(kind) != identity:
         return False
-    migration = migrations['eye-event-applicability-v1']
+    migration = migrations.get('eye-event-applicability-v1')
     if (not isinstance(migration, dict) or not migration.get('reason')
             or migration.get('legacy_applies_to_current_generation') is not False
             or migration.get('basis') != 'production_prevention_policy:PP-05'
