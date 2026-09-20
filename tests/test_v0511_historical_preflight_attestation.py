@@ -9,16 +9,14 @@ import shortdrama_mcp.service as service_module
 
 from semantic_audit_helpers import semantic_audit_for_artifact
 from test_efficiency import valid_storyboard
-from test_v057_preflight_evidence_reissue import (
-    V057PreflightEvidenceReissueTests,
-)
+import test_v057_preflight_evidence_reissue as v057
 
 
-class _V057FixtureOnly(V057PreflightEvidenceReissueTests):
+class _V057FixtureOnly(v057.V057PreflightEvidenceReissueTests):
     """Reuse the signed production fixture without rerunning v0.5.7 tests."""
 
 
-for _test_name in dir(V057PreflightEvidenceReissueTests):
+for _test_name in dir(v057.V057PreflightEvidenceReissueTests):
     if _test_name.startswith("test_"):
         setattr(_V057FixtureOnly, _test_name, None)
 

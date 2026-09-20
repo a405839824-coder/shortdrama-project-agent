@@ -932,6 +932,14 @@ def _find_work_order(hub: dict[str, Any], work_order_id: str) -> dict[str, Any]:
     return work_order
 
 
+def _recovery_mapping_identity(rows: Any) -> list[dict[str, Any]]:
+    """Compare recovery evidence while ignoring only the per-call replay flag."""
+    if not isinstance(rows, list):
+        return []
+    return [{key: value for key, value in row.items() if key != "idempotent_replay"}
+            for row in rows if isinstance(row, dict)]
+
+
 def _episode_range_from_target(value: Any) -> set[int] | None:
     """Parse the machine-readable episode target forms accepted by the API."""
 
@@ -10003,23 +10011,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 value=trace_value,
             )
         else:
-            def identity(rows: Any) -> list[dict[str, Any]]:
-                if not isinstance(rows, list):
-                    return []
-                return [
-                    {
-                        key: copy.deepcopy(value)
-                        for key, value in row.items()
-                        if key != "idempotent_replay"
-                    }
-                    for row in rows
-                    if isinstance(row, dict)
-                ]
-
             if (
                 trace_record.get("plan_sha256") != plan_sha256
-                or identity(trace_record.get("mappings"))
-                != identity(mappings)
+                or _recovery_mapping_identity(trace_record.get("mappings"))
+                != _recovery_mapping_identity(mappings)
             ):
                 raise ValueError("preflight_evidence_reissue_trace_conflict")
         return ToolResponse(
@@ -10932,23 +10927,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 value=trace_value,
             )
         else:
-            def mapping_identity(rows: Any) -> list[dict[str, Any]]:
-                if not isinstance(rows, list):
-                    return []
-                return [
-                    {
-                        key: copy.deepcopy(value)
-                        for key, value in row.items()
-                        if key != "idempotent_replay"
-                    }
-                    for row in rows
-                    if isinstance(row, dict)
-                ]
-
             if (
                 existing_trace.get("plan_sha256") != plan_sha256
-                or mapping_identity(existing_trace.get("mappings"))
-                != mapping_identity(mappings)
+                or _recovery_mapping_identity(existing_trace.get("mappings"))
+                != _recovery_mapping_identity(mappings)
             ):
                 raise ValueError("handoff_recovery_trace_conflict")
             trace_record = existing_trace
@@ -11740,7 +11722,6 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     raise
                 duplicate = False
         if not duplicate:
-            duplicate = False
             prior_draft_events = [
                 event
                 for event in ledger_snapshot.get("events", [])
@@ -11751,19 +11732,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             # AR-R10-PG1-016: count real observations without resetting their
             # lineage or rejecting a repaired candidate solely for its number.
             # Explicit host/user finite acceptance stays at the operation gate.
-            previous_issue_signatures = {
-                (
-                    str(row.get("error_code") or ""),
-                    str(row.get("field") or row.get("location") or ""),
-                    tuple(sorted(str(value) for value in row.get("shot_ids", []))),
-                )
-                for row in (
-                    prior_draft_events[-1].get("issues", [])
-                    if prior_draft_events
-                    else []
-                )
-                if isinstance(row, dict)
-            }
+            draft_context = self._quality_assessment_context(scoped_candidate)
             event_issues = []
             for issue in issues:
                 location = str(issue.get("location") or "draft_candidate")
@@ -11809,12 +11778,6 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                         ),
                         "status": "initial",
                     }
-                signature = (
-                    event_issue["error_code"],
-                    event_issue["field"],
-                    tuple(sorted(event_issue["shot_ids"])),
-                )
-                draft_context = self._quality_assessment_context(scoped_candidate)
                 event_issue = bind_issue_identity(event_issue, draft_context)
                 event_issue["status"] = finding_origin(event_issue, prior_draft_events, draft_context)
                 event_issues.append(event_issue)
@@ -11829,7 +11792,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "task_type": "production_draft_preflight",
                 "audit_class": "production_draft_preflight",
                 "assessment_contract": QUALITY_CONTRACT,
-                "assessment_context": self._quality_assessment_context(scoped_candidate),
+                "assessment_context": draft_context,
                 "audit_round": audit_round,
                 "result": "pass" if not issues else "fail_current",
                 "checked_shot_count": len(scoped_shots),

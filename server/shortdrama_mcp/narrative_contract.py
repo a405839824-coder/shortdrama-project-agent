@@ -7,11 +7,9 @@ as independent approval. Plans use chronological scenes in this v1.
 """
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import re
-from typing import Any
 
 
 CONTRACT = "narrative-contract-v1"

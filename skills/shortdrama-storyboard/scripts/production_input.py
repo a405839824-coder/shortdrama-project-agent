@@ -109,7 +109,7 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256, requ
     import author_storyboard as author
     from authoring_preflight import inspect_production_editorial, inspect_typed_decisions
     from production_decisions import CONTRACT, inspect_production_decisions
-    from source_decisions import compile_source_decisions, validate_source_decisions
+    from source_decisions import compile_source_decisions
 
     c = _Collection()
     schema_bytes = SCHEMA_PATH.read_bytes()
@@ -157,10 +157,6 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256, requ
     if not isinstance(graph_bytes, bytes):
         source_errors.append({"code": "source_graph_unavailable", "path": "source_graph_path",
                               "message": "requires separately frozen source graph bytes"})
-    elif not source_errors:
-        source_errors.extend(issue.to_dict() for issue in validate_source_decisions(
-            graph_bytes, evidence.get("source_decisions"), source_texts=source_texts,
-            expected_graph_sha256=expected_graph_sha256))
     compilation = None
     if not source_errors:
         try:

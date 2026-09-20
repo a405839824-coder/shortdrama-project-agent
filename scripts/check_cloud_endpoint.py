@@ -12,8 +12,12 @@ from urllib.parse import urlparse
 def _origin(value: str) -> str:
     candidate = value.strip().rstrip("/")
     parsed = urlparse(candidate)
-    if parsed.scheme != "https" or not parsed.netloc or parsed.path:
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.path
+            or parsed.username is not None or parsed.password is not None
+            or parsed.query or parsed.fragment):
         raise ValueError("BASE_URL 必须是无路径的 HTTPS 根地址")
+    # Accessing port validates malformed/non-numeric ports before any request.
+    _ = parsed.port
     return candidate
 
 
@@ -36,7 +40,7 @@ def check(base_url: str, timeout: float = 20.0) -> dict[str, object]:
         health = json.loads(health_body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RuntimeError("/health 没有返回有效 JSON") from exc
-    if health.get("status") != "pass" or health.get("service") != "shortdrama-project-agent":
+    if not isinstance(health, dict) or health.get("status") != "pass" or health.get("service") != "shortdrama-project-agent":
         raise RuntimeError(f"/health 内容异常：{health}")
 
     initialize = json.dumps(

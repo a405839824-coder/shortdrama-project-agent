@@ -150,8 +150,8 @@ class FieldContentTests(unittest.TestCase):
         w=load_workbook(io.BytesIO(data))
         self.assertEqual(w.sheetnames[:3],['6集_逐镜阅读','正式分镜母版','使用与来源'])
         master=w['正式分镜母版']
-        self.assertEqual([master.column_dimensions[c].width for c in 'ABCDEFGHIJ'],list(WIDTHS))
-        self.assertEqual(master.max_column,10)
+        self.assertEqual([master.column_dimensions[c].width for c in 'ABCDEFGHIJK'],list(WIDTHS))
+        self.assertEqual(master.max_column,11)
         self.assertEqual(master.cell(2,6).value,compile_gpt_keyframe_instruction(obj['shots'][0]))
         restored=extract_xlsx(data)['canonical_storyboard']
         self.assertEqual(obj,before)

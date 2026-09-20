@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
+import sys
 from types import SimpleNamespace
 import unittest
 
@@ -9,6 +11,7 @@ from shortdrama_mcp.audit_coverage import (
     build_obligations, coverage_context, read_audit_obligations, validate_coverage,
 )
 from shortdrama_mcp.models import SEMANTIC_AUDIT_LAYER_NAMES
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/shortdrama-storyboard/scripts'))
 from test_strict_prompt_contract import strict_fixture
 
 
@@ -53,8 +56,9 @@ class ObligationReadTests(unittest.TestCase):
             pages += 1
         self.assertTrue(current.data['complete'])
         self.assertIsNone(current.data['next_call'])
-        self.assertEqual(len(rows), 181 * 13)
-        self.assertLessEqual(pages, 49)  # Previously about 260 calls at 16k.
+        self.assertEqual(len(rows), 181 * 14)
+        self.assertIn('scene_causality', definitions)
+        self.assertLessEqual(pages, 53)  # Additional scene-causality check per shot.
         self.assertEqual(len({r['obligation_id'] for r in rows}), len(rows))
         checks = []
         for row, expected in zip(rows, manifest['obligations']):
@@ -77,7 +81,7 @@ class ObligationReadTests(unittest.TestCase):
             'layers': [{'layer': name, 'status': 'pass'} for name in SEMANTIC_AUDIT_LAYER_NAMES],
             'issues': [],
         }, coverage_context(self.service))
-        self.assertEqual(receipt['reviewed_count'], 2353)
+        self.assertEqual(receipt['reviewed_count'], 2534)
 
     def test_small_budget_fails_explicitly_and_offsets_never_skip(self):
         with self.assertRaisesRegex(ValueError, 'max_chars_too_small'):
@@ -85,8 +89,8 @@ class ObligationReadTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'offset_invalid'):
             self.read(offset=-1)
         with self.assertRaisesRegex(ValueError, 'offset_invalid'):
-            self.read(offset=2354)
-        end = self.read(offset=2353, max_chars=16_000)
+            self.read(offset=2535)
+        end = self.read(offset=2534, max_chars=16_000)
         self.assertTrue(end.data['complete'])
         self.assertEqual(end.data['obligations'], [])
 

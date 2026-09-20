@@ -56,7 +56,8 @@ def compiler_fingerprints():
     # Include transitive action/bridge/voice helpers as well as direct imports.
     # An unchanged input cannot reuse a replay after any runtime helper changes.
     for path in sorted(SCRIPT_DIR.glob('*.py')):
-        found.setdefault(path.name, hashlib.sha256(path.read_bytes()).hexdigest())
+        if path.name not in found:
+            found[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
     refs = SCRIPT_DIR.parent / 'references'
     # Local names are portable; the exact deployed rule/schema bytes matter.
     for path in sorted(refs.glob('*.json')):
@@ -169,6 +170,8 @@ def attach_derivation(candidate, input_decisions, graph_bytes, *, production=Non
     lowered = production or lower_production_decisions(input_decisions, source_compilation=compilation)
     compiled = compilation.to_dict()
     result = finalize_generated_candidate(candidate)
+    # The marker belongs to generated content; set it before binding that content.
+    result['prevention_evidence'].setdefault('authoring_evidence', {})['production_binding_required'] = CONTRACT
     payload = {'contract': CONTRACT, 'input': input_decisions,
                'input_sha256': digest(input_decisions), 'source_graph_json': graph_bytes.decode('utf-8'),
                'source_graph_sha256': hashlib.sha256(graph_bytes).hexdigest(),
@@ -180,11 +183,6 @@ def attach_derivation(candidate, input_decisions, graph_bytes, *, production=Non
                'commit_eligible': False}
     payload['binding_sha256'] = digest(payload)
     result['prevention_evidence'][FIELD] = payload
-    result['prevention_evidence'].setdefault('authoring_evidence', {})['production_binding_required'] = CONTRACT
-    # The marker is part of the generated identity, including on recompile.
-    payload['content_sha256'] = digest(owned_content(result))
-    payload['source_obligations'] = _obligations(result, compiled, lowered['derivation'])
-    payload['binding_sha256'] = digest({k: v for k, v in payload.items() if k != 'binding_sha256'})
     return result
 
 
@@ -194,7 +192,7 @@ def _replay_compilation(input_json, graph_text, compiler_key):
 
     The key contains exact input/source text and freshly read runtime hashes.
     Callers still verify every candidate binding and generated field. Cached
-    internals are read-only; callers receive a separate copy below.
+    internals are read-only; only the obligations returned to callers are copied.
     """
     from production_decisions import lower_production_decisions
     from author_storyboard import _render_decisions
@@ -241,20 +239,21 @@ def inspect_derivation(candidate):
         raw = payload['input']; graph = payload['source_graph_json'].encode('utf-8')
         if digest(raw) != payload['input_sha256']: fault('input_sha256', 'input decisions changed')
         if hashlib.sha256(graph).hexdigest() != payload['source_graph_sha256']: fault('source_graph_sha256', 'source graph changed')
-        if digest(owned_content(candidate)) != payload['content_sha256']:
+        content_hash = digest(owned_content(candidate))
+        if content_hash != payload['content_sha256']:
             fault('content_sha256', 'actual generated content changed; old state/source/output evidence invalid')
         if response['faults']: return response
-        replay = copy.deepcopy(_replay_compilation(
+        replay = _replay_compilation(
             json.dumps(raw, ensure_ascii=False, allow_nan=False, separators=(',', ':')),
-            graph.decode('utf-8'), tuple(sorted(current_compiler.items()))))
-        if replay['content_sha256'] != digest(owned_content(candidate)):
+            graph.decode('utf-8'), tuple(sorted(current_compiler.items())))
+        if replay['content_sha256'] != content_hash:
             fault('content_sha256', 'actual content differs from recomputed action/source decisions')
         if replay['source_compilation'] != payload['source_compilation']: fault('source_compilation', 'source compilation differs from actual frozen graph')
         if replay['action_trace'] != payload['action_trace']: fault('action_trace', 'world/action derivation differs from actual input')
         expected = replay['source_obligations']
         if expected != payload['source_obligations']: fault('source_obligations', 'source obligations do not bind actual consumed fields')
         if not response['faults']:
-            response.update(valid=True, source_obligations=expected, source_graph_sha256=payload['source_graph_sha256'],
+            response.update(valid=True, source_obligations=copy.deepcopy(expected), source_graph_sha256=payload['source_graph_sha256'],
                             derivation_sha256=payload['binding_sha256'],
                             production_prevention_verified=replay['production_prevention_verified'])
     except Exception as exc:

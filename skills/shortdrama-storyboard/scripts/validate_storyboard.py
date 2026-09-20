@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import re
 import sys
@@ -25,11 +24,10 @@ from field_content import (assert_field_content, field_content_findings,
                            voice_content_findings, r5_keyframe_sections,
                            FORMAL_EXECUTION_FIELDS, project_lighting)
 from continuity_checks import state_equal
-from performance_checks import eye_contract_faults, emphasis_binding_faults, visible_subject_tokens, visible_subject_annotation_faults, listener_reaction_faults
+from performance_checks import eye_contract_faults, emphasis_binding_faults, visible_subject_annotation_faults, listener_reaction_faults
 from lighting_checks import affirmative_matches, lighting_context_faults, scene_lighting_continuity_faults
 from dialogue_occurrences import align_storyboard_dialogue
-from voice_sequence import (VOICE_TEMPLATE_LABELS, INTEGRATED_DIALOGUE_RE,
-                            LEGACY_DIALOGUE_TAG_RE, extract_dialogues)
+from voice_sequence import (VOICE_TEMPLATE_LABELS, LEGACY_DIALOGUE_TAG_RE, extract_dialogues)
 from source_content_limits import (
     AFFORDANCE as SOURCE_LIMIT_AFFORDANCE,
     ENTAILMENT as SOURCE_LIMIT_ENTAILMENT,
@@ -3460,7 +3458,6 @@ def _validate_preventive_gates(
             if introduced > 0:
                 issues.append(_issue(catalog, "E-REGRESSION-002", f"repair_history[{index}]", f"修正新增问题={introduced:g}"))
             repeat_rounds = int(_as_number(row.get("repeat_rounds")))
-            action = str(row.get("action"))
             if repeat_rounds >= 2 and residual > 0:
                 issues.append(_issue(catalog, "E-SYSTEMIC-001", f"repair_history[{index}]", f"连续{repeat_rounds}轮仍有已观测残留，须按实际根因与依赖修正；轮数不强制重建或停止。"))
 

@@ -7,12 +7,9 @@ phase, visibility or event-basis prose. Production attempts belong to record_att
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import math
 import re
 from bisect import bisect_right
-from typing import Any
 
 from authoring_contract_blocks import eye_blocks, interior_lighting_blocks, transition_block, voice_block, psychological_safety_suffix, ContractBlockError
 from boundary_decisions import BoundaryDecision

@@ -12,7 +12,7 @@ import math
 import re
 from typing import Any, Iterable, Sequence
 from picture_presentation import timing_view, PictureTimingError
-from visible_entities import resolve_visible_subjects, visible_subject_tokens
+from visible_entities import resolve_visible_subjects, visible_subject_tokens as visible_subject_tokens
 
 
 STAGE_RE = re.compile(r"【(?P<start>\d+\.\d)—(?P<end>\d+\.\d)秒】(?P<body>.*?)(?=【\d+\.\d—\d+\.\d秒】|\Z)", re.S)

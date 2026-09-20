@@ -102,32 +102,35 @@ class SourceCompilation:
 
     def to_dict(self) -> dict[str, Any]:
         # Fresh dictionaries cannot mutate the immutable compilation.
+        plan = json.loads(self.production_plan_json) if self.production_plan_json is not None else None
+        plan_hash = narrative_hash = None
+        if plan is not None:
+            from production_plan import digest as plan_digest
+            plan_hash, narrative_hash = plan_digest(plan), plan_digest(plan['narrative'])
         return {"contract": DECISIONS_CONTRACT, "graph_sha256": self.graph_sha256,
                 "semantic_status": SEMANTIC_STATUS,
                 "uses_by_id": {u.id: u.to_dict() for u in self.uses},
                 "written_objects_by_id": {w.id: w.to_dict() for w in self.written_objects},
                 "action_plans": json.loads(self.action_plans_json) if self.action_plans_json is not None else None,
-                "production_plan": json.loads(self.production_plan_json) if self.production_plan_json is not None else None,
+                "production_plan": plan,
                 "required_fact_ids": list(self.required_fact_ids),
                 "structurally_referenced_fact_ids": list(self.represented_fact_ids),
                 "global_missing_fact_ids": [], "semantic_accuracy_percent": None,
                 "release_eligible": False,
-                "review_obligations": [self._obligation(u) for u in self.uses]}
+                "review_obligations": [self._obligation(u, plan, plan_hash, narrative_hash) for u in self.uses]}
 
-    def _obligation(self, use: SourceUse) -> dict[str, Any]:
+    def _obligation(self, use: SourceUse, plan, plan_hash, narrative_hash) -> dict[str, Any]:
         payload = {"graph_sha256": self.graph_sha256, "actual_source_use": use.to_dict(),
                    "written_objects": [paper.to_dict() for paper in self.written_objects if paper.use_id == use.id]}
-        if self.production_plan_json is not None:
-            from production_plan import digest as plan_digest
-            plan = json.loads(self.production_plan_json)
+        if plan is not None:
             payload['production_plan_review'] = {
-                'plan_sha256': plan_digest(plan),
+                'plan_sha256': plan_hash,
                 'source_fact_ids': list(use.fact_ids),
                 'required_questions': ['does the source support the frozen premise and setting',
                     'do initial knowledge and belief/pretence have actual source support',
                     'do director choices preserve the fact and make the whole shot deliverable'],
                 'related_shots': [shot['shot_id'] for shot in plan['shots'] if set(shot['purpose_fact_ids']) & set(use.fact_ids)],
-                'scene_narrative_review': {'required': True, 'plan_sha256': plan_digest(plan['narrative']),
+                'scene_narrative_review': {'required': True, 'plan_sha256': narrative_hash,
                     'question': 'Read the authorized source and audience-facing shots separately: are all necessary triggers, receipts, decisions and results represented; is withholding intentional and grounded? Source visibility is not audience delivery.'},
                 'semantic_status': SEMANTIC_STATUS,
             }

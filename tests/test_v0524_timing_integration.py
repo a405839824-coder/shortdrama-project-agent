@@ -197,7 +197,7 @@ class TimingIntegrationTests(unittest.TestCase):
         )
         row = project_export_row(candidate["shots"][0])
         self.assertEqual(list(row), list(COMPACT_MOTHER_COLUMNS))
-        self.assertEqual(len(row), 10)
+        self.assertEqual(len(row), 11)
         spoken = candidate["protected_dialogue"][0]["text"]
         self.assertEqual(row["正式分镜母版"].count(spoken), 1)
         self.assertNotIn(spoken, row["GPT关键帧生成指令"])

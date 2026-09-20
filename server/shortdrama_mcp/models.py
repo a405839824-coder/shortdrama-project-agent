@@ -152,7 +152,14 @@ class SemanticAuditLayerInput(BaseModel):
     @field_validator("evidence_ids")
     @classmethod
     def validate_evidence_ids(cls, values: list[str]) -> list[str]:
-        cleaned = [str(value).strip() for value in values]
+        # Versioned envelope fragments may end inside a quoted JSON value.
+        # Trimming that whitespace silently changes the audit observation.
+        cleaned = []
+        for value in values:
+            value = value.lstrip()
+            if not value.startswith(("audit-coverage-v1:", "audit-coverage-page-v1:")):
+                value = value.rstrip()
+            cleaned.append(value)
         if any(not value or len(value) > 256 for value in cleaned):
             raise ValueError("semantic_audit_evidence_invalid: evidence ids must be 1-256 characters")
         if len(set(cleaned)) != len(cleaned):

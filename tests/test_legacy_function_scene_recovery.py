@@ -10,9 +10,9 @@ from shortdrama_mcp.file_io import (
     CANONICAL_SIDECAR_SHEET,
     _parse_function_scene_cell,
     extract_xlsx,
-    storyboard_to_xlsx,
 )
 from shortdrama_mcp.materializer import COMPACT_SHOT_FIELDS
+from historical_workbook_fixtures import previous_workbook
 from test_v050_compact_master_io import compact_storyboard
 
 
@@ -64,18 +64,19 @@ class LegacyFunctionSceneRecoveryTests(unittest.TestCase):
         # Preserve literal punctuation and multiple utterance/voice lines.
         shot["画面内容"] += "\n【邹氏】你说。\n【苏清柳】是。"
         shot["音色"] += "\n【邹氏】语气平稳。\n【苏清柳】语气克制。"
-        payload = storyboard_to_xlsx(source, {"issues": []})
+        payload = previous_workbook(source, {"issues": []})
         book = load_workbook(io.BytesIO(payload))
         del book[CANONICAL_SIDECAR_SHEET]
+        master = book["正式生产母版"]
         # Pin the actual legacy timed field instead of deriving old input from
         # today's untimed export. Recovery must still preserve every old atom.
-        formal = book["正式分镜母版"]["E2"].value
+        formal = master["E2"].value
         match = re.search(r"(?ms)(^画面内容：)(.*?)(?=^音色：)", formal)
         self.assertIsNotNone(match)
-        book["正式分镜母版"]["E2"] = (
+        master["E2"] = (
             formal[:match.start(2)] + shot["画面内容"] + "\n\n" + formal[match.end(2):]
         )
-        book["正式分镜母版"]["D2"] = "接上集／问清打算 / SHY-N3-HALL"
+        master["D2"] = "接上集／问清打算 / SHY-N3-HALL"
         output = io.BytesIO()
         book.save(output)
         legacy_payload = output.getvalue()

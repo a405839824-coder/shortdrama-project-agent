@@ -4957,8 +4957,8 @@
     }
   },
   "counterexample_files": {
-    "skills/shortdrama-storyboard/scripts/test_episode_rules.py": "3c5b97872e23bc185d738baf910a36e457e24a53a683b3dc779d690ad7dfba26",
-    "tests/test_v0535_production_contract.py": "e8194053570e071d9b78954887c8e69a1a2631bc46fdfb29a405f80d1427d760"
+    "skills/shortdrama-storyboard/scripts/test_episode_rules.py": "5aa3ea4bcfe0dff65aeb524d4b70b6b38fc6a454f96076fc9bf1bd75e228f09d",
+    "tests/test_v0535_production_contract.py": "5d21de4ea7d9025f85fc1c98fcd0b07d704ed904110f4c0bd2469be6b86033b0"
   },
   "critical_runtime_policies": {
     "field_content_policy": {
@@ -6806,5 +6806,33 @@
       "no repair-round cap"
     ],
     "acceptance_scope": "synthetic software controls and whole current production pipeline; no real first-draft percentage"
-  }
+  },
+  "counterexample_migrations": [
+    {
+      "id": "fixture-contract-alignment-0547-v1",
+      "baseline_commit": "bea255ab0095d175c577ff14b5f153339c53dcd3",
+      "reason": "User-authorized code optimization corrects stale test expectations to the already active 0.5.47 contract; no production rule change.",
+      "files": {
+        "skills/shortdrama-storyboard/scripts/test_episode_rules.py": {
+          "baseline_sha256": "3c5b97872e23bc185d738baf910a36e457e24a53a683b3dc779d690ad7dfba26",
+          "current_sha256": "5aa3ea4bcfe0dff65aeb524d4b70b6b38fc6a454f96076fc9bf1bd75e228f09d",
+          "change": "Keep strict less-than duration observations; assert the existing retirement of mandatory short-shot quotas."
+        },
+        "tests/test_v0535_production_contract.py": {
+          "baseline_sha256": "e8194053570e071d9b78954887c8e69a1a2631bc46fdfb29a405f80d1427d760",
+          "current_sha256": "5d21de4ea7d9025f85fc1c98fcd0b07d704ed904110f4c0bd2469be6b86033b0",
+          "change": "Use 27 source-bound synthetic shots totaling 96 seconds, each at most 4 seconds; retain actual late-hook rejection and initial-visibility delivery checks."
+        }
+      },
+      "preserved": [
+        "original source hashes and all 149 historical master sections",
+        "historical rule identities, semantic definitions and thresholds",
+        "current production validators and duration exception requirements",
+        "all original synthetic source dialogue and identity bindings",
+        "strict counterexample-file hash enforcement",
+        "independent semantic review and retained first attempts"
+      ],
+      "acceptance_scope": "Synthetic software verification only; no real content quality, formal sign-off or deployment claim."
+    }
+  ]
 }

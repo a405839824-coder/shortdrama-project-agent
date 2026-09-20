@@ -32,7 +32,6 @@ from .materializer import (
     COMPACT_SCHEMA_VERSION,
     COMPACT_SHOT_FIELDS,
     FORMAL_MERGED_FIELD,
-    GPT_KEYFRAME_FIELD,
     LEGACY_STANDALONE_FIELDS,
     MOTHER_TEMPLATE_COLUMNS,
     LEGACY_MOTHER_TEMPLATE_COLUMNS,
@@ -243,6 +242,20 @@ def _validate_zip_archive(
         raise ValueError("uploaded Office file is not a valid ZIP archive") from exc
 
 
+def _unique_headers(headers: list[str]) -> list[str]:
+    """Keep every column, including collisions with generated suffixes."""
+    used: set[str] = set()
+    result: list[str] = []
+    for index, header in enumerate(headers, 1):
+        base = header or f"列{index}"
+        name, suffix = base, 2
+        while name in used:
+            name, suffix = f"{base}_{suffix}", suffix + 1
+        used.add(name)
+        result.append(name)
+    return result
+
+
 def _rows_from_sheet(sheet: Any) -> tuple[list[str], list[dict[str, Any]]]:
     values = list(sheet.iter_rows(values_only=True))
     if not values:
@@ -255,13 +268,7 @@ def _rows_from_sheet(sheet: Any) -> tuple[list[str], list[dict[str, Any]]]:
             break
     raw_headers = [str(value).strip() if value is not None else "" for value in values[header_index]]
     last = max((index for index, value in enumerate(raw_headers) if value), default=-1)
-    headers = raw_headers[: last + 1]
-    seen: dict[str, int] = {}
-    unique_headers: list[str] = []
-    for index, header in enumerate(headers, 1):
-        base = header or f"列{index}"
-        seen[base] = seen.get(base, 0) + 1
-        unique_headers.append(base if seen[base] == 1 else f"{base}_{seen[base]}")
+    unique_headers = _unique_headers(raw_headers[: last + 1])
     rows = []
     for raw in values[header_index + 1 :]:
         row = {header: json_safe(raw[index] if index < len(raw) else None) for index, header in enumerate(unique_headers)}
@@ -1257,6 +1264,7 @@ def _extract_pdf(data: bytes) -> dict[str, Any]:
 def _extract_csv(data: bytes) -> dict[str, Any]:
     text = data.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
+    reader.fieldnames = _unique_headers(reader.fieldnames or [])
     rows = [{str(key): json_safe(value) for key, value in row.items()} for row in reader]
     return {"kind": "table", "format": "csv", "headers": reader.fieldnames or [], "row_count": len(rows), "rows": rows}
 
@@ -1837,17 +1845,14 @@ def _bulk_text_items_result(
     total = len(items)
     requested = limit if limit is not None else DEFAULT_BULK_ITEM_LIMITS[unit]
     index = min(max(0, offset), total)
-    first_inner = max(0, inner_offset)
     remaining = max(0, budget)
     parts: list[str] = []
     completed_items = 0
-    partial = False
-    next_inner_offset = 0
+    next_inner_offset = max(0, inner_offset) if index < total else 0
 
     while index < total and completed_items < requested and remaining > 0:
         item = str(items[index] or "")
-        item_offset = first_inner if completed_items == 0 else 0
-        item_offset = min(item_offset, len(item))
+        item_offset = min(next_inner_offset, len(item))
         segment = item[item_offset:]
         separator = "\n\n" if parts else ""
         required = len(separator) + len(segment)
@@ -1856,19 +1861,13 @@ def _bulk_text_items_result(
             remaining -= required
             index += 1
             completed_items += 1
-            first_inner = 0
+            next_inner_offset = 0
             continue
         separator_size = len(separator)
         available = max(0, remaining - separator_size)
         if available:
             parts.append(separator + segment[:available])
             next_inner_offset = item_offset + available
-            remaining = 0
-            partial = next_inner_offset < len(item)
-            if not partial:
-                index += 1
-                completed_items += 1
-                next_inner_offset = 0
         break
 
     content = "".join(parts)
@@ -1882,8 +1881,8 @@ def _bulk_text_items_result(
         "content": content,
         "next_offset": index,
         "next_inner_offset": next_inner_offset,
-        "complete": index >= total and not partial,
-        "partial_item": partial,
+        "complete": index >= total,
+        "partial_item": bool(next_inner_offset),
     }
     return result, len(content)
 

@@ -169,7 +169,7 @@ def process_coverage_page(service: Any, namespace: str, project_id: str, *,
         with store.project_write_lock(namespace, project_id):
             if page.get("collection_key"):
                 try:
-                    collection = current_collection()
+                    current_collection()
                 except ValueError as exc:
                     if not str(exc).startswith("unknown audit_coverage_collections record_id"):
                         raise
@@ -177,12 +177,12 @@ def process_coverage_page(service: Any, namespace: str, project_id: str, *,
                         stable_scope = lambda data: {k: v for k, v in data.items() if k != "authority"}
                         if stable_scope(previous.get("binding") or {}) == stable_scope(binding) and not collection_has_signed_audit(service, namespace, project_id, storyboard, previous):
                             raise ValueError("audit_coverage_collection_already_pending: a new key cannot discard staged findings")
-                    collection = store.save_project_record(namespace, project_id, kind=COLLECTION_KIND,
+                    store.save_project_record(namespace, project_id, kind=COLLECTION_KIND,
                         record_id=collection_id, value={"collection_id": collection_id, "binding": binding,
                             "collection_key_sha256": stable_json_hash(page["collection_key"]),
                             "status": "coverage_pending", "expected_count": manifest["obligation_count"]})
             else:
-                collection = current_collection()
+                current_collection()
             value["binding"] = binding
             accepted = collection_pages()
             existing = next((item for item in accepted if item["page_id"] == page_id), None)

@@ -18,6 +18,7 @@ from shortdrama_mcp.materializer import (
     COMPACT_SHOT_FIELDS,
     FORMAL_MERGED_FIELD,
     GPT_KEYFRAME_FIELD,
+    LEGACY_MOTHER_TEMPLATE_COLUMNS,
     MOTHER_TEMPLATE_COLUMNS,
     formal_mother_template_rows,
     materialize_storyboard,
@@ -163,14 +164,14 @@ class CompactMaterializerTests(unittest.TestCase):
         self.assertTrue(
             row[FORMAL_MERGED_FIELD].startswith(
                 "镜头序号：EP06-004（3.6s；累计12.2s）\n\n"
-                "镜头类型：中近景｜可见主体：苏清柳；邹氏肩缘；荣婶儿"
+                "镜头类型：中近景｜苏清柳；邹氏肩缘；荣婶儿"
             )
         )
         self.assertNotIn("功能类型：", row[FORMAL_MERGED_FIELD])
         self.assertNotIn("场景连续性ID：", row[FORMAL_MERGED_FIELD])
-        self.assertIn("光源来源：", row[FORMAL_MERGED_FIELD])
-        self.assertIn("光源方向：", row[FORMAL_MERGED_FIELD])
-        self.assertIn("色温倾向：", row[FORMAL_MERGED_FIELD])
+        for field in ("光影", "光源来源", "光源方向", "色温倾向"):
+            self.assertIn(f"{field}：", row["光影"])
+            self.assertNotIn(f"{field}：", row[FORMAL_MERGED_FIELD])
         self.assertIn("母亲，儿媳失手，请见谅", row[FORMAL_MERGED_FIELD])
         gpt = row[GPT_KEYFRAME_FIELD]
         self.assertNotIn("母亲，儿媳失手，请见谅", gpt)
@@ -191,8 +192,8 @@ class CompactMaterializerTests(unittest.TestCase):
         headers = [cell.value for cell in workbook["正式分镜母版"][1]]
         self.assertEqual(headers, MOTHER_TEMPLATE_COLUMNS)
         self.assertEqual(
-            [workbook["正式分镜母版"].column_dimensions[letter].width for letter in "ABCDEFGHIJ"],
-            [15, 9, 11, 30, 150, 105, 52, 27, 30, 66],
+            [workbook["正式分镜母版"].column_dimensions[letter].width for letter in "ABCDEFGHIJK"],
+            [15, 9, 11, 30, 150, 105, 52, 27, 30, 66, 70],
         )
 
         canonical = extract_xlsx(payload)["canonical_storyboard"]
@@ -309,10 +310,10 @@ class CompactMaterializerTests(unittest.TestCase):
         )
         self.assertEqual(migrated["色温倾向"], "中性微暖")
         self.assertEqual(migrated["光影"], "人物面部不过曝")
-        formal = formal_mother_template_rows(compact)[0][FORMAL_MERGED_FIELD]
-        self.assertEqual(formal.count("光源来源："), 1)
-        self.assertEqual(formal.count("光源方向："), 1)
-        self.assertEqual(formal.count("色温倾向："), 1)
+        row = formal_mother_template_rows(compact)[0]
+        for field in ("光影", "光源来源", "光源方向", "色温倾向"):
+            self.assertEqual(row["光影"].count(f"{field}："), 1)
+            self.assertNotIn(f"{field}：", row[FORMAL_MERGED_FIELD])
 
     def test_legacy_pipe_light_atoms_split_without_duplication(self) -> None:
         legacy = compact_storyboard()
@@ -332,10 +333,10 @@ class CompactMaterializerTests(unittest.TestCase):
         self.assertEqual(migrated["光源来源"], "左侧木格窗晨光")
         self.assertEqual(migrated["光源方向"], "左向右衰减")
         self.assertEqual(migrated["色温倾向"], "中性微暖")
-        formal = formal_mother_template_rows(compact)[0][FORMAL_MERGED_FIELD]
-        self.assertEqual(formal.count("光源来源："), 1)
-        self.assertEqual(formal.count("光源方向："), 1)
-        self.assertEqual(formal.count("色温倾向："), 1)
+        row = formal_mother_template_rows(compact)[0]
+        for field in ("光影", "光源来源", "光源方向", "色温倾向"):
+            self.assertEqual(row["光影"].count(f"{field}："), 1)
+            self.assertNotIn(f"{field}：", row[FORMAL_MERGED_FIELD])
 
     def test_xlsx_normalizes_once_and_projects_each_output_once(self) -> None:
         with (
@@ -410,7 +411,7 @@ class CompactMaterializerTests(unittest.TestCase):
         sheets = [
             {
                 "name": "E05_正式分镜",
-                "headers": list(MOTHER_TEMPLATE_COLUMNS),
+                "headers": list(LEGACY_MOTHER_TEMPLATE_COLUMNS),
                 "rows": [
                     {
                         "分镜序号": "EP05-001",
@@ -465,9 +466,9 @@ class CompactMaterializerTests(unittest.TestCase):
         self.assertNotIn("问号尾音", gpt)
         self.assertNotIn("”", gpt)
         formal = projected[FORMAL_MERGED_FIELD]
-        self.assertEqual(formal.count("光源来源："), 1)
-        self.assertEqual(formal.count("光源方向："), 1)
-        self.assertEqual(formal.count("色温倾向："), 1)
+        for field in ("光影", "光源来源", "光源方向", "色温倾向"):
+            self.assertEqual(projected["光影"].count(f"{field}："), 1)
+            self.assertNotIn(f"{field}：", formal)
         self.assertNotIn("运镜主体：", formal)
         self.assertNotIn("运镜功能：", formal)
         self.assertNotIn("叙事功能：", formal)

@@ -204,6 +204,7 @@ class V057PreflightEvidenceReissueTests(
         sidecar.delete_cols(9, 3)
         from historical_workbook_fixtures import use_previous_layout
         use_previous_layout(workbook)
+        self.assertEqual([cell.value for cell in workbook["正式生产母版"][1]], list(expected_rows[0]))
         payload_buffer = io.BytesIO()
         workbook.save(payload_buffer)
         workbook.close()

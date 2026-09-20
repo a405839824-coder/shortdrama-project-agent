@@ -21,15 +21,15 @@ def extract_dialogues(picture_content):
     for match in INTEGRATED_DIALOGUE_RE.finditer(text):
         line = match.group("line").strip()
         if line:
-            rows.append((match.group("speaker").strip(), line))
+            rows.append((match.start(), match.group("speaker").strip(), line))
     for match in LEGACY_DIALOGUE_TAG_RE.finditer(text):
         line = match.group("line").strip()
         sentence = re.match(r"(.+?[。！？?!](?:[。！？?!…])?)", line)
         if sentence:
             line = sentence.group(1).strip()
         if line:
-            rows.append((match.group("speaker").strip(), line))
-    return rows
+            rows.append((match.start(), match.group("speaker").strip(), line))
+    return [(speaker, line) for _, speaker, line in sorted(rows)]
 
 
 def has_markers(text):

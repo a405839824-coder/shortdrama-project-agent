@@ -13,7 +13,7 @@ from openpyxl import load_workbook
 
 from shortdrama_mcp.app import create_mcp
 from shortdrama_mcp.config import Settings
-from shortdrama_mcp.file_io import CANONICAL_SIDECAR_SHEET, storyboard_to_xlsx
+from shortdrama_mcp.file_io import CANONICAL_SIDECAR_SHEET
 from shortdrama_mcp.models import OpenAIFile
 import shortdrama_mcp.service as runtime
 from shortdrama_mcp.workbook_migration import (
@@ -22,13 +22,14 @@ from shortdrama_mcp.workbook_migration import (
 )
 from semantic_audit_helpers import semantic_audit_for_artifact
 from test_efficiency import valid_storyboard
+from historical_workbook_fixtures import previous_workbook
 
 
 def legacy_bytes(candidate=None, edit=None):
     candidate = candidate or valid_storyboard()
-    book = load_workbook(io.BytesIO(storyboard_to_xlsx(candidate, {"issues": []}, assume_compact=True)))
+    book = load_workbook(io.BytesIO(previous_workbook(candidate, {"issues": []})))
     del book[CANONICAL_SIDECAR_SHEET]
-    sheet = book["正式分镜母版"]
+    sheet = book["正式生产母版"]
     for row, shot in enumerate(candidate["shots"], 2):
         # This fixture represents the earlier workbook with visible clocks.
         # New exports deliberately omit those clocks; pin the legacy source

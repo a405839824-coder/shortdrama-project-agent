@@ -9,7 +9,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from functools import lru_cache
 from pathlib import Path
 
 CONTRACT = "current-repair-check-v1"
@@ -44,20 +43,15 @@ def candidate_digest(storyboard):
     return digest(obj)
 
 
-@lru_cache(maxsize=8)
-def _files_digest(manifest):
-    return digest([(Path(path).name, hashlib.sha256(Path(path).read_bytes()).hexdigest())
-                   for path, _size, _mtime in manifest])
-
-
 def checker_digest(rules):
     scripts = Path(__file__).resolve().parent
     # A helper implementation change invalidates observations even if the top
     # level validator file and its advertised version have not changed.
-    manifest = tuple((str(p), p.stat().st_size, p.stat().st_mtime_ns)
-                     for p in sorted(scripts.glob("*.py"))
-                     if not p.name.startswith(("test_", "run_")))
-    return digest({"rules": rules, "implementation": _files_digest(manifest)})
+    # Read current bytes: a checkout or restore can preserve size and mtime.
+    implementation = [(p.name, hashlib.sha256(p.read_bytes()).hexdigest())
+                      for p in sorted(scripts.glob("*.py"))
+                      if not p.name.startswith(("test_", "run_"))]
+    return digest({"rules": rules, "implementation": digest(implementation)})
 
 
 def make_check(storyboard, issues, rules):

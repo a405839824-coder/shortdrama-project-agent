@@ -14,3 +14,4 @@ if (-not $env:SHORTDRAMA_AUTH_MODE) { $env:SHORTDRAMA_AUTH_MODE = "none" }
 if (-not $env:SHORTDRAMA_DATA_DIR) { $env:SHORTDRAMA_DATA_DIR = Join-Path $PluginRoot "data" }
 
 & $VenvPython (Join-Path $PluginRoot "server\main.py") --http
+exit $LASTEXITCODE

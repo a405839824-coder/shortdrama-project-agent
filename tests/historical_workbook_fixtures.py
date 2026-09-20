@@ -2,7 +2,7 @@
 import io
 from openpyxl import Workbook
 from shortdrama_mcp import file_io, frozen_projector_0531
-from shortdrama_mcp.materializer import MOTHER_TEMPLATE_COLUMNS
+from shortdrama_mcp.frozen_projector_0531 import MOTHER_TEMPLATE_COLUMNS
 
 
 def use_previous_layout(book):
@@ -11,6 +11,11 @@ def use_previous_layout(book):
             del book[name]
     if '正式分镜母版' in book.sheetnames:
         book['正式分镜母版'].title='正式生产母版'
+    if '正式生产母版' in book.sheetnames:
+        sheet = book['正式生产母版']
+        if file_io._normalized_mother_headers([cell.value for cell in sheet[1]]) == [*MOTHER_TEMPLATE_COLUMNS, '光影']:
+            # The historical ten-column fixture predates the separate K field.
+            sheet.delete_cols(len(MOTHER_TEMPLATE_COLUMNS) + 1)
     return book
 
 

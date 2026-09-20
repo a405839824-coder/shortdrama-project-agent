@@ -61,8 +61,9 @@ class ProductionContractTests(unittest.TestCase):
         data, graph = complete_episode()
         with tempfile.TemporaryDirectory() as folder:
             obj = generate(folder, data, graph)
-        self.assertEqual(len(obj['shots']),20)
-        self.assertEqual(obj['total_duration'],104.5)
+        self.assertEqual(len(obj['shots']),27)
+        self.assertEqual(obj['total_duration'],96)
+        self.assertTrue(all(shot['时长'] <= 4 for shot in obj['shots']))
         proof = inspect_derivation(obj)
         self.assertTrue(proof['production_prevention_verified'],proof)
         report = validate_project(obj)
@@ -87,8 +88,12 @@ class ProductionContractTests(unittest.TestCase):
 
     def test_declared_hook_clock_cannot_move_actual_delivery(self):
         data, graph = complete_episode()
-        data['shots'][0]['actions'][0].update(start=80,end=105)
-        beat=data['project']['prevention_evidence']['episode_contract']['episodes'][0]['beat_events'][0]
+        beats=data['project']['prevention_evidence']['episode_contract']['episodes'][0]['beat_events']
+        beat=beats[0]
+        late=next(b for b in beats if b['id']=='B6')
+        beat.update(shot_id=late['shot_id'],source_ids=copy.deepcopy(late['source_ids']),
+                    delivery=copy.deepcopy(late['delivery']))
+        beats.remove(late)
         beat.update(start=0,end=.2)
         with tempfile.TemporaryDirectory() as folder:
             obj=generate(folder,data,graph)
@@ -110,7 +115,7 @@ class ProductionContractTests(unittest.TestCase):
     def test_current_written_delivery_uses_actual_initial_visibility(self):
         data,graph=complete_episode()
         beat=data['project']['prevention_evidence']['episode_contract']['episodes'][0]['beat_events'][0]
-        beat.update(source_ids=['DOC'],start=0,end=10.5,
+        beat.update(source_ids=['DOC'],start=0,end=4,
                     delivery={'field':'起始状态','quote':'若条件满足，明日交付。','event_ids':['state:EP90-001:P1']})
         with tempfile.TemporaryDirectory() as folder:obj=generate(folder,data,graph)
         report=validate_project(obj)

@@ -5,7 +5,6 @@ do not establish that a model's semantic judgement is infallible.
 """
 from __future__ import annotations
 
-import copy
 import json
 from pathlib import Path
 from typing import Any

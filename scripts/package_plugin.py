@@ -13,6 +13,9 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
+from atomic_io import write_bytes_atomic as _write_bytes_atomic
+from atomic_io import write_text_atomic as _write_text_atomic
+
 
 PackageProfile = Literal["source", "connected"]
 
@@ -20,6 +23,7 @@ EXCLUDED_ANY_PARTS = {
     ".git",
     ".pytest_cache",
     ".railway",
+    ".ruff_cache",
     ".venv",
     "__pycache__",
 }
@@ -143,29 +147,6 @@ UNQUOTED_CREDENTIAL_ASSIGNMENT_RE = re.compile(
     r"\s*=\s*(?P<value>[^\s#]+)"
 )
 
-PLACEHOLDER_WORDS = {
-    "127.0.0.1",
-    "changeme",
-    "dummy",
-    "example",
-    "fake",
-    "localhost",
-    "never-log",
-    "placeholder",
-    "redacted",
-    "replace",
-    "sample",
-    "test",
-    "your",
-    "your-",
-    "your_",
-    "xxx",
-}
-PLACEHOLDER_WORD_RE = re.compile(
-    r"(?:^|[^a-z0-9])(" + "|".join(re.escape(value) for value in sorted(PLACEHOLDER_WORDS))
-    + r")(?:[^a-z0-9]|$)",
-    re.IGNORECASE,
-)
 CONNECTION_RE = re.compile(r"^(?:plugin_)?asdk_app[A-Za-z0-9_-]{8,}$")
 WINDOWS_RESERVED_NAMES = {
     "CON",
@@ -465,15 +446,23 @@ def _known_but_not_in_profile(relative: Path, profile: PackageProfile) -> bool:
     return relative.parts[0] in SOURCE_DIRECTORIES - CONNECTED_DIRECTORIES
 
 
+def _package_paths(directory: Path, *, top_level: bool = True):
+    # Prune data and virtual environments before traversing their contents.
+    for path in sorted(directory.iterdir()):
+        if path.name in EXCLUDED_ANY_PARTS or (
+            top_level and path.name in EXCLUDED_TOP_LEVEL_PARTS
+        ):
+            continue
+        yield path
+        if not path.is_symlink() and path.is_dir():
+            yield from _package_paths(path, top_level=False)
+
+
 def _collect_files(plugin_root: Path, profile: PackageProfile) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     casefolded_names: dict[str, str] = {}
-    for path in sorted(plugin_root.rglob("*")):
+    for path in _package_paths(plugin_root):
         relative = path.relative_to(plugin_root)
-        if relative.parts[0] in EXCLUDED_TOP_LEVEL_PARTS or any(
-            part in EXCLUDED_ANY_PARTS for part in relative.parts
-        ):
-            continue
         if path.is_symlink():
             raise PackagingError(f"symbolic links are not allowed: {relative.as_posix()}")
         if path.is_dir():
@@ -612,34 +601,6 @@ def _read_existing_sums(path: Path) -> dict[str, str]:
             )
         entries[match.group(2)] = match.group(1).lower()
     return entries
-
-
-def _write_text_atomic(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def _write_bytes_atomic(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def update_sha256sums(
