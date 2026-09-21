@@ -14,6 +14,7 @@ from .materializer import MOTHER_TEMPLATE_COLUMNS
 from .models import ToolResponse
 from .production_plan import model_production_contract
 from .audit_coverage import verify_certificate_coverage
+from .r5_workbook import workbook_audit_scope
 
 
 CONTRACT = "formal-storyboard-delivery-v1"
@@ -28,6 +29,7 @@ def delivery_contract():
         "rule_registry_sha256": context["rule_registry_sha256"],
         "columns": list(MOTHER_TEMPLATE_COLUMNS),
         "canonical_field_count": 27,
+        "workbook_audit_scope": workbook_audit_scope(),
         "renderer": "server_generated_master_and_same_source_R5",
         "verification": "read_project_artifact(section='formal_delivery')",
         "formal_delivery_requires": ["registered_server_storyboard", "exact_file_bytes",

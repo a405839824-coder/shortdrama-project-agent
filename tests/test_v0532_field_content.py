@@ -158,12 +158,11 @@ class FieldContentTests(unittest.TestCase):
         self.assertEqual(restored['shots'][0]['原文支撑句'],obj['shots'][0]['原文支撑句'])
         w.close()
 
-    def test_reading_page_edit_cannot_hide_behind_unchanged_canonical(self):
+    def test_reading_page_edit_is_outside_audit_scope(self):
         data=storyboard_to_xlsx(compact_storyboard(),{'status':'fail','issues':[]})
         w=load_workbook(io.BytesIO(data));s=w['6集_逐镜阅读'];s['C9']='擅自改变站位。'
         out=io.BytesIO();w.save(out);w.close()
-        with self.assertRaisesRegex(ValueError,'reading/source projection mismatch'):
-            extract_xlsx(out.getvalue())
+        self.assertEqual(extract_xlsx(out.getvalue())['canonical_storyboard'], extract_xlsx(data)['canonical_storyboard'])
 
     def test_painted_appearance_cannot_carry_attachment_status(self):
         shot=strict_fixture()['shots'][0];shot['参考图锚定']='文字造型锚：未附图，江氏穿红衣。'

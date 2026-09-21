@@ -11,12 +11,16 @@ import unicodedata
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .field_content import voice_parts
+from .field_content import voice_parts, workbook_audit_scope
 from .picture_presentation import display_picture
 
 MASTER_NAME = "正式分镜母版"
 GUIDE_NAME = "使用与来源"
 WIDTHS = (15, 9, 11, 30, 150, 105, 52, 27, 30, 66, 70)
+
+
+def is_reading_sheet(name):
+    return str(name or "").strip().endswith(workbook_audit_scope()["excluded_sheet_suffix"])
 
 
 def _label_value(label, value):

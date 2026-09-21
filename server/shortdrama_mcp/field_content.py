@@ -15,6 +15,7 @@ FORMAL_EXECUTION_FIELDS = _module.FORMAL_EXECUTION_FIELDS
 project_lighting = _module.project_lighting
 FieldContentError = _module.FieldContentError
 field_policy = _module.field_policy
+workbook_audit_scope = _module.workbook_audit_scope
 field_content_findings = _module.field_content_findings
 voice_content_findings = _module.voice_content_findings
 assert_field_content = _module.assert_field_content
