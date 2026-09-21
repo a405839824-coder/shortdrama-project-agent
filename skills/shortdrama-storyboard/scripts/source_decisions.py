@@ -323,8 +323,16 @@ def _inspect(graph, decisions, source_texts, expected_graph_sha256):
         graph_keys.add("action_plans")
     if "production_plan" in g:
         graph_keys.add("production_plan")
+    if "dialogue_realizations" in g:
+        graph_keys.add("dialogue_realizations")
     if not obj(g, graph_keys, "$graph"):
         return tuple(issues), None
+    from source_realizations import bound_realizations
+    try:
+        realizations = bound_realizations(g)
+    except (TypeError, ValueError, KeyError) as exc:
+        bad("source_realization_invalid", "$graph.dialogue_realizations", str(exc), global_issue=True)
+        realizations = {}
     action_plans = g.get("action_plans")
     if "action_plans" in g and (not isinstance(action_plans, dict)
             or action_plans.get("contract") != "source-action-plans-v1"
@@ -447,9 +455,13 @@ def _inspect(graph, decisions, source_texts, expected_graph_sha256):
                 if eid in enactments and enactments[eid] != uid: bad("event_reenacted", path, "same source event must be merged before physical enactment", refs)
                 enactments[eid] = uid
         spoken_realization = None
+        realization = realizations.get(uid)
+        if realization and use != realization["use"]:
+            bad("source_realization_use_changed", path, "exact reviewed words, speaker, facts and mode must be retained", refs)
+            realization = None
         if mode == "spoken":
             oral = [f for f in projected if f["channel"] == "oral"]
-            if not oral or not token(actor) or any(f["subject"] != actor or f["content_availability"] != "given" or f["expression_occurrence"] not in {"occurred", "current"} or f["expression_status"] != "asserted" for f in oral):
+            if not realization and (not oral or not token(actor) or any(f["subject"] != actor or f["content_availability"] != "given" or f["expression_occurrence"] not in {"occurred", "current"} or f["expression_status"] != "asserted" for f in oral)):
                 bad("spoken_unprovided", path, "spoken use needs actual oral content and its source speaker; unstated words cannot be invented", refs)
         if mode == "inner_voice":
             thoughts = [f for f in projected if f["channel"] == "thought"]
@@ -461,7 +473,7 @@ def _inspect(graph, decisions, source_texts, expected_graph_sha256):
             allowed = {"current"} if mode == "current_written" else {"current", "occurred", "future"}
             if not written or any(f["content_availability"] != "given" or f["expression_occurrence"] not in allowed or f["expression_status"] != "asserted" for f in written):
                 bad("written_scope", path, "paper needs supplied written content and the correct inscription occurrence; proposition futurity alone does not forbid current paper", refs)
-        if mode == "spoken" and wording == "adapted" and any(f["channel"] == "oral" and f["content_policy"] != "adaptable" for f in projected):
+        if mode == "spoken" and wording == "adapted" and not realization and any(f["channel"] == "oral" and f["content_policy"] != "adaptable" for f in projected):
             bad("protected_content_adapted", path, "protected or unstated source cannot opt into adapted speech", refs)
         if mode in {"current_written", "write", "inner_voice"} or (mode == "spoken" and wording == "verbatim"):
             channel = "oral" if mode == "spoken" else "thought" if mode == "inner_voice" else "written"
@@ -470,12 +482,21 @@ def _inspect(graph, decisions, source_texts, expected_graph_sha256):
                 bad("decided_content_changed", path, "rendered words must equal the ordered locked content; use adapted wording for unprotected oral content; paper/protected text cannot drift", refs)
         if mode == "objective_narration" and any(f["content_availability"] == "unstated" for f in selected) and re.search(r'[“”「」『』"]', text):
             bad("unstated_quoted_words", path, "event-only narration cannot add quoted unknown communication content", refs)
-        if mode in {"spoken", "inner_voice"}:
+        if realization:
+            spoken_realization = {"contract": "source-spoken-realization-v1", "transform": "reviewed_indirect_speech_v1",
+                "proposal_id": realization["proposal_id"], "review_id": realization["review_id"],
+                "binding_sha256": realization["binding_sha256"],
+                "ordered_use_ids": realization["ordered_use_ids"],
+                "actual_text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "authority_status": "requires_live_server_verification", "semantic_status": SEMANTIC_STATUS}
+        elif mode in {"spoken", "inner_voice"}:
             spoken_realization = _spoken_realization(projected, selected, facts, text, wording, source_texts, bad, path,
                                                        channel="thought" if mode == "inner_voice" else "oral")
         uses[uid] = SourceUse(uid, tuple(refs), tuple(dict.fromkeys(f["event_id"] for f in selected)), mode, wording, actor, text, _json_bytes(selected),
                              _json_bytes(spoken_realization) if spoken_realization is not None else None)
     missing = [fid for fid, f in facts.items() if f["required"] is True and fid not in represented]
+    for uid in set(realizations) - set(uses):
+        bad("source_realization_use_missing", "$decisions.uses", "reviewed conversation cannot silently omit a bound use: " + uid, global_issue=True)
     for fid in missing: bad("required_fact_unrepresented", "$global.required_facts", "required fact has no actual source use", [fid], True)
     papers = {}
     carrier_instants = set()

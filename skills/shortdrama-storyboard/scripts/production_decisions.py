@@ -974,6 +974,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
     chain = ProductionStateChain(_state(world), label="initial", reason="single initial production world")
     rows, records, used_events, used_shots, used_uids = [], [], {}, set(), set()
     consumed_uses, consumed_papers, projection_dependencies, rendered_event_ids = set(), set(), {}, set()
+    reviewed_speech = []
     world_events = []
     elapsed = 0; previous = None
     for index, raw in enumerate(payload["shots"]):
@@ -1089,6 +1090,11 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
         psychological_text = ""; voice_entries = []
         audio_alignments = []
         for action, ap, _ in sorted(intervals, key=lambda x: (x[0]["start"], x[0]["id"])):
+            if action["kind"] == "speak":
+                use = sources["uses_by_id"][action["source_use_id"]]
+                realization = use.get("spoken_realization") or {}
+                if realization.get("transform") == "reviewed_indirect_speech_v1":
+                    reviewed_speech.append((realization, use["id"], elapsed + action["start"], elapsed + action["end"]))
             info = prepared[action["id"]]; verb, sentence = _action_sentence(action, info)
             pieces = [(i, max(a, action["start"]), min(b, action["end"])) for i, (a, b) in enumerate(zip(ticks, ticks[1:]))
                       if max(a, action["start"]) < min(b, action["end"])]
@@ -1292,6 +1298,11 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
         from source_decisions import validate_source_consumption
         consumption_issues = validate_source_consumption(source_compilation, use_ids=consumed_uses, written_object_ids=consumed_papers)
         _need(not consumption_issues, "source_consumption", "; ".join(x.message for x in consumption_issues))
+    for proposal_id in {r[0]["proposal_id"] for r in reviewed_speech}:
+        spoken = [r for r in reviewed_speech if r[0]["proposal_id"] == proposal_id]
+        _need([r[1] for r in spoken] == spoken[0][0]["ordered_use_ids"]
+              and all(a[3] <= b[2] for a, b in zip(spoken, spoken[1:])),
+              "source_realization_order", "reviewed utterances must be spoken once in their approved order without overlap")
     source_action_report = _source_action_call(source_action_execution.finish)
     production_plan_report = _production_plan_call(plan_guard.finish)
     return copy.deepcopy({"typed_decisions": {"contract": "typed-authoring-decisions-v2", "project": project, "shots": rows},

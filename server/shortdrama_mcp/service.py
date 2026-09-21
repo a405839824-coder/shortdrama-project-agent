@@ -1954,6 +1954,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Recompute THG-05 speaker/text authority from the imported source."""
 
+        self._verify_storyboard_source_realizations(namespace, project_id, candidate)
         active_hub = hub or self.store.load_hub(namespace, project_id)
         entry = self._selected_dialogue_source_entry(active_hub)
         base_manifest: dict[str, Any] = {
@@ -11308,6 +11309,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     raise ValueError('chapter_source_scope_required: server-selected novel source requires novel episode scope and chapter intake; candidate labels cannot downgrade the imported source')
             from .production_route import check_borrow_permissions
             check_borrow_permissions(project_input,self._project_borrow_permissions(namespace,project_id))
+            self._verify_source_realization_graph(namespace, project_id, json.loads(graph_bytes))
             attempt = record_attempt(
                 directory / "decisions.original.json", directory / "compiler_attempts",
                 source_graph_path=directory / "source_graph.original.json",
@@ -11401,6 +11403,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             self._assert_workbook_migration_atoms(workbook_migration, storyboard)
             candidate, _identity = _prepare_compact_storyboard_for_commit(storyboard)
             _assert_r10_spc1_output_contract(candidate)
+            self._verify_storyboard_source_realizations(namespace, project_id, candidate)
             self._require_current_production(candidate, work_order=work_order, scope_kind=scope_kind,
                                        load_artifact=lambda aid: self.store.get_artifact(namespace, project_id, aid)[1].read_bytes(),
                                        workbook_migration=workbook_migration,
@@ -13915,6 +13918,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             expected_json_fingerprint = metadata.get("canonical_json_fingerprint")
             if expected_json_fingerprint and str(expected_json_fingerprint) != actual_payload_hash:
                 raise ValueError("canonical storyboard link fingerprint mismatch")
+            self._verify_storyboard_source_realizations(namespace, project_id, storyboard)
             return storyboard, record
 
         extracted, record, _path = self._load_extracted_or_payload(namespace, project_id, artifact_id)
@@ -13938,6 +13942,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         expected_hash = record.get("metadata", {}).get("canonical_sha256")
         if expected_hash and str(expected_hash) != canonical_hash:
             raise ValueError("canonical storyboard stable hash mismatch")
+        self._verify_storyboard_source_realizations(namespace, project_id, storyboard)
 
         # Legacy/imported workbooks do not have a canonical sidecar. Recover it
         # once and link it atomically so every later window reads the complete
@@ -20841,6 +20846,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "workbook_source_raw_sha256": plan["source_raw_sha256"],
                 "workbook_source_atoms_sha256": plan["proof"]["atom_sha256"],
             })
+        self._verify_storyboard_source_realizations(namespace, project_id, storyboard)
         self._require_current_production(storyboard, work_order=work_order_snapshot, scope_kind='full',
                                    load_artifact=lambda aid: self.store.get_artifact(namespace, project_id, aid)[1].read_bytes(),
                                    workbook_migration=workbook_migration,
