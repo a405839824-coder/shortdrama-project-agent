@@ -84,7 +84,8 @@ CURRENT_PROJECTION_CONTRACT = "shortdrama-projector/0.5.46"
 R5_LEGACY_PROJECTION_CONTRACT = "shortdrama-projector/0.5.32"
 PREVIOUS_PROJECTION_CONTRACT = "shortdrama-projector/0.5.5"
 from . import frozen_projector_0531
-from .r5_workbook import MASTER_NAME, WIDTHS, reading_matrices, write_reading_sheets
+from .r5_workbook import (MASTER_NAME, WIDTHS, is_reading_sheet, reading_matrices,
+                          workbook_audit_scope, write_reading_sheets)
 LEGACY_PROJECTION_CONTRACT = "shortdrama-projector/0.5.0"
 CONTROLLED_HISTORICAL_PROJECTION_CONTRACTS = frozenset(
     {CURRENT_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT,
@@ -615,7 +616,8 @@ def _mother_sheet_candidates(sheets: list[dict[str, Any]]) -> list[dict[str, Any
     return [
         sheet
         for sheet in sheets
-        if _normalized_mother_headers(sheet.get("headers", [])) in expected
+        if not is_reading_sheet(sheet.get("name"))
+        and _normalized_mother_headers(sheet.get("headers", [])) in expected
     ]
 
 
@@ -688,10 +690,10 @@ def _assert_visible_projection_matches(
     sheets: list[dict[str, Any]],
     canonical: dict[str, Any],
 ) -> None:
-    """Verify the visible ten-column master against its canonical sidecar.
+    """Verify the visible formal master against its canonical sidecar.
 
     The hidden canonical is an integrity source, not permission to ignore the
-    user-facing workbook.  A stale or incorrectly generated visible projection
+    formal workbook fields. A stale or incorrectly generated master projection
     must therefore block import/audit even when the sidecar itself is intact.
     """
 
@@ -711,10 +713,15 @@ def _projection_columns(rows):
     return MOTHER_TEMPLATE_COLUMNS if rows and "光影" in rows[0] else LEGACY_MOTHER_TEMPLATE_COLUMNS
 
 
-def _assert_auxiliary_sheets(sheets, storyboard, expected_rows, contract):
+def _assert_auxiliary_sheets(sheets, storyboard, expected_rows, contract, *, include_reading=False):
     current = contract in {CURRENT_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT}
     expected_aux = reading_matrices(storyboard, expected_rows,
         _legacy_layout=contract == R5_LEGACY_PROJECTION_CONTRACT) if current else {}
+    # Reading copies are outside audit. Only the exporter verifies its own
+    # freshly generated copies; import, audit and recovery use the master.
+    if not include_reading:
+        sheets = [sheet for sheet in sheets if not is_reading_sheet(sheet.get("name"))]
+        expected_aux = {name: rows for name, rows in expected_aux.items() if not is_reading_sheet(name)}
     names = [str(sheet.get("name") or "") for sheet in sheets
              if sheet.get("name") != CANONICAL_SIDECAR_SHEET]
     expected_names = ["00_范围与审计", MASTER_NAME if current else "正式生产母版", *expected_aux]
@@ -810,6 +817,8 @@ def workbook_to_storyboard(
     _allow_controlled_transitional_short_header: bool = False,
     _allowed_projection_contracts: frozenset[str] | None = None,
 ) -> dict[str, Any] | None:
+    # Excluded reading pages cannot supply shots, metadata, or duplicate masters.
+    sheets = [sheet for sheet in sheets if not is_reading_sheet(sheet.get("name"))]
     sidecar_result = _canonical_storyboard_from_sidecar(
         sheets,
         _allowed_projection_contracts=_allowed_projection_contracts,
@@ -1021,6 +1030,7 @@ def extract_xlsx(data: bytes) -> dict[str, Any]:
         "kind": "workbook",
         "sheet_count": len(public_sheets),
         "sheets": public_sheets,
+        "workbook_audit_scope": workbook_audit_scope(),
         "canonical_storyboard": canonical,
         "canonical_sidecar_present": canonical_sidecar_present,
     }
@@ -1730,7 +1740,8 @@ def storyboard_to_xlsx(
     roundtrip_result = _canonical_storyboard_from_sidecar(sheets)
     roundtrip = roundtrip_result[0] if roundtrip_result is not None else None
     _assert_visible_projection_rows_match(sheets, formal_rows)
-    _assert_auxiliary_sheets(sheets, compact, formal_rows, CURRENT_PROJECTION_CONTRACT)
+    _assert_auxiliary_sheets(sheets, compact, formal_rows, CURRENT_PROJECTION_CONTRACT,
+                             include_reading=True)
     if roundtrip != json_safe(compact):
         raise ValueError(
             "canonical sidecar invalid: saved workbook canonical round-trip mismatch"
@@ -1749,13 +1760,15 @@ def preview_extracted(value: dict[str, Any], section: str | None, offset: int, l
         if section == "canonical_storyboard":
             return {"kind": "json", "content": value.get("canonical_storyboard")}
         sheets = value.get("sheets", [])
-        sheet = next((item for item in sheets if item.get("name") == section), None) if section else (sheets[0] if sheets else None)
+        sheet = _workbook_sheet(value, section)
         if not sheet:
             return {"kind": kind, "available_sections": [item.get("name") for item in sheets], "rows": []}
         rows = sheet.get("rows", [])
         return {
             "kind": kind,
             "section": sheet.get("name"),
+            "audit_included": not is_reading_sheet(sheet.get("name")),
+            "workbook_audit_scope": workbook_audit_scope(),
             "headers": sheet.get("headers", []),
             "offset": offset,
             "limit": limit,
@@ -1931,7 +1944,9 @@ def _workbook_sheet(value: dict[str, Any], section: str | None) -> dict[str, Any
     sheets = value.get("sheets", [])
     if section:
         return next((item for item in sheets if item.get("name") == section), None)
-    return sheets[0] if sheets else None
+    candidates = _mother_sheet_candidates(sheets)
+    return candidates[0] if candidates else next(
+        (sheet for sheet in sheets if not is_reading_sheet(sheet.get("name"))), None)
 
 
 def _bulk_one_range(
@@ -2093,11 +2108,14 @@ def preview_extracted_bulk(
     for request in requests:
         remaining = max(0, budget - used)
         result, consumed = _bulk_one_range(value, request, default_unit=default_unit, budget=remaining)
+        if value.get("kind") == "workbook":
+            result["audit_included"] = not is_reading_sheet(result.get("section"))
         used += min(max(0, consumed), remaining)
         results.append(result)
     truncated = any(not bool(item.get("complete")) for item in results)
     return {
         "kind": value.get("kind"),
+        **({"workbook_audit_scope": workbook_audit_scope()} if value.get("kind") == "workbook" else {}),
         "ranges": results,
         "max_chars": budget,
         "returned_chars": used,

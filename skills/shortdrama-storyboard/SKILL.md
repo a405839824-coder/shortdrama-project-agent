@@ -14,6 +14,12 @@ declare a sound before contact, or omit a protected action through a bridge.
 
 ## Complete current audit evidence
 
+Workbook sheets named `*_逐镜阅读` are outside audit. Do not use their text,
+format, missing rows, or differences as audit issues, scores, or repair targets.
+Read the formal master and its GPT keyframes and source bindings. The remaining
+per-shot, adjacent-shot, and eight-layer coverage requirements still apply.
+Reading copies are still exported; exact artifact-byte signatures remain required.
+
 Read `references/workflow_integrity_contract.md` and the live
 `get_agent_status.workflow_integrity_contract`. Before independent review, page
 through `read_project_artifact(section="audit_obligations")` for the exact current

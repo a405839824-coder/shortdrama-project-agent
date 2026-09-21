@@ -691,7 +691,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         name="read_project_artifact",
         title="读取项目文件",
         description=(
-            "读取已导入或已生成文件。默认自动批量读取长内容并返回无重叠续读位置；旧版"
+            "读取已导入或已生成文件。分镜工作簿默认读正式母版；*_逐镜阅读页可显式读取，但不在审计范围。默认自动批量读取长内容并返回无重叠续读位置；旧版"
             "section/offset/limit分页可用automatic_bulk=false保持兼容。也可使用"
             "bulk_ranges一次获取最多16个段落、页面、行或字符范围，合并内容硬限制为16000字符。"
             "可传if_none_match避免重复返回未变化文件。"
@@ -1152,7 +1152,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         name="audit_storyboard",
         title="审计并记录分镜",
         description=(
-            "独立审计已存在的分镜文件时调用。首次或指纹变化后的审计必须提交semantic_audit："
+            "独立审计已存在的分镜文件时调用。*_逐镜阅读页排除审计，不据此报错、计分或要求修正；正式母版、GPT关键帧及全部镜头的其余检查保留。首次或指纹变化后的审计必须提交semantic_audit："
             "先read_project_artifact(section=audit_obligations)读取完整当前义务与提交合同；"
             "大批次用coverage_page逐页暂存，再显式finalize全部页，coverage_pending不是审计通过。"
             "旧schema可用该读取响应提供的版本化evidence_ids封套，仍执行相同校验。"

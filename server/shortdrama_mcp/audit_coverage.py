@@ -13,6 +13,7 @@ from typing import Any
 from .canonical import canonical_sha256, stable_json_hash
 from .materializer import COMPACT_SHOT_FIELDS
 from .models import SemanticAuditCoverageInput, SemanticAuditCoveragePageInput, ToolResponse
+from .r5_workbook import workbook_audit_scope
 
 
 CONTRACT = "semantic-obligation-coverage-v1"
@@ -442,6 +443,7 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
     data = {
         **{k: v for k, v in manifest.items() if k not in {"obligations", "_values"}},
         "read_view": "compact-obligations-v1",
+        "workbook_audit_scope": workbook_audit_scope(),
         "rule_definitions_sha256": definition_hash,
         "definition_reference": {"offset": 0, "manifest_sha256": manifest["manifest_sha256"]},
         "reference_pattern": "field:{shot_id}.{field}",

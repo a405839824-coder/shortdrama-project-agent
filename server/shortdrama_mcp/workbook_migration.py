@@ -20,6 +20,7 @@ from .file_io import (
 from .materializer import (COMPACT_SHOT_FIELDS,
     LEGACY_MOTHER_TEMPLATE_COLUMNS as MOTHER_TEMPLATE_COLUMNS,
     LEGACY_FORMAL_MERGED_ATOMIC_FIELDS as FORMAL_MERGED_ATOMIC_FIELDS)
+from .r5_workbook import is_reading_sheet
 
 WORKBOOK_MIGRATION_TARGET = "workbook-canonical-v1"
 WORKBOOK_MIGRATION_PHASE = "legacy_workbook_canonical_migration"
@@ -63,7 +64,7 @@ def recover_legacy_workbook(payload: bytes) -> tuple[dict[str, Any], dict[str, A
     try:
         if CANONICAL_SIDECAR_SHEET in book.sheetnames:
             raise _fail("a workbook already containing a sidecar is outside this route")
-        candidates = [sheet for sheet in book.worksheets if
+        candidates = [sheet for sheet in book.worksheets if not is_reading_sheet(sheet.title) and
                       _normalized_mother_headers([cell.value for cell in sheet[1]]) ==
                       _normalized_mother_headers(MOTHER_TEMPLATE_COLUMNS)]
         if len(candidates) != 1:

@@ -49,6 +49,16 @@ def field_policy():
     return policy
 
 
+@lru_cache(maxsize=1)
+def _workbook_audit_scope():
+    registry = json.loads((REFERENCE_ROOT / "rule_registry.json").read_text(encoding="utf-8"))
+    return registry["runtime"]["workflow_integrity_policy"]["workbook_audit_scope"]
+
+
+def workbook_audit_scope():
+    return dict(_workbook_audit_scope())
+
+
 class FieldContentError(ValueError):
     def __init__(self, findings):
         self.findings = findings
@@ -248,6 +258,7 @@ def model_field_contract():
             "owned_clause_patterns": policy.get("owned_clause_patterns", {}),
             "speaking_gaze_policy": policy.get("speaking_gaze_policy"),
             "workbook": {"formal_sheet": "正式分镜母版", "reading_sheets": "每集_逐镜阅读", "source_sheet": "使用与来源", "visible_columns": 11,
+                         "audit_scope": workbook_audit_scope(),
                          "lighting_column": "K:光影", "formal_cell_lighting": False, "visible_subject_label": False},
             "new_production_entry": policy["new_production_entry"],
             "legacy_canonical": "兼容候选仍执行全部字段检查；不因此视为已验证结构化生成",
