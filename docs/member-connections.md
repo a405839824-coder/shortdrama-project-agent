@@ -98,3 +98,5 @@ python scripts/configure_member_connections.py /secure/reviewed-members.json
 本地验证包含 RSA 签名 token 的 HTTP `/mcp` 调用、10 个成员空间、权限拒绝、禁用、错误配置、Google 绑定、历史 owner 空间及配置切换期间身份一致性。它不等于真实员工账号接入、Auth0 续期成功、生产部署或 10 人重任务并发性能验收。
 
 0.5.49新生产读取在线v3计划与shot_design v2：4秒目标不触发自动切镜，4—6秒完整短句有独立通道；cut_anchor与备选绑定实际台词/动作，镜数是参考，整批节奏必须独审。沿用同一计时、状态与十一列表格，不输出内部理由。6秒以上对白和未支持运镜/音频能力保持限制。本轮按用户要求未测试，不宣称内容验收或首稿98%。见docs/UPGRADE_0.5.49.md。
+
+0.5.50 已补入有源间接言语的生成前独立审查：具体来源、事实、说话人与措辞冻结后，复用 narrative 工具及签名记录进入编译。原文给定对白继续逐字保护，最新 fail/unknown 或版本变化会阻断旧批准；转译批准不替代完整分镜审计。协议见 references/source_dialogue_review.md，升级说明见 docs/UPGRADE_0.5.50.md。

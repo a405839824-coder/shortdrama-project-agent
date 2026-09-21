@@ -15,6 +15,7 @@ from .source_dialogue import extracted_source_text
 from .acceptance_service import controlled_acceptance_operation
 from .models import ToolResponse
 from .storage import sha256_bytes, slug_filename, utc_stamp
+from .source_realization_service import SourceRealizationMixin
 
 NARRATIVE_OPERATIONS = frozenset({
     "script_create", "script_rewrite", "script_change", "dialogue_rewrite",
@@ -30,7 +31,7 @@ def digest(value: Any) -> str:
                                   separators=(",", ":"), allow_nan=False).encode("utf-8"))
 
 
-class NarrativeGuardMixin:
+class NarrativeGuardMixin(SourceRealizationMixin):
     @staticmethod
     def _invalidate_narrative_current(hub, order, reason):
         current_id = order.get("narrative_current_artifact_id")
@@ -71,15 +72,16 @@ class NarrativeGuardMixin:
         return self.store.save_project_record(namespace, project_id, kind=RECORD_KIND,
                                              record_id=record_id, value=value)
 
-    def _narrative_order(self, namespace, project_id, work_order_id, session, *, audit=False):
+    def _narrative_order(self, namespace, project_id, work_order_id, session, *, audit=False, operations=None):
         from .service import _find_work_order
         hub = self.store.load_hub(namespace, project_id)
         order = _find_work_order(hub, work_order_id)
-        expected = {"narrative_audit"} if audit else NARRATIVE_OPERATIONS
+        expected = {"narrative_audit"} if audit else (operations or NARRATIVE_OPERATIONS)
+        planning = not audit and expected == {"storyboard_plan"}
         if (order.get("operation") not in expected
                 or order.get("server_actor_role") != ("independent_audit" if audit else "production")
-                or order.get("mode") != ("audit_only" if audit else "execute")
-                or order.get("authorization") != ("read_only" if audit else "explicit_execute")):
+                or order.get("mode") != ("audit_only" if audit else "plan_only" if planning else "execute")
+                or order.get("authorization") != ("read_only" if audit else "plan_only" if planning else "explicit_execute")):
             raise ValueError("narrative_authority_required")
         self._assert_work_order_session(namespace, order, session)
         return hub, order
@@ -118,6 +120,9 @@ class NarrativeGuardMixin:
         from .service import _find_work_order
         self._require_runtime()
         with self.store.project_write_lock(namespace, project_id):
+            from source_realizations import PROPOSAL
+            if isinstance(plan, dict) and plan.get("contract") == PROPOSAL:
+                return self._preflight_source_realization(namespace, project_id, work_order_id, plan, request_session_id)
             hub, order = self._narrative_order(namespace, project_id, work_order_id, request_session_id)
             if order.get("status") not in {"approved", "scope_locked", "executing", "failed_current", "validating"}:
                 raise ValueError("narrative_plan_work_order_not_writable")
@@ -302,6 +307,8 @@ class NarrativeGuardMixin:
         with self.store.project_write_lock(namespace, project_id):
             hub, audit = self._narrative_order(namespace, project_id, work_order_id, request_session_id, audit=True)
             target = self._narrative_record(namespace, project_id, target_id)
+            if target["record_type"] == "source_dialogue_proposal":
+                return self._review_source_realization(namespace, project_id, hub, audit, target_id, review)
             if target["record_type"] == "plan":
                 plan_record = self._current_narrative_plan(namespace, project_id, hub, target_id)
                 candidate = None
@@ -391,11 +398,12 @@ class NarrativeGuardMixin:
     def read_narrative_record(self, namespace, *, project_id, record_id=None, offset=0, limit=20000):
         if offset < 0 or not 1 <= limit <= 20000:
             raise ValueError("narrative_read_range_invalid")
-        if record_id == "contract":
+        if record_id in {"contract", "source-dialogue-contract"}:
             self.store.load_hub(namespace, project_id)
-            reference = Path(__file__).resolve().parents[2] / "skills" / "shortdrama-storyboard" / "references" / "narrative-production-constraints.md"
+            name = "source_dialogue_review.md" if record_id == "source-dialogue-contract" else "narrative-production-constraints.md"
+            reference = Path(__file__).resolve().parents[2] / "skills" / "shortdrama-storyboard" / "references" / name
             encoded = reference.read_text(encoding="utf-8")
-            data = {"record_id": "contract", "record_type": "workflow_reference", "content": encoded[offset:offset + limit],
+            data = {"record_id": record_id, "record_type": "workflow_reference", "content": encoded[offset:offset + limit],
                     "total_chars": len(encoded), "reference_sha256": sha256_bytes(encoded.encode("utf-8")),
                     "next_offset": offset + limit if offset + limit < len(encoded) else None}
         elif record_id:

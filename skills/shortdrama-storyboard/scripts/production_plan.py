@@ -51,6 +51,7 @@ def model_production_contract():
             'episode_contract': episode_policy(),
             'shot_design_policy': shot_policy(),
             'scene_narrative_policy': p['scene_narrative_policy'],
+            'source_dialogue_review': json.loads((REF / 'rule_registry.json').read_text(encoding='utf-8'))['runtime']['source_dialogue_review_policy'],
             'action_contract':{'reference':'references/source_actions_0537.md',
                 'parameters':{k:sorted(v) for k,v in sorted(ACTION_FIELDS.items())},
                 'expression_poses': production_actions.EXPRESSION_POSES,

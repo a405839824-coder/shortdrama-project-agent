@@ -17,9 +17,9 @@ import sqlite3
 import tarfile
 import tempfile
 
-TARGET_VERSION = "0.5.49"
-CONTRACT = "library-runtime-transfer-0549-v1"
-DIRECTORY = ".upgrade-0549"
+TARGET_VERSION = "0.5.50"
+CONTRACT = "library-runtime-transfer-0550-v1"
+DIRECTORY = ".upgrade-0550"
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 MAX_FILES = 100_000
