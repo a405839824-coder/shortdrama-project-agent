@@ -14,6 +14,32 @@ INTEGRATED_DIALOGUE_RE = re.compile(
 MARKER = re.compile(r'〔([1-9][0-9]*):([^〔〕\r\n]+)〕')
 
 
+def required_voice_clause_findings(label, value, policy):
+    """Check required roles against the exact grammar used by field ownership.
+
+    Clause groups are registry indices, not a second emotion/intent word list.
+    A supported clause in one group cannot supply a missing group or license an
+    unknown extra clause; the field checker reports that extra independently.
+    This checks declared expression syntax, not source or acting correctness.
+    """
+    path = "音色." + label
+    groups = policy["voice_subfields"][label].get("required_clause_groups", {})
+    patterns = policy.get("owned_clause_patterns", {}).get(path, [])
+    clauses = [part.strip() for part in re.split(r"[。；;，,\n]", str(value or "")) if part.strip()]
+    findings = []
+    for role, indices in groups.items():
+        # An invalid registry is an implementation fault, never an empty allowlist.
+        if not indices or any(type(i) is not int or not 0 <= i < len(patterns) for i in indices):
+            raise ValueError(path + ": invalid required_clause_groups: " + role)
+        if not any(re.fullmatch(patterns[i], clause, re.I) for i in indices for clause in clauses):
+            findings.append({"code": "E-FIELD-CONTENT-001", "path": path,
+                             "role": "missing_owned_clause_group", "status": "fail",
+                             "excerpt": str(value or ""), "offset": [0, len(str(value or ""))],
+                             "message": path + "缺少必要的" + role,
+                             "repair": "按真实对白与人物依据补齐对应表达决定；未知语义保留为待支持，不能自动替换为统一情绪"})
+    return findings
+
+
 def extract_dialogues(picture_content):
     """Shared R10-SPC-1 and legacy read-only syntax, without validator imports."""
     rows = []

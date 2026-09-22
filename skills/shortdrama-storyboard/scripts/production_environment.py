@@ -112,7 +112,7 @@ def validate_editorial(value, path="editorial"):
         _need(cue["volume"] in ("soft", "normal"), cp, "volume must be soft or normal")
 
 
-def render_environment(editorial, *, initial_world, final_world, scene_id, actions, action_start_worlds=None):
+def render_environment(editorial, *, initial_world, final_world, scene_id, actions, action_start_worlds=None, display_names=None):
     """Render only after simulation; derive cue actor, object and clock once.
 
     This compiler's existing indoor light model declares clear air and a fixed
@@ -142,10 +142,11 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
         action_world = (action_start_worlds or {}).get(action['id'], initial_world)
         _need(action_world["actors"][actor]["scene_id"] == scene_id, cp,
               "sound action belongs to another scene")
+        prop_name = (display_names or {}).get(action.get('prop'), action.get('prop'))
         contact_ticks = None
         if cue['sound']=='drop_impact':
             physical=final_world['props'][action['prop']]['physical']
-            event=f"{action['prop']}{'落下碎裂' if physical['integrity']=='broken' else '落下接触落点'}的声音"
+            event=f"{prop_name}{'落下碎裂' if physical['integrity']=='broken' else '落下接触落点'}的声音"
             contact_ticks=[action['end']]
         elif cue['sound']=='slap':
             _need(action['mode']=='slap',cp,'slap sound cannot bind a grasp, release or support')
@@ -157,9 +158,9 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
             _need(all(abs(t-round(t))<1e-8 for t in contact_ticks),cp,'repeat contacts must align to actual simulated integer ticks')
             contact_ticks=[round(t) for t in contact_ticks]
         elif cue['sound']=='cloth':
-            event=f"{actor}使用{action['prop']}时的衣料摩擦声"
+            event=f"{actor}使用{prop_name}时的衣料摩擦声"
         elif cue["sound"] == "prop_contact":
-            event = f"{actor}移动{action['prop']}时的物件接触声"
+            event = f"{actor}移动{prop_name}时的物件接触声"
         elif cue["sound"] == "writing":
             event = f"{actor}书写时笔尖接触纸面的声音"
         else:

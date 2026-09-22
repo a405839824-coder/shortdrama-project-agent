@@ -35,7 +35,7 @@ def replan(data, graph):
     evidence = data['project']['prevention_evidence']
     texts = {r['source_id']:r['source_text'] for r in evidence['source_ledger']}
     graph['production_plan'] = frozen_plan(data, graph, texts)
-    graph['production_plan']['shots'][0]['visible'] = [{'kind':'eyes','subject':'甲','start':0,'end':30}]
+    graph['production_plan']['shots'][0]['visible'] = [{'kind':'eyes','subject':next(iter(data['initial_world']['actors'])),'start':0,'end':30}]
     raw = json.dumps(graph, ensure_ascii=False, sort_keys=True).encode()
     source = compile_source_decisions(raw, evidence['source_decisions'], source_texts=texts,
                                      expected_graph_sha256=hashlib.sha256(raw).hexdigest())
@@ -57,12 +57,24 @@ def generate(folder, data, graph):
 
 
 class ProductionContractTests(unittest.TestCase):
+    def test_fixture_cut_uses_actual_boundary_and_refuses_to_invent_one(self):
+        data, graph = complete_episode()
+        replan(data, graph)
+        anchor = graph['production_plan']['shots'][1]['design']['cut_anchor']
+        self.assertEqual((anchor['shot_id'], anchor['action_id'], anchor['tick']),
+                         ('EP90-001', 'SPEECH1', 35))
+        data['shots'][0]['actions'][0]['end'] = 30
+        original_actions = copy.deepcopy([shot['actions'] for shot in data['shots']])
+        with self.assertRaisesRegex(ValueError, 'no actual boundary event: EP90-006'):
+            replan(data, graph)
+        self.assertEqual([shot['actions'] for shot in data['shots']], original_actions)
+
     def test_complete_episode_compiler_validator_and_projection_agree(self):
         data, graph = complete_episode()
         with tempfile.TemporaryDirectory() as folder:
             obj = generate(folder, data, graph)
-        self.assertEqual(len(obj['shots']),27)
-        self.assertEqual(obj['total_duration'],96)
+        self.assertEqual(len(obj['shots']),23)
+        self.assertEqual(obj['total_duration'],91.5)
         self.assertTrue(all(shot['时长'] <= 4 for shot in obj['shots']))
         proof = inspect_derivation(obj)
         self.assertTrue(proof['production_prevention_verified'],proof)
@@ -90,7 +102,7 @@ class ProductionContractTests(unittest.TestCase):
         data, graph = complete_episode()
         beats=data['project']['prevention_evidence']['episode_contract']['episodes'][0]['beat_events']
         beat=beats[0]
-        late=next(b for b in beats if b['id']=='B6')
+        late=next(b for b in beats if b['id']=='B7')
         beat.update(shot_id=late['shot_id'],source_ids=copy.deepcopy(late['source_ids']),
                     delivery=copy.deepcopy(late['delivery']))
         beats.remove(late)
@@ -115,7 +127,7 @@ class ProductionContractTests(unittest.TestCase):
     def test_current_written_delivery_uses_actual_initial_visibility(self):
         data,graph=complete_episode()
         beat=data['project']['prevention_evidence']['episode_contract']['episodes'][0]['beat_events'][0]
-        beat.update(source_ids=['DOC'],start=0,end=4,
+        beat.update(source_ids=['DOC'],start=0,end=3.5,
                     delivery={'field':'起始状态','quote':'若条件满足，明日交付。','event_ids':['state:EP90-001:P1']})
         with tempfile.TemporaryDirectory() as folder:obj=generate(folder,data,graph)
         report=validate_project(obj)
@@ -194,7 +206,7 @@ class CurrentMcpContractTests(unittest.TestCase):
         self.assertEqual(scene['data']['report']['issues'],[],scene['data']['report']['issues'])
         args.update(scope_kind='full',scope_id='EP90')
         full=f.mcp('preflight_storyboard_draft',args)
-        self.assertTrue(full['data']['commit_ready'],full['data'])
+        self.assertTrue(full['data']['commit_ready'],full['data'].get('report', {}).get('issues', []))
         obj=full['data']['compiled_storyboard']
         committed=f.mcp('commit_storyboard',{'project_id':f.project,'work_order_id':f.order,'storyboard':obj,
             'draft_preflight_id':full['trace_id'],'file_name':'合成整集链路验证.xlsx'})
@@ -240,7 +252,7 @@ class CurrentMcpContractTests(unittest.TestCase):
         self.assertEqual(scene['data']['report']['issues'],[])
         args.update(scope_kind='full',scope_id='EP90')
         full=f.mcp('preflight_storyboard_draft',args)
-        self.assertTrue(full['data']['commit_ready'],full['data'])
+        self.assertTrue(full['data']['commit_ready'],full['data'].get('report', {}).get('issues', []))
         self.assertEqual(original.read_bytes(),before)
         self.assertGreaterEqual(len(f.records()),3)
 

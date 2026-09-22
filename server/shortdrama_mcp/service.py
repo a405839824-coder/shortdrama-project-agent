@@ -69,6 +69,7 @@ from .models import (
 from .storage import ProjectStore, sha256_bytes, slug_filename, utc_stamp
 from .quality import (
     QUALITY_CONTRACT, assessment_context, annotate_attempt_event, bind_issue_identity,
+    machine_preflight_quality,
     convergence_evidence, finding_origin, machine_issue_map, repair_diff, measure_quality,
 )
 from .workbook_migration import WORKBOOK_MIGRATION_TARGET
@@ -606,7 +607,7 @@ SEMANTIC_AUDIT_CONTRACT_FINGERPRINT = sha256_bytes(
     SEMANTIC_AUDIT_CONTRACT_VERSION.encode("utf-8")
 )
 
-_ACTIVE_CONSUMPTION_CLAIMS: contextvars.ContextVar[tuple[dict[str, str], ...]] = (
+_ACTIVE_CONSUMPTION_CLAIMS: contextvars.ContextVar[tuple[dict[str, Any], ...]] = (
     contextvars.ContextVar("shortdrama_active_consumption_claims", default=())
 )
 
@@ -616,7 +617,8 @@ def _release_consumption_claims_on_error(method: Any) -> Any:
 
     The durable journal and deterministic ids make a later retry resumable;
     releasing here prevents a handled exception from needlessly waiting for
-    lease expiry.  A hard process crash is recovered by the bounded lease.
+    lease expiry. Ordinary claims recover after lease expiry; a reconstruction
+    source stays reserved for its exact original draft's recovery.
     """
 
     @functools.wraps(method)
@@ -673,9 +675,13 @@ def _release_consumption_claims_on_error(method: Any) -> Any:
                             claim["record_id"],
                             route_trace_id=claim["route_trace_id"],
                         )
+                    elif claim.get("kind") == "workbook_reconstruction":
+                        from .workbook_reconstruction import release_reconstruction
+                        release_reconstruction(self.store, claim["namespace"], claim["project_id"], claim["identity"])
                 except Exception:
-                    # Preserve the original failure.  The bounded lease is the
-                    # fallback if compensation itself cannot be persisted.
+                    # Preserve the original failure. Ordinary leases expire;
+                    # a source reconstruction reservation stays with its exact
+                    # original preflight and can only resume that commit.
                     pass
             raise
         finally:
@@ -11614,17 +11620,18 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         )
         report["status"] = "pass" if not issues else "fail_current"
         report["scope_status"] = report["status"]
-        quality = _draft_quality_metrics(
+        diagnostic_score = _draft_quality_metrics(
             scoped_candidate,
             issues,
             project_id=project_id,
             known_pattern_keys=known_patterns,
         )
+        quality = machine_preflight_quality(diagnostic_score, scope_kind=scope_kind)
         observation = self._observe_draft_candidate(
             namespace, project_id, work_order_id=work_order_id, scope_kind=scope_kind,
             scope_id=scope_id, storyboard=storyboard, quality=quality, report=report,
         )
-        commit_ready = bool(scope_kind == "full" and quality["commit_eligible"])
+        commit_ready = quality["diagnostic_summary"]["machine_draft_admission_eligible"]
         scene_coverage_generation_sha = sha256_bytes(
             _stable_json_bytes(
                 scene_coverage
@@ -17902,6 +17909,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "successor_scope_hash": successor_scope_hash,
                 }
             )
+        reconstruction = artifact_record.get("metadata", {}).get("workbook_reconstruction")
+        if reconstruction is not None:
+            handoff["objective_evidence"]["source_manifest"]["workbook_reconstruction"] = copy.deepcopy(reconstruction)
         if handoff_type == "repair_to_audit":
             if not repair_package_id:
                 raise ValueError(
@@ -20847,7 +20857,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "workbook_source_atoms_sha256": plan["proof"]["atom_sha256"],
             })
         self._verify_storyboard_source_realizations(namespace, project_id, storyboard)
-        self._require_current_production(storyboard, work_order=work_order_snapshot, scope_kind='full',
+        production_route = self._require_current_production(storyboard, work_order=work_order_snapshot, scope_kind='full',
                                    load_artifact=lambda aid: self.store.get_artifact(namespace, project_id, aid)[1].read_bytes(),
                                    workbook_migration=workbook_migration,
                                    source_kind=str((self._selected_dialogue_source_entry(hub_snapshot) or {}).get('source_role') or '').removeprefix('source:'),
@@ -21138,6 +21148,16 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         if work_order.get("operation") not in STORYBOARD_OPERATIONS:
             raise ValueError("work order operation cannot commit a storyboard")
         self._ensure_can_execute(work_order)
+        if source_link_mode == "repair" and workbook_migration is None and not successor_pending:
+            from .workbook_reconstruction import source_backed_reconstruction
+            reconstruction = source_backed_reconstruction(
+                self, namespace, project_id, hub=hub, work_order=work_order,
+                source_artifact_id=source_artifact_id, candidate=storyboard,
+                production_route=production_route, full_preflight=bound_draft_preflight,
+            )
+            if reconstruction is not None:
+                source_link_mode = "revision"
+                successor_metadata["workbook_reconstruction"] = reconstruction
         prior_issue_keys: set[str] = set()
         is_repair_link = bool(source_artifact_id and source_link_mode == "repair")
         repair_root_artifact_id = None
@@ -21247,7 +21267,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "audit_cycle_id": f"REPAIR-DRAFT-{repair_root_artifact_id}",
                     "task_type": "production_draft_preflight", "audit_class": "production_draft_preflight",
                     "result": "pass", "checked_shot_count": len(storyboard.get("shots", [])),
-                    "issues": [], "quality": _draft_quality_metrics(storyboard, []),
+                    "issues": [], "quality": machine_preflight_quality(
+                        _draft_quality_metrics(storyboard, []), scope_kind="full"),
                     "commit_ready": False, "publication_status": "not_yet_published",
                     "repair_root_artifact_id": repair_root_artifact_id,
                     "repair_base_artifact_id": source_artifact_id, "work_order_id": work_order_id,
@@ -21277,6 +21298,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     project_id=project_id,
                     known_pattern_keys=known_patterns,
                 )
+                quality = machine_preflight_quality(quality, scope_kind="full")
                 event_key = sha256_bytes(
                     _stable_json_bytes(
                         {
@@ -21537,6 +21559,15 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 stage="claimed",
                 progress={**draft_commit_ids, "version": version},
             )
+        reconstruction = successor_metadata.get("workbook_reconstruction")
+        if reconstruction is not None:
+            from .workbook_reconstruction import claim_reconstruction
+            identity = claim_reconstruction(self.store, namespace, project_id, reconstruction,
+                                             claim_token=draft_commit_claim_token)
+            _ACTIVE_CONSUMPTION_CLAIMS.set((*_ACTIVE_CONSUMPTION_CLAIMS.get(), {
+                "kind":"workbook_reconstruction", "namespace":namespace,
+                "project_id":project_id, "identity":identity,
+            }))
         json_record = self.store.save_artifact_json(
             namespace,
             project_id,

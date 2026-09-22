@@ -1325,7 +1325,10 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         preflight_id = str(preflight.trace_id)
         self.assertEqual(preflight.status, service_module.DRAFT_PREFLIGHT_PASS)
         self.assertTrue(preflight.data["commit_ready"])
-        self.assertEqual(preflight.data["quality"]["grade"], "A")
+        self.assertEqual(preflight.data["quality"]["grade"], "unavailable")
+        self.assertIsNone(preflight.data["quality"]["first_draft_correctness_percent"])
+        self.assertFalse(preflight.data["quality"]["commit_eligible"])
+        self.assertTrue(preflight.data["quality"]["diagnostic_summary"]["machine_draft_admission_eligible"])
         self._assert_no_storyboard_publication(project_id)
 
         changed = copy.deepcopy(draft)

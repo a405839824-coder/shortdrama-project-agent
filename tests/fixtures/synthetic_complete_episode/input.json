@@ -28,10 +28,6 @@
           "treatment": "保留",
           "target_shots": [
             "EP90-001",
-            "EP90-002",
-            "EP90-003",
-            "EP90-004",
-            "EP90-005",
             "EP90-006",
             "EP90-007",
             "EP90-008",
@@ -334,54 +330,6 @@
       "shot_plan": [
         {
           "shot_id": "EP90-001",
-          "core_function": "合成编号核对",
-          "viewpoint_count": 1,
-          "main_camera_count": 1,
-          "camera_position": "固定机位",
-          "main_action_stage": "展示本镜编号",
-          "main_action_stage_count": 1,
-          "transition_function": "同场信息顺序",
-          "is_detail_shot": false,
-          "detail_shot_function": "不适用：宽景"
-        },
-        {
-          "shot_id": "EP90-002",
-          "core_function": "合成编号核对",
-          "viewpoint_count": 1,
-          "main_camera_count": 1,
-          "camera_position": "固定机位",
-          "main_action_stage": "展示本镜编号",
-          "main_action_stage_count": 1,
-          "transition_function": "同场信息顺序",
-          "is_detail_shot": false,
-          "detail_shot_function": "不适用：宽景"
-        },
-        {
-          "shot_id": "EP90-003",
-          "core_function": "合成编号核对",
-          "viewpoint_count": 1,
-          "main_camera_count": 1,
-          "camera_position": "固定机位",
-          "main_action_stage": "展示本镜编号",
-          "main_action_stage_count": 1,
-          "transition_function": "同场信息顺序",
-          "is_detail_shot": false,
-          "detail_shot_function": "不适用：宽景"
-        },
-        {
-          "shot_id": "EP90-004",
-          "core_function": "合成编号核对",
-          "viewpoint_count": 1,
-          "main_camera_count": 1,
-          "camera_position": "固定机位",
-          "main_action_stage": "展示本镜编号",
-          "main_action_stage_count": 1,
-          "transition_function": "同场信息顺序",
-          "is_detail_shot": false,
-          "detail_shot_function": "不适用：宽景"
-        },
-        {
-          "shot_id": "EP90-005",
           "core_function": "合成编号核对",
           "viewpoint_count": 1,
           "main_camera_count": 1,
@@ -1573,10 +1521,6 @@
                 "kind": "plot",
                 "shot_ids": [
                   "EP90-001",
-                  "EP90-002",
-                  "EP90-003",
-                  "EP90-004",
-                  "EP90-005",
                   "EP90-006",
                   "EP90-007",
                   "EP90-008",
@@ -1789,7 +1733,10 @@
             "纸面"
           ]
         },
-        "barriers": []
+        "barriers": [],
+        "opening_labels": {
+          "东纸窗": "纸窗"
+        }
       }
     },
     "actors": {
@@ -1895,7 +1842,7 @@
         0,
         10,
         30,
-        40
+        35
       ],
       "camera": {
         "position_xyz": [
@@ -1952,182 +1899,6 @@
       ],
       "transition": {
         "relation": "initial",
-        "basis": "合成同场连续动作。"
-      }
-    },
-    {
-      "shot_id": "EP90-002",
-      "shot_uid": "OMISSION-SYNTHETIC-002",
-      "episode_id": "EP90",
-      "scene_id": "ROOM",
-      "continuity_id": "ROOM-C1",
-      "ticks": [
-        0,
-        1,
-        3,
-        5
-      ],
-      "camera": {
-        "position_xyz": [
-          0,
-          4,
-          1.5
-        ],
-        "target": "取景中心",
-        "hfov_deg": 50,
-        "vfov_deg": 50,
-        "frame": "wide"
-      },
-      "actions": [],
-      "editorial": {
-        "功能类型": "合成编号信息核对",
-        "环境音效": {
-          "mode": "none"
-        },
-        "环境动态": {
-          "mode": "shared_world"
-        },
-        "参考图锚定": "无外部图像锚点。",
-        "原文依据类型": "动作叙述",
-        "原文支撑句": "纸面现在写有“若条件满足，明日交付。”"
-      },
-      "source_unit_ids": [
-        "DOC"
-      ],
-      "transition": {
-        "relation": "continuous",
-        "basis": "合成同场连续动作。"
-      }
-    },
-    {
-      "shot_id": "EP90-003",
-      "shot_uid": "OMISSION-SYNTHETIC-003",
-      "episode_id": "EP90",
-      "scene_id": "ROOM",
-      "continuity_id": "ROOM-C1",
-      "ticks": [
-        0,
-        5,
-        10,
-        15
-      ],
-      "camera": {
-        "position_xyz": [
-          0,
-          4,
-          1.5
-        ],
-        "target": "取景中心",
-        "hfov_deg": 50,
-        "vfov_deg": 50,
-        "frame": "wide"
-      },
-      "actions": [],
-      "editorial": {
-        "功能类型": "合成编号信息核对",
-        "环境音效": {
-          "mode": "none"
-        },
-        "环境动态": {
-          "mode": "shared_world"
-        },
-        "参考图锚定": "无外部图像锚点。",
-        "原文依据类型": "动作叙述",
-        "原文支撑句": "纸面现在写有“若条件满足，明日交付。”"
-      },
-      "source_unit_ids": [
-        "DOC"
-      ],
-      "transition": {
-        "relation": "continuous",
-        "basis": "合成同场连续动作。"
-      }
-    },
-    {
-      "shot_id": "EP90-004",
-      "shot_uid": "OMISSION-SYNTHETIC-004",
-      "episode_id": "EP90",
-      "scene_id": "ROOM",
-      "continuity_id": "ROOM-C1",
-      "ticks": [
-        0,
-        5,
-        10,
-        15
-      ],
-      "camera": {
-        "position_xyz": [
-          0,
-          4,
-          1.5
-        ],
-        "target": "取景中心",
-        "hfov_deg": 50,
-        "vfov_deg": 50,
-        "frame": "wide"
-      },
-      "actions": [],
-      "editorial": {
-        "功能类型": "合成编号信息核对",
-        "环境音效": {
-          "mode": "none"
-        },
-        "环境动态": {
-          "mode": "shared_world"
-        },
-        "参考图锚定": "无外部图像锚点。",
-        "原文依据类型": "动作叙述",
-        "原文支撑句": "纸面现在写有“若条件满足，明日交付。”"
-      },
-      "source_unit_ids": [
-        "DOC"
-      ],
-      "transition": {
-        "relation": "continuous",
-        "basis": "合成同场连续动作。"
-      }
-    },
-    {
-      "shot_id": "EP90-005",
-      "shot_uid": "OMISSION-SYNTHETIC-005",
-      "episode_id": "EP90",
-      "scene_id": "ROOM",
-      "continuity_id": "ROOM-C1",
-      "ticks": [
-        0,
-        1,
-        3,
-        5
-      ],
-      "camera": {
-        "position_xyz": [
-          0,
-          4,
-          1.5
-        ],
-        "target": "取景中心",
-        "hfov_deg": 50,
-        "vfov_deg": 50,
-        "frame": "wide"
-      },
-      "actions": [],
-      "editorial": {
-        "功能类型": "合成编号信息核对",
-        "环境音效": {
-          "mode": "none"
-        },
-        "环境动态": {
-          "mode": "shared_world"
-        },
-        "参考图锚定": "无外部图像锚点。",
-        "原文依据类型": "动作叙述",
-        "原文支撑句": "纸面现在写有“若条件满足，明日交付。”"
-      },
-      "source_unit_ids": [
-        "DOC"
-      ],
-      "transition": {
-        "relation": "continuous",
         "basis": "合成同场连续动作。"
       }
     },

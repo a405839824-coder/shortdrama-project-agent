@@ -30,8 +30,8 @@ def shot(kind='face', audio='none', night=False):
     variants = {
         'face': ('甲', '人物中近景', '甲坐在木椅上，右手空着放在膝上。', 'natural_open'),
         'closed': ('甲', '人物近景', '甲侧卧在布枕上，双手在被沿内。', 'source_closed'),
-        'back': ('甲（背影）', '背影中景', '甲站在木案南侧，身体朝北，双手自然垂下。', 'not_visible'),
-        'hands': ('甲（仅双手）', '手部近景', '甲双手空着，静放木案南沿，袖口平整。', 'not_visible'),
+        'back': ('甲（背影）', '背影中景', '甲站在画面中部、木案靠近镜头的一侧，背向镜头、面朝木案，双手自然垂下。', 'not_visible'),
+        'hands': ('甲（仅双手）', '手部近景', '甲双手空着，静放木案靠近镜头的桌沿，袖口平整。', 'not_visible'),
         'object': ('无人物入画', '物件近景', '木牌平放木案上，纸签现有可读文字：“松木”。', 'no_people'),
     }
     visible, scale, initial, state = variants[kind]
@@ -62,8 +62,10 @@ def shot(kind='face', audio='none', night=False):
     elif audio != 'none': raise ValueError(audio)
     return {
         '镜头编号':'EP01-001', '时长':4.0, '累计时长':4.0, '功能类型':'局部信息', '场景连续性ID':'SYN-ROOM',
-        '镜头类型':scale, '可见主体':visible, '空间站位描述':'木案位于房间中央。'+light['spatial_state_append'],
-        '起始状态':initial+eye['initial_state_append'], '机位':'固定机位，50mm，当前主体与所列物件在明确取景范围内。',
+        # Synthetic setup: the camera faces north from the table's south
+        # side. These are authored screen coordinates, not a legacy converter.
+        '镜头类型':scale, '可见主体':visible, '空间站位描述':'木案位于画面中部。'+light['spatial_state_append'],
+        '起始状态':initial+eye['initial_state_append'], '机位':'摄影机位于木案南侧朝北；固定机位，50mm，当前主体与所列物件在明确取景范围内。',
         '运镜方式':'固定镜头。', '画面内容':picture, '音色':voice, '心理音轨':psych,
         '环境音效':'低环境底声。', '环境动态':'木案纹理清楚，空气清澈。',
         **light['lighting_fields'],
@@ -222,6 +224,17 @@ class AuthoringContractBlocksTests(unittest.TestCase):
         self.assertNotIn('木墙',str(result))
         self.assertNotIn('反射补光',str(result))
         self.assertNotIn('关闭',str(result))
+
+    def test_night_spatial_state_uses_explicit_screen_side_without_moving_world_light(self):
+        for screen, placement in (('左', '画面左侧'), ('右', '画面右侧'), ('正前', '画面中部')):
+            args = light_args(True); args['screen_side'] = screen
+            before = copy.deepcopy(args)
+            result = interior_lighting_blocks(**args)
+            self.assertIn(placement+'的油灯（壁灯甲）已点亮', result['spatial_state_append'])
+            self.assertNotIn('东侧', result['spatial_state_append'])
+            self.assertIn('场景东侧已点亮', result['lighting_fields']['光源来源'])
+            self.assertIn('画面'+screen+'侧', result['lighting_fields']['光源方向'])
+            self.assertEqual(args, before)
 
     def test_transition_uses_only_named_destination_and_registered_cut(self):
         for method in ['hard_cut','dissolve']:

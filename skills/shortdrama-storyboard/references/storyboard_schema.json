@@ -675,7 +675,7 @@
         "picture_timing": {
           "type": "object",
           "additionalProperties": false,
-          "description": "内部计时注释；正文不含制作时间标记。按正文SHA256绑定，只能回读计时符号，不能夹带剧情或发出通过结论。",
+          "description": "内部计时与呈现记录，按正文SHA256绑定。v2只可逆折叠跨全部阶段相同的已登记主体静态声明；实际动作、对白和次数不折叠。v1历史记录只读兼容。",
           "required": [
             "contract",
             "text_sha256",
@@ -683,7 +683,7 @@
           ],
           "properties": {
             "contract": {
-              "const": "picture-clock-annotations-v1"
+              "enum": ["picture-clock-annotations-v1", "picture-clock-annotations-v2"]
             },
             "text_sha256": {
               "type": "string",
@@ -706,11 +706,17 @@
                   "token": {
                     "type": "string",
                     "minLength": 1
-                  }
+                  },
+                  "kind": {"enum": ["clock", "repeated_state"]}
                 }
               }
             }
-          }
+          },
+          "allOf": [{
+            "if": {"properties": {"contract": {"const": "picture-clock-annotations-v2"}}},
+            "then": {"properties": {"annotations": {"items": {"required": ["kind"]}}}},
+            "else": {"properties": {"annotations": {"items": {"not": {"required": ["kind"]}}}}}
+          }]
         },
         "镜头编号": {"type": "string", "pattern": "^EP\\d{2}-\\d{3}$", "description": "程序分配的本镜标识。不接收自由备注、另一套镜号；对应稳定镜头身份。权威字段合同：storyboard-field-content-v1。", "x-field-content-policy": "镜头编号"},
         "时长": {"type": "number", "exclusiveMinimum": 0, "description": "本镜执行时长数值。不接收剧情解释；对白、动作、心理音轨和依赖顺序实际可容纳。权威字段合同：storyboard-field-content-v1。", "x-field-content-policy": "时长"},

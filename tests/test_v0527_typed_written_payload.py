@@ -12,7 +12,7 @@ from shortdrama_mcp import materializer
 from written_payload import discover_current_written_payloads
 from test_v0527_written_payload_binding import shot
 
-CASES = [('TWP01_previous_sentence_surface', '纸面平放案上，纸面高0.8米，页首朝北。现有经办记录：“甲已登记。”其下落名处为空白。', True), ('TWP02_arbitrary_current_roles', '纸上现有权限记录：“未复核，不得交付。”现有核验结论：“已登记；不等于已放行。”', True), ('TWP03_exhaustive_literal', '纸面平放，四边完整。纸上全文只有：“材料收讫”。没有其他文字，手部不入画。', True), ('TWP04_narration_scope', '纸面平放。旁白转述，现有经办记录：“已登记。”', False), ('TWP05_future_plan_role', '纸面平放。现有将来写字计划：“已登记。”', False), ('TWP06_unknown_scope', '纸面平放。是否现有经办记录：“已登记。”尚不清楚。', False), ('TWP07_speaking_role', '纸面平放。现有旁白：“已登记。”', False), ('TWP08_payload_is_literal', '纸面平放。现有文本：“明日再说；未核验，不得交付。”', True), ('TWP09_adjacent_dynamic', '纸面平放。现有文本：“材料收讫”。甲正在书写。', False), ('TWP10_changed_domain', '纸面平放。甲说道，现有经办记录：“已登记。”', False)]
+CASES = [('TWP01_previous_sentence_surface', '纸面平放案上，纸面高0.8米，页首朝画面上方。现有经办记录：“甲已登记。”其下落名处为空白。', True), ('TWP02_arbitrary_current_roles', '纸上现有权限记录：“未复核，不得交付。”现有核验结论：“已登记；不等于已放行。”', True), ('TWP03_exhaustive_literal', '纸面平放，四边完整。纸上全文只有：“材料收讫”。没有其他文字，手部不入画。', True), ('TWP04_narration_scope', '纸面平放。旁白转述，现有经办记录：“已登记。”', False), ('TWP05_future_plan_role', '纸面平放。现有将来写字计划：“已登记。”', False), ('TWP06_unknown_scope', '纸面平放。是否现有经办记录：“已登记。”尚不清楚。', False), ('TWP07_speaking_role', '纸面平放。现有旁白：“已登记。”', False), ('TWP08_payload_is_literal', '纸面平放。现有文本：“明日再说；未核验，不得交付。”', True), ('TWP09_adjacent_dynamic', '纸面平放。现有文本：“材料收讫”。甲正在书写。', False), ('TWP10_changed_domain', '纸面平放。甲说道，现有经办记录：“已登记。”', False)]
 
 class TypedWrittenPayloadTests(unittest.TestCase):
     def check_case(self, value, expected):

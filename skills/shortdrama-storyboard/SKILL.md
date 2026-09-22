@@ -12,6 +12,15 @@ decisions within the same unique template and do not waive source or delivery
 checks. Never turn a fall into voluntary lying down, dress the wrong person,
 declare a sound before contact, or omit a protected action through a bridge.
 
+Read the live `production_prevention_contract.world_presentation` before assigning
+scene references. Preserve stable IDs and world facts; use explicit grounded
+display names and project positions/facing through the current camera. Never
+replace world-direction words mechanically or guess missing legacy geometry.
+Machine preflight quality reports are diagnostic observations, not first-draft
+accuracy or independent approval. Old workbook reconstruction requires the
+original authorized script/novel, exact old artifact/hash/episode targets and a
+new frozen production plan; preserve the original and existing failed audits.
+
 ## Complete current audit evidence
 
 Workbook sheets named `*_逐镜阅读` are outside audit. Do not use their text,

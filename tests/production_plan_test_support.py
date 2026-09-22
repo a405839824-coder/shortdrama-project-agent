@@ -50,7 +50,15 @@ def frozen_plan(payload, graph, texts):
                 'gesture_choice': '只执行已列实际动作。', 'voice_choice': '按实际音轨；无发声时无音色。'}
                 for name in sorted(set(view['actors']) | speakers)], 'duration_exception': None}
         if design['cut_anchor']['kind'] == 'event':
-            design['cut_anchor']['action_id'] = next(a['id'] for a in shot['actions'] if a['start'] == 0)
+            target = shot
+            boundary = next((a for a in shot['actions'] if a['start'] == 0), None)
+            if boundary is None:
+                target = payload['shots'][index - 1]
+                boundary = next((a for a in target['actions'] if a['end'] == target['ticks'][-1]), None)
+            if boundary is None:
+                raise ValueError(f"synthetic fixture cut has no actual boundary event: {shot['shot_id']}")
+            design['cut_anchor'].update(shot_id=target['shot_id'], action_id=boundary['id'],
+                                        tick=0 if target is shot else target['ticks'][-1])
         shots.append({'shot_id':shot['shot_id'],'purpose_fact_ids':purpose,
                       'required_action_ids':[a['id'] for a in shot['actions']],
                       'audio_action_ids':[a['id'] for a in shot['actions'] if a['kind'] in {'speak','narrate','inner_voice'}],

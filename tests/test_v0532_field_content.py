@@ -97,7 +97,7 @@ class FieldContentTests(unittest.TestCase):
 
     def test_legitimate_role_relations_and_plot_actions_are_not_rejected(self):
         cases = [('机位','摄影机在门内，平视50mm；焦点落在江氏已经握住的袖口。'),
-                 ('空间站位描述','江氏在木案北侧，她的目光略偏向摄影机右侧的邹氏。'),
+                 ('空间站位描述','江氏位于画面左侧、木案旁，她的目光略偏向摄影机右侧的邹氏。'),
                  ('画面内容','江氏没有开口。她推开窗，吹灭油灯。'),
                  ('画面内容','江氏在“没来晚”重音期间不眨眼。'),
                  ('光源来源','北侧木格窗关闭，光源离地2米。'),

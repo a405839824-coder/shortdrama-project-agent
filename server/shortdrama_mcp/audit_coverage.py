@@ -7,12 +7,13 @@ No production code manufactures auditor conclusions or clean observations.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from typing import Any
 
 from .canonical import canonical_sha256, stable_json_hash
 from .materializer import COMPACT_SHOT_FIELDS
-from .models import SemanticAuditCoverageInput, SemanticAuditCoveragePageInput, ToolResponse
+from .models import SemanticAuditCheckInput, SemanticAuditCoverageInput, SemanticAuditCoveragePageInput, ToolResponse
 from .r5_workbook import workbook_audit_scope
 
 
@@ -20,6 +21,12 @@ CONTRACT = "semantic-obligation-coverage-v1"
 LEGACY_PREFIX = "audit-coverage-v1:"
 PAGE_PREFIX = "audit-coverage-page-v1:"
 MAX_ENVELOPE_BYTES = 8 * 1024 * 1024
+MAX_CHECK_OBSERVATIONS = SemanticAuditCheckInput.model_json_schema()['properties']['observations']['maxItems']
+SOURCE_TRANSPORT_RECOVERY = (
+    "read_project_artifact(section='canonical_storyboard', unit='characters', offset=0, limit=2000, max_chars=64000) "
+    "on this workbook and follow its pagination to inspect retained evidence; this read does not close the audit. "
+    "Rebuild bounded source units from the same authorized source before restarting review."
+)
 NEXT_STEP = (
     "read_project_artifact(section='audit_obligations', offset=0, limit=100, max_chars=64000); "
     "follow next_call through every page, inspect current fields with the first-page rule_definitions, then submit coverage. "
@@ -32,7 +39,7 @@ NEXT_STEP = (
 # Each tuple: stable rule, layer, question, relevant current-shot fields,
 # mandatory observed fields, whether previous/next shots are dependencies.
 RULES = (
-    ("source_fidelity", "源文对白", "逐字核对授权对白、叙述转译和源文事实；没有依据不得补剧情。",
+    ("source_fidelity", "源文对白", "阅读完整来源单元，与同单元全部关联镜的实际画面、心理音轨、起态和声音合并核对：逐项判断动作、主体、次序、条件及结果是否交付，保护原对白；来源引用或已消费一个动作不等于整句完成，部分成分不能关闭整句。没有依据不得补剧情，未交付或未知须指出。",
      ("画面内容", "覆盖原文", "原文依据类型", "原文支撑句"), ("画面内容", "原文支撑句"), False),
     ("camera_visibility", "机位可见性", "机位、景别与主体位置是否允许拍到所写动作；站位必须同时定位画面左/中/右与真实场景参照物，换机位重新推导屏幕方向。多人场景按说者、主要听者、关键反应取景，不能丢失画外人物世界状态或用群演替换实名角色；机位字段只描述机位。",
      ("机位", "镜头类型", "可见主体", "空间站位描述", "画面内容"), ("机位", "画面内容"), False),
@@ -86,6 +93,72 @@ def _text(value: Any) -> str:
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _source_units(storyboard: dict[str, Any], graph: dict[str, Any], shot_ids: list[str]) -> list[dict[str, Any]]:
+    """Bind complete declared units, not producer-selected fact subspans.
+
+    Existing service source authority remains mandatory. A matching graph hash
+    binds these bytes; it does not certify the graph's interpretation or that
+    the author included the entire authorized source scope.
+    """
+    evidence = storyboard.get('prevention_evidence') or {}
+    ledger = evidence.get('source_ledger')
+    derivation = evidence.get('production_derivation') or {}
+    if ledger is None and not derivation:
+        return []  # Historical artifacts retain their existing source-field review.
+    if not isinstance(ledger, list) or not ledger:
+        raise ValueError('audit_coverage_source_units_missing: complete source ledger required')
+    shot_set = set(shot_ids)
+    aliases = {str(shot.get('shot_uid')): sid for shot, sid in zip(storyboard['shots'], shot_ids) if shot.get('shot_uid')}
+    facts = {f['id']: f for f in graph.get('facts', [])}
+    uses = {u['id']: {span['source_id'] for fid in u['fact_ids']
+                     for span in facts.get(fid, {}).get('supports', [])}
+            for u in (evidence.get('source_decisions') or {}).get('uses', [])}
+    papers = {p['id']: p['use_id'] for p in (evidence.get('source_decisions') or {}).get('written_objects', [])}
+    actual = {}
+    for shot in (derivation.get('action_trace') or {}).get('shots', []):
+        used = [(action.get('source_use_id'), '心理音轨' if action.get('kind') in {'narrate', 'inner_voice'} else '画面内容')
+                for action in shot.get('actions', [])]
+        used.extend((papers.get(identity), '起始状态') for identity in shot.get('visible_current_paper_refs', []))
+        for use_id, field in used:
+            for source_id in uses.get(use_id, set()):
+                actual.setdefault(source_id, {}).setdefault(shot['shot_id'], set()).add(field)
+    units, seen = [], set()
+    for row in ledger:
+        if not isinstance(row, dict):
+            raise ValueError('audit_coverage_source_unit_invalid')
+        identity, text = row.get('source_id'), row.get('source_text')
+        if not isinstance(identity, str) or not identity.strip() or identity in seen or not isinstance(text, str) or not text.strip():
+            raise ValueError('audit_coverage_source_unit_invalid: unique ID and complete raw text required')
+        seen.add(identity)
+        digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        if graph and graph.get('sources', {}).get(identity) != digest:
+            raise ValueError('audit_coverage_source_unit_hash_mismatch: ' + identity)
+        targets = row.get('target_shots')
+        if not isinstance(targets, list):
+            raise ValueError('audit_coverage_source_unit_targets_invalid: ' + identity)
+        delivery = actual.get(identity, {})
+        mapped = {aliases.get(ref, ref) for ref in targets} | set(delivery)
+        if mapped - shot_set or (not mapped and row.get('treatment') != '授权删除'):
+            raise ValueError('audit_coverage_source_unit_targets_invalid: ' + identity)
+        # A declared deletion still needs review; bind it to the first check,
+        # rather than dropping its full source text from the audit altogether.
+        related = [sid for sid in shot_ids if sid in mapped] or shot_ids[:1]
+        chunks = [{'reference': f'source-unit:{identity}:{start // 2000:05d}',
+                   'text': text[start:start + 2000], 'source_unit_id': identity,
+                   'source_text_sha256': digest, 'start': start,
+                   'end': min(start + 2000, len(text)), 'source_text_length': len(text),
+                   'treatment': row.get('treatment'),
+                   'authorization': row.get('authorization')}
+                  for start in range(0, len(text), 2000)]
+        fields = ('画面内容', '心理音轨', '起始状态', '环境音效')
+        units.append({'related_shot_ids': related, 'evidence': chunks,
+                      'delivery_refs': [f'field:{sid}.{field}' for sid in related for field in fields
+                                        if field in delivery.get(sid, fields)]})
+    if (set(graph.get('sources', {})) | set(actual)) - seen:
+        raise ValueError('audit_coverage_source_units_missing: source graph or actual use lacks complete raw unit')
+    return units
+
+
 def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> dict[str, Any]:
     shots = [s for s in storyboard.get("shots", []) if isinstance(s, dict)]
     ids = [str(s.get("镜头编号") or s.get("shot_uid") or "").strip() for s in shots]
@@ -104,6 +177,7 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
         for sid, shot in zip(ids, shots) for field in COMPACT_SHOT_FIELDS
     }
     field_hashes = {ref: stable_json_hash(value) for ref, value in values.items()}
+    graph = {}
     try:
         graph = json.loads(storyboard['prevention_evidence']['production_derivation']['source_graph_json'])
         designs = {s['shot_id']: s['design'] for s in graph['production_plan']['shots']}
@@ -111,6 +185,29 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
     except (KeyError, TypeError, ValueError):
         designs = {}  # Historical inputs lack a current production design.
         narrative = None
+    source_units = _source_units(storyboard, graph, ids)
+    units_by_shot = {sid: [] for sid in ids}
+    for unit in source_units:
+        for sid in unit['related_shot_ids']:
+            units_by_shot[sid].append(unit)
+    source_deliveries = {}
+    for sid, units in units_by_shot.items():
+        # One aggregate comparison for a small unit; other shots observe their
+        # own delivery. Large units share observations across existing checks,
+        # so the full matrix covers every field without N-by-N duplication.
+        local = {ref for unit in units for ref in unit['delivery_refs'] if ref.startswith(f'field:{sid}.')}
+        aggregate = local | {ref for unit in units if unit['related_shot_ids'][0] == sid for ref in unit['delivery_refs']}
+        base = {f'field:{sid}.画面内容', f'field:{sid}.原文支撑句'}
+        source_refs = {part['reference'] for unit in units for part in unit['evidence']}
+        fits = len(base | source_refs | aggregate) <= MAX_CHECK_OBSERVATIONS
+        source_deliveries[sid] = sorted(aggregate if fits else local)
+        for unit in units:
+            if unit['related_shot_ids'][0] == sid:
+                unit['review_scope'] = 'aggregate' if fits else 'distributed_across_related_shots'
+        if len(base | source_refs | local) > MAX_CHECK_OBSERVATIONS:
+            raise ValueError(f'audit_coverage_source_unit_transport_exceeded: {sid}; complete source and actual delivery exceed '
+                             f'{MAX_CHECK_OBSERVATIONS} observations; audit remains blocked, no source text was truncated. '
+                             + SOURCE_TRANSPORT_RECOVERY)
     # Compute from the actual artifact, not a producer's prewritten statistics.
     from .production_plan import shot_rhythm_statistics, shot_policy
     from episode_rules import episode_id
@@ -149,6 +246,23 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
                 "allowed_statuses": ["pass", "fail_current"],
                 "applicability": "Required review; natural stillness, silent shots and prop-only frames are valid when supported, not omissions.",
             }
+            if rule == 'source_fidelity':
+                units = units_by_shot[sid]
+                if units:
+                    row['source_evidence'] = [
+                        {**part, 'review_anchor_obligation_id': unit['related_shot_ids'][0] + '/source_fidelity',
+                         'review_scope': unit['review_scope'],
+                         **({'related_shot_ids': unit['related_shot_ids']} if unit['related_shot_ids'][0] == sid else {})}
+                        for unit in units for part in unit['evidence']]
+                    for part in row['source_evidence']:
+                        ref = part['reference']
+                        values[ref] = part['text']
+                        row['dependency_fields'][ref] = stable_json_hash(part)
+                        row['required_observation_refs'].append(ref)
+                    for ref in source_deliveries[sid]:
+                        row['dependency_fields'][ref] = field_hashes[ref]
+                        if ref not in row['required_observation_refs']:
+                            row['required_observation_refs'].append(ref)
             if sid in designs and rule in DESIGN_FIELDS:
                 ref = f'plan:{sid}.{rule}'
                 text = json.dumps({k: designs[sid].get(k) for k in DESIGN_FIELDS[rule]}, ensure_ascii=False, sort_keys=True)
@@ -343,6 +457,8 @@ def validate_coverage(storyboard: dict[str, Any], submission: dict[str, Any],
             if ref not in expected["dependency_fields"]:
                 raise ValueError("audit_coverage_observation_outside_dependencies")
             value = manifest["_values"][ref]
+            if ref.startswith('source-unit:') and quote != value:
+                raise ValueError('audit_coverage_source_unit_quote_incomplete: ' + ref)
             # Empty content must be explicitly observed as empty; an empty
             # substring must not serve as evidence for a populated field.
             if (value and len(quote.strip()) < min(8, len(value.strip()))) or quote not in value or (not value and quote != ""):
@@ -407,7 +523,7 @@ def _obligation_rule_definitions() -> dict[str, dict[str, Any]]:
     }
 
 
-def _compact_obligation(row: dict[str, Any], neighbor_ids: list[str]) -> dict[str, Any]:
+def _compact_obligation(row: dict[str, Any], neighbor_ids: list[str], definition: dict[str, Any]) -> dict[str, Any]:
     result = {key: row[key] for key in ("obligation_id", "shot_id", "rule_id", "dependency_sha256")}
     if neighbor_ids:
         result["neighbor_shot_ids"] = neighbor_ids
@@ -415,6 +531,24 @@ def _compact_obligation(row: dict[str, Any], neighbor_ids: list[str]) -> dict[st
         result['planning_evidence'] = row['planning_evidence']
     if 'rhythm_evidence' in row:
         result['rhythm_evidence'] = row['rhythm_evidence']
+    if 'source_evidence' in row:
+        result['source_evidence'] = row['source_evidence']
+    dependencies = {f"field:{row['shot_id']}.{field}" for field in definition['dependency_fields']}
+    dependencies.update(f"field:{sid}.{field}" for sid in neighbor_ids
+                        for field in definition['neighbor_dependency_fields'])
+    observations = {f"field:{row['shot_id']}.{field}" for field in definition['required_observation_fields']}
+    for key in ('planning_evidence', 'rhythm_evidence'):
+        if key in row:
+            dependencies.add(row[key]['reference'])
+            observations.add(row[key]['reference'])
+    # Causal dependencies can span nonadjacent shots. Keep the compact defaults,
+    # but never discard server-generated review obligations outside those defaults.
+    for key, full, expanded in (
+            ('additional_dependency_refs', row['dependency_fields'], dependencies),
+            ('additional_observation_refs', row['required_observation_refs'], observations)):
+        extra = [ref for ref in full if ref not in expanded]
+        if extra:
+            result[key] = extra
     return result
 
 
@@ -458,8 +592,8 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
             "page_submission_schema": SemanticAuditCoveragePageInput.model_json_schema(),
             "read_contract": {
                 "row_fields": "Use rule_definitions[row.rule_id] for layer, question, dependency fields and required observation fields.",
-                "dependencies": "Expand dependency_fields with row.shot_id, then neighbor_dependency_fields with each row.neighbor_shot_ids (absent means none), using reference_pattern.",
-                "observations": "Expand required_observation_fields with row.shot_id. Also observe planning_evidence.reference and rhythm_evidence.reference when present, quoting their text and judging the actual design and whole-batch rhythm against the source and rendered fields. Read actual artifact content and submit literal excerpts plus a separate judgement; definitions alone are not review evidence.",
+                "dependencies": "Expand dependency_fields with row.shot_id, then neighbor_dependency_fields with each row.neighbor_shot_ids (absent means none), using reference_pattern. Include planning_evidence.reference, rhythm_evidence.reference and all additional_dependency_refs when present; deduplicate references.",
+                "observations": "Expand required_observation_fields with row.shot_id. Also observe planning_evidence.reference, rhythm_evidence.reference and all additional_observation_refs when present; deduplicate references. source_evidence contains complete raw units in ordered chunks: quote each chunk in full, then judge every source action, subject, order and result against all related delivery fields. Follow review_anchor_obligation_id for related_shot_ids; distributed_across_related_shots splits actual-field observations across those existing source_fidelity checks, all of which must close. One consumed action cannot close a compound source unit. Read the referenced artifact fields, quote supplied planning text and judge design, cross-shot causality and whole-batch rhythm against the source. Submit literal excerpts plus a separate judgement; definitions alone are not review evidence.",
                 "fingerprints": "Return each obligation_id and dependency_sha256 unchanged. Per-field hashes stay server-side; full manifest identity and validation are unchanged.",
                 "consistency": "All pages must have the same manifest_sha256 and rule_definitions_sha256. If either changes, restart at offset=0; never combine versions.",
                 "applicability": "Natural stillness, silent shots and prop-only frames are valid when supported, not omissions. Unresolved checks cannot pass.",
@@ -489,7 +623,7 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
 
     for row in manifest['obligations'][offset:offset + limit]:
         adjacent = neighbors[row['shot_id']] if definitions[row['rule_id']]['neighbor_dependency_fields'] else []
-        response.data['obligations'].append(_compact_obligation(row, adjacent))
+        response.data['obligations'].append(_compact_obligation(row, adjacent, definitions[row['rule_id']]))
         set_next()
         if len(response.model_dump_json()) > budget:
             response.data['obligations'].pop()
@@ -497,5 +631,8 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
             break
     set_next()
     if (offset < total and not response.data['obligations']) or len(response.model_dump_json()) > budget:
+        if budget == 64_000:
+            raise ValueError('audit_obligations_item_exceeds_transport: complete obligation exceeds 64000 characters; '
+                             'audit remains blocked, evidence was not truncated. ' + SOURCE_TRANSPORT_RECOVERY)
         raise ValueError("audit_obligations_max_chars_too_small: increase max_chars to 64000")
     return response

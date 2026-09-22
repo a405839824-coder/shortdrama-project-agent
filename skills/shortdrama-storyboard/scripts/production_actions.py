@@ -28,6 +28,7 @@ FIELDS = {
     'assist_stand': {'target_actor','hand','target_part','point','landmarks','helper_point','helper_landmarks'},
     'wipe': {'prop', 'hand', 'part'},
     'contact_actor': {'hand', 'target_actor', 'target_part', 'mode'},
+    'push_actor': {'hand', 'target_actor', 'target_part', 'point'},
     'clap': {'count'},
     'kowtow': {'count'},
     'head_gesture': {'direction', 'count'},
@@ -52,7 +53,7 @@ EXPRESSIONS.update(EXPRESSION_POSES)
 PARTS = {'face', 'left_wrist', 'right_wrist', 'left_foot', 'right_foot', 'head', 'torso', 'left_hand', 'right_hand'}
 PART_TEXT = {'face': '面颊', 'left_wrist': '左手腕', 'right_wrist': '右手腕', 'left_foot': '左脚背',
              'right_foot': '右脚背', 'head': '头部', 'torso': '外衣', 'left_hand': '左手', 'right_hand': '右手'}
-SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'}
+SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'push_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'}
 BRIDGE_KINDS = {'move_actor', 'turn', 'look', 'posture', 'hand_move', 'eye_state', 'hand_shape',
                 'expression', 'cross_passage', 'scene_light'}
 
@@ -130,6 +131,9 @@ def channels(action):
     if k == 'assist_stand':
         return {(who,part) for who in (a,action['target_actor'])
                 for part in ('position','body','head','left','right','gaze')}
+    if k == 'push_actor':
+        return {(a,'position'),(a,'body'),(a,action['hand'])} | {
+            (action['target_actor'],part) for part in ('position','body','left','right')}
     if k == 'scene_light': return {('scene', action['scene_id'])}
     if k == 'set_opening': return {('scene_openings','all'),(a,action['hand'])}
     if k in {'posture', 'fall', 'cross_passage', 'kowtow'}:
@@ -160,6 +164,12 @@ def _contacted(world, actor, hand=None):
             if c['actor'] == actor and (hand is None or c['part'] in {hand + '_wrist', hand + '_hand'})]
 
 
+def _push_ticks(action):
+    """Finite landmark timing, not a claim about measured body dynamics."""
+    length = action['end'] - action['start']
+    return action['start'] + length // 4, action['start'] + 3 * length // 4
+
+
 def prepare(world, action, info, path, *, bridge=False):
     p = _p(); a = world['actors'][action['actor']]; k = action['kind']
     info['before_all'] = copy.deepcopy(world)
@@ -173,7 +183,45 @@ def prepare(world, action, info, path, *, bridge=False):
         p._need(action['hand'] in {'left', 'right'}, path, 'unknown hand')
         p._need(action['hand'] not in a['action_state']['contacts'] and not _contacted(world, action['actor'], action['hand']),
                 path, 'hand remains in an actual grasp/support contact')
-    if k == 'assist_stand':
+    if k == 'push_actor':
+        target = world['actors'].get(action['target_actor'])
+        p._need(target and action['target_actor'] != action['actor'] and target['scene_id'] == a['scene_id'],
+                path, 'push requires another same-scene actor')
+        p._need(action['hand'] in {'left','right'} and action['target_part'] == 'torso',
+                path, 'push supports a declared hand-to-torso contact')
+        p._need(a['posture'] == target['posture'] == '站立' and duration >= .8,
+                path, 'push requires standing people and at least 0.8 seconds')
+        p._free_hand(world, action['actor'], action['hand'], path)
+        p._need(a['action_state']['hand_shapes'][action['hand']] == 'open', path, 'push requires an open hand')
+        p._need(not a['action_state']['contacts'] and not target['action_state']['contacts'] and
+                not _contacted(world, action['actor']) and not _contacted(world, action['target_actor']),
+                path, 'release existing body contacts before pushing')
+        p._need(not any(x['anchor'] == {'actor':action['target_actor'],'binding':'wrists'}
+                       for x in world['props'].values()), path, 'bound target needs a separately supported displacement')
+        point = world['points'].get(action['point'])
+        p._need(point and point['scene_id'] == target['scene_id'], path, 'push endpoint must stay in the same physical scene')
+        delta = p._sub(point['position_xyz'], target['position_xyz'])
+        p._need(p.EPS < p._distance(delta,[0,0,0]) <= .6 and abs(delta[2]) <= p.EPS,
+                path, 'push requires a changed level endpoint within the finite 0.6 metre displacement model')
+        away = p._sub(target['position_xyz'], a['position_xyz'])
+        p._need(sum(delta[i]*away[i] for i in (0,1)) >= -p.EPS and math.hypot(*away[:2]) > p.EPS,
+                path, 'push may move the target aside or away, not pull through the initiator')
+        for start in (target['position_xyz'], body_point(target,'torso')):
+            p._need(not p._blocked(world,target['scene_id'],start,p._add(start,delta)),
+                    path, 'barrier blocks pushed target path')
+        contact = body_point(target,'torso')
+        p._reach(world,action['actor'],target['scene_id'],contact,path)
+        p._need(not p._blocked(world,a['scene_id'],p._hand(a,action['hand']),contact),
+                path, 'barrier blocks push contact approach')
+        p._need(p._distance(p._hand(a,action['hand']),contact) > .05,
+                path, 'push must show approach to the actual contact landmark')
+        # The declared shoulder and arm must reach the moving contact, including
+        # the final target position. This action does not secretly move its owner.
+        p._reach(world,action['actor'],target['scene_id'],p._add(contact,delta),path)
+        p._need(not p._blocked(world,a['scene_id'],p._add(contact,delta),p._hand(a,action['hand'])),
+                path, 'barrier blocks push hand release')
+        info.update(destination=list(point['position_xyz']))
+    elif k == 'assist_stand':
         target=world['actors'].get(action['target_actor'])
         p._need(target and action['target_actor']!=action['actor'] and target['scene_id']==a['scene_id'],
                 path,'assisted standing requires another same-scene person')
@@ -379,7 +427,30 @@ def effects(initial, action, tick):
     result = {}; base = ('actors', who)
     def set_actor(key, value): result[base + (key,)] = copy.deepcopy(value)
     def state(key, value): result[base + ('action_state', key)] = copy.deepcopy(value)
-    if k == 'assist_stand':
+    if k == 'push_actor':
+        target = initial['actors'][action['target_actor']]
+        contact_tick, release_tick = _push_ticks(action)
+        shift = max(0., min(1., (tick-contact_tick)/(release_tick-contact_tick)))
+        destination = initial['points'][action['point']]['position_xyz']
+        position = p._lerp(target['position_xyz'],destination,shift)
+        delta = p._sub(position,target['position_xyz'])
+        result[('actors',action['target_actor'],'position_xyz')] = position
+        result[('actors',action['target_actor'],'reach_origin_xyz')] = p._add(target['reach_origin_xyz'],delta)
+        contact = p._add(body_point(target,'torso'),delta)
+        original_hand = p._hand(a,action['hand'])
+        if tick < contact_tick:
+            hand = p._lerp(original_hand,contact,(tick-action['start'])/(contact_tick-action['start']))
+        elif tick <= release_tick:
+            hand = contact
+        else:
+            hand = p._lerp(contact,original_hand,(tick-release_tick)/(action['end']-release_tick))
+        changed = copy.deepcopy(a); p._set_hand(changed,action['hand'],hand)
+        result[base+('hands',action['hand'])] = changed['hands'][action['hand']]
+        contacts = copy.deepcopy(a['action_state']['contacts'])
+        if contact_tick <= tick < release_tick:
+            contacts[action['hand']] = {'actor':action['target_actor'],'part':'torso','mode':'push'}
+        state('contacts',contacts)
+    elif k == 'assist_stand':
         changed={}
         for who,point_key,lm_key in [(action['target_actor'],'point','landmarks'),
                                      (who,'helper_point','helper_landmarks')]:
@@ -499,6 +570,8 @@ def sentence(action, info):
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
     if k=='assist_stand':
         return '扶起',f"{a}{hand}持续扶住{action['target_actor']}{PART_TEXT[action['target_part']]}并扶起{action['target_actor']}，帮助其起身站稳。"
+    if k=='push_actor':
+        return '推开',f"{a}{hand}抵住{action['target_actor']}的躯干并推开，{action['target_actor']}被推至{action['point']}，{a}随即收回{hand}。"
     if k=='posture':
         verb={'站立':'起身','坐姿':'坐下','蹲姿':'蹲下','跪姿':'跪下','跪伏':'俯身','躬身':'躬身','躺卧':'躺下'}[action['to']]
         return verb, f"{a}{verb}，落在{action['point']}。"
@@ -513,7 +586,7 @@ def sentence(action, info):
     if k=='put_down': return '放到',f"{a}{hand}将{action['prop']}放到{action['to']}。"
     if k=='drop_prop':
         target=action['contact']; landing=f"{target['actor']}{PART_TEXT[target['part']]}" if target else action['to']
-        tail=''; physical=info['before_all']['props'][action['prop']]['physical']
+        tail=''; physical=info['before_all']['props'][action.get('_prop_id', action['prop'])]['physical']
         if physical['contents']!='none': tail+=f"{'热水' if physical['contents']=='hot_water' else '水'}洒在{landing}。"
         if action['breaks']: tail+=f"{action['prop']}触及落点后碎裂。"
         return '松开',f"{a}{hand}松开{action['prop']}，{action['prop']}下落至{landing}。"+tail
@@ -543,7 +616,8 @@ def static_actor(actor, name, *, face_visible=True):
     for hand,shape in state['hand_shapes'].items():
         if shape=='fist': rows.append(f"{name}{'左手' if hand=='left' else '右手'}握拳。")
     for hand,c in state['contacts'].items():
-        rows.append(f"{name}{'左手' if hand=='left' else '右手'}仍{'抓住' if c['mode']=='grasp' else '扶住'}{c['actor']}{PART_TEXT[c['part']]}。")
+        verb = {'grasp':'抓住','support':'扶住','push':'推抵'}[c['mode']]
+        rows.append(f"{name}{'左手' if hand=='left' else '右手'}仍{verb}{c['actor']}{PART_TEXT[c['part']]}。")
     if face_visible and state['expression'] != '平静':
         rows.append(f"{name}{state['expression']}。" if state['expression'] in EXPRESSION_POSES else f"{name}神情{state['expression']}。")
     return ''.join(rows)
@@ -562,6 +636,11 @@ def visible(sample, action):
     if k in {'head_gesture','kowtow'}:return bool(owner.get('head'))
     if k=='clap':return set(owner.get('hands',[]))=={'left','right'}
     if k=='contact_actor':return action['hand'] in owner.get('hands',[]) and part_visible(action['target_actor'],action['target_part'])
+    if k=='push_actor':
+        target=view['actors'].get(action['target_actor'],{})
+        # Head and feet keep the complete translated torso in the declared
+        # camera frame; unknown real body occlusion still needs semantic review.
+        return bool(action['hand'] in owner.get('hands',[]) and target.get('head') and target.get('feet'))
     if k=='assist_stand':
         target=view['actors'].get(action['target_actor'],{})
         return bool(owner.get('head') and target.get('head') and
@@ -591,6 +670,17 @@ def check_contacts(world, path):
 def fragment_sentence(action, info, lo, hi):
     """Do not announce landing, release or contact before its actual end."""
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
+    if k=='push_actor':
+        contact, release = _push_ticks(action)
+        target = action['target_actor']
+        if hi <= contact:
+            verb = '抵住' if hi == contact else '伸向'
+            return verb, f'{a}{hand}{verb}{target}的躯干。'
+        if hi < release:
+            return '推动', f'{a}{hand}抵住{target}的躯干向{action["point"]}推动，{target}随推力移位。'
+        if lo < release:
+            return '推开', f'{a}{hand}推开{target}，{target}被推至{action["point"]}，{a}{hand}随即离开其躯干。'
+        return '收回', f'{a}收回{hand}，{target}站在{action["point"]}。'
     if k in {'clap','kowtow'}:
         contacts=[action['start']+(action['end']-action['start'])*(i+.5)/action['count'] for i in range(action['count'])]
         count=sum(lo<t<=hi for t in contacts)

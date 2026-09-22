@@ -101,7 +101,7 @@ class UntimedPictureTests(unittest.TestCase):
 
     def test_annotation_cannot_enter_a_quoted_payload(self):
         shot = separate_shot_clock({"画面内容": '甲说道：“随后再来。”'})
-        shot[FIELD]["annotations"] = [{"offset": shot["画面内容"].index("随后"), "token": "3秒后"}]
+        shot[FIELD]["annotations"] = [{"offset": shot["画面内容"].index("随后"), "token": "3秒后", "kind": "clock"}]
         with self.assertRaisesRegex(PictureTimingError, "roundtrip"):
             timed_picture(shot)
 

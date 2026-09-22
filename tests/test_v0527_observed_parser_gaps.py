@@ -49,35 +49,35 @@ class ObservedParserGapTests(unittest.TestCase):
 
     def test_actual_by_and_legacy_from_ongoing_motion_reject(self):
         for text in (
-            "暖轿由西侧岸路接近背风照料区西缘。",
-            "暖轿从西侧岸路接近背风照料区西缘。",
-            "暖轿正在接近背风照料区西缘。",
+            "暖轿由画面左侧岸路接近背风照料区左缘。",
+            "暖轿从画面左侧岸路接近背风照料区左缘。",
+            "暖轿正在接近背风照料区左缘。",
         ):
             with self.subTest(text=text):
                 self.project_both(text, reject=True)
 
     def test_explicit_negative_motion_including_subject_is_preserved(self):
         for text in (
-            "暖轿没有由西侧岸路接近背风照料区西缘。",
-            "暖轿并未从西侧岸路接近背风照料区西缘。",
-            "禁止暖轿由西侧岸路接近背风照料区西缘。",
+            "暖轿没有由画面左侧岸路接近背风照料区左缘。",
+            "暖轿并未从画面左侧岸路接近背风照料区左缘。",
+            "禁止暖轿由画面左侧岸路接近背风照料区左缘。",
         ):
             with self.subTest(text=text):
                 self.project_both(text)
 
     def test_actual_stopped_result_and_static_distance_are_preserved(self):
         for text in (
-            "暖轿由西侧岸路接近后已停稳，门框平直。",
-            "暖轿停在背风照料区西缘，车夫在近处，门框平直。",
+            "暖轿由画面左侧岸路接近后已停稳，门框平直。",
+            "暖轿停在背风照料区左缘，车夫在近处，门框平直。",
         ):
             with self.subTest(text=text):
                 self.project_both(text)
 
     def test_later_affirmative_motion_is_not_hidden(self):
         for text in (
-            "暖轿没有由西侧岸路接近，但暖轿由南侧空地接近敞门。",
-            "暖轿由西侧岸路接近后已停稳，随后又由南侧空地接近敞门。",
-            "纸面标签写着“暖轿由西侧岸路接近”，暖轿由南侧空地接近敞门。",
+            "暖轿没有由画面左侧岸路接近，但暖轿由画面右侧空地接近敞门。",
+            "暖轿由画面左侧岸路接近后已停稳，随后又由画面右侧空地接近敞门。",
+            "纸面标签写着“暖轿由西侧岸路接近”，暖轿由画面右侧空地接近敞门。",
         ):
             with self.subTest(text=text):
                 self.project_both(text, reject=True)
@@ -87,8 +87,8 @@ class ObservedParserGapTests(unittest.TestCase):
 
     def test_negation_of_other_predicate_does_not_waive_motion(self):
         for text in (
-            "没有日光的院里暖轿由西侧接近门口。",
-            "禁止喧哗时暖轿由西侧接近门口。",
+            "没有日光的院里暖轿由画面左侧接近门口。",
+            "禁止喧哗时暖轿由画面左侧接近门口。",
         ):
             with self.subTest(text=text):
                 self.project_both(text, reject=True)

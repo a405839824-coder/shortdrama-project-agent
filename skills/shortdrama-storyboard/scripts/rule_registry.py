@@ -175,6 +175,14 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
     migrations = registry.get('historical_rule_migrations', {})
     if not isinstance(migrations, dict):
         return False
+    if kind == 'critical_runtime_policies' and identity in {'field_content_policy', 'production_prevention_policy'}:
+        migration = migrations.get('unified-production-0552', {})
+        hashes = migration.get(kind, {}).get(identity, {})
+        if (migration.get('basis') == 'user-authorized-unified-root-cause-fix-2026-09-22'
+                and migration.get('legacy_applies_to_current_generation') is False
+                and hashes.get('baseline_sha256') == registry_sha256(previous)
+                and hashes.get('current_sha256') == registry_sha256(current)):
+            return True
     if kind == 'critical_runtime_policies' and identity == 'production_prevention_policy':
         migration = migrations.get('shot-rhythm-0549', {})
         hashes = migration.get(kind, {}).get(identity, {})

@@ -43,7 +43,9 @@ def source_input(mode="paper"):
     evidence = data["project"]["prevention_evidence"]
     evidence["source_decisions"] = uses
     evidence["source_ledger"] = [
-        {"source_id": sid, "source_text": text} for sid, text in texts.items()
+        {"source_id": sid, "source_text": text,
+         "target_shots": [data["shots"][0]["shot_id"]], "treatment": "保留",
+         "authorization": "合成来源审计控制"} for sid, text in texts.items()
     ]
     if mode == "narration":
         data["shots"][0]["actions"] = [action("narrate", source_use_id="U1")]

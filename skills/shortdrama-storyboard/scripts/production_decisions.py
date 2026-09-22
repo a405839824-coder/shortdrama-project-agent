@@ -14,10 +14,11 @@ from bisect import bisect_right
 from authoring_contract_blocks import eye_blocks, interior_lighting_blocks, transition_block, voice_block, psychological_safety_suffix, ContractBlockError
 from boundary_decisions import BoundaryDecision
 from production_state import ProductionStateChain, CONTRACT as STATE_CONTRACT
-from staging_geometry import _direction
+from staging_geometry import _direction, screen_direction
+from field_content import world_position_matches
 from timing_model import estimate_utterance, _profile as timing_profile, _rules as timing_rules
 from production_environment import (METADATA_FIELDS, validate_editorial,
-                                    render_environment, normalize_openings, EnvironmentDecisionError)
+                                    render_environment, normalize_openings, opening_states, EnvironmentDecisionError)
 import production_actions as extended_actions
 
 CONTRACT = "production-decisions-v1"
@@ -368,9 +369,13 @@ def _world(value, sources, *, check_source_refs=True):
     _need(bool(w["scenes"]), "initial_world.scenes", "requires a physical scene")
     for sid, scene in w["scenes"].items():
         _name(sid, "scene.id")
-        _obj(scene, {"label", "door_window_state", "light", "barriers"} | ({'passages'} if 'passages' in scene else set()), "scene." + sid)
+        _obj(scene, {"label", "door_window_state", "light", "barriers"} | ({'passages'} if 'passages' in scene else set()) | ({'opening_labels'} if 'opening_labels' in scene else set()), "scene." + sid)
         if 'passages' in scene: _need(isinstance(scene['passages'], list), 'scene.passages', 'requires explicit passage array')
         _name(scene["label"], "scene.label")
+        if 'opening_labels' in scene:
+            _need(isinstance(scene['opening_labels'], dict), 'scene.opening_labels', 'requires opening ID to display name mapping')
+            for identity, label in scene['opening_labels'].items():
+                _name(identity, 'scene.opening_labels.id'); _display_name(label, 'scene.opening_labels.' + identity)
         light = _obj(scene["light"], {"period", "kind", "name", "state", "position_xyz", "main_tone", "shadow_tone", "materials"}, "scene.light")
         _name(light["name"], "scene.light.name")
         try:
@@ -389,9 +394,10 @@ def _world(value, sources, *, check_source_refs=True):
             _need(wall["a"][2] == wall["b"][2] == 0 and wall["height_m"] > 0 and _distance(wall["a"], wall["b"]) > EPS,
                   "wall", "requires a nonzero ground segment and positive opaque height")
     for identity, point in w["points"].items():
-        _name(identity, "point.id"); _obj(point, {"scene_id", "position_xyz"}, "point." + identity)
+        _name(identity, "point.id"); _obj(point, {"scene_id", "position_xyz"} | ({"display_name"} if "display_name" in point else set()), "point." + identity)
         _need(point["scene_id"] in w["scenes"], "point.scene_id", "unknown physical scene")
         point["position_xyz"] = _xyz(point["position_xyz"], "point.position_xyz")
+        if 'display_name' in point: _display_name(point['display_name'], 'point.display_name')
     for identity, actor in w["actors"].items():
         _name(identity, "actor.id")
         keys = {"scene_id", "position_xyz", "body_yaw", "head_yaw", "eye_height", "eye_state", "posture", "hands", "gaze", "reach_m", "reach_origin_xyz"}
@@ -414,7 +420,8 @@ def _world(value, sources, *, check_source_refs=True):
         for hand in actor["hands"]: actor["hands"][hand] = _xyz(actor["hands"][hand], "actor.hands." + hand)
     occupied = set()
     for identity, prop in w["props"].items():
-        _name(identity, "prop.id"); _obj(prop, {"anchor", "written_ref"} | ({'physical'} if 'physical' in prop else set()), "prop." + identity)
+        _name(identity, "prop.id"); _obj(prop, {"anchor", "written_ref"} | ({'physical'} if 'physical' in prop else set()) | ({'display_name'} if 'display_name' in prop else set()), "prop." + identity)
+        if 'display_name' in prop: _display_name(prop['display_name'], 'prop.display_name')
         anchor = prop["anchor"]
         if isinstance(anchor, dict) and set(anchor) == {"point"}:
             _need(anchor["point"] in w["points"], "prop.anchor", "unknown anchor point")
@@ -717,13 +724,13 @@ def _apply(world, action, info, tick, path):
     if end: world["completed"].append(action["id"])
 
 
-def _action_sentence(action, info):
+def _action_sentence(action, info, world, camera):
     actor, kind = action["actor"], action["kind"]
-    if kind in extended_actions.FIELDS: return extended_actions.sentence(action, info)
+    if kind in extended_actions.FIELDS: return extended_actions.sentence(_display_action(action, world, camera), info)
     before = info.get("before", {})
     if kind == 'hold':
-        return '保持', (f"{actor}保持{before['posture']}，身体朝{_direction(before['body_yaw'])}。"
-                        f"{actor}左手停在{_coord(_hand(before, 'left'))}，右手停在{_coord(_hand(before, 'right'))}。")
+        return '保持', (f"{actor}保持{before['posture']}，身体朝{screen_direction(before['body_yaw'], camera['forward'])}。"
+                        f"{actor}左手停在{_screen_place(_hand(before, 'left'), camera)}，右手停在{_screen_place(_hand(before, 'right'), camera)}。")
     if kind == "eyelid":
         verb = "放松" if action["to"] == "relaxed" else "轻收"
         return verb, f"{actor}上眼睑{verb}。"
@@ -731,7 +738,7 @@ def _action_sentence(action, info):
         verb = "吸气" if action["phase"] == "inhale" else "呼气"
         return verb, f"{actor}自然{verb}。"
     if kind == "focus_adjust":
-        target = before["gaze"]["ref"]["id"]
+        target = _reference(world, before["gaze"]["ref"], camera)
         return "焦点调整", f"{actor}眼球轻微进行焦点调整。{actor}视线持续停在{target}。"
     if kind == "blink_restraint":
         binding = info["restraint_binding"]
@@ -741,13 +748,13 @@ def _action_sentence(action, info):
     if kind == "turn":
         body_changed = abs(_delta(action["body_yaw"], before["body_yaw"])) > EPS
         head_changed = abs(_delta(action["head_yaw"], before["head_yaw"])) > EPS
-        body = f"{actor}转身至身体朝{_direction(action['body_yaw'])}。" if body_changed else ""
-        head = (f"{actor}转头至头部朝{_direction(action['head_yaw'])}。" if head_changed else
+        body = f"{actor}转身至身体朝{screen_direction(action['body_yaw'], camera['forward'])}。" if body_changed else ""
+        head = (f"{actor}转头至头部朝{screen_direction(action['head_yaw'], camera['forward'])}。" if head_changed else
                 f"{actor}头部保持不动。")
         return "转身" if body_changed else "转头", body + head
     if kind == "look" and action["target"] is not None:
-        origin = before["gaze"]["ref"]["id"] if before["gaze"] else None
-        target = action["target"]["id"]
+        origin = _reference(world, before["gaze"]["ref"], camera) if before["gaze"] else None
+        target = _reference(world, action["target"], camera)
         if origin == target:
             text = f"{actor}视线持续停在{target}。"
             verb = "停在"
@@ -760,13 +767,13 @@ def _action_sentence(action, info):
                  f"{actor}头部随目标方向转动。{actor}眼球随头部角度调整继续对准{target}。")
         return verb, text
     hand = "左手" if action.get("hand") == "left" else "右手"
-    verbs = {"move_actor": ("移动", f"移动至{action.get('to', '')}"),
-             "turn": ("转身", f"转身至身体朝{_direction(float(action.get('body_yaw', 0)))}，{actor}头部朝{_direction(float(action.get('head_yaw', 0)))}"),
-             "point": ("指向", f"{hand}指向{(action.get('target') or {}).get('id', '')}"),
-             "move_prop": ("移动", f"{hand}移动{action.get('prop', '')}至{action.get('to', '')}"),
+    display = _display_action(action, world, camera)
+    verbs = {"move_actor": ("移动", f"移动至{display.get('to', '')}"),
+             "point": ("指向", f"{hand}指向{(_reference(world, action['target'], camera) if action.get('target') else '')}"),
+             "move_prop": ("移动", f"{hand}移动{display.get('prop', '')}至{display.get('to', '')}"),
              "blink": ("自然眨眼", "自然眨眼一次"),
-             "transfer": ("递交", f"递交{action.get('prop', '')}至{action.get('to_actor', '')}的{'左手' if action.get('to_hand') == 'left' else '右手'}"),
-             "write": ("书写", f"{hand}在{info.get('paper', {}).get('carrier_id', '')}书写"),
+             "transfer": ("递交", f"递交{display.get('prop', '')}至{action.get('to_actor', '')}的{'左手' if action.get('to_hand') == 'left' else '右手'}"),
+             "write": ("书写", f"{hand}在{_reference(world, {'kind': 'prop', 'id': info['paper']['carrier_id']}, camera) if info.get('paper') else ''}书写"),
              "look": ("注视", "保持无当前注视" if action.get("target") is None else
                       ("持续跟随注视" if action.get("tracking") else "将视线落到") + (action.get("target") or {}).get("id", ""))}
     if kind == "speak": return None, f'{actor}说道：“{info["use"]["text"]}”'
@@ -776,12 +783,9 @@ def _action_sentence(action, info):
     # Actor starts the physical clause; the exact same sentence is timing basis.
     sentence = f"{actor}{content}。"
     if kind in {"move_actor", "move_prop", "point"}:
-        sentence += f"目标落点坐标为{_coord(info['destination'])}。"
+        sentence += f"目标落点位于{_screen_place(info['destination'], camera)}。"
     if kind == "write": sentence += f'本次书写内容为“{info["paper"]["text"]}”。'
     return verb, sentence
-
-
-def _coord(position): return f"东{position[0]:g}米、北{position[1]:g}米、高{position[2]:g}米"
 
 
 def _audio_segments(text, pieces, shot_id, profile, path):
@@ -829,6 +833,93 @@ def _screen_place(position, camera):
     return '画面中部' if abs(x) <= 1 / 3 else '画面左侧' if x < 0 else '画面右侧'
 
 
+def _display_name(value, path):
+    _name(value, path)
+    _need(not list(world_position_matches(value)), path,
+          'display name still encodes world placement; supply an explicit object name, keep the stable ID')
+    return value
+
+
+def _reference(world, ref, camera):
+    """Present an explicit reference, retaining identity and camera-relative place."""
+    identity, kind = ref['id'], ref['kind']
+    if kind == 'actor': return identity  # personal names are not placement labels
+    registry = world['points'] if kind == 'point' else world['props']
+    item = registry[identity]
+    label = _display_name(item.get('display_name', identity), kind + '.' + identity + '.display_name')
+    if kind == 'prop':
+        scene_id, _ = _anchor(world, item)
+        _need(not any(other != identity and row.get('display_name', other) == label
+                      and _anchor(world, row)[0] == scene_id for other, row in registry.items()),
+              'prop.' + identity + '.display_name',
+              'multiple scene props share a display name; provide a grounded distinguishing label')
+        return label
+    place = _screen_place(item['position_xyz'], camera)
+    # Two identical labels in the same region do not identify a usable anchor.
+    # Require an authored distinguishing name; never fabricate numbering/props.
+    ambiguous = [other for other, row in registry.items() if other != identity
+                 and row['scene_id'] == item['scene_id']
+                 and row.get('display_name', other) == label
+                 and _screen_place(row['position_xyz'], camera) == place]
+    _need(not ambiguous, 'point.' + identity + '.display_name',
+          'display name and screen region do not distinguish multiple references; provide a grounded distinguishing label')
+    return place + '的' + label
+
+
+def _opening_label(world, scene, identity):
+    item = world['points'].get(identity, world['props'].get(identity, {}))
+    return _display_name(scene.get('opening_labels', {}).get(identity, item.get('display_name', identity)),
+                         'scene.opening_labels.' + identity)
+
+
+def _opening_description(world, scene_id, camera):
+    scene = world['scenes'][scene_id]
+    if scene['door_window_state'] == '无门窗。': return '无门窗。'
+    openings = opening_states(scene['door_window_state'])
+    labels = scene.get('opening_labels', {})
+    _need(set(labels) <= set(openings), 'scene.opening_labels', 'display name refers to an undeclared opening')
+    displays, rows = set(), []
+    for identity, state in openings.items():
+        label = _opening_label(world, scene, identity)
+        if identity in world['points']:
+            point = world['points'][identity]
+            _need(point['scene_id'] == scene_id, 'scene.openings', 'opening point belongs to another scene')
+            position = point['position_xyz']
+        elif identity in world['props']:
+            prop_scene, position = _anchor(world, world['props'][identity])
+            _need(prop_scene == scene_id, 'scene.openings', 'opening prop belongs to another scene')
+        elif identity == scene['light']['name']:
+            position = scene['light']['position_xyz']
+        else:
+            position = None
+        _need(position is not None or not list(world_position_matches(identity)), 'scene.openings.' + identity,
+              'world-position opening requires an explicit point/prop or the same named light geometry; no left/right is guessed')
+        display = (_screen_place(position, camera) + '的' if position is not None else '') + label
+        _need(display not in displays, 'scene.opening_labels',
+              'multiple openings have indistinguishable display labels; provide grounded distinguishing names')
+        displays.add(display)
+        rows.append(display + ('开启。' if state == 'open' else '关闭。'))
+    return ''.join(rows)
+
+
+def _display_action(action, world, camera):
+    """Adapt only typed reference slots, never substitute words in source prose."""
+    shown = dict(action)
+    for key in ('prop', 'tool'):
+        if action.get(key) in world['props']:
+            shown[key] = _reference(world, {'kind': 'prop', 'id': action[key]}, camera)
+            if key == 'prop': shown['_prop_id'] = action[key]
+    for key in ('point', 'to'):
+        if key == 'to' and action['kind'] not in {'move_actor', 'move_prop', 'hand_move', 'put_down', 'drop_prop'}: continue
+        if isinstance(action.get(key), str) and action[key] in world['points']:
+            shown[key] = _reference(world, {'kind': 'point', 'id': action[key]}, camera)
+    if action.get('opening'):
+        scene = world['scenes'][world['actors'][action['actor']]['scene_id']]
+        name = action['opening']
+        shown['opening'] = _opening_label(world, scene, name)
+    return shown
+
+
 def _spatial_description(world, row, camera, view, sources):
     """Camera-relative layout from the same world; never invent scene objects."""
     plan = sources.get('production_plan')
@@ -844,16 +935,21 @@ def _spatial_description(world, row, camera, view, sources):
         _need(anchor != name and anchor in world['points'] and world['points'][anchor]['scene_id'] == row['scene_id'],
               'shot.design.spatial_anchors', 'requires a different registered point in this scene')
         reference = world['points'][anchor]['position_xyz']; delta = _sub(position, reference)
-        lateral, depth = _dot(delta, camera['right']), _dot(delta, camera['forward'])
+        # Ground-layout depth excludes landmark height; camera tilt cannot turn
+        # an actor at the same floor location into a person behind a table.
+        lateral = _dot(delta, camera['right'])
+        depth = _dot(delta[:2], camera['forward'][:2])
         sides = []
         if abs(lateral) > .1: sides.append('左' if lateral < 0 else '右')
         if abs(depth) > .1: sides.append('后' if depth > 0 else '前')
-        relative = '的画面' + ''.join(sides) + '侧' if sides else '近旁'
-        descriptions.append(f"{name}位于{_screen_place(position, camera)}，在{anchor}{relative}。")
+        relative = '画面' + ''.join(sides) + '侧' if sides else '近旁'
+        reference_label = _reference(world, {'kind': 'point', 'id': anchor}, camera)
+        label = name if name in world['actors'] else _reference(world, {'kind': 'prop', 'id': name}, camera)
+        descriptions.append(f"{label}位于{_screen_place(position, camera)}；相对{reference_label}，处于{relative}。")
     return ''.join(descriptions)
 
 
-def _initial(world, view, sources, camera=None):
+def _initial(world, view, sources, camera):
     rows, limits, names = [], [], []
     for identity, shown in view["actors"].items():
         actor = world["actors"][identity]
@@ -861,11 +957,11 @@ def _initial(world, view, sources, camera=None):
         parts += ["左手" if h == "left" else "右手" for h in shown["hands"]]
         if shown["feet"]: parts.append("足部")
         names.append(f"{identity}（{'、'.join(parts)}）")
-        place = _screen_place(_eye(actor) if shown['head'] else actor['position_xyz'], camera) if camera else _coord(actor['position_xyz'])
-        rows.append(f"{identity}位于{place}，{actor['posture']}，身体朝{_direction(actor['body_yaw'])}，头部朝{_direction(actor['head_yaw'])}。")
+        place = _screen_place(_eye(actor) if shown['head'] else actor['position_xyz'], camera)
+        rows.append(f"{identity}位于{place}，{actor['posture']}，身体朝{screen_direction(actor['body_yaw'], camera['forward'])}，头部朝{screen_direction(actor['head_yaw'], camera['forward'])}。")
         rows.append(extended_actions.static_actor(actor, identity, face_visible=shown['eye_visible']))
         for hand in shown["hands"]:
-            place = _screen_place(_hand(actor, hand), camera) if camera else _coord(_hand(actor, hand))
+            place = _screen_place(_hand(actor, hand), camera)
             rows.append(f"{identity}{'左手' if hand == 'left' else '右手'}位于{place}。")
         eyes = eye_blocks(subject=identity, visibility="visible" if shown["eye_visible"] else "hidden",
                           state=("source_closed" if actor["eye_state"] == "closed" else "natural_open") if shown["eye_visible"] else None,
@@ -873,30 +969,31 @@ def _initial(world, view, sources, camera=None):
                           planned_events=sources.get('production_plan') is not None)
         rows.append(eyes["initial_state_append"]); limits.append(eyes["generation_limits_append"])
         if shown["eye_visible"] and actor["gaze"] is not None:
-            rows.append(f"{identity}视线落在{actor['gaze']['ref']['id']}。")
+            rows.append(f"{identity}视线落在{_reference(world, actor['gaze']['ref'], camera)}。")
     for identity in view["props"]:
         prop = world["props"][identity]; _, position = _anchor(world, prop)
-        rows.append(f"{identity}位于{_screen_place(position, camera) if camera else _coord(position)}。")
-        if prop['physical']['integrity']=='broken': rows.append(f'{identity}已碎裂。')
-        if 'worn' in prop['anchor']: rows.append(f"{identity}穿戴在{prop['anchor']['actor']}{extended_actions.PART_TEXT[prop['anchor']['worn']]}。")
-        if 'binding' in prop['anchor']: rows.append(f"{identity}捆住{prop['anchor']['actor']}双腕。")
-        if 'prop' in prop['anchor']: rows.append(f"{identity}承放在{prop['anchor']['prop']}上。")
+        label = _reference(world, {"kind": "prop", "id": identity}, camera)
+        rows.append(f"{label}位于{_screen_place(position, camera)}。")
+        if prop['physical']['integrity']=='broken': rows.append(f'{label}已碎裂。')
+        if 'worn' in prop['anchor']: rows.append(f"{label}穿戴在{prop['anchor']['actor']}{extended_actions.PART_TEXT[prop['anchor']['worn']]}。")
+        if 'binding' in prop['anchor']: rows.append(f"{label}捆住{prop['anchor']['actor']}双腕。")
+        if 'prop' in prop['anchor']: rows.append(f"{label}承放在{_reference(world, {'kind': 'prop', 'id': prop['anchor']['prop']}, camera)}上。")
         if prop["written_ref"] is not None:
             paper = sources["written_objects_by_id"][prop["written_ref"]]
-            rows.append(f'{identity}当前纸面可读文字为“{paper["text"]}”。')
+            rows.append(f'{label}当前纸面可读文字为“{paper["text"]}”。')
     _need(bool(rows), "camera.frame0", "no modelled subject is visible in the initial frame")
-    return "".join(rows), "；".join(names) if names else "无人（物件：" + "、".join(view["props"]) + "）", "".join(limits)
+    return "".join(rows), "；".join(names) if names else "无人（物件：" + "、".join(_reference(world, {"kind": "prop", "id": name}, camera) for name in view["props"]) + "）", "".join(limits)
 
 
 def _fields(world, row, cam, view, sources):
     planned = sources.get('production_plan') is not None
-    static, visible, eye_limits = _initial(world, view, sources, cam if planned else None)
+    static, visible, eye_limits = _initial(world, view, sources, cam)
     scene = world["scenes"][row["scene_id"]]; light = scene["light"]
     source_vec = _sub(light["position_xyz"], cam["target"])
     _need(math.hypot(*light["position_xyz"][:2]) > EPS, "scene.light", "light world direction undefined at the common scene origin")
     screen = _dot(source_vec, cam["right"])
     receivers = [i + ("面部" if v["eye_visible"] else "后脑" if v["head"] else "手部") for i, v in view["actors"].items()]
-    receivers = receivers or list(view["props"])
+    receivers = receivers or [_reference(world, {"kind": "prop", "id": name}, cam) for name in view["props"]]
     blocks = interior_lighting_blocks(source={k: light[k] for k in ("period", "kind", "name", "state")} |
                                      {"world_side": _direction(_bearing([0, 0, 0], light["position_xyz"])), "height_m": light["position_xyz"][2]},
                                      screen_side="正前" if abs(screen) <= EPS else "左" if screen < 0 else "右",
@@ -932,9 +1029,9 @@ def _fields(world, row, cam, view, sources):
     tilt = math.degrees(math.asin(cam["forward"][2]))
     fields = {**{key: row["editorial"][key] for key in METADATA_FIELDS}, "场景连续性ID": row["continuity_id"], "镜头类型": framing,
               "可见主体": visible, "空间站位描述": scene["label"] + "。" +
-                  (("日间。" if light['period'] == 'day' else "夜间。") + scene['door_window_state'] if planned else blocks['spatial_state_append']) +
+                  (("日间。" if light['period'] == 'day' else "夜间。") + _opening_description(world, row["scene_id"], cam)) +
                   (_spatial_description(world, row, cam, view, sources) if planned else
-                   "".join(f"{name}位于{_coord(point['position_xyz'])}。" for name, point in world["points"].items() if point["scene_id"] == row["scene_id"])),
+                   "".join(f"{_reference(world, {'kind': 'point', 'id': name}, cam)}。" for name, point in world["points"].items() if point["scene_id"] == row["scene_id"])),
               "起始状态": "\n".join(relation_tokens + [static]),
               "机位": "[[staging:camera]]" + f"摄影机离地{cam['origin'][2]:g}米，{'仰角' if tilt >= 0 else '俯角'}{abs(tilt):.1f}度；水平视角{row['camera']['hfov_deg']:g}度，垂直视角{row['camera']['vfov_deg']:g}度。",
               "运镜方式": "固定镜头", "音色": voice_block(mode="silent", dialogue_rows=[]), "心理音轨": "无。",
@@ -1095,7 +1192,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                 realization = use.get("spoken_realization") or {}
                 if realization.get("transform") == "reviewed_indirect_speech_v1":
                     reviewed_speech.append((realization, use["id"], elapsed + action["start"], elapsed + action["end"]))
-            info = prepared[action["id"]]; verb, sentence = _action_sentence(action, info)
+            info = prepared[action["id"]]; verb, sentence = _action_sentence(action, info, samples[action["start"]]["world"], cam)
             pieces = [(i, max(a, action["start"]), min(b, action["end"])) for i, (a, b) in enumerate(zip(ticks, ticks[1:]))
                       if max(a, action["start"]) < min(b, action["end"])]
             is_audio = action["kind"] in {"speak", "narrate", "inner_voice"}
@@ -1160,11 +1257,13 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     fragment += "呈现一次眨眼动作的局部。" if partial_blink else "自然眨眼一次。"
                     if partial_blink: verb = "眨眼"
                 elif action['kind'] in extended_actions.FIELDS:
-                    verb, fragment = extended_actions.fragment_sentence(action, info, lo, hi)
-                elif len(pieces) > 1 and action['kind'] != 'hold':
+                    verb, fragment = extended_actions.fragment_sentence(_display_action(action, samples[lo]["world"], cam), info, lo, hi)
+                elif len(pieces) > 1 and action['kind'] != 'hold' and verb not in {'停在', '保持', '焦点调整'}:
                     prefix = "开始" if part_index == 0 else "继续"
                     fragment = str(action["actor"]) + prefix + sentence[len(action["actor"]):]
-                if not is_audio and action["kind"] != "blink":
+                phase_hold = (action['kind'] == 'look' and verb in {'停在', '保持'}
+                              and (lo, hi) == (ticks[phase_index], ticks[phase_index + 1]))
+                if not is_audio and action["kind"] != "blink" and not phase_hold:
                     prior_speech = [item for item in world_events if item["id"] in inherited
                                     and item["shot_id"] == sid and item["kind"] == "speak" and item["actor"] != action["actor"]]
                     after_text = f"于{prior_speech[-1]['actor']}本句发言结束后" if prior_speech else ""
@@ -1246,16 +1345,19 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     states = [samples[t]["world"]["actors"][identity] for lo, hi in pieces for t in range(lo, hi)]
                     gazes = [state["gaze"] for state in states]
                     if gazes and all(g is not None and g["ref"] == gazes[0]["ref"] and g["position_xyz"] == gazes[0]["position_xyz"] for g in gazes):
-                        target = gazes[0]["ref"]["id"]
-                        phases[i]["text"] += f"{identity}视线持续停在{target}。"
-                        if all(state["head_yaw"] == states[0]["head_yaw"] for state in states):
-                            phases[i]["text"] += f"{identity}头部保持不动。"
-                        phases[i]["text"] += f"{identity}最终视线停在{target}。"
+                        target = _reference(samples[a]['world'], gazes[0]['ref'], cam)
+                        gaze_text = f"{identity}视线持续停在{target}。"
+                        if gaze_text not in phases[i]['text']: phases[i]['text'] += gaze_text
+                        head_text = f"{identity}头部保持不动。"
+                        if all(state["head_yaw"] == states[0]["head_yaw"] for state in states) and head_text not in phases[i]['text']:
+                            phases[i]["text"] += head_text
+                        if not any(lo >= b or hi > b for lo, hi in windows):
+                            phases[i]["text"] += f"{identity}最终视线停在{target}。"
             if not phases[i]["text"]:
                 sample = samples[a]
                 phases[i]['text'] = ''.join(f"{name}保持{sample['world']['actors'][name]['posture']}。"
                                            for name in sample['view']['actors'])
-                phases[i]['text'] += ''.join(f"{name}位于{_screen_place(_anchor(sample['world'], sample['world']['props'][name])[1], cam) if sources.get('production_plan') else _coord(_anchor(sample['world'], sample['world']['props'][name])[1])}。"
+                phases[i]['text'] += ''.join(f"{_reference(sample['world'], {'kind': 'prop', 'id': name}, cam)}位于{_screen_place(_anchor(sample['world'], sample['world']['props'][name])[1], cam)}。"
                                             for name in sample['view']['props'])
                 if not phases[i]['text']:
                     phases[i]['text'] = f"{start_world['scenes'][row['scene_id']]['label']}空景。"
@@ -1263,7 +1365,9 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
             environment_fields, environment_binding = render_environment(
                 row["editorial"], initial_world=start_world, final_world=world,
                 scene_id=row["scene_id"], actions=actions,
-                action_start_worlds={a['id']: samples[a['start']]['world'] for a in actions})
+                action_start_worlds={a['id']: samples[a['start']]['world'] for a in actions},
+                display_names={a['prop']: _reference(samples[a['start']]['world'], {'kind': 'prop', 'id': a['prop']}, cam)
+                               for a in actions if 'prop' in a})
         except EnvironmentDecisionError as exc:
             raise ProductionDecisionError(path + "." + exc.path, exc.reason) from exc
         fields.update(environment_fields)

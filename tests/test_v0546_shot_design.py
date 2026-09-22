@@ -1,5 +1,6 @@
-"""Regression cases retained for later authorization; not run for this release."""
+"""Synthetic layout and evidence-contract regression, not content acceptance."""
 import copy
+import hashlib
 from pathlib import Path
 import sys
 import unittest
@@ -46,7 +47,11 @@ class ShotDesignRegression(unittest.TestCase):
         graph = {'production_plan': {'shots': [{'shot_id': 'EP01-001', 'design': {
             'framing_reason': 'visible face', 'cut_reason': 'new statement', 'spatial_anchors': {'A': 'table'},
             'performance': [], 'duration_exception': None}}]}}
-        storyboard = {'shots': [{'镜头编号': 'EP01-001'}], 'prevention_evidence': {
+        source = 'A站在桌边。'
+        graph['sources'] = {'P1': hashlib.sha256(source.encode()).hexdigest()}
+        storyboard = {'shots': [{'镜头编号': 'EP01-001', '画面内容': source, '原文支撑句': source}], 'prevention_evidence': {
+            'source_ledger': [{'source_id': 'P1', 'source_text': source, 'target_shots': ['EP01-001'],
+                               'treatment': '保留', 'authorization': '合成设计证据测试'}],
             'production_derivation': {'source_graph_json': json.dumps(graph)}}}
         manifest = build_obligations(storyboard, {})
         timing = next(r for r in manifest['obligations'] if r['rule_id'] == 'timing_capacity')
