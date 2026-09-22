@@ -113,6 +113,15 @@ def _direction(yaw: float) -> str:
     return DIRECTIONS[int(math.floor((yaw + 22.5) / 45)) % 8]
 
 
+def screen_direction(yaw: float, camera_forward) -> str:
+    """Planar facing in camera axes; this is neither screen position nor gaze."""
+    bearing = _heading(tuple(camera_forward[:2]))
+    relative = (yaw - bearing) % 360
+    labels = ("画面后方", "画面右后方", "画面右侧", "画面右前方",
+              "镜头方向", "画面左前方", "画面左侧", "画面左后方")
+    return labels[int(math.floor((relative + 22.5) / 45)) % 8]
+
+
 def _signed_delta(a: float, b: float) -> float:
     """Clockwise change from b to a; a half-turn is returned as -180."""
     return (a - b + 180) % 360 - 180

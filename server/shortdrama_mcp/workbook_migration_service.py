@@ -6,12 +6,24 @@ from pathlib import Path
 from typing import Any
 
 from .canonical import COMPACT_SHOT_FIELDS, stable_json_hash
+from .field_content import field_content_findings
+from .materializer import context_instruction_text
 from .models import ToolResponse
 from .storage import utc_stamp
 from .workbook_migration import (
     WORKBOOK_MIGRATION_PHASE, WORKBOOK_MIGRATION_TARGET,
     recover_legacy_workbook, shot_atoms,
 )
+
+
+def _migration_field_precheck(candidate):
+    findings = [{"shot_id":shot["镜头编号"], **finding}
+                for shot in candidate["shots"]
+                for finding in field_content_findings(shot, mask=context_instruction_text)]
+    return {"status":"blocked" if findings else "pass",
+            "scope":"current_field_content_contract_only", "findings":findings,
+            "affected_shot_ids":list(dict.fromkeys(row["shot_id"] for row in findings)),
+            "content_accuracy_verified":False}
 
 
 class WorkbookMigrationMixin:
@@ -65,6 +77,9 @@ class WorkbookMigrationMixin:
                 if original[field] != projected[field]:
                     transformations.append({"shot_id":original["镜头编号"], "field":field,
                                             "before":original[field], "after":projected[field]})
+        # Lossless migration cannot repair content while retaining its atom
+        # hash. Detect this before minting a work order that can never pass.
+        field_precheck = _migration_field_precheck(prepared)
         certificate = self._require_runtime_test_certificate(namespace, project_id)
         plan = {"contract":WORKBOOK_MIGRATION_TARGET, "project_id":project_id,
                 "authorizing_work_order_id":work_order_id, "authorizing_request_sha256":stable_json_hash(order["request_text"]),
@@ -73,6 +88,7 @@ class WorkbookMigrationMixin:
                 "source_entry_sha256":stable_json_hash(entries[0]), "proof":proof,
                 "prepared_atom_sha256":stable_json_hash(shot_atoms(prepared)),
                 "transformations":transformations, "policy_sha256":stable_json_hash(hub["policy"]),
+                "field_content_precheck":field_precheck,
                 "runtime_certificate_key":self._runtime_certificate_key(),
                 "runtime_certificate_id":certificate["certificate_id"],
                 "ruleset_version":self._ruleset_version, "validator_version":self._validator_version(),
@@ -96,6 +112,47 @@ class WorkbookMigrationMixin:
                 namespace, project_id, work_order_id, request_session_id)
             plan_sha = stable_json_hash(plan)
             identifier = "WMG-" + plan_sha[:20]
+            if plan["field_content_precheck"]["status"] == "blocked":
+                source = runtime.StoryboardService._selected_dialogue_source_entry(hub)
+                return ToolResponse(status="workbook_migration_requires_reconstruction",
+                    summary="原表已保留｜字段内容不支持保真迁移｜需有来源的重建，未创建生产工单",
+                    project_id=project_id, work_order_id=work_order_id,
+                    data={"migration_plan":plan, "plan_sha256":plan_sha,
+                          "artifact_created":False, "certificate_created":False,
+                          "production_work_order_created":False, "original_preserved":True,
+                          "reconstruction_guidance":{
+                              "status":"required_inputs_pending", "authorization_granted":False,
+                              "source_artifact_id":plan["source_artifact_id"],
+                              "source_raw_sha256":plan["source_raw_sha256"],
+                              "dialogue_authority_artifact_id":(source or {}).get("artifact_id"),
+                              "required_inputs":[
+                                  "当前会话对受影响字段重建的明确授权；仅保真迁移授权不代表可改内容",
+                                  "服务端已导入的权威小说/剧本及逐字对白；旧分镜文件本身不自动成为对白权威",
+                                  "受影响镜头可核实的场景、参照物显示名、人物/物体状态及机位；未知位置不得猜成左中右",
+                                  "与原文和本句匹配的字段决定、当前production-decisions和冻结source graph/production plan"],
+                              "next_action":"prepare_source_backed_storyboard_regenerate_after_required_inputs",
+                              "begin_project_task_template":{
+                                  "project_id":project_id,
+                                  "operation":"storyboard_regenerate", "mode":"execute",
+                                  "authorization":"explicit_execute",
+                                  "request_text":"<填写当前已获用户授权的重建范围，不得沿用仅保真迁移授权>",
+                                  "targets":[plan["source_artifact_id"], "source_sha256:" + plan["source_raw_sha256"],
+                                             *plan["proof"]["episode_ids"]],
+                                  "authoritative_source":(source or {}).get("artifact_id") or "<先导入并锁定原小说/剧本>",
+                                  "latest_version":plan["source_raw_sha256"],
+                                  "target_boundary":"、".join(plan["proof"]["episode_ids"]),
+                                  "must_keep":["原工作簿及其哈希不变", "原文对白与未授权内容"],
+                                  "must_remove":[], "protected_scope":["未经本次授权的原内容"],
+                                  "expected_outputs":["有来源的新分镜候选", "全量预检及独立审计"]},
+                              "commit_storyboard_template":{
+                                  "project_id":project_id, "work_order_id":"<新重建工单ID>",
+                                  "source_artifact_id":plan["source_artifact_id"],
+                                  "draft_preflight_id":"<同候选逐场景覆盖后签发的full预检ID>",
+                                  "storyboard":"<当前production-decisions及冻结plan实际编译的完整候选>"},
+                              "route_limits":[
+                                  "此建议未签发新工单或修正权限，不能用删掉对白保护字段来绕过来源检查",
+                                  "普通重建仍须当前生产证明与原表完整分集；服务端核实工单、原表哈希及full预检后推导新修订，客户端不得自行声明revision",
+                                  "已绑定canonical、正式证书、handoff或正式后代的原表不得借此绕过既有修复链"]}})
             if action == "plan":
                 return ToolResponse(status="workbook_migration_plan_ready", summary="母本迁移预演完成｜原件未改｜待执行计划",
                                     project_id=project_id, work_order_id=work_order_id,

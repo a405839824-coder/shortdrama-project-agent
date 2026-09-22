@@ -91,7 +91,8 @@ def public_source_motion_case(*, plan_kind="move_prop", opening="closed"):
     source_text = "甲把铜牌从案左移到案右。"
     light = {"period": "day", "kind": "paper_window", "name": "东纸窗", "state": "closed",
              "position_xyz": [3, 0, 2], "main_tone": "neutral", "shadow_tone": "neutral", "materials": ["木案"]}
-    world = {"scenes": {"ROOM": {"label": "房内", "door_window_state": {"东纸窗": opening}, "light": light, "barriers": []}},
+    world = {"scenes": {"ROOM": {"label": "房内", "door_window_state": {"东纸窗": opening},
+             "opening_labels": {"东纸窗": "纸窗"}, "light": light, "barriers": []}},
              "actors": {"甲": {"scene_id": "ROOM", "position_xyz": [0, 0, 0], "body_yaw": 0, "head_yaw": 0,
                  "eye_height": 1.5, "eye_state": "natural_open", "posture": "站立",
                  "hands": {"left": [-0.2, 0.3, 1.0], "right": [0.2, 0.3, 1.0]}, "gaze": None,

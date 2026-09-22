@@ -4958,7 +4958,7 @@
   },
   "counterexample_files": {
     "skills/shortdrama-storyboard/scripts/test_episode_rules.py": "5aa3ea4bcfe0dff65aeb524d4b70b6b38fc6a454f96076fc9bf1bd75e228f09d",
-    "tests/test_v0535_production_contract.py": "5d21de4ea7d9025f85fc1c98fcd0b07d704ed904110f4c0bd2469be6b86033b0"
+    "tests/test_v0535_production_contract.py": "c64f35c90c3ca41f09594588b068661611c9050a61c90c3f7ef54f0ba0f1e02d"
   },
   "critical_runtime_policies": {
     "field_content_policy": {
@@ -6833,6 +6833,60 @@
         "independent semantic review and retained first attempts"
       ],
       "acceptance_scope": "Synthetic software verification only; no real content quality, formal sign-off or deployment claim."
+    },
+    {
+      "id": "fixture-contract-alignment-0552-v1",
+      "baseline_commit": "bbf7e5182ad1f3a203bfaa9fb255aeee5e77803d",
+      "reason": "User-authorized unified-flow correction binds cuts to actual events and explicit display names; retain every existing counterexample rather than weakening hash enforcement.",
+      "files": {
+        "tests/test_v0535_production_contract.py": {
+          "baseline_sha256": "5d21de4ea7d9025f85fc1c98fcd0b07d704ed904110f4c0bd2469be6b86033b0",
+          "current_sha256": "c64f35c90c3ca41f09594588b068661611c9050a61c90c3f7ef54f0ba0f1e02d",
+          "change": "Use the real SPEECH1 end at 3.5s and remove four empty, eventless filler shots from the healthy fixture. Keep all 24 source units and their exact text/use decisions. Healthy episode becomes 23 shots/91.5s. Move the late-hook negative to B7 so it remains beyond the unchanged opening deadline; initial written visibility ends at the actual 3.5s boundary. Derive the single synthetic actor label from its world rather than hardcoding a name.",
+          "preserved_test_ids": [
+            "CurrentMcpContractTests.test_full_current_episode_scene_full_commit_and_signed_review",
+            "CurrentMcpContractTests.test_legacy_parameter_envelope_mints_only_equally_authorized_grants",
+            "CurrentMcpContractTests.test_rejected_actual_request_can_be_corrected_without_erasing_first_attempt",
+            "ProductionContractTests.test_actual_speech_gaze_direct_and_unknown_cannot_pass_by_relabel",
+            "ProductionContractTests.test_combining_event_sets_cannot_count_an_existing_delivery_twice",
+            "ProductionContractTests.test_complete_episode_compiler_validator_and_projection_agree",
+            "ProductionContractTests.test_current_written_delivery_uses_actual_initial_visibility",
+            "ProductionContractTests.test_declared_hook_clock_cannot_move_actual_delivery",
+            "ProductionContractTests.test_delivery_identity_and_source_are_both_required",
+            "ProductionContractTests.test_hold_prose_and_clock_keep_real_world_effects",
+            "ProductionContractTests.test_registered_physical_aliases_do_not_license_unrelated_sentences",
+            "ProductionContractTests.test_whole_clause_ownership_rejects_clean_prefix_with_unrelated_tail"
+          ],
+          "added_test_ids": [
+            "ProductionContractTests.test_fixture_cut_uses_actual_boundary_and_refuses_to_invent_one"
+          ],
+          "test_count_before": 12,
+          "test_count_after": 13
+        }
+      },
+      "fixture_evidence": {
+        "file": "tests/fixtures/synthetic_complete_episode/input.json",
+        "source_text_sha256": "af70e8f52925d35de16cb7ce6ea944c234019ce3e52b1427c0fa00915390f9e6",
+        "source_unit_count_before": 24,
+        "source_unit_count_after": 24,
+        "source_decisions_unchanged": true,
+        "removed_eventless_shot_ids": [
+          "EP90-002",
+          "EP90-003",
+          "EP90-004",
+          "EP90-005"
+        ],
+        "new_negative_control": "An ended-at-3.0s event cannot fabricate a 3.5s cut anchor; input actions remain unchanged."
+      },
+      "preserved": [
+        "all previous counterexample test methods and assertions except explicitly rebound valid fixture lengths/times",
+        "exact source text, source facts and source-use identities",
+        "late opening-hook rejection and initial-state written delivery checks",
+        "real compiler/preflight/independent-review pipeline controls",
+        "all source hashes, historical master sections and rule identities",
+        "strict counterexample-file SHA enforcement and independent semantic review"
+      ],
+      "acceptance_scope": "Synthetic software controls only; no real first-draft percentage, formal sign-off or deployment claim."
     }
   ]
 }

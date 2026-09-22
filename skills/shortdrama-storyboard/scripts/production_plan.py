@@ -59,9 +59,15 @@ def model_production_contract():
                 'frozen_source_required':sorted(production_actions.SOURCE_REQUIRED),
                 'bridge_kinds':sorted(production_actions.BRIDGE_KINDS),
                 'sound_kinds':{k:sorted(v) for k,v in SOUND_KINDS.items()},
+                'push_actor':'source_step only; empty open hand contacts target torso before passive displacement to registered point; both standing, level ground, lateral or away, 0<distance<=0.6m within reach; contact and displacement visible; no invented fall or injury',
                 'bridge':'transition.bridge={ticks,actions}; omitted staging only; zero screen duration; no source credit',
                 'voices':'sequential speakers in the same eleven labels, each body bound by 〔ordinal:speaker〕',
                 'semantics':'pending_independent_review'},
+            'world_presentation': {
+                'points_and_props':'optional display_name; stable IDs remain unchanged. Explicit non-world-direction display names are required when IDs encode world placement; names must distinguish the referenced objects.',
+                'openings':'scene.opening_labels maps stable opening IDs to grounded display names; position comes from a same-ID point or the same named light. Missing geometry cannot be guessed.',
+                'projection':'position, body/head facing and gaze are separate camera-dependent values; relative staging depth uses the ground plane, not object height',
+                'legacy':'original workbook is retained; a field conflict requires source-bound reconstruction, not mechanical word replacement or a lossless-migration waiver'},
             'episode_contract_shape': {
                 'contract':'episode-production-contract-v1','profile_id':'mother-episode-90-180-v1',
                 'scope':'fragment | complete_episodes | complete_series', 'source_kind':'novel | script | original',

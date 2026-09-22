@@ -29,7 +29,7 @@ def production_fixture():
              "reach_origin_xyz": [0, 0, 1.2]}
     light = {"period": "day", "kind": "paper_window", "name": "东纸窗", "state": "closed",
              "position_xyz": [3, 0, 2], "main_tone": "neutral", "shadow_tone": "neutral", "materials": ["纸面"]}
-    world = {"scenes": {"ROOM": {"label": "书房", "door_window_state": "东纸窗关闭。", "light": light, "barriers": []}},
+    world = {"scenes": {"ROOM": {"label": "书房", "door_window_state": "东纸窗关闭。", "opening_labels": {"东纸窗": "纸窗"}, "light": light, "barriers": []}},
              "actors": {"甲": actor}, "props": {"信纸": {"anchor": {"point": "案左"}, "written_ref": None}},
              "points": {"案左": {"scene_id": "ROOM", "position_xyz": [0.2, 0.3, 1.0]},
                         "案右": {"scene_id": "ROOM", "position_xyz": [0.5, 0.3, 1.0]},
@@ -138,7 +138,7 @@ class ProductionDecisionTests(unittest.TestCase):
         self.assertEqual(eye_contract_faults(canonical["shots"][0], duration=4), [])
         self.assertEqual(validate_timing(canonical, canonical["shots"])["faults"], [])
         self.assertNotIn("视线从观察点移向观察点", canonical["shots"][0]["画面内容"])
-        self.assertIn("视线持续停在观察点", canonical["shots"][0]["画面内容"])
+        self.assertIn("视线持续停在画面中部的观察点", canonical["shots"][0]["画面内容"])
         completed = result["derivation"]["final_world"]["completed"]
         self.assertEqual(completed.count("relax"), 1)
         self.assertEqual(result["derivation"]["shots"][0]["actions"][0]["phase_fragments"], ["relax-part1", "relax-part2"])
@@ -159,7 +159,7 @@ class ProductionDecisionTests(unittest.TestCase):
         data = performance_fixture(); data["shots"][0]["actions"] = [action("focus_adjust", start=5, end=15)]
         result = self.lower(data); picture = _render_decisions(result["typed_decisions"])["shots"][0]["画面内容"]
         self.assertIn("眼球轻微进行焦点调整", picture)
-        self.assertIn("视线持续停在观察点", picture)
+        self.assertIn("视线持续停在画面中部的观察点", picture)
         self.assertEqual(result["derivation"]["final_world"]["actors"]["甲"]["gaze"]["ref"]["id"], "观察点")
         data["initial_world"]["actors"]["甲"]["gaze"] = None
         self.rejected(data, "resolved current target")
@@ -262,7 +262,7 @@ class ProductionDecisionTests(unittest.TestCase):
             action("turn", id="turn", actor="乙", start=32, end=38, body_yaw=0, head_yaw=0, after=["hidden"])]
         result = lower_production_decisions(data, source_compilation=source); shot = _render_decisions(result["typed_decisions"])["shots"][0]
         self.assertNotIn("乙自然眨眼", shot["画面内容"])
-        self.assertIn("转头至头部朝北", shot["画面内容"])
+        self.assertIn("转头至头部朝镜头方向", shot["画面内容"])
         self.assertEqual(listener_reaction_faults(shot, duration=4, dialogue_rows=[("甲", "明日再议。")]), [])
         event = next(e for e in result["typed_decisions"]["shots"][0]["events"] if e["id"] == "turn")
         self.assertEqual(event["after"], ["speech"])
@@ -354,7 +354,7 @@ class ProductionDecisionTests(unittest.TestCase):
         self.assertEqual(rows[0]["start_state"]["动作进度"]["物件位置与状态"]["信纸"]["position_xyz"], [0.2, 0.3, 1.0])
         self.assertEqual(rows[0]["end_state"], rows[1]["start_state"])
         self.assertEqual(rows[1]["start_state"]["动作进度"]["物件位置与状态"]["信纸"]["position_xyz"], [0.5, 0.3, 1.0])
-        self.assertIn("信纸位于东0.5米", rows[1]["fields"]["起始状态"])
+        self.assertIn("信纸位于画面中部", rows[1]["fields"]["起始状态"])
         rows[1]["start_state"]["动作进度"]["物件位置与状态"]["信纸"]["position_xyz"][0] = 99
         self.assertEqual(rows[0]["end_state"]["动作进度"]["物件位置与状态"]["信纸"]["position_xyz"][0], 0.5)
         _render_decisions(self.lower(data)["typed_decisions"])

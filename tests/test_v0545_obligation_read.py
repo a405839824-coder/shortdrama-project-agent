@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -15,6 +17,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/shortdrama-
 from test_strict_prompt_contract import strict_fixture
 
 
+def expand_refs(row, rule):
+    dependencies = [f"field:{row['shot_id']}.{field}" for field in rule['dependency_fields']]
+    dependencies.extend(f'field:{sid}.{field}' for sid in row.get('neighbor_shot_ids', [])
+                        for field in rule['neighbor_dependency_fields'])
+    observations = [f"field:{row['shot_id']}.{field}" for field in rule['required_observation_fields']]
+    for key in ('planning_evidence', 'rhythm_evidence'):
+        if key in row:
+            dependencies.append(row[key]['reference'])
+            observations.append(row[key]['reference'])
+    dependencies.extend(row.get('additional_dependency_refs', []))
+    observations.extend(row.get('additional_observation_refs', []))
+    return list(dict.fromkeys(dependencies)), list(dict.fromkeys(observations))
+
+
 class ObligationReadTests(unittest.TestCase):
     def setUp(self):
         self.storyboard = strict_fixture()
@@ -24,6 +40,11 @@ class ObligationReadTests(unittest.TestCase):
             shot = copy.deepcopy(first)
             shot['镜头编号'] = f'EP90-{index + 1:03d}'
             self.storyboard['shots'].append(shot)
+        # Each cloned synthetic occurrence retains its own complete source unit.
+        self.storyboard['prevention_evidence']['source_ledger'] = [
+            {'source_id': f'fixture-{index}', 'source_text': shot['原文支撑句'],
+             'target_shots': [shot['镜头编号']], 'treatment': '保留', 'authorization': '合成分页验收'}
+            for index, shot in enumerate(self.storyboard['shots'])]
         self.service = SimpleNamespace(
             _ruleset_fingerprint='r' * 64, _validator_fingerprint='v' * 64,
             _runtime_fingerprint='t' * 64, _schema_fingerprint='s' * 64,
@@ -65,16 +86,14 @@ class ObligationReadTests(unittest.TestCase):
             rule = definitions[row['rule_id']]
             self.assertEqual(row['obligation_id'], expected['obligation_id'])
             self.assertEqual(row['dependency_sha256'], expected['dependency_sha256'])
-            refs = [f"field:{row['shot_id']}.{field}" for field in rule['dependency_fields']]
-            refs.extend(f'field:{sid}.{field}' for sid in row.get('neighbor_shot_ids', [])
-                        for field in rule['neighbor_dependency_fields'])
+            refs, observations = expand_refs(row, rule)
             self.assertEqual(refs, list(expected['dependency_fields']))
-            observations = [f"field:{row['shot_id']}.{field}" for field in rule['required_observation_fields']]
             self.assertEqual(observations, expected['required_observation_refs'])
             # Synthetic evidence only: proves compact transport loses no refs.
             checks.append({'obligation_id': row['obligation_id'], 'dependency_sha256': row['dependency_sha256'],
                 'status': 'pass', 'judgement': 'Synthetic transport equivalence check; not actual content acceptance.',
-                'observations': [{'reference': ref, 'quote': manifest['_values'][ref][:24]} for ref in observations],
+                'observations': [{'reference': ref, 'quote': manifest['_values'][ref] if ref.startswith('source-unit:')
+                                  else manifest['_values'][ref][:24]} for ref in observations],
                 'issue_ids': []})
         receipt = validate_coverage(self.storyboard, {
             'coverage': {'contract': manifest['contract'], 'manifest_sha256': manifest['manifest_sha256'], 'checks': checks},
@@ -82,6 +101,33 @@ class ObligationReadTests(unittest.TestCase):
             'issues': [],
         }, coverage_context(self.service))
         self.assertEqual(receipt['reviewed_count'], 2534)
+
+    def test_nonadjacent_causal_dependencies_and_observations_survive_read_view(self):
+        self.storyboard['shots'] = self.storyboard['shots'][:3]
+        ids = [s['镜头编号'] for s in self.storyboard['shots']]
+        graph = {'production_plan': {'shots': [
+            {'shot_id': sid, 'design': {}, 'purpose_fact_ids': [fact], 'source_use_ids': []}
+            for sid, fact in zip(ids, ('cause', 'unrelated', 'effect'))],
+            'narrative': {'segments': [{'shot_ids': [sid]} for sid in ids],
+                'prior_deliveries': [], 'causal_links': [{'fact_id': 'effect',
+                    'requires_fact_id': 'cause', 'establishment_shot_id': ids[0],
+                    'reveal_shot_id': ids[2], 'prior_delivery_id': None}]}}}
+        ledger = self.storyboard['prevention_evidence']['source_ledger'][:3]
+        graph['sources'] = {row['source_id']: hashlib.sha256(row['source_text'].encode()).hexdigest() for row in ledger}
+        self.storyboard['prevention_evidence'] = {'source_ledger': ledger,
+            'production_derivation': {'source_graph_json': json.dumps(graph)}}
+        manifest = build_obligations(self.storyboard, coverage_context(self.service))
+        page = self.read(limit=100, max_chars=64_000)
+        self.assertTrue(page.data['complete'])
+        for row, full in zip(page.data['obligations'], manifest['obligations']):
+            dependencies, observations = expand_refs(row, page.data['rule_definitions'][row['rule_id']])
+            self.assertEqual(set(dependencies), set(full['dependency_fields']))
+            self.assertEqual(set(observations), set(full['required_observation_refs']))
+        causal = next(row for row in page.data['obligations']
+                      if row['shot_id'] == ids[0] and row['rule_id'] == 'scene_causality')
+        ref = f'field:{ids[2]}.画面内容'
+        self.assertIn(ref, causal['additional_dependency_refs'])
+        self.assertIn(ref, causal['additional_observation_refs'])
 
     def test_small_budget_fails_explicitly_and_offsets_never_skip(self):
         with self.assertRaisesRegex(ValueError, 'max_chars_too_small'):

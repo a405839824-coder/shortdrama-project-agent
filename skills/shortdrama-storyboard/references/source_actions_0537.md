@@ -22,6 +22,7 @@
 | release_binding | prop, hand, target_actor | 初始`{actor,binding:wrists}`绳索约束只能经真实解绳解除；解开前不能自由移动身体或手，绳索随后由实际解绳者拿住 |
 | wipe | prop, hand, part | 手持布料确实触及自己的脸或手 |
 | contact_actor | hand, target_actor, target_part, mode | grasp/release_grasp/support/release_support/slap；真抓握必须解除后才可移动受约束部位；掌掴必须有真实手部趋近及面部接触 |
+| push_actor | hand, target_actor, target_part:torso, point | 由冻结source_step执行；空置张开的手先接触躯干，再使对方被动移至已登记终点，随后释放收手；双站姿、平地、侧向或远离施力者、0＜距离≤0.6米且全程可及，接触与位移须入画。不得改成自愿让路、拉回、掌掴、跌倒或受伤 |
 | clap / kowtow | count | 有界准确次数；磕头须先跪地；动作跨段时分配实际接触次数，不重复执行 |
 | head_gesture | direction:nod或shake, count | 点头/摇头与视线状态相容 |
 

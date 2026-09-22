@@ -101,7 +101,8 @@ def synthetic_coverage(manifest: dict[str, Any]) -> dict[str, Any]:
                 "dependency_sha256": row["dependency_sha256"],
                 "status": "pass",
                 "judgement": "合成软件验收声明，仅检查义务绑定与覆盖机制，不证明实际内容正确。",
-                "observations": [{"reference": ref, "quote": manifest["_values"][ref][:100]}
+                "observations": [{"reference": ref, "quote": manifest["_values"][ref] if ref.startswith('source-unit:')
+                                  else manifest["_values"][ref][:100]}
                                  for ref in row["required_observation_refs"]],
                 "issue_ids": [],
             } for row in manifest["obligations"]]}

@@ -18,7 +18,7 @@ from typing import Any
 
 import timing_model
 from episode_rules import chapter_required, delivery_text, inspect_episodes, inspect_borrowing
-from written_payload import discover_current_written_payloads, context_instruction_text
+from written_payload import context_instruction_text, protect_visual_text_fragments
 import repair_observations
 from field_content import (assert_field_content, field_content_findings,
                            voice_content_findings, r5_keyframe_sections,
@@ -262,18 +262,6 @@ KEYFRAME_TIMECODE_RE = re.compile(
     r"\d+(?:\.\d+)?\s*(?:秒|s)\s*(?:\]|】|[:：])?",
     re.I,
 )
-KEYFRAME_PROTECTED_VISUAL_LABEL_PATTERN = (
-    r"(?:参考图锚点|可见文字|画内文字|道具文字|"
-    r"匾额(?:文字)?|牌匾(?:文字)?|招牌(?:文字)?|题字)"
-)
-KEYFRAME_PROTECTED_VISUAL_FRAGMENT_RE = re.compile(
-    rf"(?:【{KEYFRAME_PROTECTED_VISUAL_LABEL_PATTERN}】[^；;\n，,]*|"
-    rf"(?:画内)?(?:匾额|牌匾|招牌|门牌|题字|"
-    rf"可见文字|画内文字|道具文字)"
-    rf"(?=[^；;\n，,]{{0,32}}(?:[“\"「『]|写着|写有|刻着|刻有|"
-    rf"题着|题有|印着|印有|可见文字|字样|清晰可见))"
-    rf"[^；;\n，,]*)"
-)
 KEYFRAME_BRACKETED_DIALOGUE_RE = re.compile(
     r"【[^】\n]{1,40}】\s*[^。！？!?；;\n]*(?:[。！？!?；;]|$)"
 )
@@ -487,18 +475,6 @@ VOICE_DIMENSION_PATTERNS = {
     "重音位置": re.compile(r"重音|加重|强调|咬重"),
     "尾音变化": re.compile(r"尾音|上扬|下压|发虚|放柔|拉长|落下|收住"),
 }
-VOICE_SPEECH_ACT_RE = re.compile(
-    r"命令|质问|试探|讥讽|安抚|回避|逼问|恳求|警告|敷衍|认错|询问|问候|"
-    r"陈述|解释|回答|反问|请求|劝说|拒绝|威胁|调侃|挑衅|确认|提醒|承诺|道歉|示弱|宣告"
-)
-VOICE_EMOTION_RE = re.compile(
-    r"平静|温和|克制|冷硬|紧张|愤怒|委屈|警惕|讥讽|焦虑|害怕|坚定|迟疑|"
-    r"轻松|亲近|不耐|压迫|恳切|敷衍|歉疚|惊讶|震惊|悲伤|欣慰|急切|疏离|戒备"
-)
-VOICE_INTENT_RE = re.compile(
-    r"意在|试图|暗含|为了|借此|实则|潜在|避免|确认|安抚|回避|掩饰|警告|"
-    r"争取|拖延|试探|逼迫|探问|稳住|压住|说服|拒绝|示弱|隐藏|提醒"
-)
 VOICE_BASE_REQUIREMENTS = {
     "年龄感": re.compile(r"少年|青年|中年|老年|年长|年轻|成熟|年龄感|年纪|\d+岁|[一二三四五六七八九十]+岁"),
     "音区": re.compile(r"音区|低音|中低音|中音|中高音|高音|偏低|偏高"),
@@ -691,16 +667,9 @@ def _voice_template_errors(
     ]
     if missing_baseline:
         errors.append("基础声线缺少：" + "、".join(missing_baseline))
-    if parsed.get("言语行为") and not VOICE_SPEECH_ACT_RE.search(parsed["言语行为"]):
-        errors.append("言语行为未给出可执行的话语动作")
     current_expression = parsed.get("当前表达", "")
-    if current_expression:
-        if cjk_len(current_expression) > 80:
-            errors.append("当前表达必须是一句短而可执行的话，不得写成长篇心理分析")
-        if not VOICE_EMOTION_RE.search(current_expression):
-            errors.append("当前表达缺少可执行的表层情绪")
-        if not VOICE_INTENT_RE.search(current_expression):
-            errors.append("当前表达缺少必要的潜在意图")
+    if cjk_len(current_expression) > 80:
+        errors.append("当前表达必须是一句短而可执行的话，不得写成长篇心理分析")
 
     emphasis = parsed.get("重音", "")
     errors.extend(emphasis_binding_faults(
@@ -1176,132 +1145,7 @@ def project_formal_master(shot: dict[str, Any]) -> str:
 
 
 def _protect_visual_text_fragments(value: Any, *, field_name: str = "") -> tuple[str, dict[str, str]]:
-    """Protect written payloads, never adjacent action or quoted speech."""
-    protected: dict[str, str] = {}
-    source_text = _projection_text(value)
-    typed_quotes = {item.quote.start: item.quote.literal
-                    for item in discover_current_written_payloads(source_text, field_name)}
-
-    def replace(match: re.Match[str]) -> str:
-        token = f"\ue000VISUAL{len(protected)}\ue001"
-        protected[token] = match.group(0)
-        return token
-
-    surface_re = re.compile(r"纸面|纸上|纸签|记录纸|账册|册页|书页|木牌|布告|标签|标题|题头|栏名|表头|简图|地图|示意图|页签|最后一行|门牌|匾额|牌匾|招牌|题字|可见文字|画内文字|道具文字")
-    marking_re = re.compile(r"写着|写有|写到|写好|已写的|刻着|刻有|印着|印有|标注|标记|现有|已有|可读|标签|标题|题头|栏名|表头|字样|文字|题字|清晰可见")
-    speaking_re = re.compile(
-        r"说道|说着|问道|答道|喊道|念道|朗读|朗诵|念出|念着|读出|读着|默读|"
-        r"低声|轻声|高声|开口|转述|口述|心理内声|内声|旁白|对白|台词|音轨|"
-        r"(?:说|问|答|喊|念|(?<!可)读)\s*[:：]?\s*$|"
-        r"(?:说|问|念|(?<!可)读)(?=纸面|纸上|册页|书页|文字)"
-    )
-    historical_re = re.compile(
-        r"昨日|昨天|前日|前一日|从前|以前|当年|当时|曾经|"
-        r"曾(?:写|有|刻|印)|回忆|记得|想起|原文|源文|历史引用"
-    )
-    enumeration_re = re.compile(r"[\s，,、；;:：]*(?:(?:以及|及|和|与)[\s，,、；;:：]*)?")
-    current_re = re.compile(r"现在|当前|此刻|眼下")
-    correction_re = re.compile(r"[\s，,]*而是(?:写着|写有|刻着|刻有|印着|印有|标注为)[\s:：]*")
-    column_intro_re = re.compile(r"栏|列|字段")
-    column_value_re = re.compile(
-        r'[\s，,、；;]+(?:(?:以及|及|和|与)\s*)?[^“"「『，,、；;:：=。！？!?\n]+?(?:为|是|[:：=])\s*'
-    )
-    column_break_re = re.compile(
-        r"随后|稍后|正在|将(?:要)?(?:写|改|标|刻|印|为|是)|(?:改|变)(?:成|为)|"
-        r"(?:不再|已不|不)(?:存在|可读|显示)|擦除|抹去|收起|移走"
-    )
-
-    # Keep the physical paper scope separate from the kind of its first
-    # value: a title can precede named columns without itself being a column.
-    paper_surface_re = re.compile(
-        r"纸面|纸上|纸签|记录纸|账册|册页|书页|"
-        r"(?:同一张|这张|该张|一张)纸(?:的(?:上部|下部|左侧|右侧|中部))?|"
-        r"纸的(?:上部|下部|左侧|右侧|中部)"
-    )
-    current_role_re = re.compile(
-        r'[\s，,、；;]+(?:(?:以及|及|和|与)\s*)?(?:现有|已有)'
-        r'(?:标题|题头|表头|栏名|栏目|字段|[^“"「『，,、；;:：=。！？!?\n]*?(?:栏|列))'
-        r'(?:为|是|[:：=])\s*'
-    )
-    negative_marking_re = re.compile(
-        r"(?:没有|未曾|从未|并未|尚未|不曾|不是|不|未)(?:写着|写有|标注|现有|已有)|不存在"
-    )
-
-    def protect_written_quotes(match: re.Match[str]) -> str:
-        clause = match.group(0)
-        end = 0
-        written = False
-        columns = False
-        paper_scope = False
-
-        def choose(quote: re.Match[str]) -> str:
-            nonlocal end, written, columns, paper_scope
-            prefix = clause[end:quote.start()]
-            end = quote.end()
-            typed_quote = typed_quotes.get(match.start() + quote.start()) == quote.group(0)
-            scope_break = bool(speaking_re.search(prefix) or historical_re.search(prefix)
-                               or column_break_re.search(prefix))
-            if scope_break:
-                paper_scope = False
-            if (paper_scope and current_role_re.fullmatch(prefix)
-                    and not scope_break and not negative_marking_re.search(prefix)):
-                written = True
-                columns = True
-                return replace(quote)
-            if written and correction_re.fullmatch(prefix):
-                # Preserve both the negated label and its positive correction;
-                # only this same-surface continuation may inherit the binding.
-                return replace(quote)
-            if (written and columns and column_value_re.fullmatch(prefix)
-                    and not speaking_re.search(prefix) and not historical_re.search(prefix)
-                    and not column_break_re.search(prefix)):
-                # Arbitrary column labels inherit this sentence's explicit
-                # current paper declaration. Only the value is masked; speech,
-                # state changes and other unquoted instructions remain visible.
-                return replace(quote)
-            if not enumeration_re.fullmatch(prefix):
-                # A new unquoted clause needs its own physical-text binding.
-                # In particular 可读 is a visibility property, not 读 speech.
-                local_prefix = re.split(r"[，,；;]", prefix)[-1]
-                scope_prefix = re.split(r"[；;]", prefix)[-1]
-                suffix = re.split(r'[“"「『，,。；;！？!?\n]', clause[end:], maxsplit=1)[0]
-                context = local_prefix + suffix
-                historical = list(historical_re.finditer(scope_prefix))
-                current = list(current_re.finditer(scope_prefix))
-                historical_only = bool(historical and not (current and current[-1].start() > historical[-1].start()))
-                written = bool(
-                    (surface_re.search(context) or paper_surface_re.search(context))
-                    and marking_re.search(context)
-                    and not speaking_re.search(scope_prefix)
-                    and not historical_only
-                )
-                paper_scope = bool(
-                    written and paper_surface_re.search(local_prefix)
-                    and not column_break_re.search(scope_prefix)
-                    and not negative_marking_re.search(scope_prefix)
-                )
-                columns = bool(written and column_intro_re.search(local_prefix)
-                               and re.search(r"现有|已有|现在|当前|此刻|眼下", scope_prefix)
-                               and not column_break_re.search(scope_prefix))
-            return replace(quote) if written or typed_quote else quote.group(0)
-
-        return KEYFRAME_QUOTED_DIALOGUE_RE.sub(choose, clause)
-
-    # Sentence boundaries reset the binding; commas/semicolons may enumerate
-    # several payloads after one explicit paper-text declaration. Protect only
-    # the quotes, so a following actor/camera process still reaches the gate.
-    text = re.sub(r'(?:[“"「『][^”"」』\n]*[”"」』]|[^。！？!?\n])+', protect_written_quotes, source_text)
-
-    def protect_explicit(match: re.Match[str]) -> str:
-        fragment = match.group(0)
-        if "\ue000VISUAL" in fragment or re.search(r'[“"「『]', fragment):
-            # Only the explicit marker needs protection from bracketed-dialogue
-            # removal. The quoted payload is already protected, and a trailing
-            # body/environment action must remain visible to the static guard.
-            return re.sub(r"【(?:参考图锚点|可见文字|画内文字|道具文字|匾额(?:文字)?|牌匾(?:文字)?|招牌(?:文字)?|题字)】", replace, fragment)
-        return replace(match)
-
-    return KEYFRAME_PROTECTED_VISUAL_FRAGMENT_RE.sub(protect_explicit, text), protected
+    return protect_visual_text_fragments(_projection_text(value), field_name=field_name)
 
 
 

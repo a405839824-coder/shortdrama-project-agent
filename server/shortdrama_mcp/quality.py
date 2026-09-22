@@ -147,6 +147,33 @@ def measure_quality(storyboard, issues, *, resolve_ids: Callable,
     }
 
 
+def machine_preflight_quality(score, *, scope_kind):
+    """Expose diagnostics without certifying unexamined semantic correctness.
+
+    Preserve the old envelope for ledger readers, but move diagnostic ratios to
+    explicitly named fields. A full machine preflight can admit an audit draft;
+    it cannot establish independent content quality or authorize delivery.
+    """
+    result = copy.deepcopy(score)
+    result["diagnostic_summary"] = {
+        "measurement_basis": "reported_machine_diagnostics_only",
+        "scope_kind": scope_kind,
+        "no_reported_content_defect_shot_percent": score["first_draft_correctness_percent"],
+        "no_reported_content_or_contract_defect_shot_percent": score["direct_usability_percent"],
+        "machine_draft_admission_eligible": bool(scope_kind == "full" and score["commit_eligible"]),
+    }
+    result.update(measurement_state="unavailable", grade="unavailable",
+                  measurement_basis="machine_preflight_without_independent_content_coverage",
+                  independent_content_coverage_verified=False, commit_eligible=False)
+    for key in ("first_draft_correctness_percent", "direct_usability_percent",
+                "new_local_issue_shot_rate_percent", "minimum_episode_correctness_percent",
+                "minimum_episode_direct_usability_percent"):
+        result[key] = None
+    for key in ("episode_correctness_percent", "episode_direct_usability_percent"):
+        result[key] = {episode: None for episode in score.get(key, {})}
+    return result
+
+
 def assessment_context(storyboard, *, rules="unknown", validator="unknown", runtime="unknown"):
     content = copy.deepcopy(storyboard)
     evidence = content.get("prevention_evidence")

@@ -9,3 +9,4 @@ _module = module_from_spec(_spec)
 _spec.loader.exec_module(_module)
 discover_current_written_payloads = _module.discover_current_written_payloads
 context_instruction_text = _module.context_instruction_text
+protect_visual_text_fragments = _module.protect_visual_text_fragments

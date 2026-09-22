@@ -343,7 +343,7 @@
     "legacy_policy": "read_only_migration_to_compact_successor",
     "mother_template_column_count": 11,
     "output_contract": "R10-SPC-1",
-    "plugin_version": "0.5.51",
+    "plugin_version": "0.5.52",
     "production_audit_status": "PENDING_AUDIT",
     "required_per_shot_aspect_phrase": "9:16竖屏",
     "schema_version": "R10.1",
@@ -593,11 +593,13 @@
     "contract": "natural-actions-v1",
     "display_numeric_timestamps": false,
     "internal_timing_field": "picture_timing",
-    "timing_binding": "picture-clock-annotations-v1",
+    "timing_binding": "picture-clock-annotations-v2",
     "preserve_duration_columns": true,
     "preserve_literal_dialogue_and_written_payloads": true,
     "repair_requires_current_text_binding": true,
-    "legacy_timed_input": "read_only_compatibility_and_lossless_internal_validation"
+    "legacy_timed_input": "read_only_compatibility_and_lossless_internal_validation",
+    "legacy_timing_binding": "picture-clock-annotations-v1 read-only exact reconstruction",
+    "repeated_states": "Only identical static assertions of registered visible subjects across every timed phase may be reversibly folded; real actions, dialogue and event counts remain unchanged."
   },
   "field_content_policy": {
     "contract": "storyboard-field-content-v1",
@@ -773,5 +775,6 @@
     "review_route": "separate narrative_audit/audit_only/read_only -> review_narrative_artifact",
     "graph_location": "source_graph.dialogue_realizations[] = exact data.dialogue_realization returned by independent review",
     "limits": "Only exact reviewed source-grounded indirect speech; unchanged original dialogue; latest fail/unknown blocks; server verifies signed source/version/authority on each use. Not full-draft acceptance or 98% evidence."
-  }
+  },
+  "preflight_quality_scope": "Machine diagnostics expose only reported-defect ratios; first-draft correctness and usability are null without independent content coverage. Draft admission is not audit completion or delivery."
 }

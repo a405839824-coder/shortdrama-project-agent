@@ -233,7 +233,8 @@ def interior_lighting_blocks(*, source: dict[str, Any], screen_side: str,
     elif period == "night" and kind in {"oil_lamp", "candle", "lantern"}:
         _choice(source["state"], {"lit"}, "source.state")
         kinds = {"oil_lamp": "油灯", "candle": "蜡烛", "lantern": "灯笼"}
-        physical = f"室内夜间；场景{world}侧的{kinds[kind]}（{name}）已点亮。"
+        placement = "画面中部" if screen == "正前" else f"画面{screen}侧"
+        physical = f"室内夜间；{placement}的{kinds[kind]}（{name}）已点亮。"
         origin = f"场景{world}侧已点亮的{kinds[kind]}（{name}）为本镜主光。"
     else:
         raise ContractBlockError("source: unsupported period/kind pairing; do not infer a missing light source")

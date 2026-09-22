@@ -22,6 +22,66 @@ FORMAL_EXECUTION_FIELDS = (
     "环境音效", "环境动态", "生成限制", "转场类型", "切镜/转场提示词",
 )
 
+# A location/orientation grammar, not a global ban on characters such as 东 in
+# 东西 or personal/place names. Camera/light fields keep their own contracts.
+WORLD_POSITION_RE = re.compile(
+    r"(?:朝|向|往|面向|转向|位于|站在|坐在)(?:正)?(?:东|東|西|南|北)(?:北|南|东|東|西)?(?:侧|方|面|边)?"
+    r"|(?:东|東|西|南|北)(?:北|南|东|東|西)?(?:侧|方(?=[位向。；;，,\s]|$)|边|角|主位|客椅|客座|正门|院门|纸窗|窗|门|厢|墙|桌|榻|廊|案)"
+    r"|(?:东|東|西|南|北)\s*-?\d+(?:\.\d+)?\s*米")
+
+
+def world_position_matches(text):
+    return WORLD_POSITION_RE.finditer(str(text or ""))
+
+
+def _screen_position_matches(text, field):
+    """A bare scene name is not a placement assertion about its subjects.
+
+    Only the complete scene field can have this noun-reference role. A side,
+    orientation, state or relation predicate restores the placement check;
+    quoted text and names appended to a valid placement do not gain scope.
+    """
+    name = text.strip().rstrip("。：:")
+    bare_scene = (field == "空间站位描述"
+                  and re.fullmatch(r"[\w\u3400-\u9fff·-]{2,48}", name)
+                  and not re.search(r"朝|向|往|侧|方|边|缘|旁|角|前|后|左|右|上|下|"
+                                    r"站|坐|跪|躺|置|位|在|处|有|无|开|关|摆|放|"
+                                    r"停|行|走|动|身|视线|头部|主光|光源", name))
+    for match in world_position_matches(text):
+        # A compound place name such as 南门通道 is allowed as a reference;
+        # bare directional anchor IDs such as 东客椅 remain rejected.
+        if bare_scene and match.start() == 0 and match.end() < len(name):
+            continue
+        yield match
+
+
+@lru_cache(maxsize=1)
+def _written_syntax():
+    path = Path(__file__).with_name("written_payload.py")
+    spec = spec_from_file_location("shortdrama_field_written_syntax", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _projected_position_guard(text, path, *, visual_limits=False):
+    """Guard the extra GPT inputs after their owner-specific extraction.
+
+    A light direction remains a light direction; one legal light phrase does
+    not license an actor-position phrase in the same clause. Physical written
+    payloads use the same bounded grammar as source-field checks and export.
+    """
+    scanned = _written_syntax().context_instruction_text(str(text or ''), path)
+    for match in world_position_matches(scanned):
+        if visual_limits:
+            before, after = scanned[:match.start()], scanned[match.end():]
+            if (re.match(r'(?:主光|光源|天光|日光|灯光)', after)
+                    or re.search(r'(?:主光|光源|天光|日光|灯光)(?:来自|从|位于|朝向|由|在|方向为|方向保持)?$', before)):
+                continue
+        raise ValueError('field_content_violation: ' + path +
+                         '含有世界方位站位，须回到有依据的机位与空间决定重建：' + match.group())
+
 
 def project_lighting(shot, text):
     """Keep the server and standalone export on the same four-section column."""
@@ -68,8 +128,8 @@ class FieldContentError(ValueError):
 
 def _instruction_text(value, field, mask):
     text = str(value or "")
-    # Only the caller's typed written/speech parser can grant literal scope.
-    text = mask(text, field) if mask is not None else text
+    # Direct field checks and both export paths use the identical literal scope.
+    text = (mask or _written_syntax().context_instruction_text)(text, field)
     if field == "画面内容":
         # An eye/mouth action may refer to an actual speech event. This masks
         # only the event label, never the following delivery or action clause.
@@ -93,6 +153,27 @@ def _findings_for_value(field, value, *, mask, subfield=None, dialogue_rows=(), 
                 text = text[:match.start()] + " " * (match.end() - match.start()) + text[match.end():]
     path = field + ("." + subfield if subfield else "")
     found = []
+    if field in policy['screen_position_fields'] and subfield is None:
+        # Only actual speaker-labelled utterances grant literal dialogue scope.
+        spatial_text = text
+        if field == '画面内容':
+            for match in re.finditer(r'“([^”]*)”|「([^」]*)」|"([^"\n]*)"', text):
+                literal = next((x for x in match.groups() if x is not None), '')
+                if any(literal == line for _, line in dialogue_rows):
+                    spatial_text = spatial_text[:match.start()] + ' ' * (match.end()-match.start()) + spatial_text[match.end():]
+        for match in _screen_position_matches(spatial_text, field):
+            found.append({'code': ERROR_CODE, 'path': path, 'role': 'world_position_in_screen_field',
+                          'status': 'fail', 'excerpt': original[match.start():match.end()],
+                          'offset': [match.start(), match.end()],
+                          'message': '人物、物体和场景站位须由当前机位投影到画面方向；不能把旧世界方位拼在正确前缀后',
+                          'repair': '保留原稿和稳定身份，补齐有依据的世界状态、机位和参照物显示名后统一重建；缺依据保持待处理，禁止机械替换'})
+    if field == '生成限制' and subfield is None:
+        try:
+            _projected_position_guard(text, path, visual_limits=True)
+        except ValueError as exc:
+            found.append({'code': ERROR_CODE, 'path': path, 'role': 'world_position_in_screen_field',
+                          'status': 'fail', 'excerpt': original[:220], 'offset': [0, len(original)],
+                          'message': str(exc), 'repair': '人物或物体站位回到空间决定；真实光源方向和已绑定源文分别按自身合同保留'})
     clause_patterns = policy.get('owned_clause_patterns', {}).get(path)
     if clause_patterns is not None:
         for match in re.finditer(r'[^。；;，,\n]+', text):
@@ -107,7 +188,9 @@ def _findings_for_value(field, value, *, mask, subfield=None, dialogue_rows=(), 
         # Every clause must match supported camera syntax. A known word in one
         # clause does not license unrelated text elsewhere in the field.
         for match in re.finditer(r'[^。；;，,\n]+', text):
-            clause=match.group().strip()
+            # Literal masking supplies safe clause boundaries, while camera
+            # focus syntax still needs its original quoted target delimiters.
+            clause=original[match.start():match.end()].strip()
             focus = re.fullmatch(r'焦点(?:优先)?(?:落)?(?:在|对准)([\w\u3400-\u9fff·-]{1,12})', clause)
             subjects = re.split(r'[，,；;、。\n]', str((context or {}).get('可见主体') or ''))
             named_focus = focus is not None and any(focus[1] == subject.strip() or re.match(
@@ -178,6 +261,7 @@ def voice_content_findings(value, *, dialogue_rows=(), mask=None):
         for segment,rows in values:
             findings.extend(_findings_for_value("音色", segment, mask=mask,
                                                subfield=label, dialogue_rows=rows))
+            findings.extend(syntax.required_voice_clause_findings(label, segment, field_policy()))
         if label == "发声方式" and body:
             findings.append({"code": ERROR_CODE, "path": "音色.发声方式", "role": "unlabelled",
                              "excerpt": body, "offset": [0, len(body)],
@@ -208,7 +292,15 @@ def field_content_findings(shot, *, mask=None, dialogue_rows=()):
         if field == "音色":
             findings.extend(voice_content_findings(shot[field], mask=mask, dialogue_rows=dialogue_rows))
         else:
-            findings.extend(_findings_for_value(field, shot[field], mask=mask, context=shot))
+            findings.extend(_findings_for_value(field, shot[field], mask=mask, dialogue_rows=dialogue_rows, context=shot))
+    if '参考图锚定' in shot:
+        try:
+            appearance_anchor_text(shot['参考图锚定'])
+        except ValueError as exc:
+            findings.append({'code': ERROR_CODE, 'path': '参考图锚定.文字造型锚',
+                             'role': 'invalid_appearance_anchor', 'status': 'fail',
+                             'excerpt': str(shot['参考图锚定'])[:220], 'offset': [0, len(str(shot['参考图锚定']))],
+                             'message': str(exc), 'repair': '只在造型锚保留外观；空间关系由当前机位与场景事实生成，不改写素材ID或来源证据'})
     unique = {}
     for row in findings:
         unique[(row["path"], row["role"], tuple(row["offset"]))] = row
@@ -236,6 +328,7 @@ def appearance_anchor_text(value):
     result = (tail[:boundary.start()] if boundary else tail).strip()
     if not result or re.search(r"未附图|未绑定|待绑定|附件状态|(?:图片|文件)ID\s*[:：]", result, re.I):
         raise ValueError("field_content_violation: 参考图锚定.文字造型锚缺失或混入素材绑定状态")
+    _projected_position_guard(result, '参考图锚定.文字造型锚')
     return result
 
 
@@ -253,6 +346,8 @@ def model_field_contract():
     return {"contract": CONTRACT,
             "fields": {name: row["allows"] for name, row in policy["fields"].items()},
             "voice_subfields": {name: row["allows"] for name, row in policy["voice_subfields"].items()},
+            "voice_required_clause_groups": {name: row['required_clause_groups']
+                for name, row in policy['voice_subfields'].items() if row.get('required_clause_groups')},
             "keyframe_sections": policy["keyframe_sections"],
             "embedded_heading_policy": policy["embedded_heading_policy"],
             "owned_clause_patterns": policy.get("owned_clause_patterns", {}),
@@ -278,8 +373,10 @@ def r5_keyframe_sections(values, *, aspect, visual_limits, appearance_anchor):
             value = aspect
         elif label == "视觉限制":
             value = visual_limits
+            _projected_position_guard(value, 'GPT.视觉限制', visual_limits=True)
         elif label == "文字造型锚":
             value = appearance_anchor
+            _projected_position_guard(value, 'GPT.文字造型锚')
         else:
             value = "；".join(str(values.get(key) or "").strip() for key in section["sources"]
                              if str(values.get(key) or "").strip())

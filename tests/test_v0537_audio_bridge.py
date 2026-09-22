@@ -86,7 +86,8 @@ assert 'validate_storyboard' not in sys.modules
         use=next(u for u in e['source_decisions']['uses'] if u['id']=='U20');use['mode']='inner_voice'
         source=next(s for s in e['source_ledger'] if s['source_id']=='DOC19')
         source.update(source_text=text,source_type='心理')
-        shot=data['shots'][18];shot['actions'][0]['kind']='inner_voice'
+        shot_index=next(i for i,s in enumerate(data['shots']) if s['shot_id']=='EP90-019')
+        shot=data['shots'][shot_index];shot['actions'][0]['kind']='inner_voice'
         shot['actions'][0].pop('voice')
         shot['editorial']['原文支撑句']=text
         beat=next(b for b in e['episode_contract']['episodes'][0]['beat_events'] if b['id']=='B19')
@@ -95,13 +96,13 @@ assert 'validate_storyboard' not in sys.modules
             canonical=generate(folder,data,graph)
         report=validate_project(canonical)
         self.assertEqual(report['issues'],[],report['issues'])
-        row=canonical['shots'][18]
+        row=canonical['shots'][shot_index]
         self.assertIn('甲内心独白：“编号十九可以开始。”',row['心理音轨'])
         self.assertNotIn('编号十九可以开始',row['画面内容'])
         raw=storyboard_to_xlsx(canonical,report,assume_compact=True)
         wb=load_workbook(io.BytesIO(raw));master=wb['正式分镜母版']
         self.assertEqual([c.value for c in master[1]],list(MOTHER_TEMPLATE_COLUMNS))
-        self.assertIn('甲内心独白：“编号十九可以开始。”',str(master.cell(20,5).value))
+        self.assertIn('甲内心独白：“编号十九可以开始。”',str(master.cell(shot_index+2,5).value))
         self.assertTrue(extract_file(raw,'synthetic-thought.xlsx'))
         beat['delivery']['field']='画面内容'
         with tempfile.TemporaryDirectory() as folder:
