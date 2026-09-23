@@ -549,6 +549,8 @@ def _state(world):
 def _free_hand(world, actor, hand, path):
     _need(hand in {"left", "right"}, path, "hand must be left or right")
     _need(not any(p["anchor"] == {"actor": actor, "hand": hand} for p in world["props"].values()), path, "hand is occupied")
+    _need(hand not in world['actors'][actor]['action_state']['contacts'] and
+          not extended_actions._contacted(world, actor, hand), path, 'hand remains in an actual grasp/support contact')
 
 
 def _reach(world, actor_id, target_scene, destination, path):
@@ -597,6 +599,11 @@ def _prepare(world, action, sources, path, *, bridge=False):
     info = {"before": copy.deepcopy(a), "before_world_sha256": _hash(world)}
     if kind in extended_actions.FIELDS:
         return extended_actions.prepare(world, action, info, path, bridge=bridge)
+    if kind in {'move_actor', 'turn'}:
+        contacts = list(a['action_state']['contacts'].values()) + [
+            contact for _, _, contact in extended_actions._contacted(world, action['actor'])]
+        _need(not any(contact['mode'] == 'grasp' and contact['part'] in extended_actions.HAND_PARTS for contact in contacts),
+              path, 'release actual hand grasp before relocating or turning')
     if kind == "move_actor":
         scene, target = _target(world, {"kind": "point", "id": action["to"]}, path)
         _need(scene == a["scene_id"], path, "cross-room movement requires a separately modelled passage; cut is not relocation")

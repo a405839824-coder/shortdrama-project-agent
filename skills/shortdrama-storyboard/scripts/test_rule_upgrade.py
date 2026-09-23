@@ -20,6 +20,7 @@ TEST_MODULES = (
     "test_outdoor_daylight",
     "test_failed_push",
     "test_preserved_voice_baselines",
+    "test_hand_grasp",
 )
 
 

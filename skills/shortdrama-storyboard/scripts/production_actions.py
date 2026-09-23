@@ -54,6 +54,7 @@ EXPRESSIONS.update(EXPRESSION_POSES)
 PARTS = {'face', 'left_wrist', 'right_wrist', 'left_foot', 'right_foot', 'head', 'torso', 'left_hand', 'right_hand'}
 PART_TEXT = {'face': '面颊', 'left_wrist': '左手腕', 'right_wrist': '右手腕', 'left_foot': '左脚背',
              'right_foot': '右脚背', 'head': '头部', 'torso': '外衣', 'left_hand': '左手', 'right_hand': '右手'}
+HAND_PARTS = {'left_hand', 'right_hand'}
 PUSH_ACTIONS = {'push_actor', 'push_actor_no_displacement'}
 SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'} | PUSH_ACTIONS
 BRIDGE_KINDS = {'move_actor', 'turn', 'look', 'posture', 'hand_move', 'eye_state', 'hand_shape',
@@ -145,6 +146,8 @@ def channels(action):
     if k == 'head_gesture': return {(a, 'head'), (a, 'gaze')}
     if k == 'clap': return {(a, 'left'), (a, 'right')}
     result = {(a, action['hand'])}
+    if k == 'contact_actor' and action['target_part'] in HAND_PARTS and action['mode'] in {'grasp', 'release_grasp'}:
+        result.update({(a, 'position'), (a, 'body')})
     if 'prop' in action: result.add(('prop', action['prop']))
     if k in {'dress_actor','undress_actor','release_binding'}:
         result.update((action['target_actor'],part) for part in ('position','body','head'))
@@ -394,7 +397,16 @@ def prepare(world, action, info, path, *, bridge=False):
             if action['mode']=='slap':
                 p._need(p._distance(p._hand(a,action['hand']),point) >= .1, path, 'slap requires an actual approach before contact')
             if action['mode'] == 'slap': p._need(action['target_part'] == 'face', path, 'slap requires a face landmark')
-            if action['mode'] == 'grasp': p._need(action['target_part'] in {'left_wrist', 'right_wrist'}, path, 'grasp requires an actual wrist')
+            if action['mode'] == 'grasp':
+                p._need(action['target_part'] in HAND_PARTS | {'left_wrist', 'right_wrist'}, path, 'grasp requires an actual hand or wrist')
+                if action['target_part'] in HAND_PARTS:
+                    target_hand = action['target_part'].split('_')[0]
+                    p._free_hand(world, action['target_actor'], target_hand, path)
+                    p._need(not any(prop['anchor'] == {'actor': action['target_actor'], 'binding': 'wrists'}
+                                    for prop in world['props'].values()), path, 'release actual target wrist binding before grasping its hand')
+                    p._need(a['action_state']['hand_shapes'][action['hand']] == 'open' and
+                            target['action_state']['hand_shapes'][target_hand] == 'open', path,
+                            'hand grasp requires both hands open before contact')
     elif k in {'clap', 'kowtow', 'head_gesture'}:
         p._need(type(action['count']) is int and 1 <= action['count'] <= 10, path, 'requires exact bounded repetition count')
         p._need(duration >= action['count'] * (.6 if k == 'kowtow' else .4), path, 'declared repetitions cannot fit action interval')
@@ -534,6 +546,9 @@ def effects(initial, action, tick):
             if action['mode'].startswith('release_'): contacts.pop(action['hand'])
             elif action['mode'] != 'slap': contacts[action['hand']]={'actor':action['target_actor'],'part':action['target_part'],'mode':action['mode']}
         state('contacts',contacts)
+        if action['target_part'] in HAND_PARTS and action['mode'] in {'grasp', 'release_grasp'}:
+            shape = ('grip' if action['mode'] == 'grasp' else 'open') if end else a['action_state']['hand_shapes'][action['hand']]
+            result[base+('action_state','hand_shapes',action['hand'])] = shape
     elif k == 'clap':
         wave=(1-math.cos(2*math.pi*action['count']*f))/2
         mid=[(x+y)/2 for x,y in zip(a['hands']['left'],a['hands']['right'])]
@@ -612,6 +627,10 @@ def sentence(action, info):
     if k=='wipe': return '擦拭',f"{a}以{hand}所持{action['prop']}擦拭自己的{PART_TEXT[action['part']]}。"
     if k=='contact_actor':
         verb={'grasp':'抓住','release_grasp':'松开','support':'扶住','release_support':'松开','slap':'扇向'}[action['mode']]
+        if action['target_part'] in HAND_PARTS and action['mode'] in {'grasp', 'release_grasp'}:
+            verb = '握住' if action['mode'] == 'grasp' else '松开'
+            fingers = '手指收拢' if action['mode'] == 'grasp' else '手指展开'
+            return verb,f"{a}{hand}{fingers}，{verb}{action['target_actor']}的{PART_TEXT[action['target_part']]}。"
         return verb,f"{a}{hand}{verb}{action['target_actor']}的{PART_TEXT[action['target_part']]}。"
     if k=='clap': return '拍响',f"{a}双手拍响{action['count']}下。"
     if k=='kowtow': return '磕头',f"{a}跪地磕头{action['count']}下，每次额头触地后抬起。"
@@ -631,6 +650,7 @@ def static_actor(actor, name, *, face_visible=True):
         if shape=='fist': rows.append(f"{name}{'左手' if hand=='left' else '右手'}握拳。")
     for hand,c in state['contacts'].items():
         verb = {'grasp':'抓住','support':'扶住','push':'推抵'}[c['mode']]
+        if c['mode'] == 'grasp' and c['part'] in HAND_PARTS: verb = '手指收拢握住'
         rows.append(f"{name}{'左手' if hand=='left' else '右手'}仍{verb}{c['actor']}{PART_TEXT[c['part']]}。")
     if face_visible and state['expression'] != '平静':
         rows.append(f"{name}{state['expression']}。" if state['expression'] in EXPRESSION_POSES else f"{name}神情{state['expression']}。")
@@ -672,8 +692,23 @@ def visible(sample, action):
 def check_contacts(world, path):
     p=_p()
     for owner,actor in world['actors'].items():
+        for hand,shape in actor['action_state']['hand_shapes'].items():
+            contact = actor['action_state']['contacts'].get(hand)
+            hand_grasp = contact is not None and contact['mode'] == 'grasp' and contact['part'] in HAND_PARTS
+            p._need((shape == 'grip') == hand_grasp, path, 'gripping fingers require the actual matching hand grasp')
         for hand,contact in actor['action_state']['contacts'].items():
             target=world['actors'][contact['actor']]
+            if contact['mode'] == 'grasp' and contact['part'] in HAND_PARTS:
+                target_hand = contact['part'].split('_')[0]
+                p._need(hand not in {prop['anchor'].get('hand') for prop in world['props'].values()
+                                     if prop['anchor'].get('actor') == owner}, path, 'grasping hand cannot hold a prop')
+                p._need(not target['action_state']['contacts'].get(target_hand) and
+                        _contacted(world, contact['actor'], target_hand) == [(owner, hand, contact)], path,
+                        'grasp target hand has another contact')
+                p._need(target['action_state']['hand_shapes'][target_hand] == 'open' and
+                        not any(prop['anchor'] in ({'actor': contact['actor'], 'hand': target_hand},
+                                                  {'actor': contact['actor'], 'binding': 'wrists'})
+                                for prop in world['props'].values()), path, 'grasp target hand is occupied or constrained')
             p._need(actor['scene_id']==target['scene_id'] and
                     p._distance(p._hand(actor,hand),body_point(target,contact['part']))<=.2,
                     path, 'ongoing body contact was broken without a release action')

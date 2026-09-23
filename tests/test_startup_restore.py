@@ -170,10 +170,10 @@ class StartupRestoreTests(unittest.TestCase):
             restore._restore(self.data, self.runtime, version='0.5.46')
         self.assertFalse(self.runtime.exists())
 
-    def test_v0553_binding_rejects_signed_previous_release(self):
+    def test_v0554_binding_rejects_signed_previous_release(self):
         self.assertEqual((restore.TARGET_VERSION, restore.CONTRACT, restore.DIRECTORY),
-                         ('0.5.53', 'library-runtime-transfer-0553-v1', '.upgrade-0553'))
-        self.manifest.update(target_version='0.5.52', contract='library-runtime-transfer-0552-v1')
+                         ('0.5.54', 'library-runtime-transfer-0554-v1', '.upgrade-0554'))
+        self.manifest.update(target_version='0.5.53', contract='library-runtime-transfer-0553-v1')
         self.sign()
         before = restore._tree(self.data)
         with self.assertRaisesRegex(ValueError, 'manifest_binding'):
