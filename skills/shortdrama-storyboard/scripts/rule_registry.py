@@ -65,6 +65,13 @@ def render_views(registry):
                 '合同：' + narrative['contract'], '', *['- ' + x for x in narrative['instructions']], '',
                 '## 输入结构', '', '```json', json.dumps(narrative['shape'], ensure_ascii=False, indent=2), '```', '',
             ])
+        knowledge = runtime['production_prevention_policy'].get('knowledge_event_policy')
+        if knowledge:
+            result['knowledge_event_contract.md'] = '\n'.join([
+                '# 来源事件与人物知情合同', '', '由 rule_registry.json 生成；不得单独编辑。', '',
+                '合同：' + knowledge['contract'], '', *['- ' + x for x in knowledge['instructions']], '',
+                '## 结构与支持范围', '', '```json', json.dumps({k:v for k,v in knowledge.items() if k != 'instructions'}, ensure_ascii=False, indent=2), '```', '',
+            ])
     if "workflow_integrity_policy" in runtime:
         policy = runtime["workflow_integrity_policy"]
         result["workflow_integrity_contract.md"] = "\n".join([
@@ -200,6 +207,17 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
                 and hashes.get('current_sha256') == registry_sha256(current)):
             return True
     if kind == 'critical_runtime_policies' and identity == 'production_prevention_policy':
+        migration = migrations.get('knowledge-events-0555', {})
+        hashes = migration.get(kind, {}).get(identity, {})
+        if (migration.get('basis') == 'user-authorized-knowledge-event-fix-2026-09-23'
+                and migration.get('authorization_work_order') == 'WO-d0cdb8c14cd241f0'
+                and migration.get('introduced_in') == '0.5.55'
+                and migration.get('legacy_applies_to_current_generation') is False
+                and set(migration.get(kind, {})) == {identity}
+                and current.get('knowledge_event_policy', {}).get('contract') == 'source-event-knowledge-v1'
+                and hashes.get('baseline_sha256') == registry_sha256(previous)
+                and hashes.get('current_sha256') == registry_sha256(current)):
+            return True
         migration = migrations.get('shot-rhythm-0549', {})
         hashes = migration.get(kind, {}).get(identity, {})
         if (migration.get('basis') == 'user-authorized-shot-rhythm-2026-09-20'
