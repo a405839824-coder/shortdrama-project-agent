@@ -19,6 +19,7 @@ TEST_MODULES = (
     "test_episode_rules",
     "test_outdoor_daylight",
     "test_failed_push",
+    "test_preserved_voice_baselines",
 )
 
 

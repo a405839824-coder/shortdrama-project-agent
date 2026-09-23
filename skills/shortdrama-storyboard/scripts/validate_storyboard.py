@@ -21,7 +21,7 @@ from episode_rules import chapter_required, delivery_text, inspect_episodes, ins
 from written_payload import context_instruction_text, protect_visual_text_fragments
 import repair_observations
 from field_content import (assert_field_content, field_content_findings,
-                           voice_content_findings, r5_keyframe_sections,
+                           voice_content_findings, preserved_voice_baseline, r5_keyframe_sections,
                            FORMAL_EXECUTION_FIELDS, project_lighting)
 from continuity_checks import state_equal
 from performance_checks import eye_contract_faults, emphasis_binding_faults, visible_subject_annotation_faults, listener_reaction_faults
@@ -663,7 +663,7 @@ def _voice_template_errors(
     baseline = parsed.get("基础声线", "")
     missing_baseline = [
         name for name, pattern in VOICE_BASE_REQUIREMENTS.items()
-        if not pattern.search(baseline)
+        if not preserved_voice_baseline(baseline) and not pattern.search(baseline)
     ]
     if missing_baseline:
         errors.append("基础声线缺少：" + "、".join(missing_baseline))

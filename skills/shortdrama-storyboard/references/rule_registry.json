@@ -1346,7 +1346,7 @@
       "pass_condition": "音色结构、内容和本镜对白重音全部通过，独审禁项与声音层逐镜提交field:镜头编号.音色证据",
       "priority": 98,
       "repair_action": "只在音色字段内按fixed-voice-template-v1修复并重跑THG-15；不得恢复顶层发声方式字段",
-      "rule_full_text": "带对白镜的音色必须按基础声线、言语行为、当前表达、发声方式空标题、音量、语速与节奏、呼吸、停顿、重音、尾音、禁止语气固定顺序填写；基础声线覆盖年龄感/音区/厚薄/明暗/长期特征，重音逐字来自本镜实际对白，禁止语气2—4项，不追加统一中性模板；无对白镜固定写无对白，不适用。",
+      "rule_full_text": "带对白镜的音色必须按基础声线、言语行为、当前表达、发声方式空标题、音量、语速与节奏、呼吸、停顿、重音、尾音、禁止语气固定顺序填写；基础声线覆盖年龄感/音区/厚薄/明暗/长期特征；existing-baseline-verbatim-v1登记的已确认完整原声线及既有自然声线继承语句仅整段精确兼容，不新增声线参数或为其他正文放行；重音逐字来自本镜实际对白，禁止语气2—4项，不追加统一中性模板；无对白镜固定写无对白，不适用。",
       "rule_id": "AR-R10-VOICE-001",
       "rule_name": "THG-15音色固定子模板",
       "rule_revision": "0.5.53",
@@ -8728,6 +8728,17 @@
         "基础声线": {
           "allows": "来自人物声线档案的年龄感、音区、厚薄、明暗、长期稳定特征",
           "requires": "临时情绪、语速、动作、机位；不得无依据推测声线",
+          "preserved_baseline_contract": "existing-baseline-verbatim-v1",
+          "preserved_baseline_scope": "只兼容明确授权且已核对的完整既定原句，逐字保留，不推断新参数；自然声线继承句不等于已提供年龄或音区。匹配不确认角色归属，也不改变声线注册一致性策略。前后附加正文、任意缺参字符串和其他音色子项不适用。",
+          "preserved_complete_baselines": [
+            "青年女声，中音区，清亮偏薄，气息有稳定支撑。",
+            "年长女声，中低音区，偏厚偏暗，气息稳重。",
+            "中年女声，中低音区，偏厚偏暗，字头清楚、气息稳定。",
+            "中年女声，中低音区，偏厚偏暗、微沙，沉稳直接。",
+            "青年男声，中音区，略厚而明亮，平常吐字清楚、声线端正。",
+            "中年男声，中低音区，厚实偏沉，声线平稳。"
+          ],
+          "preserved_inheritance_baseline": "保持角色自然声线，不额外改变音高、厚薄或明暗。",
           "forbidden_roles": [
             "camera",
             "actor_action",
@@ -11985,7 +11996,7 @@
       "handler": "check_fixed_voice_template_in_tone_field",
       "implementation": "scripts/validate_storyboard.py",
       "module": "VOICE",
-      "pass_condition": "音色子标签顺序/唯一性/非空值、基础声线五项、言语行为、当前表达、六项发声方式、本镜实际对白重音、尾音方向、2—4项禁止语气及反向解析全部通过；画面内容无复制的固定音色子标签",
+      "pass_condition": "音色子标签顺序/唯一性/非空值、基础声线五项（或existing-baseline-verbatim-v1登记原句的整段精确兼容）、言语行为、当前表达、六项发声方式、本镜实际对白重音、尾音方向、2—4项禁止语气及反向解析全部通过；画面内容无复制的固定音色子标签",
       "repair_action": "只在音色字段按fixed-voice-template-v1补齐；画面内容只保留对白时点、口型和可见表演，不恢复顶层发声方式字段",
       "rule_revision": "0.5.53",
       "severity": "fail",
@@ -12463,6 +12474,25 @@
   ],
   "workflow_revision": "R10-PG1",
   "historical_rule_migrations": {
+    "existing-voice-0553": {
+      "introduced_in": "0.5.53",
+      "basis": "user-authorized-existing-voice-compatibility-2026-09-23",
+      "authorization_work_order": "WO-27691d9b6635439b",
+      "legacy_applies_to_current_generation": false,
+      "reason": "User authorized preserving exact existing voice baselines and the existing natural-voice inheritance sentence without inventing new voice parameters. The original historical baseline and unrelated field/voice checks stay unchanged.",
+      "critical_runtime_policies": {
+        "field_content_policy": {
+          "baseline_sha256": "f467af3cb150e1870f73536a0d74f94475d9c13a6c6959bc90e6a00db93bd6b9",
+          "current_sha256": "0de78adf9347718a4df0999c64bd56b4930919ff733cc7fdac5dcd357ee9ec3d"
+        }
+      },
+      "atomic_semantic_definitions": {
+        "AR-R10-VOICE-001": {
+          "baseline_sha256": "7c7b6b296b6213f5fb5fb37b6d5cffc6d30cf0e6a8dae2ec64dd51207bed1793",
+          "current_sha256": "80dd53eb2a0b4224a19cbd369d9fc44dfea9e61ef27a055da4cee5528a87bcfb"
+        }
+      }
+    },
     "eye-event-applicability-v1": {
       "introduced_in": "0.5.46",
       "basis": "production_prevention_policy:PP-05",

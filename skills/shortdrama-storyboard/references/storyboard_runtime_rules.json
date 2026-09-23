@@ -3382,6 +3382,17 @@
       "基础声线": {
         "allows": "来自人物声线档案的年龄感、音区、厚薄、明暗、长期稳定特征",
         "requires": "临时情绪、语速、动作、机位；不得无依据推测声线",
+        "preserved_baseline_contract": "existing-baseline-verbatim-v1",
+        "preserved_baseline_scope": "只兼容明确授权且已核对的完整既定原句，逐字保留，不推断新参数；自然声线继承句不等于已提供年龄或音区。匹配不确认角色归属，也不改变声线注册一致性策略。前后附加正文、任意缺参字符串和其他音色子项不适用。",
+        "preserved_complete_baselines": [
+          "青年女声，中音区，清亮偏薄，气息有稳定支撑。",
+          "年长女声，中低音区，偏厚偏暗，气息稳重。",
+          "中年女声，中低音区，偏厚偏暗，字头清楚、气息稳定。",
+          "中年女声，中低音区，偏厚偏暗、微沙，沉稳直接。",
+          "青年男声，中音区，略厚而明亮，平常吐字清楚、声线端正。",
+          "中年男声，中低音区，厚实偏沉，声线平稳。"
+        ],
+        "preserved_inheritance_baseline": "保持角色自然声线，不额外改变音高、厚薄或明暗。",
         "forbidden_roles": [
           "camera",
           "actor_action",
@@ -5347,5 +5358,5 @@
   ],
   "rule_registry_contract": "r10-rule-registry-v1",
   "rule_registry_revision": "0.5.53",
-  "rule_registry_sha256": "49d40bb08ea1cfbed37ab841143851513b8e7cab6480edfd487fd3ffe648c351"
+  "rule_registry_sha256": "9c8a4bb120cefe91b613e398c4aae52678662bb535727e40dab20d10e2e1dc4f"
 }

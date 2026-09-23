@@ -200,7 +200,7 @@
     "handler": "check_fixed_voice_template_in_tone_field",
     "implementation": "scripts/validate_storyboard.py",
     "module": "VOICE",
-    "pass_condition": "音色子标签顺序/唯一性/非空值、基础声线五项、言语行为、当前表达、六项发声方式、本镜实际对白重音、尾音方向、2—4项禁止语气及反向解析全部通过；画面内容无复制的固定音色子标签",
+    "pass_condition": "音色子标签顺序/唯一性/非空值、基础声线五项（或existing-baseline-verbatim-v1登记原句的整段精确兼容）、言语行为、当前表达、六项发声方式、本镜实际对白重音、尾音方向、2—4项禁止语气及反向解析全部通过；画面内容无复制的固定音色子标签",
     "repair_action": "只在音色字段按fixed-voice-template-v1补齐；画面内容只保留对白时点、口型和可见表演，不恢复顶层发声方式字段",
     "rule_revision": "0.5.53",
     "severity": "fail",

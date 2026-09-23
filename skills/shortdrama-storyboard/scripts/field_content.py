@@ -109,6 +109,15 @@ def field_policy():
     return policy
 
 
+def preserved_voice_baseline(value):
+    """Recognize an entire registered legacy value without inferring voice traits."""
+    spec = field_policy()["voice_subfields"]["基础声线"]
+    return (isinstance(value, str)
+            and spec.get("preserved_baseline_contract") == "existing-baseline-verbatim-v1"
+            and (value in spec.get("preserved_complete_baselines", [])
+                 or value == spec.get("preserved_inheritance_baseline")))
+
+
 @lru_cache(maxsize=1)
 def _workbook_audit_scope():
     registry = json.loads((REFERENCE_ROOT / "rule_registry.json").read_text(encoding="utf-8"))
@@ -144,6 +153,8 @@ def _findings_for_value(field, value, *, mask, subfield=None, dialogue_rows=(), 
     policy = field_policy()
     spec = policy["voice_subfields"][subfield] if subfield else policy["fields"][field]
     original = str(value or "")
+    if field == "音色" and subfield == "基础声线" and preserved_voice_baseline(original):
+        return []  # Exact whole-value compatibility, never a clause/subfield wildcard.
     text = _instruction_text(original, field, mask)
     if subfield in {"重音", "停顿"}:
         # A genuine quoted dialogue span is data, not a camera/voice directive.
