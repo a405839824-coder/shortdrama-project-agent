@@ -60,10 +60,18 @@ def model_production_contract():
                 'bridge_kinds':sorted(production_actions.BRIDGE_KINDS),
                 'sound_kinds':{k:sorted(v) for k,v in SOUND_KINDS.items()},
                 'push_actor':'source_step only; empty open hand contacts target torso before passive displacement to registered point; both standing, level ground, lateral or away, 0<distance<=0.6m within reach; contact and displacement visible; no invented fall or injury',
+                'push_actor_no_displacement':'source_step only; both sitting or both standing; empty open hand approaches and presses target torso, then releases and returns; target position and posture remain unchanged at every sample; actual contact and stationary target visible; no endpoint parameter, support/grasp substitution, offscreen bridge, fall or injury; at least 0.8 seconds',
                 'bridge':'transition.bridge={ticks,actions}; omitted staging only; zero screen duration; no source credit',
                 'voices':'sequential speakers in the same eleven labels, each body bound by 〔ordinal:speaker〕',
                 'semantics':'pending_independent_review'},
             'world_presentation': {
+                'light': {
+                    'indoor': '{period:day,kind:paper_window,name,state:open|closed,position_xyz:[east,north,height],main_tone,shadow_tone,materials}; night permits explicitly lit oil_lamp|candle|lantern instead of paper_window',
+                    'outdoor': '{period:day,kind:outdoor_daylight,name,state:present,direction_xyz:[east,north,up],main_tone,shadow_tone,materials}; finite world direction toward daylight, up>0 and horizontal component>0, not a metre position; no position_xyz',
+                    'projection': 'world bearing/elevation and camera screen side derive from the same direction; translation does not move distant daylight; no invented source height, paper window, lamp, visible sun or weather',
+                    'evidence': 'freeze the actual scene light in production_plan; ordinary lighting choice may be director_choice, never fabricated source_fact or locked_setting; existing independent semantics and source gates remain required',
+                    'bridge': 'scene_light reuses the same validator; cannot relocate the same scene indoors/outdoors; opening positions require their own geometry',
+                    'reference': 'references/production_decisions.md; references/authoring_contract_blocks.md'},
                 'points_and_props':'optional display_name; stable IDs remain unchanged. Explicit non-world-direction display names are required when IDs encode world placement; names must distinguish the referenced objects.',
                 'openings':'scene.opening_labels maps stable opening IDs to grounded display names; position comes from a same-ID point or the same named light. Missing geometry cannot be guessed.',
                 'projection':'position, body/head facing and gaze are separate camera-dependent values; relative staging depth uses the ground plane, not object height',

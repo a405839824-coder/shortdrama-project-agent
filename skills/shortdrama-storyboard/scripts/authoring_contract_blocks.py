@@ -189,32 +189,35 @@ def transition_block(*, method: str, destination_place: str | None = None,
     return {"转场类型": label, "切镜/转场提示词": prompt}
 
 
-def interior_lighting_blocks(*, source: dict[str, Any], screen_side: str,
+def scene_lighting_blocks(*, source: dict[str, Any], screen_side: str,
                              receiving_surfaces: list[str], weak_reflector: str | None,
                              main_tone: str, shadow_tone: str, materials: list[str],
                              air: str, exposure: str) -> dict[str, Any]:
-    """Render only explicitly supplied ordinary indoor light decisions.
+    """Render explicitly supplied ordinary indoor or outdoor daylight decisions.
 
     Supported narrow cases: day paper-window daylight (open/closed), or a lit
-    night oil lamp/candle/lantern. Camera-relative screen_side must come from the
+    night oil lamp/candle/lantern, or outdoor daylight. Screen side must come from the
     caller's actual staging; this function does not certify that computation.
     """
-    required = {"period", "kind", "name", "state", "world_side", "height_m"}
+    outdoor = isinstance(source, dict) and source.get("kind") == "outdoor_daylight"
+    dimension = "elevation_deg" if outdoor else "height_m"
+    required = {"period", "kind", "name", "state", "world_side", dimension}
     if not isinstance(source, dict) or set(source) != required:
-        raise ContractBlockError("source: requires exactly period, kind, name, state, world_side, height_m")
+        raise ContractBlockError("source: requires exactly period, kind, name, state, world_side, " + dimension)
     period = _choice(source["period"], {"day", "night"}, "source.period")
-    kind = _choice(source["kind"], {"paper_window", "oil_lamp", "candle", "lantern"}, "source.kind")
+    kind = _choice(source["kind"], {"paper_window", "oil_lamp", "candle", "lantern", "outdoor_daylight"}, "source.kind")
     name = _label(source["name"], "source.name")
     world = _choice(source["world_side"], _WORLD, "source.world_side")
     screen = _choice(screen_side, {"左", "右", "正前"}, "screen_side")
-    height = source["height_m"]
+    height = source[dimension]
     try:
         valid_height = (not isinstance(height, bool) and isinstance(height, (int, float))
-                        and math.isfinite(height) and height > 0)
+                        and math.isfinite(height) and height > 0 and (not outdoor or height < 90))
     except OverflowError:
         valid_height = False
     if not valid_height:
-        raise ContractBlockError("source.height_m: requires a finite positive number, not a bool")
+        raise ContractBlockError("source." + dimension + ": requires a finite positive number, not a bool" +
+                                 ("; elevation must be below 90 degrees" if outdoor else ""))
     receivers = "、".join(_labels(receiving_surfaces, "receiving_surfaces"))
     material = "、".join(_labels(materials, "materials"))
     reflector = None if weak_reflector is None else _label(weak_reflector, "weak_reflector")
@@ -222,7 +225,11 @@ def interior_lighting_blocks(*, source: dict[str, Any], screen_side: str,
     shadow = _TONE[_choice(shadow_tone, _TONE, "shadow_tone")]
     _choice(air, {"clear"}, "air")
     _choice(exposure, {"normal"}, "exposure")
-    if period == "day" and kind == "paper_window":
+    if period == "day" and outdoor:
+        _choice(source["state"], {"present"}, "source.state")
+        physical = "室外日间；已建立日间自然天光。"
+        origin = f"场景{world}侧上方的日间自然天光（{name}）为本镜主光，来光仰角{height:g}度。"
+    elif period == "day" and kind == "paper_window":
         state = _choice(source["state"], {"open", "closed"}, "source.state")
         if state == "closed":
             physical = f"室内日间；{name}关闭，窗纸透入漫射天光。"
@@ -240,11 +247,21 @@ def interior_lighting_blocks(*, source: dict[str, Any], screen_side: str,
         raise ContractBlockError("source: unsupported period/kind pairing; do not infer a missing light source")
     fill = f"{reflector}提供较弱反射补光。" if reflector else ""
     dark = f"暗侧由{reflector}弱反射补光。" if reflector else "暗侧保留自然明暗层次。"
+    shading = ("可见表面随朝向呈现自然明暗层次。" if outdoor else
+               "亮度沿可见表面与空间纵深衰减。")
     fields = {
-        "光影": f"{receivers}呈现自然明暗层次。曝光正常，高光不过曝，暗部保留材质灰阶；空气清澈，背景结构清晰可辨，不泛白、不雾化。亮度沿可见表面与空间纵深衰减。" + dark,
-        "光源来源": origin + f"光源离地{height:g}米。" + fill,
+        "光影": f"{receivers}呈现自然明暗层次。曝光正常，高光不过曝，暗部保留材质灰阶；空气清澈，背景结构清晰可辨，不泛白、不雾化。" + shading + dark,
+        "光源来源": origin + ("" if outdoor else f"光源离地{height:g}米。") + fill,
         "光源方向": f"场景{world}侧主光位于画面{screen}侧，落向{receivers}。",
         "色温倾向": f"主光{main}，暗侧{shadow}；可见材质的{material}本色保持自然，不作整幅染色。",
     }
     return {"spatial_state_append": physical, "lighting_fields": fields,
-            "generation_limits_append": CLEAR_INTERIOR_LIMITS}
+            "generation_limits_append": ("室外" + CLEAR_INTERIOR_LIMITS.removeprefix("室内")) if outdoor else CLEAR_INTERIOR_LIMITS}
+
+
+def interior_lighting_blocks(**kwargs) -> dict[str, Any]:
+    """Compatibility entry for the existing indoor-only fragment contract."""
+    source = kwargs.get("source")
+    if isinstance(source, dict) and source.get("kind") == "outdoor_daylight":
+        raise ContractBlockError("source.kind: outdoor daylight requires scene_lighting_blocks")
+    return scene_lighting_blocks(**kwargs)

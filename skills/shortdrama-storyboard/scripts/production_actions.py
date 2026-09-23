@@ -29,6 +29,7 @@ FIELDS = {
     'wipe': {'prop', 'hand', 'part'},
     'contact_actor': {'hand', 'target_actor', 'target_part', 'mode'},
     'push_actor': {'hand', 'target_actor', 'target_part', 'point'},
+    'push_actor_no_displacement': {'hand', 'target_actor', 'target_part'},
     'clap': {'count'},
     'kowtow': {'count'},
     'head_gesture': {'direction', 'count'},
@@ -53,7 +54,8 @@ EXPRESSIONS.update(EXPRESSION_POSES)
 PARTS = {'face', 'left_wrist', 'right_wrist', 'left_foot', 'right_foot', 'head', 'torso', 'left_hand', 'right_hand'}
 PART_TEXT = {'face': '面颊', 'left_wrist': '左手腕', 'right_wrist': '右手腕', 'left_foot': '左脚背',
              'right_foot': '右脚背', 'head': '头部', 'torso': '外衣', 'left_hand': '左手', 'right_hand': '右手'}
-SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'push_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'}
+PUSH_ACTIONS = {'push_actor', 'push_actor_no_displacement'}
+SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'} | PUSH_ACTIONS
 BRIDGE_KINDS = {'move_actor', 'turn', 'look', 'posture', 'hand_move', 'eye_state', 'hand_shape',
                 'expression', 'cross_passage', 'scene_light'}
 
@@ -131,7 +133,7 @@ def channels(action):
     if k == 'assist_stand':
         return {(who,part) for who in (a,action['target_actor'])
                 for part in ('position','body','head','left','right','gaze')}
-    if k == 'push_actor':
+    if k in PUSH_ACTIONS:
         return {(a,'position'),(a,'body'),(a,action['hand'])} | {
             (action['target_actor'],part) for part in ('position','body','left','right')}
     if k == 'scene_light': return {('scene', action['scene_id'])}
@@ -183,14 +185,19 @@ def prepare(world, action, info, path, *, bridge=False):
         p._need(action['hand'] in {'left', 'right'}, path, 'unknown hand')
         p._need(action['hand'] not in a['action_state']['contacts'] and not _contacted(world, action['actor'], action['hand']),
                 path, 'hand remains in an actual grasp/support contact')
-    if k == 'push_actor':
+    if k in PUSH_ACTIONS:
         target = world['actors'].get(action['target_actor'])
         p._need(target and action['target_actor'] != action['actor'] and target['scene_id'] == a['scene_id'],
                 path, 'push requires another same-scene actor')
         p._need(action['hand'] in {'left','right'} and action['target_part'] == 'torso',
                 path, 'push supports a declared hand-to-torso contact')
-        p._need(a['posture'] == target['posture'] == '站立' and duration >= .8,
-                path, 'push requires standing people and at least 0.8 seconds')
+        stationary = k == 'push_actor_no_displacement'
+        if stationary:
+            p._need(a['posture'] == target['posture'] and a['posture'] in {'站立','坐姿'} and duration >= .8,
+                    path, 'no-displacement push requires both sitting or both standing and at least 0.8 seconds')
+        else:
+            p._need(a['posture'] == target['posture'] == '站立' and duration >= .8,
+                    path, 'push requires standing people and at least 0.8 seconds')
         p._free_hand(world, action['actor'], action['hand'], path)
         p._need(a['action_state']['hand_shapes'][action['hand']] == 'open', path, 'push requires an open hand')
         p._need(not a['action_state']['contacts'] and not target['action_state']['contacts'] and
@@ -198,11 +205,15 @@ def prepare(world, action, info, path, *, bridge=False):
                 path, 'release existing body contacts before pushing')
         p._need(not any(x['anchor'] == {'actor':action['target_actor'],'binding':'wrists'}
                        for x in world['props'].values()), path, 'bound target needs a separately supported displacement')
-        point = world['points'].get(action['point'])
-        p._need(point and point['scene_id'] == target['scene_id'], path, 'push endpoint must stay in the same physical scene')
-        delta = p._sub(point['position_xyz'], target['position_xyz'])
-        p._need(p.EPS < p._distance(delta,[0,0,0]) <= .6 and abs(delta[2]) <= p.EPS,
-                path, 'push requires a changed level endpoint within the finite 0.6 metre displacement model')
+        destination = target['position_xyz']
+        if not stationary:
+            point = world['points'].get(action['point'])
+            p._need(point and point['scene_id'] == target['scene_id'], path, 'push endpoint must stay in the same physical scene')
+            destination = point['position_xyz']
+        delta = p._sub(destination, target['position_xyz'])
+        if not stationary:
+            p._need(p.EPS < p._distance(delta,[0,0,0]) <= .6 and abs(delta[2]) <= p.EPS,
+                    path, 'push requires a changed level endpoint within the finite 0.6 metre displacement model')
         away = p._sub(target['position_xyz'], a['position_xyz'])
         p._need(sum(delta[i]*away[i] for i in (0,1)) >= -p.EPS and math.hypot(*away[:2]) > p.EPS,
                 path, 'push may move the target aside or away, not pull through the initiator')
@@ -220,7 +231,7 @@ def prepare(world, action, info, path, *, bridge=False):
         p._reach(world,action['actor'],target['scene_id'],p._add(contact,delta),path)
         p._need(not p._blocked(world,a['scene_id'],p._add(contact,delta),p._hand(a,action['hand'])),
                 path, 'barrier blocks push hand release')
-        info.update(destination=list(point['position_xyz']))
+        info.update(destination=list(destination))
     elif k == 'assist_stand':
         target=world['actors'].get(action['target_actor'])
         p._need(target and action['target_actor']!=action['actor'] and target['scene_id']==a['scene_id'],
@@ -408,15 +419,15 @@ def prepare(world, action, info, path, *, bridge=False):
     elif k == 'scene_light':
         p._need(bridge and action['source_use_id'] is None, path, 'light period changes belong to a frozen inter-shot bridge')
         p._need(action['scene_id'] in world['scenes'], path, 'unknown light scene')
-        p._obj(action['light'], set(world['scenes'][action['scene_id']]['light']), path + '.light')
         # Reuse the normal initial-world lighting/opening validator on the changed scene.
-        from authoring_contract_blocks import interior_lighting_blocks
-        light = action['light']; p._xyz(light['position_xyz'], path)
+        scene = world['scenes'][action['scene_id']]
+        light = action['light']
+        p._need(isinstance(light, dict), path + '.light', 'requires an explicit light object')
+        p._need((light.get('kind') == 'outdoor_daylight') == (scene['light']['kind'] == 'outdoor_daylight'),
+                path + '.light', 'a lighting bridge cannot relocate the same scene indoors/outdoors')
+        p._validate_scene_light(light, scene['label'])
         from production_environment import normalize_openings
-        normalize_openings(world['scenes'][action['scene_id']]['door_window_state'], light, path)
-        interior_lighting_blocks(source={k: light[k] for k in ('period', 'kind', 'name', 'state')} |
-            {'world_side': '东', 'height_m': light['position_xyz'][2]}, screen_side='左',
-            receiving_surfaces=['人物面部'], weak_reflector=None, main_tone=light['main_tone'], shadow_tone=light['shadow_tone'], materials=light['materials'], air='clear', exposure='normal')
+        normalize_openings(scene['door_window_state'], light, path)
     return info
 
 
@@ -427,11 +438,12 @@ def effects(initial, action, tick):
     result = {}; base = ('actors', who)
     def set_actor(key, value): result[base + (key,)] = copy.deepcopy(value)
     def state(key, value): result[base + ('action_state', key)] = copy.deepcopy(value)
-    if k == 'push_actor':
+    if k in PUSH_ACTIONS:
         target = initial['actors'][action['target_actor']]
         contact_tick, release_tick = _push_ticks(action)
         shift = max(0., min(1., (tick-contact_tick)/(release_tick-contact_tick)))
-        destination = initial['points'][action['point']]['position_xyz']
+        destination = (target['position_xyz'] if k == 'push_actor_no_displacement'
+                       else initial['points'][action['point']]['position_xyz'])
         position = p._lerp(target['position_xyz'],destination,shift)
         delta = p._sub(position,target['position_xyz'])
         result[('actors',action['target_actor'],'position_xyz')] = position
@@ -572,6 +584,8 @@ def sentence(action, info):
         return '扶起',f"{a}{hand}持续扶住{action['target_actor']}{PART_TEXT[action['target_part']]}并扶起{action['target_actor']}，帮助其起身站稳。"
     if k=='push_actor':
         return '推开',f"{a}{hand}抵住{action['target_actor']}的躯干并推开，{action['target_actor']}被推至{action['point']}，{a}随即收回{hand}。"
+    if k=='push_actor_no_displacement':
+        return '推抵',f"{a}{hand}推抵{action['target_actor']}的躯干，却推不动，{action['target_actor']}保持原位，{a}随即收回{hand}。"
     if k=='posture':
         verb={'站立':'起身','坐姿':'坐下','蹲姿':'蹲下','跪姿':'跪下','跪伏':'俯身','躬身':'躬身','躺卧':'躺下'}[action['to']]
         return verb, f"{a}{verb}，落在{action['point']}。"
@@ -636,9 +650,9 @@ def visible(sample, action):
     if k in {'head_gesture','kowtow'}:return bool(owner.get('head'))
     if k=='clap':return set(owner.get('hands',[]))=={'left','right'}
     if k=='contact_actor':return action['hand'] in owner.get('hands',[]) and part_visible(action['target_actor'],action['target_part'])
-    if k=='push_actor':
+    if k in PUSH_ACTIONS:
         target=view['actors'].get(action['target_actor'],{})
-        # Head and feet keep the complete translated torso in the declared
+        # Head and feet bound the torso and its moved/unchanged location in the
         # camera frame; unknown real body occlusion still needs semantic review.
         return bool(action['hand'] in owner.get('hands',[]) and target.get('head') and target.get('feet'))
     if k=='assist_stand':
@@ -670,12 +684,18 @@ def check_contacts(world, path):
 def fragment_sentence(action, info, lo, hi):
     """Do not announce landing, release or contact before its actual end."""
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
-    if k=='push_actor':
+    if k in PUSH_ACTIONS:
         contact, release = _push_ticks(action)
         target = action['target_actor']
         if hi <= contact:
             verb = '抵住' if hi == contact else '伸向'
             return verb, f'{a}{hand}{verb}{target}的躯干。'
+        if k == 'push_actor_no_displacement':
+            if hi < release:
+                return '推抵', f'{a}{hand}推抵{target}的躯干，{target}仍保持原位。'
+            if lo < release:
+                return '推抵', f'{a}{hand}推抵{target}却推不动，{target}保持原位，{a}{hand}随即离开其躯干。'
+            return '收回', f'{a}收回{hand}，{target}仍保持原位。'
         if hi < release:
             return '推动', f'{a}{hand}抵住{target}的躯干向{action["point"]}推动，{target}随推力移位。'
         if lo < release:

@@ -150,3 +150,29 @@ open/closed eyes, cropped subjects, objects, speech/narration, day/night lightin
 retained paper text and rejected unregistered video actions. These checks do not
 certify source fidelity, action feasibility, continuity, all preflight gates, or
 any accuracy percentage.
+
+## Explicit ordinary outdoor daylight
+
+Use `scene_lighting_blocks` for an established outdoor day scene. It accepts the
+same receiver, tone, material, clear-air and normal-exposure arguments as the
+indoor helper, with this exact source shape:
+
+```python
+source = {"period": "day", "kind": "outdoor_daylight", "name": "院中天光",
+          "state": "present", "world_side": "东", "elevation_deg": 45}
+```
+
+The elevation is finite and strictly between 0 and 90 degrees. The production
+compiler supplies bearing, elevation and screen side from the single authored
+`direction_xyz` world vector; the standalone fragment does not certify them.
+The result explicitly says `室外日间`, supplies ordinary natural daylight and
+never adds a window, lamp, weather, visible sun or metre-based source height.
+It owns the same existing four lighting fields and generation-limit fragment.
+Calling the old indoor-only entry with this new kind is an error.
+
+Source/setting support and a permitted ordinary director lighting choice remain
+distinct. An author assertion is not source evidence or a semantic approval.
+No night daylight, below-horizon direction, exact zenith, unestablished source,
+smoke, volumetric beam or autonomous weather effect is supported by this branch.
+Bundled certificate regressions are in `scripts/test_outdoor_daylight.py`; full
+frozen-plan replay controls are in `tests/test_v0553_outdoor_daylight.py`.

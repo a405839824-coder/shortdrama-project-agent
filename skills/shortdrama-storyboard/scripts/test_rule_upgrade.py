@@ -17,6 +17,8 @@ TEST_MODULES = (
     "test_practical_light_negation",
     "test_rule_registry",
     "test_episode_rules",
+    "test_outdoor_daylight",
+    "test_failed_push",
 )
 
 
