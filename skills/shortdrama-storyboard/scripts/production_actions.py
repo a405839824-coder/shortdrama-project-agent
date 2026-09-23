@@ -609,7 +609,7 @@ def sentence(action, info):
     if k=='eye_state': return ('闭上双眼',f'{a}闭上双眼。') if action['to']=='closed' else ('睁开双眼',f'{a}睁开双眼。')
     if k=='hand_shape': return ('握紧拳头',f'{a}{hand}握紧拳头。') if action['to']=='fist' else ('展开',f'{a}{hand}展开。')
     if k=='expression':
-        return ('表情变化', f"{a}{action['to']}。") if action['to'] in EXPRESSION_POSES else ('神情转为', f"{a}神情转为{action['to']}。")
+        return (action['to'], f"{a}{action['to']}。") if action['to'] in EXPRESSION_POSES else ('神情转为', f"{a}神情转为{action['to']}。")
     if k=='cross_passage': return '迈入',f"{a}经{action['passage']}迈入{info['destination_scene']}。"
     if k=='pick_up': return '拿起',f"{a}{hand}拿起{action['prop']}。"
     if k=='put_down': return '放到',f"{a}{hand}将{action['prop']}放到{action['to']}。"

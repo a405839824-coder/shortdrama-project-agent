@@ -6,7 +6,7 @@ import re
 from typing import Any, Iterable
 
 from .written_payload import context_instruction_text, protect_visual_text_fragments
-from .picture_presentation import display_picture
+from .picture_presentation import display_picture, timed_picture
 from .field_content import (assert_field_content, r5_keyframe_sections, LIGHTING_FIELDS as LIGHTING_FIELDS,
                             FORMAL_EXECUTION_FIELDS, project_lighting)
 
@@ -1459,6 +1459,13 @@ def migrate_legacy_shot(
     for field in INTERNAL_SHOT_FIELDS:
         if source.get(field) not in (None, ""):
             compact[field] = source[field]
+    if "picture_timing" in compact:
+        # A folded final phase can leave a significant trailing newline.  Its
+        # clock offsets/hash bind the exact prose, not the stripped display.
+        timed_picture(source)
+        if compact["画面内容"] != source["画面内容"].strip():
+            raise ValueError("picture_timing_binding: compaction cannot rewrite bound picture content")
+        compact["画面内容"] = source["画面内容"]
     return compact
 
 

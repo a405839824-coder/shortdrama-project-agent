@@ -305,7 +305,7 @@ COLOR_RELATION_RE = re.compile(r"暖|冷|中性")
 COLOR_MATERIAL_RE = re.compile(r"前景|中景|后景|背景|空间|主区|暗部|高光|肤色|面部|皮肤|衣料|木|纸|本色|低饱和|色偏")
 LIGHT_SUBJECT_RE = re.compile(r"主体|人物|面部|眼神|手部|道具|高光|暗部|受光|明暗|皮肤|衣料|木构")
 LIGHT_SOURCE_RE = re.compile(r"窗|门|日光|晨光|天光|烛|灯|火|月光|反射光|补光|廊|庭院|水面|雪面")
-LIGHT_DIRECTION_RE = re.compile(r"画面左|画面右|左侧|右侧|左前|右前|左后|右后|上方|下方|前方|后方")
+LIGHT_DIRECTION_RE = re.compile(r"画面左|画面右|画面正前侧|左侧|右侧|左前|右前|左后|右后|上方|下方|前方|后方")
 LIGHT_PATH_RE = re.compile(r"斜落|斜照|投向|落向|补面|衰减|递减|纵深|暗侧|明侧")
 DAY_SCENE_RE = re.compile(r"清晨|晨间|早晨|上午|正午|午后|白昼|日间|晴日|早膳后")
 NIGHT_SCENE_RE = re.compile(r"夜晚|夜间|深夜|月夜|入夜|黄昏后|黎明前|子时|亥时")
@@ -383,6 +383,39 @@ VOLUMETRIC_LIGHT_RE = re.compile(r"丁达尔|体积光|光束")
 SCATTERING_MEDIUM_RE = re.compile(r"雾|烟|尘|水汽|香火|空气颗粒")
 UNIFORM_FACE_LIGHT_RE = re.compile(r"面部[^；。\n]{0,12}(?:柔和均匀|均匀照亮)|全脸[^；。\n]{0,8}均匀")
 WEAK_FILL_RE = re.compile(r"反射|补光|夜空|月色|浅色墙|地面|纱幔|窗外")
+
+
+def _invisible_face_terms(text, entities):
+    """Keep mixed-shot facial instructions bound to their visible owner."""
+    from performance_checks import _subject
+    face_names = {name for name, description in entities.descriptions.items()
+                  if re.match(re.escape(name) + r'（(?:面部|[^；）]*、面部)(?:、|；|）)', description)}
+    eye_action = r'(?:眨眼|闭眼|闭上(?:双眼|眼睛)|睁眼|睁开(?:双眼|眼睛))'
+    inherited_face = re.compile(r'^(?:眼睛|眼神|视线|目光|眉|嘴唇|嘴角|瞳孔|脸颊|眼眶|睫毛|面部|双眼|眼球|眼睑|'
+                                r'(?:自然|轻轻|缓慢|快速|短促|微微|轻)*' + eye_action + r')')
+    bad = set()
+    for sentence in re.split(r'[。；;\n]|【\d+\.\d—\d+\.\d秒】', text):
+        sentence = sentence.strip()
+        if any(sentence == name + '眼睛不入画' for name in entities.people):
+            continue
+        owner = None
+        for clause in re.split(r'[，,]', sentence):
+            probe = re.sub(r'在\d+\.\d秒', '', clause.strip())
+            for name in entities.people:
+                probe = re.sub(r'^' + re.escape(name) + r'(?:观察|看着|看见|望着|注视)', '', probe)
+            named_part = re.match(r'([^\W\d_]{1,64}?)(?:眼睛|眼神|视线|目光|眉|嘴唇|嘴角|瞳孔|脸颊|眼眶|睫毛|面部)', probe)
+            unknown_owner = named_part and named_part[1] not in entities.people
+            subject = _subject(probe, entities.people) if not unknown_owner else None
+            if subject is not None:
+                owner = subject
+            # Only explicit subjectless facial fragments inherit across a
+            # comma; an unfamiliar name plus a blink/close-eye verb cannot.
+            elif unknown_owner or not inherited_face.match(probe):
+                owner = None
+            if owner not in face_names:
+                bad.update(term for term in FACE_TERMS if term in clause)
+                bad.update(match.group() for match in re.finditer(eye_action, clause))
+    return sorted(bad)
 
 
 def _has_affirmative_match(pattern: re.Pattern[str], value: Any) -> bool:
@@ -3737,7 +3770,7 @@ def validate_project(
                 ))
         invisible_context = _has_any(f"{shot_type} {visible}", INVISIBLE_SHOT_TERMS) and not _has_any(visible, FACE_VISIBLE_TERMS)
         if invisible_context:
-            bad = [term for term in FACE_TERMS if term in combined_performance]
+            bad = _invisible_face_terms(combined_performance, entities)
             if bad:
                 issues.append(_issue(catalog, "E-VIS-005", location, f"不可见镜头写入面部/眨眼细节：{sorted(set(bad))}"))
 

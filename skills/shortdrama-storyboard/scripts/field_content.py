@@ -371,12 +371,36 @@ def model_field_contract():
             "limits": "已支持的字段结构和角色检查；原文理解、表演选择等开放语义仍须独立审查；不能据此声称98%"}
 
 
+def _keyframe_visible_subjects(value):
+    """Select explicit frame-zero parts from the generated all-shot register."""
+    from visible_entities import visible_subject_tokens
+    text = str(value or '')
+    if '首帧：' not in text: return text
+    part = r'(?:面部|后侧头部|左手|右手|足部)'
+    parts = part + '(?:、' + part + ')*'
+    pattern = re.compile(r'(?P<name>[^；;（）]+)（(?P<whole>' + parts +
+                         r')；首帧：(?P<first>不入画|' + parts + r')）')
+    rows = []
+    for token in visible_subject_tokens(text):
+        if '首帧：' not in token:
+            rows.append(token); continue
+        match = pattern.fullmatch(token)
+        if not match: raise ValueError('keyframe_subject_visibility: malformed frame-zero subject binding')
+        first = match.group('first')
+        if first == '不入画': continue
+        if not set(first.split('、')) <= set(match.group('whole').split('、')):
+            raise ValueError('keyframe_subject_visibility: frame-zero parts absent from shot visibility')
+        rows.append(match.group('name') + '（' + first + '）')
+    return '；'.join(rows) if rows else '无人'
+
+
 def r5_keyframe_sections(values, *, aspect, visual_limits, appearance_anchor):
     """Route already validated, static values; never copy a full video field.
 
     The caller owns initial-state and literal validation. No environment motion,
     sound, voice, transition or audit metadata is an input to this renderer.
     """
+    values = dict(values, 可见主体=_keyframe_visible_subjects(values.get('可见主体')))
     result = []
     for section in field_policy()["keyframe_sections"]:
         label = section["label"]
