@@ -89,8 +89,11 @@ def estimate_utterance(text, profile=None, pauses=()):
 
 def _phase_rows(shot):
     text = str(shot.get("画面内容") or "")
+    from performance_checks import eye_visibility_timeline_scan
+    scan = eye_visibility_timeline_scan(text, duration=_number(shot.get('时长')),
+                                        visible_subjects=shot.get('可见主体'))
     quote_ranges = [(m.start(), m.end()) for m in QUOTED.finditer(text)]
-    matches = [m for m in PHASE.finditer(text) if not any(a <= m.start() < b for a, b in quote_ranges)]
+    matches = [m for m in PHASE.finditer(scan) if not any(a <= m.start() < b for a, b in quote_ranges)]
     if not matches:
         return [{"start": 0.0, "end": _number(shot.get("时长")), "offset": 0, "stop": len(text), "body": text}]
     return [{"start": float(m.group("start")), "end": float(m.group("end")),

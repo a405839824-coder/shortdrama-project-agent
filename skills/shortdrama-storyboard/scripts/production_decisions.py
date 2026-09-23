@@ -549,6 +549,8 @@ def _state(world):
 def _free_hand(world, actor, hand, path):
     _need(hand in {"left", "right"}, path, "hand must be left or right")
     _need(not any(p["anchor"] == {"actor": actor, "hand": hand} for p in world["props"].values()), path, "hand is occupied")
+    _need(hand not in world['actors'][actor]['action_state']['contacts'] and
+          not extended_actions._contacted(world, actor, hand), path, 'hand remains in an actual grasp/support contact')
 
 
 def _reach(world, actor_id, target_scene, destination, path):
@@ -597,6 +599,11 @@ def _prepare(world, action, sources, path, *, bridge=False):
     info = {"before": copy.deepcopy(a), "before_world_sha256": _hash(world)}
     if kind in extended_actions.FIELDS:
         return extended_actions.prepare(world, action, info, path, bridge=bridge)
+    if kind in {'move_actor', 'turn'}:
+        contacts = list(a['action_state']['contacts'].values()) + [
+            contact for _, _, contact in extended_actions._contacted(world, action['actor'])]
+        _need(not any(contact['mode'] == 'grasp' and contact['part'] in extended_actions.HAND_PARTS for contact in contacts),
+              path, 'release actual hand grasp before relocating or turning')
     if kind == "move_actor":
         scene, target = _target(world, {"kind": "point", "id": action["to"]}, path)
         _need(scene == a["scene_id"], path, "cross-room movement requires a separately modelled passage; cut is not relocation")
@@ -990,13 +997,35 @@ def _spatial_description(world, row, camera, view, sources):
     return ''.join(descriptions)
 
 
+def _visible_parts(shown):
+    parts = (["面部" if shown["front"] else "后侧头部"] if shown["head"] else [])
+    parts += ["左手" if hand == "left" else "右手" for hand in shown["hands"]]
+    if shown["feet"]: parts.append("足部")
+    return parts
+
+
+def _shot_visible_subjects(first_view, samples, initial_text):
+    """Register actual shot subjects without claiming a late part in frame zero."""
+    parts = {}
+    for sample in samples:
+        for identity, shown in sample['view']['actors'].items():
+            parts.setdefault(identity, [])
+            for part in _visible_parts(shown):
+                if part not in parts[identity]: parts[identity].append(part)
+    if not parts: return initial_text
+    rows = []
+    for identity, whole in parts.items():
+        first = _visible_parts(first_view['actors'][identity]) if identity in first_view['actors'] else []
+        note = '' if set(first) == set(whole) else '；首帧：' + ('、'.join(first) if first else '不入画')
+        rows.append(f"{identity}（{'、'.join(whole)}{note}）")
+    return '；'.join(rows)
+
+
 def _initial(world, view, sources, camera):
     rows, limits, names = [], [], []
     for identity, shown in view["actors"].items():
         actor = world["actors"][identity]
-        parts = (["面部" if shown["front"] else "后侧头部"] if shown["head"] else [])
-        parts += ["左手" if h == "left" else "右手" for h in shown["hands"]]
-        if shown["feet"]: parts.append("足部")
+        parts = _visible_parts(shown)
         names.append(f"{identity}（{'、'.join(parts)}）")
         place = _screen_place(_eye(actor) if shown['head'] else actor['position_xyz'], camera)
         rows.append(f"{identity}位于{place}，{actor['posture']}，身体朝{screen_direction(actor['body_yaw'], camera['forward'])}，头部朝{screen_direction(actor['head_yaw'], camera['forward'])}。")
@@ -1249,10 +1278,13 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                 if action['source_use_id'] is not None:
                     _need(all(shown) and end_visible,ap+'.visible','source action requires its actual action/contact landmarks in frame; use an appropriate camera or separate supported delivery')
                 pieces=[(i,lo,hi) for i,lo,hi in pieces if all(shown[t-action['start']] for t in range(lo,hi))]
-            elif action["kind"] in EYE_ACTIONS:
+            elif action["kind"] in EYE_ACTIONS | {"look"}:
                 visible_intervals = _visible_intervals(samples, action["actor"], action["start"], action["end"])
                 visible_intervals = [(lo, hi) for lo, hi in visible_intervals
                                      if info["before"]["eye_state"] == "natural_open"]
+                if action['kind'] == 'look' and action['source_use_id'] is not None:
+                    _need(visible_intervals == [(action['start'], action['end'])], ap + '.visible',
+                          'source look requires actual eye landmarks in frame; use an appropriate camera')
                 partial_blink = visible_intervals != [(action["start"], action["end"])]
                 pieces = [(i, max(lo, left), min(hi, right)) for i, lo, hi in pieces for left, right in visible_intervals
                           if max(lo, left) < min(hi, right)]
@@ -1364,6 +1396,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                                    "source_use_id": action["source_use_id"]})
             used_events[action["id"]] = elapsed + action["end"]
         _production_plan_call(plan_guard.check_shot, row, samples, actions, action_records)
+        fields['可见主体'] = _shot_visible_subjects(first_view, samples, fields['可见主体'])
         visibility = {}
         for identity in world["actors"]:
             windows = []; opened = None
