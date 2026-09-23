@@ -22,6 +22,7 @@ TEST_MODULES = (
     "test_preserved_voice_baselines",
     "test_hand_grasp",
     "test_generated_action_binding",
+    "test_knowledge_events",
 )
 
 

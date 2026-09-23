@@ -51,6 +51,7 @@ def model_production_contract():
             'episode_contract': episode_policy(),
             'shot_design_policy': shot_policy(),
             'scene_narrative_policy': p['scene_narrative_policy'],
+            'knowledge_event_policy': copy.deepcopy(p['knowledge_event_policy']),
             'source_dialogue_review': json.loads((REF / 'rule_registry.json').read_text(encoding='utf-8'))['runtime']['source_dialogue_review_policy'],
             'action_contract':{'reference':'references/source_actions_0537.md',
                 'parameters':{k:sorted(v) for k,v in sorted(ACTION_FIELDS.items())},
@@ -99,8 +100,9 @@ def model_production_contract():
                                'value': 'exact JSON value of this partition; no inferred replacement'}],
                 'knowledge': {
                     'initial': ['{actor,fact_ids,evidence_fact_ids}'],
-                    'acquisitions': ['{id,actor,fact_ids,evidence_fact_ids,action_id,mode:heard|source_report}'],
-                    'uses': ['{action_id,actor,fact_ids,stance,evidence_fact_ids}; every actual action exactly once']},
+                    'acquisitions': ['{id,actor,fact_ids,evidence_fact_ids,action_id,mode:heard|source_report|self_event|source_reading}; source_reading additionally requires prop_id'],
+                    'uses': ['{action_id,actor,fact_ids,stance,evidence_fact_ids,event_fact_ids?}; event_fact_ids is own actual primary-event provenance, never knowledge or assertion truth; every actual action exactly once'],
+                    'event_provenance': p['knowledge_event_policy']},
                 'shots': ['{shot_id,purpose_fact_ids,required_action_ids,audio_action_ids,source_use_ids,visible,design}'],
                 'shot_design': shot_policy()['design_shape'],
                 'narrative': p['scene_narrative_policy']['shape']},
@@ -216,15 +218,22 @@ def validate_source_plan(plan, facts, source_texts, source_hashes):
             need(pair not in initial_pairs, p + '.knowledge.initial', 'duplicate initial knowledge')
             initial_pairs.add(pair)
     for entry in registry(k['acquisitions'], 'id', p + '.knowledge.acquisitions').values():
-        obj(entry, {'id', 'actor', 'fact_ids', 'evidence_fact_ids', 'action_id', 'mode'}, p + '.knowledge.acquisitions')
+        obj(entry, {'id', 'actor', 'fact_ids', 'evidence_fact_ids', 'action_id', 'mode'} |
+            ({'prop_id'} if entry.get('mode') == 'source_reading' else set()), p + '.knowledge.acquisitions')
         need(entry['mode'] in active['acquisition_modes'], p + '.knowledge.acquisitions.mode',
              'acquisition channel is not modelled; retain independent source evidence', 'not_supported')
         ids(entry['fact_ids'], p + '.knowledge.acquisitions.fact_ids', facts, nonempty=True)
         ids(entry['evidence_fact_ids'], p + '.knowledge.acquisitions.evidence_fact_ids', facts, nonempty=True)
         need(all(isinstance(entry[x], str) and entry[x] for x in ('actor', 'action_id')), p + '.knowledge.acquisitions', 'actor and actual action required')
+        if entry['mode'] == 'source_reading':
+            need(isinstance(entry['prop_id'], str) and bool(entry['prop_id']), p + '.knowledge.acquisitions.prop_id', 'actual reading object required')
     for entry in registry(k['uses'], 'action_id', p + '.knowledge.uses').values():
-        obj(entry, {'action_id', 'actor', 'fact_ids', 'stance', 'evidence_fact_ids'}, p + '.knowledge.uses')
+        obj(entry, {'action_id', 'actor', 'fact_ids', 'stance', 'evidence_fact_ids'} |
+            ({'event_fact_ids'} if 'event_fact_ids' in entry else set()), p + '.knowledge.uses')
         ids(entry['fact_ids'], p + '.knowledge.uses.fact_ids', facts)
+        ids(entry.get('event_fact_ids', []), p + '.knowledge.uses.event_fact_ids', facts)
+        need(not set(entry['fact_ids']) & set(entry.get('event_fact_ids', [])), p + '.knowledge.uses',
+             'event provenance and knowledge assertions must be disjoint')
         ids(entry['evidence_fact_ids'], p + '.knowledge.uses.evidence_fact_ids', facts)
         need(entry['stance'] in active['knowledge_stances'], p + '.knowledge.uses.stance', 'unsupported knowledge stance', 'not_supported')
         need(entry['actor'] is None or isinstance(entry['actor'], str), p + '.knowledge.uses.actor', 'invalid actor identity')
@@ -457,13 +466,84 @@ class ProductionPlanGuard:
                       [*shot['transition'].get('bridge',{}).get('actions',[]),*shot['actions']]]
         ids(action_ids, 'shots.actions')
         need(set(self.uses) == set(action_ids), p + '.knowledge.uses', 'every actual action needs its knowledge applicability', 'insufficient_evidence')
-        self.known, self.reported, self.reported_at = set(), set(), {}
+        self.known, self.known_at, self.reported, self.reported_at = set(), {}, set(), {}
+        self.source_action_ids = {}
+        for shot in payload['shots']:
+            for action in shot['actions']:
+                if action.get('source_use_id'):
+                    self.source_action_ids.setdefault(action['source_use_id'], set()).add(action['id'])
         for entry in self.plan['knowledge']['initial']:
             need(entry['actor'] in self.actors, p + '.knowledge.initial', 'unknown initial actor')
             self.known.update((entry['actor'], fid) for fid in entry['fact_ids'])
+            self.known_at.update(((entry['actor'], fid), 0) for fid in entry['fact_ids'])
         for entry in self.plan['knowledge']['acquisitions']:
             need(entry['actor'] in self.actors and entry['action_id'] in self.uses,
                  p + '.knowledge.acquisitions', 'unknown recipient or actual acquisition action')
+
+    def _event_facts(self, action, use, fact_ids, path):
+        """Prove the enacted expression/action identity, never its proposition truth."""
+        need(use is not None and action['actor'] is not None and use['actor'] == action['actor'],
+             path, 'event provenance requires the actual source event actor')
+        facts = {f['id']: f for f in use['source_constraints']}
+        primary = facts[use['fact_ids'][0]]['event_id']
+        context = {fid for f in facts.values() for fid in f['depends_on'] + f['conditions']}
+        channel = {'spoken': 'oral', 'inner_voice': 'thought', 'physical_action': 'action'}.get(use['mode'])
+        need(channel is not None, path, 'only own action or actual expression has event provenance')
+        for fid in fact_ids:
+            fact = facts.get(fid)
+            need(fact is not None and fid not in context and fact['event_id'] == primary and fact['subject'] == action['actor'] and
+                 fact['channel'] == channel, path, 'event provenance cannot absorb another actor, dependency or channel')
+            if channel == 'action':
+                need(fact['polarity'] == 'affirmative' and fact['modality'] == 'asserted' and
+                     fact['occurrence'] in {'occurred', 'ongoing'} and not fact['conditions'], path,
+                     'conditional, possible or future physical events cannot become actual provenance')
+            else:
+                need(fact['expression_occurrence'] in {'occurred', 'current'} and
+                     fact['expression_status'] == 'asserted' and fact['content_availability'] == 'given', path,
+                     'event provenance needs actual supplied words; proposition futurity is separate')
+
+    def _acquire_self_event(self, acquisition, sid, action, samples, use, path):
+        """Own completed physical event only; no speech-to-truth or general perception."""
+        need(use['mode'] == 'physical_action' and acquisition['actor'] == action['actor'], path,
+             'self acquisition requires the same actual physical-event actor')
+        self._event_facts(action, use, acquisition['fact_ids'], path)
+        need(set(acquisition['evidence_fact_ids']) == set(acquisition['fact_ids']), path,
+             'self acquisition evidence must name exactly the acquired event facts')
+        expected = self.source_action_ids.get(action['source_use_id'], set())
+        need(expected and expected <= set(self.events), path, 'own event result used before all actual source steps completed')
+        moments = [self.narrative.clock[self.events[aid][0]] + self.events[aid][1]['end'] for aid in expected]
+        moment = self.narrative.clock[sid] + action['end']
+        need(moment == max(moments), path, 'acquisition must bind the final completed event step in story time')
+        if acquisition['mode'] == 'source_reading':
+            # ponytail: this verifies a source-declared reading event and its gaze
+            # interval, not text recognition, font legibility or arbitrary sight.
+            prop_id = acquisition['prop_id']
+            need(action['kind'] == 'hold', path, 'source reading needs a distinct sustained gaze interval after looking')
+            phrases = policy()['knowledge_event_policy']['reading_receipt_phrases']
+            need(use['text'].rstrip('。') in {action['actor'] + phrase for phrase in phrases}, path,
+                 'reading receipt must be the explicit source reading clause, not looking, holding or a later reaction', 'not_supported')
+            need(any(span['text'] == use['text'] for f in use['source_constraints']
+                     if f['id'] in acquisition['fact_ids'] for span in f['supports']), path,
+                 'source reading must retain an exact source-declared receipt span')
+            from production_decisions import _anchor
+            for sample in samples[action['start']:action['end'] + 1]:
+                world = sample['world']; actor = world['actors'][action['actor']]
+                prop = world['props'].get(prop_id)
+                need(prop is not None and prop.get('physical', {}).get('material') == 'paper', path,
+                     'source reading requires the actual registered paper object')
+                need(_anchor(world, prop)[0] == actor['scene_id'] and not world['scenes'][actor['scene_id']]['barriers'],
+                     path, 'reading across a different scene or unmodelled barrier is unsupported', 'not_supported')
+                need(actor['eye_state'] == 'natural_open' and actor['gaze'] is not None and
+                     actor['gaze']['ref'] == {'kind': 'prop', 'id': prop_id}, path,
+                     'source reading requires actual open-eye gaze on that paper for the entire interval')
+        else:
+            kinds = {self.events[aid][1]['kind'] for aid in expected}
+            need(bool(kinds & set(policy()['knowledge_event_policy']['self_event_effect_kinds'])), path,
+                 'self_event cannot grant reading, observation, belief or knowledge from pure staging')
+        for fid in acquisition['fact_ids']:
+            key = (acquisition['actor'], fid)
+            self.known.add(key)
+            self.known_at[key] = min(moment, self.known_at.get(key, moment))
 
     def check_bridge(self, row, actions):
         if self.plan is None: return
@@ -476,6 +556,74 @@ class ProductionPlanGuard:
             u=self.uses[action['id']]
             need(u['actor']==action['actor'] and u['stance']=='not_applicable' and not u['fact_ids'],
                  '$graph.production_plan.bridge','omitted staging cannot grant or consume plot knowledge')
+            need(not u.get('event_fact_ids'), '$graph.production_plan.bridge', 'omitted staging cannot claim source event provenance')
+
+    def _check_knowledge(self, row, samples, actions):
+        p = '$graph.production_plan.shots.' + row['shot_id']
+        # Finish a disclosure at a tick before checking a dependent action at
+        # that tick. No fictional hearing is inferred from a sentence string.
+        timeline = sorted({0, row['ticks'][-1], *[a['start'] for a in actions], *[a['end'] for a in actions]})
+        for tick in timeline:
+            for a in actions:
+                if a['end'] == tick:
+                    self.events[a['id']] = (row['shot_id'], a, samples)
+            for acquisition in self.plan['knowledge']['acquisitions']:
+                if acquisition['id'] in self.granted or acquisition['action_id'] not in self.events:
+                    continue
+                sid, a, prior_samples = self.events[acquisition['action_id']]
+                actual_use = self.source['uses_by_id'].get(a.get('source_use_id'))
+                need(actual_use is not None, p + '.knowledge', 'acquisition requires an actual compiled source use')
+                need(set(acquisition['fact_ids']) <= set(actual_use['fact_ids']), p + '.knowledge', 'disclosure does not carry the acquired fact')
+                if acquisition['mode']=='heard':
+                    need(a['kind'] == 'speak', p + '.knowledge', 'heard acquisition must bind an actual spoken event')
+                    for sample in prior_samples[a['start']:a['end']]:
+                        listener = sample['world']['actors'][acquisition['actor']]
+                        speaker = sample['world']['actors'][a['actor']]
+                        need(listener['scene_id'] == speaker['scene_id'] and acquisition['actor'] != a['actor'], p + '.knowledge', 'listener has no actual same-scene disclosure')
+                        need(not sample['world']['scenes'][speaker['scene_id']]['barriers'], p + '.knowledge',
+                             'hearing across declared barriers is not modelled', 'not_supported')
+                elif acquisition['mode']=='source_report':
+                    need(a['kind']=='narrate' and actual_use['actor'] is None, p+'.knowledge','source report must be delivered by actual objective narration')
+                    reports=[f for f in actual_use['source_constraints'] if f['id'] in acquisition['evidence_fact_ids'] and f['channel']=='report']
+                    need(reports and all(f['subject']==acquisition['actor'] and f['polarity']=='affirmative' and
+                        f['modality']=='asserted' and f['occurrence']=='occurred' and not f['conditions'] and
+                        any(span['text']==actual_use['text'] for span in f['supports']) for f in reports),
+                        p+'.knowledge','source report needs exact narrated source span and an occurred receipt by this recipient')
+                    need(set(acquisition['evidence_fact_ids'])<=set(actual_use['fact_ids']),p+'.knowledge','report evidence is not delivered')
+                else:
+                    self._acquire_self_event(acquisition, sid, a, prior_samples, actual_use, p + '.knowledge')
+                    self.granted.add(acquisition['id'])
+                    continue
+                # Hearing an assertion establishes receipt, not its truth.
+                self.reported.update((acquisition['actor'], fid) for fid in acquisition['fact_ids'])
+                moment = self.narrative.clock[sid] + a['end']
+                for fid in acquisition['fact_ids']:
+                    key = (acquisition['actor'], fid)
+                    self.reported_at[key] = min(moment, self.reported_at.get(key, moment))
+                self.granted.add(acquisition['id'])
+            for a in actions:
+                if a['start'] != tick:
+                    continue
+                u = self.uses[a['id']]
+                need(u['actor'] == a['actor'], p + '.knowledge', 'knowledge user differs from the actual event actor')
+                sourced = self.source['uses_by_id'].get(a.get('source_use_id'))
+                enacted = u.get('event_fact_ids', [])
+                if enacted:
+                    self._event_facts(a, sourced, enacted, p + '.knowledge')
+                if sourced:
+                    need(set(sourced['fact_ids']) <= set(u['fact_ids']) | set(enacted), p + '.knowledge', 'knowledge declaration omits actual source facts')
+                if a['kind'] == 'narrate':
+                    need(u['stance'] == 'narrator' and u['actor'] is None, p + '.knowledge', 'objective narration requires narrator stance')
+                else:
+                    need(u['stance'] != 'narrator', p + '.knowledge', 'a character cannot use narrator knowledge')
+                    if u['stance'] == 'known':
+                        need(all((a['actor'], fid) in self.known for fid in u['fact_ids']), p + '.knowledge', 'character uses knowledge before its acquisition')
+                        need(all(self.known_at[(a['actor'], fid)] <= self.narrative.clock[row['shot_id']] + a['start']
+                                 for fid in u['fact_ids']), p + '.knowledge', 'parallel editing cannot grant a later physical event result')
+                    if u['stance'] == 'reported':
+                        need(all((a['actor'], fid) in self.reported for fid in u['fact_ids']), p + '.knowledge', 'character uses a report before actually hearing it')
+                        need(all(self.reported_at[(a['actor'], fid)] <= self.narrative.clock[row['shot_id']] + a['start']
+                                 for fid in u['fact_ids']), p + '.knowledge', 'parallel editing cannot grant information from a later story instant')
 
     def check_shot(self, row, samples, actions, action_records):
         if self.plan is None:
@@ -507,60 +655,7 @@ class ProductionPlanGuard:
         need(set(spec['required_action_ids']) <= set(actual), p + '.required_action_ids', 'required event absent from this shot')
         audio = {a['id'] for a in actions if a['kind'] in {'speak', 'narrate', 'inner_voice'}}
         need(set(spec['audio_action_ids']) == audio, p + '.audio_action_ids', 'actual audio does not match the shot delivery plan')
-        # Finish a disclosure at a tick before checking a dependent action at
-        # that tick. No fictional hearing is inferred from a sentence string.
-        timeline = sorted({0, row['ticks'][-1], *[a['start'] for a in actions], *[a['end'] for a in actions]})
-        for tick in timeline:
-            for a in actions:
-                if a['end'] == tick:
-                    self.events[a['id']] = (row['shot_id'], a, samples)
-            for acquisition in self.plan['knowledge']['acquisitions']:
-                if acquisition['id'] in self.granted or acquisition['action_id'] not in self.events:
-                    continue
-                sid, a, prior_samples = self.events[acquisition['action_id']]
-                actual_use = self.source['uses_by_id'][a['source_use_id']]
-                need(set(acquisition['fact_ids']) <= set(actual_use['fact_ids']), p + '.knowledge', 'disclosure does not carry the acquired fact')
-                if acquisition['mode']=='heard':
-                    need(a['kind'] == 'speak', p + '.knowledge', 'heard acquisition must bind an actual spoken event')
-                    for sample in prior_samples[a['start']:a['end']]:
-                        listener = sample['world']['actors'][acquisition['actor']]
-                        speaker = sample['world']['actors'][a['actor']]
-                        need(listener['scene_id'] == speaker['scene_id'] and acquisition['actor'] != a['actor'], p + '.knowledge', 'listener has no actual same-scene disclosure')
-                        need(not sample['world']['scenes'][speaker['scene_id']]['barriers'], p + '.knowledge',
-                             'hearing across declared barriers is not modelled', 'not_supported')
-                else:
-                    need(a['kind']=='narrate' and actual_use['actor'] is None, p+'.knowledge','source report must be delivered by actual objective narration')
-                    reports=[f for f in actual_use['source_constraints'] if f['id'] in acquisition['evidence_fact_ids'] and f['channel']=='report']
-                    need(reports and all(f['subject']==acquisition['actor'] and f['polarity']=='affirmative' and
-                        f['modality']=='asserted' and f['occurrence']=='occurred' and not f['conditions'] and
-                        any(span['text']==actual_use['text'] for span in f['supports']) for f in reports),
-                        p+'.knowledge','source report needs exact narrated source span and an occurred receipt by this recipient')
-                    need(set(acquisition['evidence_fact_ids'])<=set(actual_use['fact_ids']),p+'.knowledge','report evidence is not delivered')
-                # Hearing an assertion establishes receipt, not its truth.
-                self.reported.update((acquisition['actor'], fid) for fid in acquisition['fact_ids'])
-                moment = self.narrative.clock[sid] + a['end']
-                for fid in acquisition['fact_ids']:
-                    key = (acquisition['actor'], fid)
-                    self.reported_at[key] = min(moment, self.reported_at.get(key, moment))
-                self.granted.add(acquisition['id'])
-            for a in actions:
-                if a['start'] != tick:
-                    continue
-                u = self.uses[a['id']]
-                need(u['actor'] == a['actor'], p + '.knowledge', 'knowledge user differs from the actual event actor')
-                sourced = self.source['uses_by_id'].get(a.get('source_use_id'))
-                if sourced:
-                    need(set(sourced['fact_ids']) <= set(u['fact_ids']), p + '.knowledge', 'knowledge declaration omits actual source facts')
-                if a['kind'] == 'narrate':
-                    need(u['stance'] == 'narrator' and u['actor'] is None, p + '.knowledge', 'objective narration requires narrator stance')
-                else:
-                    need(u['stance'] != 'narrator', p + '.knowledge', 'a character cannot use narrator knowledge')
-                    if u['stance'] == 'known':
-                        need(all((a['actor'], fid) in self.known for fid in u['fact_ids']), p + '.knowledge', 'character uses knowledge before its acquisition')
-                    if u['stance'] == 'reported':
-                        need(all((a['actor'], fid) in self.reported for fid in u['fact_ids']), p + '.knowledge', 'character uses a report before actually hearing it')
-                        need(all(self.reported_at[(a['actor'], fid)] <= self.narrative.clock[row['shot_id']] + a['start']
-                                 for fid in u['fact_ids']), p + '.knowledge', 'parallel editing cannot grant information from a later story instant')
+        self._check_knowledge(row, samples, actions)
         for requirement in spec['visible']:
             lo, hi, identity = requirement['start'], requirement['end'], requirement['subject']
             need(hi <= row['ticks'][-1], p + '.visible', 'required visibility lies outside this shot')

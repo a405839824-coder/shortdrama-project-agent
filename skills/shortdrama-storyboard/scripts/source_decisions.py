@@ -127,7 +127,7 @@ class SourceCompilation:
                 'plan_sha256': plan_hash,
                 'source_fact_ids': list(use.fact_ids),
                 'required_questions': ['does the source support the frozen premise and setting',
-                    'do initial knowledge and belief/pretence have actual source support',
+                    'do initial knowledge and belief/pretence have actual source support; are own event provenance, completed results and explicit reading receipts separate from proposition truth, with all necessary information dependencies retained and no invented paper contents',
                     'do director choices preserve the fact and make the whole shot deliverable'],
                 'related_shots': [shot['shot_id'] for shot in plan['shots'] if set(shot['purpose_fact_ids']) & set(use.fact_ids)],
                 'scene_narrative_review': {'required': True, 'plan_sha256': narrative_hash,

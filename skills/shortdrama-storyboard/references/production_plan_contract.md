@@ -49,7 +49,8 @@
 
 - `initial`：每项 `{actor, fact_ids, evidence_fact_ids}`。记录角色开始时已知事实及原文依据，禁止重复。依据能否证明该角色知情，由独立语义核对完成。
 - `acquisitions`：每项 `{id, actor, fact_ids, evidence_fact_ids, action_id, mode}`。`mode=heard`：引用真实对白事件，内容必须包含相关事实，听者与说者在事件期间同场，不能自我授予听取，事件完成后才更新知情。场景含声明遮挡时，声传播不在模型范围内，返回 `not_supported`。隔墙听取、读心、复杂看见/认出等不能假装已经建模。
-- `uses`：每个真实动作恰好一项 `{action_id, actor, fact_ids, stance, evidence_fact_ids}`；来源动作涉及的事实不能从这里删掉。`known` 要求有已知事实依据；`reported` 要求已经通过实际听取事件收到该信息；`suspected`、`mistaken`、`pretended` 要求非空事实与证据，仍须独立核对；`narrator` 仅用于无场内角色的客观旁白；`not_applicable` 只能对应不使用事实的动作。
+- `uses`：每个真实动作恰好一项 `{action_id, actor, fact_ids, stance, evidence_fact_ids}`，可选 `event_fact_ids`。来源事实不能丢弃；真正使用的信息进入 `fact_ids`，本人主事件的实际演出来源可进入互不相交的 `event_fact_ids`，两者并集覆盖来源的完整依赖。`known` 要求已知依据及合法剧情时点；`reported` 要求实际收悉；`suspected`、`mistaken`、`pretended` 仍须非空事实、依据及独审；`narrator` 仅客观旁白；`not_applicable` 要求信息 `fact_ids` 为空，不能隐藏依赖。
+- `event_fact_ids` 不授知情。`self_event` 与受限 `source_reading` 获知方式、确切主事件定义及阅读物件/时间检查由单源生成的 [knowledge_event_contract.md](knowledge_event_contract.md) 规定。前者只有本人实际物理事件全部步骤完成后取得结果；后者额外要求 `prop_id` 和源文明示的阅读收悉，不能授予未提供的文字或宣称像素阅读通过。旧初始声明不自动合法化。
 
 检查采用实际事件顺序，同一时刻先完成听取，再检查依赖动作。听到某种说法只登记为已收到信息，不自动升级为事实已经证实；猜测、误解和伪装也不变为世界真相。不强制自然眨眼或无信息动作借用剧情事实。
 支持状态独立的同时异地场景，实际获知按narrative的剧情时间计量。倒叙、非线性重排或同一事件重新取景的认知回放仍报告 `not_supported`；不把有限平行剪辑能力当完整时间旅行模型。
