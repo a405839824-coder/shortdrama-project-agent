@@ -11,7 +11,7 @@ import math
 import re
 from bisect import bisect_right
 
-from authoring_contract_blocks import eye_blocks, interior_lighting_blocks, transition_block, voice_block, psychological_safety_suffix, ContractBlockError
+from authoring_contract_blocks import eye_blocks, scene_lighting_blocks, transition_block, voice_block, psychological_safety_suffix, ContractBlockError
 from boundary_decisions import BoundaryDecision
 from production_state import ProductionStateChain, CONTRACT as STATE_CONTRACT
 from staging_geometry import _direction, screen_direction
@@ -360,6 +360,41 @@ def _paper(sources, ref, path, *, current):
     return paper
 
 
+def _light_source(light):
+    """The source is a finite position indoors and a world direction outdoors."""
+    outdoor = light.get('kind') == 'outdoor_daylight'
+    key = 'direction_xyz' if outdoor else 'position_xyz'
+    _obj(light, {'period', 'kind', 'name', 'state', key, 'main_tone', 'shadow_tone', 'materials'}, 'scene.light')
+    _name(light['name'], 'scene.light.name')
+    if outdoor:
+        _need(isinstance(light[key], list) and len(light[key]) == 3, 'scene.light.direction_xyz',
+              'requires [east, north, up] direction toward daylight, not a source position')
+        vector = [_num(x, 'scene.light.direction_xyz') for x in light[key]]
+    else:
+        vector = _xyz(light[key], 'scene.light.position_xyz')
+    _need(math.hypot(*vector[:2]) > EPS, 'scene.light',
+          'light world direction undefined at the common scene origin')
+    source = {k: light[k] for k in ('period', 'kind', 'name', 'state')}
+    source['world_side'] = _direction(_bearing([0, 0, 0], vector))
+    source['elevation_deg' if outdoor else 'height_m'] = (
+        math.degrees(math.atan2(vector[2], math.hypot(*vector[:2]))) if outdoor else vector[2])
+    return source, vector
+
+
+def _validate_scene_light(light, label):
+    source, _ = _light_source(light)
+    if light['kind'] == 'outdoor_daylight':
+        from lighting_checks import classify_scene
+        _need(classify_scene({'空间站位描述': label})['space_type'] != 'indoor', 'scene.light',
+              'outdoor daylight cannot be assigned to an indoor scene')
+    try:
+        scene_lighting_blocks(source=source, screen_side='正前', receiving_surfaces=['人物面部'],
+            weak_reflector=None, main_tone=light['main_tone'], shadow_tone=light['shadow_tone'],
+            materials=light['materials'], air='clear', exposure='normal')
+    except ContractBlockError as exc:
+        raise ProductionDecisionError('scene.light', str(exc)) from exc
+
+
 def _world(value, sources, *, check_source_refs=True):
     _obj(value, {"scenes", "actors", "props", "points"}, "initial_world")
     w = copy.deepcopy(value)
@@ -376,13 +411,19 @@ def _world(value, sources, *, check_source_refs=True):
             _need(isinstance(scene['opening_labels'], dict), 'scene.opening_labels', 'requires opening ID to display name mapping')
             for identity, label in scene['opening_labels'].items():
                 _name(identity, 'scene.opening_labels.id'); _display_name(label, 'scene.opening_labels.' + identity)
-        light = _obj(scene["light"], {"period", "kind", "name", "state", "position_xyz", "main_tone", "shadow_tone", "materials"}, "scene.light")
-        _name(light["name"], "scene.light.name")
+        light = scene["light"]
+        _need(isinstance(light, dict), 'scene.light', 'requires an explicit light object')
+        if light.get('kind') == 'outdoor_daylight':
+            _validate_scene_light(light, scene['label'])
+        else:
+            # Retain legacy validation timing for indoor scenes not yet filmed.
+            _obj(light, {"period", "kind", "name", "state", "position_xyz", "main_tone", "shadow_tone", "materials"}, "scene.light")
+            _name(light["name"], "scene.light.name")
+            light["position_xyz"] = _xyz(light["position_xyz"], "scene.light.position_xyz")
         try:
             scene["door_window_state"] = normalize_openings(scene["door_window_state"], light, "scene." + sid + ".door_window_state")
         except EnvironmentDecisionError as exc:
             raise ProductionDecisionError(exc.path, exc.reason) from exc
-        light["position_xyz"] = _xyz(light["position_xyz"], "scene.light.position_xyz")
         _need(isinstance(scene["barriers"], list), "scene.barriers", "requires explicit array; [] declares no known barriers")
         seen = set()
         for wall in scene["barriers"]:
@@ -888,7 +929,7 @@ def _opening_description(world, scene_id, camera):
         elif identity in world['props']:
             prop_scene, position = _anchor(world, world['props'][identity])
             _need(prop_scene == scene_id, 'scene.openings', 'opening prop belongs to another scene')
-        elif identity == scene['light']['name']:
+        elif identity == scene['light']['name'] and 'position_xyz' in scene['light']:
             position = scene['light']['position_xyz']
         else:
             position = None
@@ -989,13 +1030,13 @@ def _fields(world, row, cam, view, sources):
     planned = sources.get('production_plan') is not None
     static, visible, eye_limits = _initial(world, view, sources, cam)
     scene = world["scenes"][row["scene_id"]]; light = scene["light"]
-    source_vec = _sub(light["position_xyz"], cam["target"])
-    _need(math.hypot(*light["position_xyz"][:2]) > EPS, "scene.light", "light world direction undefined at the common scene origin")
+    light_source, vector = _light_source(light)
+    outdoor = light['kind'] == 'outdoor_daylight'
+    source_vec = vector if outdoor else _sub(vector, cam["target"])
     screen = _dot(source_vec, cam["right"])
     receivers = [i + ("面部" if v["eye_visible"] else "后脑" if v["head"] else "手部") for i, v in view["actors"].items()]
     receivers = receivers or [_reference(world, {"kind": "prop", "id": name}, cam) for name in view["props"]]
-    blocks = interior_lighting_blocks(source={k: light[k] for k in ("period", "kind", "name", "state")} |
-                                     {"world_side": _direction(_bearing([0, 0, 0], light["position_xyz"])), "height_m": light["position_xyz"][2]},
+    blocks = scene_lighting_blocks(source=light_source,
                                      screen_side="正前" if abs(screen) <= EPS else "左" if screen < 0 else "右",
                                      receiving_surfaces=receivers, weak_reflector=None, main_tone=light["main_tone"],
                                      shadow_tone=light["shadow_tone"], materials=light["materials"], air="clear", exposure="normal")
@@ -1029,7 +1070,7 @@ def _fields(world, row, cam, view, sources):
     tilt = math.degrees(math.asin(cam["forward"][2]))
     fields = {**{key: row["editorial"][key] for key in METADATA_FIELDS}, "场景连续性ID": row["continuity_id"], "镜头类型": framing,
               "可见主体": visible, "空间站位描述": scene["label"] + "。" +
-                  (("日间。" if light['period'] == 'day' else "夜间。") + _opening_description(world, row["scene_id"], cam)) +
+                  (("室外日间。" if outdoor else "日间。" if light['period'] == 'day' else "夜间。") + _opening_description(world, row["scene_id"], cam)) +
                   (_spatial_description(world, row, cam, view, sources) if planned else
                    "".join(f"{_reference(world, {'kind': 'point', 'id': name}, cam)}。" for name, point in world["points"].items() if point["scene_id"] == row["scene_id"])),
               "起始状态": "\n".join(relation_tokens + [static]),

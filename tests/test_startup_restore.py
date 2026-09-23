@@ -170,6 +170,17 @@ class StartupRestoreTests(unittest.TestCase):
             restore._restore(self.data, self.runtime, version='0.5.46')
         self.assertFalse(self.runtime.exists())
 
+    def test_v0553_binding_rejects_signed_previous_release(self):
+        self.assertEqual((restore.TARGET_VERSION, restore.CONTRACT, restore.DIRECTORY),
+                         ('0.5.53', 'library-runtime-transfer-0553-v1', '.upgrade-0553'))
+        self.manifest.update(target_version='0.5.52', contract='library-runtime-transfer-0552-v1')
+        self.sign()
+        before = restore._tree(self.data)
+        with self.assertRaisesRegex(ValueError, 'manifest_binding'):
+            self.run_restore()
+        self.assertFalse(self.runtime.exists())
+        self.assertEqual(restore._tree(self.data), before)
+
     def test_startup_gate_precedes_create_and_listener_on_both_transports(self):
         import main
         settings = SimpleNamespace(host='127.0.0.1', port=12345)

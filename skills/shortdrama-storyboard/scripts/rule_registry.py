@@ -175,6 +175,22 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
     migrations = registry.get('historical_rule_migrations', {})
     if not isinstance(migrations, dict):
         return False
+    voice_reviewed = {
+        'critical_runtime_policies': 'field_content_policy',
+        'atomic_semantic_definitions': 'AR-R10-VOICE-001',
+    }
+    if voice_reviewed.get(kind) == identity:
+        migration = migrations.get('existing-voice-0553', {})
+        hashes = migration.get(kind, {}).get(identity, {})
+        if (migration.get('basis') == 'user-authorized-existing-voice-compatibility-2026-09-23'
+                and migration.get('authorization_work_order') == 'WO-27691d9b6635439b'
+                and migration.get('introduced_in') == '0.5.53'
+                and migration.get('legacy_applies_to_current_generation') is False
+                and all(set(migration.get(family, {})) == {required_id}
+                        for family, required_id in voice_reviewed.items())
+                and hashes.get('baseline_sha256') == registry_sha256(previous)
+                and hashes.get('current_sha256') == registry_sha256(current)):
+            return True
     if kind == 'critical_runtime_policies' and identity in {'field_content_policy', 'production_prevention_policy'}:
         migration = migrations.get('unified-production-0552', {})
         hashes = migration.get(kind, {}).get(identity, {})

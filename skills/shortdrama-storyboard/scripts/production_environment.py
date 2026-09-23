@@ -41,6 +41,8 @@ def opening_states(value, path='scene.openings'):
     renderer. The paper-window entry must be the same actual declared state.
     """
     openings = {}
+    if value == "无门窗。":
+        return openings  # Accept the normal form emitted for an empty registry.
     if isinstance(value, dict):
         for name, state in value.items():
             _need(isinstance(name, str) and bool(re.fullmatch(r"[\u3400-\u9fffA-Za-z0-9_-]{1,64}", name))
@@ -115,14 +117,14 @@ def validate_editorial(value, path="editorial"):
 def render_environment(editorial, *, initial_world, final_world, scene_id, actions, action_start_worlds=None, display_names=None):
     """Render only after simulation; derive cue actor, object and clock once.
 
-    This compiler's existing indoor light model declares clear air and a fixed
+    This compiler's light model declares clear air and a fixed
     light source. Prop/actor movements remain in the shared action timeline;
     this environmental field never adds a competing motion narrative.
     """
     validate_editorial(editorial)
     light = initial_world["scenes"][scene_id]["light"]
     states = {"closed": "关闭", "open": "开启", "lit": "点燃", "unlit": "未点燃",
-              "extinguished": "熄灭"}
+               "extinguished": "熄灭", "present": "已建立"}
     _need(light["state"] in states, "environment.light.state", "unsupported shared light state")
     # This grammar models no independent wind/rain/flame/background action.
     # Air appearance and the registered opening/light state have other owners.
