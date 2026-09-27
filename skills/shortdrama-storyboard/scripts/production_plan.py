@@ -55,6 +55,9 @@ def model_production_contract():
             'source_dialogue_review': json.loads((REF / 'rule_registry.json').read_text(encoding='utf-8'))['runtime']['source_dialogue_review_policy'],
             'action_contract':{'reference':'references/source_actions_0537.md',
                 'parameters':{k:sorted(v) for k,v in sorted(ACTION_FIELDS.items())},
+                'optional_parameters': {'speak': {
+                    'timing': '{profile_id,selection_evidence}; registered source-bound selection only',
+                    'pauses': '[{id,offset,seconds,extra?}]; offset indexes this source use including punctuation, 0 before first character, len(text) after last; normal pauses included in utterance-average; unique extra pauses once; same-ID or same-position conflicts rejected; semantic support pending independent review'}},
                 'expression_poses': production_actions.EXPRESSION_POSES,
                 'source_modes':sorted(MODES),'postures':sorted(production_actions.POSTURES),
                 'frozen_source_required':sorted(production_actions.SOURCE_REQUIRED),

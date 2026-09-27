@@ -53,6 +53,7 @@ from .delta import (
 from .file_io import (
     _VerifiedAuditOverlay,
     _seal_service_verified_audit_overlay,
+    audit_saved_workbook_overlay,
     download_openai_file,
     extract_file,
     extract_xlsx_for_controlled_handoff_revalidation,
@@ -3745,7 +3746,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         unknown_checks = [row for row in machine_checks if row.get("status") == "unknown"]
         if not obligation_coverage["complete"] or unknown_checks:
             clean = False
-            unresolved = [state for state in obligation_coverage["check_states"].values() if not state["complete"]]
+            unresolved = [{**state, "shot_id": identity.rsplit("/", 1)[0]}
+                          for identity, state in obligation_coverage["check_states"].items() if not state["complete"]]
             unresolved.extend(unknown_checks)
             unknown_layers = {row.get("layer") for row in unresolved}
             for layer, row in layer_matrix.items():
@@ -3762,6 +3764,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     row["evidence_count"] = 1
             issues.append({"error_code": "E-AUDIT-COVERAGE-UNKNOWN", "severity": "fail", "blocking": True,
                            "location": "audit_coverage", "evidence": "Applicable review or required evidence remains unresolved.",
+                           "shot_ids": sorted({str(sid) for state in unresolved
+                               for sid in (state.get("shot_ids") or [state.get("shot_id")]) if sid}),
                            "repair_action": "Complete the current bound obligations and missing evidence; do not infer PASS from absent findings."})
         quality = _draft_quality_metrics(storyboard, issues, coverage=obligation_coverage, execution_checks=machine_checks)
         enriched.setdefault("quality_metrics", {})["review_completion"] = quality
@@ -18184,7 +18188,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         handoff: dict[str, Any],
         storyboard: dict[str, Any],
         artifact_id: str,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """Recheck the narrow legacy workbook route without granting a verdict."""
 
         if handoff.get("preflight_evidence_source") != (
@@ -18212,7 +18216,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         )
         artifact_bytes = artifact_path.read_bytes()
         extracted = extract_xlsx_for_controlled_handoff_revalidation(
-            artifact_bytes
+            artifact_bytes, audit_only=True
         )
         proof = handoff.get("workbook_projection_revalidation")
         replay = handoff.get("production_validation_replay")
@@ -18248,6 +18252,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "historical_handoff_audit_intake_invalid: workbook, "
                 "canonical, replay, or projection proof differs"
             )
+        return extracted.get("audit_workbook_evidence")
 
     def _ensure_audit_work_order(
         self,
@@ -23475,7 +23480,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 audit_work_order=audit_work_order,
                 stage_trace_id=stage_trace_id,
             )
-        self._assert_historical_handoff_audit_intake(
+        historical_saved_workbook_evidence = self._assert_historical_handoff_audit_intake(
             namespace,
             project_id,
             handoff=handoff,
@@ -23781,7 +23786,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 )
             report = self._attach_independent_evidence_matrix(
                 validate_storyboard.validate_project(storyboard, mode="audit",
-                    saved_workbook_evidence=self._saved_workbook_audit_evidence(namespace, project_id, artifact_id)),
+                    saved_workbook_evidence=(historical_saved_workbook_evidence or
+                        self._saved_workbook_audit_evidence(namespace, project_id, artifact_id))),
                 storyboard,
                 semantic_audit,
             )
@@ -24479,25 +24485,39 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             None,
         )
         if audited_record is None:
-            audited_bytes = _export_compact_storyboard(
-                storyboard,
-                signed_report,
-                audit_overlay=audit_overlay,
-            )
+            _, original_path = self.store.get_artifact(namespace, project_id, artifact_id)
+            original_workbook = original_path.suffix.lower() in {".xlsx", ".xlsm"}
+            if original_workbook:
+                audited_bytes = audit_saved_workbook_overlay(
+                    original_path.read_bytes(), storyboard, signed_report, audit_overlay=audit_overlay,
+                    controlled_historical=historical_saved_workbook_evidence is not None)
+                saved_evidence = (signed_report.get("quality_metrics", {}).get("saved_workbook_evidence")
+                                  or storyboard.get("audit_workbook_evidence") or {})
+                overlay_contract = {
+                    "read_only_audit": True,
+                    "audit_output_mode": "original_workbook_with_report_overlay",
+                    "regenerated_execution_fields": False,
+                    "source_projection_contract": saved_evidence.get("projection_contract"),
+                    "source_column_contract": saved_evidence.get("column_contract"),
+                }
+            else:
+                audited_bytes = _export_compact_storyboard(
+                    storyboard, signed_report, audit_overlay=audit_overlay)
+                overlay_contract = compact_contract_evidence()
             audited_record = self.store.save_artifact_bytes(
                 namespace,
                 project_id,
                 audited_bytes,
                 file_name=(
                     f"{Path(str(record.get('file_name') or 'storyboard')).stem}"
-                    f"_独立审计_{overlay_status}.xlsx"
+                    f"_独立审计_{overlay_status}{original_path.suffix.lower() if original_workbook else '.xlsx'}"
                 ),
                 artifact_type="storyboard_audit_overlay",
                 version=str(record.get("version") or "current"),
                 work_order_id=str(audit_work_order["work_order_id"]),
                 source_artifact_id=artifact_id,
                 metadata={
-                    **compact_contract_evidence(),
+                    **overlay_contract,
                     "canonical_json_artifact_id": record.get("metadata", {}).get(
                         "canonical_json_artifact_id"
                     ),

@@ -65,11 +65,26 @@ DELIVERY_CLASSES = {"continuous_explanation", "ordinary_question_or_reply", "spe
 
 def source_uses(project):
     """Reuse existing source bindings, never infer adulthood from a name."""
+    if not isinstance(project, dict):
+        return {}
     evidence = project.get("prevention_evidence") or {}
-    compilation = (evidence.get("production_derivation") or {}).get("source_compilation") or {}
+    if not isinstance(evidence, dict):
+        return {}
+    derivation = evidence.get("production_derivation") or {}
+    if not isinstance(derivation, dict):
+        return {}
+    compilation = derivation.get("source_compilation") or {}
+    if not isinstance(compilation, dict):
+        return {}
     if compilation.get("uses_by_id"):
-        return compilation["uses_by_id"]
-    rows = (evidence.get("source_decisions") or {}).get("uses", [])
+        bindings = compilation["uses_by_id"]
+        return {key: row for key, row in bindings.items() if isinstance(key, str) and isinstance(row, dict)} if isinstance(bindings, dict) else {}
+    decisions = evidence.get("source_decisions") or {}
+    if not isinstance(decisions, dict):
+        return {}
+    rows = decisions.get("uses", [])
+    if not isinstance(rows, list):
+        return {}
     return {row["id"]: row for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str)}
 
 
@@ -145,22 +160,22 @@ def _continuation_voice(shot):
     return parsed
 
 
-def estimate_utterance(text, profile=None, pauses=()):
-    profile = profile or _profile(_rules())
-    rate = _number(profile.get("units_per_second"))
-    if rate <= 0:
-        raise ValueError("语速必须大于零")
-    text = str(text or "")
-    # Mixed-language/digit readings are labelled approximate until a reviewed
-    # matching reading/counting profile is registered; never rewrite the source.
-    units = len(re.findall(r"[\u3400-\u9fffA-Za-z0-9]", text))
-    seen, positions, extra = {}, {}, 0.0
+def normalize_pauses(text, pauses=()):
+    """Pause offsets belong to this exact utterance, including punctuation.
+
+    An offset is before that character; len(text) is after the utterance.
+    Repeated declarations are one event, never an extra fee or a silent repair.
+    """
+    if not isinstance(pauses, (list, tuple)):
+        raise ValueError("停顿必须是事件列表")
+    seen, positions, result = {}, {}, []
     for pause in pauses:
-        if not isinstance(pause, dict):
+        if not isinstance(pause, dict) or set(pause) - {"id", "offset", "seconds", "extra"}:
             raise ValueError("停顿必须是带身份的事件")
         identity, offset = pause.get("id"), pause.get("offset")
         seconds = _number(pause.get("seconds"))
-        if not identity or type(offset) is not int or not 0 <= offset <= len(text) or seconds < 0:
+        if (not isinstance(identity, str) or not identity.strip() or type(offset) is not int
+                or not 0 <= offset <= len(text) or seconds < 0 or type(pause.get("extra", False)) is not bool):
             raise ValueError("停顿身份、字符位置或时长非法")
         signature = (offset, seconds, pause.get("extra") is True)
         if identity in seen and seen[identity] != signature:
@@ -171,8 +186,26 @@ def estimate_utterance(text, profile=None, pauses=()):
         if offset in positions:
             continue
         positions[offset] = (seconds, pause.get("extra") is True)
-        if profile.get("rate_basis") == "articulation" or pause.get("extra") is True:
-            extra += seconds
+        result.append({"id": identity, "offset": offset, "seconds": seconds, "extra": pause.get("extra") is True})
+    return sorted(result, key=lambda p: p["offset"])
+
+
+def segment_pauses(text, pauses, start, end):
+    """A cut-point pause belongs to the following segment; final pause to last."""
+    return [dict(p, offset=p["offset"] - start) for p in normalize_pauses(text, pauses)
+            if start <= p["offset"] < end or p["offset"] == end == len(text)]
+
+
+def estimate_utterance(text, profile=None, pauses=()):
+    profile = profile or _profile(_rules())
+    rate = _number(profile.get("units_per_second"))
+    if rate <= 0:
+        raise ValueError("语速必须大于零")
+    text = str(text or "")
+    # Mixed-language/digit readings remain approximate; never rewrite source.
+    units = len(re.findall(r"[\u3400-\u9fffA-Za-z0-9]", text))
+    extra = sum(p["seconds"] for p in normalize_pauses(text, pauses)
+                if profile.get("rate_basis") == "articulation" or p["extra"])
     result = {"seconds": units / rate + extra, "units": units,
             "profile_id": profile.get("id"), "evidence_status": profile.get("evidence_status"),
             "rate_basis": profile.get("rate_basis"), "extra_pause_seconds": extra,
@@ -185,6 +218,32 @@ def estimate_utterance(text, profile=None, pauses=()):
         result["reference_seconds"] = [units / high + extra, units / low + extra]
         result["reference_range_kind"] = "within_sample_turn_variation_not_confidence_or_guarantee"
     return result
+
+
+def predicted_character_interval(text, profile, pauses, segment, char_range):
+    """Local planned speech span, reserving actual extra pause seconds first.
+
+    Unmeasured speech is distributed by units inside the remaining window.
+    A pause before the first selected character precedes the returned interval;
+    a pause after the last selected character does not lengthen its tail.
+    """
+    lo, hi = segment["char_range"]
+    left, right = max(lo, char_range[0]), min(hi, char_range[1])
+    if left >= right:
+        return None
+    local = segment_pauses(text, pauses, lo, hi)
+    charged = [p for p in local if profile.get("rate_basis") == "articulation" or p["extra"]]
+    counts = [estimate_utterance(c, profile)["units"] for c in text[lo:hi]]
+    if not sum(counts):
+        counts = [1.0] * (hi - lo)
+    length = segment["end"] - segment["start"] - sum(p["seconds"] for p in charged)
+    if length < -EPS:
+        raise ValueError("额外停顿超出发言片段窗口")
+    total = sum(counts)
+    def position(offset, before):
+        delay = sum(p["seconds"] for p in charged if p["offset"] < offset or (before and p["offset"] == offset))
+        return segment["start"] + max(0.0, length) * sum(counts[:offset]) / total + delay
+    return position(left - lo, True), position(right - lo, False)
 
 
 def _reference_advisory(estimate, window, *, shot_id, utterance_id):
@@ -350,7 +409,7 @@ def validate_timing(project, shots, rules=None):
                 raise ValueError("发言缺实际时间片段")
             # Validate every pause BEFORE filtering it into character segments.
             # Otherwise an out-of-range pause could vanish and buy false space.
-            estimate_utterance(row["text"], profile, item.get("pauses", []))
+            full_estimate = estimate_utterance(row["text"], profile, item.get("pauses", []))
             cursor, previous_end = 0, None
             for segment in segments:
                 segment_sid = segment.get("shot_id")
@@ -389,7 +448,7 @@ def validate_timing(project, shots, rules=None):
                 global_start, global_end = bases[segment_sid] + start, bases[segment_sid] + end
                 if previous_end is not None and abs(global_start - previous_end) > EPS:
                     raise ValueError("同一连续发言的时间片段存在间隙、重叠或错序")
-                pauses = [dict(p, offset=p["offset"] - bounds[0]) for p in item.get("pauses", []) if bounds[0] <= p.get("offset", -1) < bounds[1] or p.get("offset") == bounds[1] == len(row["text"])]
+                pauses = segment_pauses(row["text"], item.get("pauses", []), *bounds)
                 estimate = estimate_utterance(row["text"][bounds[0]:bounds[1]], profile, pauses)
                 if estimate["seconds"] > end - start + EPS:
                     fault(f"按配置{profile['id']}预算需{estimate['seconds']:.3f}s，片段仅{end-start:.3f}s；这是文本预算不足，非音视频实测结论", segment_sid, code="E-DIALOGUE-003" if kind == "dialogue" else "E-PSYCH-001")
@@ -402,6 +461,13 @@ def validate_timing(project, shots, rules=None):
                               "reference_seconds": estimate.get("reference_seconds"),
                               "selection_evidence": item.get("selection_evidence"),
                               "selection_semantic_status": "pending_independent_review" if profile.get("applicability") else None})
+                if full_estimate['extra_pause_seconds'] > 0:
+                    # Internal arrival means the prefix has been heard. Keep
+                    # the established utterance endpoint inclusive of its wait.
+                    spans[-1]['character_reached_at'] = [global_start] + [
+                        global_end if offset == len(row['text']) else bases[segment_sid] + predicted_character_interval(
+                            row['text'], profile, item.get('pauses', []), segment, [bounds[0], offset])[1]
+                        for offset in range(bounds[0] + 1, bounds[1] + 1)]
                 cursor, previous_end = bounds[1], global_end
             if cursor != len(row["text"]):
                 raise ValueError("发言片段未覆盖完整原句及标点")

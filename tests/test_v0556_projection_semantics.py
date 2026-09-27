@@ -171,13 +171,37 @@ class ProjectionSemanticsTests(unittest.TestCase):
             _, canonical = generated(); shot = canonical['shots'][0]; shot['生成限制'] = '9:16竖屏；' + clause
             self.assertEqual(project_formal_master(shot), compile_formal_merged_field(shot, assume_compact=True))
             self.assertNotIn('配乐', project_gpt_keyframe(shot))
-        for clause in ['禁止字幕但加入音乐', '不加字幕、水印并加入背景音乐', '无BGM；随后播放音乐', '无BGM且加入配乐']:
+        for clause in ['禁止字幕但加入音乐', '不加字幕、水印并加入背景音乐', '无BGM；随后播放音乐',
+                       '无BGM且加入配乐', '无BGM并恢复配乐', '无BGM而恢复配乐', '无BGM后恢复配乐',
+                       '背景音乐低沉铺底', '配乐渐强烘托情绪', '不是没有音乐', '不能没有BGM']:
             self.assertIn('affirmative', {row['status'] for row in music_directives(clause)})
-        for clause in ['是否加入音乐', '未禁止音乐', '音乐待定', '如果需要则播放BGM']:
+        for clause in ['是否加入音乐', '未禁止音乐', '音乐待定', '如果需要则播放BGM',
+                       '没有禁止配乐', '不必没有BGM', '无须禁止音乐']:
             self.assertEqual({row['status'] for row in music_directives(clause)}, {'unknown'})
         for clause in ['此镜不加音乐', '音乐不得响起', '禁止字幕和使用配乐']:
             self.assertEqual({row['status'] for row in music_directives(clause)}, {'negative'})
         self.assertEqual(music_directives('沈值班员说道：“禁止音乐。”'), [])
+
+    def test_malformed_semantic_evidence_returns_diagnostics_and_unknown(self):
+        _, canonical = generated()
+        for malformed in ('invalid', None, []):
+            with self.subTest(prevention_evidence=malformed):
+                obj = copy.deepcopy(canonical)
+                obj['prevention_evidence'] = malformed
+                self.assertTrue(validate_project(obj)['issues'])
+        obj = copy.deepcopy(canonical)
+        obj['prevention_evidence']['source_ledger'] = [
+            {'source_id': 'S1', 'source_text': '林工程师告诉站长备用系统已经断电。', 'target_shots': 7}]
+        checks = validate_project(obj)['quality_metrics']['semantic_checks']
+        self.assertTrue(any(c['check_id'] == 'source_communication' and c['status'] == 'unknown' for c in checks))
+        for evidence in ({'rows': None}, {'rows': [{'shot_id': canonical['shots'][0]['镜头编号'], 'cells': 'invalid'}]}):
+            with self.subTest(saved_evidence=evidence):
+                obj = copy.deepcopy(canonical)
+                obj['audit_workbook_evidence'] = evidence
+                report = validate_project(obj)
+                self.assertTrue(report['issues'])
+                self.assertTrue(any(c['check_id'] == 'saved_projection_format' and c['status'] == 'unknown'
+                                    for c in report['quality_metrics']['semantic_checks']))
 
     def test_unquoted_communication_without_optional_contract_remains_unknown(self):
         for source in ['站长通知工程师明日检修。', '驿使向军官宣读撤离命令。', '船长请求舵手关闭舱门。']:

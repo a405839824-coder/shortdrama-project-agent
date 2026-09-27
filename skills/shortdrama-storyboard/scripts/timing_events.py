@@ -313,7 +313,16 @@ def validate_events(project: dict[str, Any], shots: Any, speech_spans: list[dict
             for span in utterances.get(trigger["utterance_id"], []):
                 chars = _char_bounds(span.get("char_range"))
                 if chars and chars[0] <= offset <= chars[1]:
-                    reached = span["global_start"] + (offset - chars[0]) / (chars[1] - chars[0]) * (span["global_end"] - span["global_start"])
+                    clock = span.get('character_reached_at')
+                    if clock is not None:
+                        if (not isinstance(clock, list) or len(clock) != chars[1] - chars[0] + 1
+                                or any(type(t) not in (int, float) or _number(t) is None or not span['global_start'] - 1e-9 <= t <= span['global_end'] + 1e-9 for t in clock)
+                                or any(a > b + 1e-9 for a, b in zip(clock, clock[1:]))):
+                            faults.append(_fault(f"事件{event_id}的发言字符时钟非法", shot_id))
+                            continue
+                        reached = clock[offset - chars[0]]
+                    else:
+                        reached = span["global_start"] + (offset - chars[0]) / (chars[1] - chars[0]) * (span["global_end"] - span["global_start"])
                     candidates.append((reached, chars))
             if not candidates:
                 faults.append(_fault(f"事件{event_id}的触发发言/字符偏移无实际发声片段可证明", shot_id))

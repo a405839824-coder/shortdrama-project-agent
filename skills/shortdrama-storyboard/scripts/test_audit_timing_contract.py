@@ -1,11 +1,15 @@
 """Small certificate-bound checks for the generic 0.5.56 contracts."""
 import copy
+import hashlib
+import json
 import unittest
 
 from rule_registry import load_registry, check_registry_definition
 from timing_model import resolve_profile, estimate_utterance
 from projection_semantics import music_directives, explicit_state_conflicts, tail_binding_faults
 from authoring_contract_blocks import scene_lighting_blocks, ContractBlockError
+from production_decisions import _audio_segments, ProductionDecisionError
+from timing_model import segment_pauses, predicted_character_interval
 
 
 class AuditTimingContractTests(unittest.TestCase):
@@ -82,6 +86,76 @@ class AuditTimingContractTests(unittest.TestCase):
         args['source']['period'] = 'night'
         with self.assertRaises(ContractBlockError):
             scene_lighting_blocks(**args)
+
+    def test_author_pause_partition_and_character_clock_use_one_extra_event(self):
+        profile = self.select()
+        text = '甲乙丙丁。'
+        pause = {'id': 'extra', 'offset': 2, 'seconds': .3, 'extra': True}
+        segments = _audio_segments(text, [(0, 0, 10), (1, 10, 20), (2, 20, 40)],
+                                   'S1', profile, 'test', [pause, pause])
+        total = sum(estimate_utterance(text[a:b], profile,
+                    segment_pauses(text, [pause, pause], a, b))['seconds']
+                    for a, b in (s['char_range'] for s in segments))
+        self.assertAlmostEqual(total, 4 / 6.3 + .3)
+        span = predicted_character_interval(text, profile, [pause],
+                    {'start': 1, 'end': 3, 'char_range': [0, 5]}, [2, 4])
+        self.assertAlmostEqual(span[0], 2.15)
+        with self.assertRaises(ProductionDecisionError):
+            _audio_segments(text, [(0, 0, 5)], 'S1', profile, 'test', [pause])
+
+    def test_actual_author_pause_compiler_canonical_and_chapter(self):
+        # Reuse a packaged public structural fixture, not a story accuracy sample.
+        from test_failed_push import fixture
+        from source_decisions import compile_source_decisions
+        from production_decisions import lower_production_decisions
+        from author_storyboard import _render_decisions
+        from timing_model import validate_timing, chapter_budget
+        data, _ = fixture()
+        del data['initial_world']['actors']['乙']
+        text = '明日再议。'; source_text = '成年甲说道：“' + text + '”'
+        fact = {'id': 'f', 'subject': '甲', 'event_id': 'e', 'polarity': 'affirmative',
+            'conditions': [], 'modality': 'asserted', 'occurrence': 'future',
+            'expression_occurrence': 'occurred', 'expression_status': 'asserted',
+            'channel': 'oral', 'content_availability': 'given', 'content_policy': 'verbatim',
+            'content_text': text, 'depends_on': [], 'required': True,
+            'supports': [{'source_id': 'DOC', 'start': 0, 'end': len(source_text), 'text': source_text}]}
+        graph = json.dumps({'contract': 'source-facts-v1', 'sources': {'DOC': hashlib.sha256(source_text.encode()).hexdigest()},
+                            'facts': [fact]}, ensure_ascii=False).encode()
+        decisions = {'contract': 'source-decisions-v1', 'uses': [{'id': 'u', 'fact_ids': ['f'],
+            'mode': 'spoken', 'wording': 'verbatim', 'actor': '甲', 'text': text}], 'written_objects': []}
+        source = compile_source_decisions(graph, decisions, source_texts={'DOC': source_text}, expected_graph_sha256=hashlib.sha256(graph).hexdigest())
+        evidence = data['project']['prevention_evidence']
+        evidence.update(source_decisions=decisions, source_ledger=[{'source_id': 'DOC', 'source_text': source_text}])
+        row = data['shots'][0]; row['source_unit_ids'] = ['DOC']
+        voice = {'baseline': '年龄感为成年，中音区，厚薄适中，明暗中性，常态清楚。',
+            'speech_act': '陈述商议安排。', 'current_expression': '平静，意在告知。', 'volume': '正常交谈。',
+            'rhythm': '中速，逐字清楚。', 'breath': '自然吸气。', 'pauses': '按语义短停。',
+            'emphasis': '“明日”。', 'tail_direction': '落稳', 'tail_execution': '句末自然收住。',
+            'prohibited_tones': ['喊叫', '哭腔']}
+        speech = {'id': 'speech', 'kind': 'speak', 'source_use_id': 'u', 'start': 10, 'end': 30, 'after': [], 'voice': voice,
+                  'timing': {'profile_id': self.fast, 'selection_evidence': self.selection}}
+        row['actions'] = [speech]
+        def render():
+            return _render_decisions(lower_production_decisions(data, source_compilation=source)['typed_decisions'])
+        ordinary = render()
+        speech['pauses'] = []
+        self.assertEqual(render(), ordinary)
+        pause = {'id': 'wait', 'offset': 2, 'seconds': .4, 'extra': True}
+        speech['pauses'] = [pause, pause]
+        canonical = render()
+        item = canonical['prevention_evidence']['audio_workflow']['timing']['utterances'][0]
+        self.assertEqual(len(item['pauses']), 1)
+        self.assertEqual(validate_timing(canonical, canonical['shots'])['faults'], [])
+        budget = chapter_budget([{'speaker': '甲', 'text': text}], project=canonical)
+        self.assertEqual(budget['faults'], [])
+        self.assertAlmostEqual(budget['required_dialogue_seconds'], 4 / 6.3 + .4)
+        speech['pauses'] = [pause, dict(pause, seconds=.5)]
+        with self.assertRaises(ProductionDecisionError):
+            render()
+        speech['pauses'] = [pause]
+        speech['voice']['pauses'] = '“明日”后停顿1秒。'
+        with self.assertRaises(ProductionDecisionError):
+            render()
 
 
 if __name__ == '__main__':

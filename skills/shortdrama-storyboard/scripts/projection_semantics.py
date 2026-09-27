@@ -11,9 +11,17 @@ import re
 QUOTES = re.compile(r'“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|"[^"\n]*"')
 MUSIC = re.compile(r'BGM|背景音乐|额外配乐|配乐|音乐', re.I)
 NEGATIVE = re.compile(r'^(?:禁止|不要|不得|不使用|不生成|没有|不加|无)(?:任何)?')
-UNCERTAIN = re.compile(r'是否|可能|酌情|视情况|待定|考虑|不一定|未禁止|不必|并非|不是|不再禁止|不能没有')
-ACTION = re.compile(r'加入|加上|播放|配上|使用|采用|允许|生成|插入|铺设|搭配|切入|响起|渐入|铺开|伴随|保留|开启')
-BOUNDARY = re.compile(r'([；;。！？!?，,\n]+|但是|然而|不过|而且|并且|随后|然后|而后|接着|同时|但|却|且|又|并(?=加入|播放|使用|生成|允许))')
+UNCERTAIN = re.compile(r'是否|可能|酌情|视情况|待定|考虑|不一定|如果|倘若|假如|若')
+# Cancelling a ban grants no proof that music actually exists. Cancelling
+# absence, or requiring its opposite, does assert its presence. Keep these
+# operator relationships separate from an ordinary first-order prohibition.
+RELAXED_BAN = re.compile(r'(?:没有|并未|未曾|未|不再|不|无须|无需|不必|不需要)(?:再)?(?:禁止|禁用|没有|无)')
+REQUIRED_PRESENCE = re.compile(r'(?:不是|并非|不能|不可|不得)(?:完全)?(?:没有|无)')
+ACTION = re.compile(r'加入|加上|播放|配上|使用|采用|允许|生成|插入|铺设|搭配|切入|响起|渐入|铺开|伴随|保留|开启|恢复|保持|衬托|烘托|铺底|渐强|渐弱|持续')
+# These are predicate forms, not an inventory of permitted visual objects.
+# A conjoined assertion must never inherit a prior music item's negation.
+ASSERTION = re.compile(ACTION.pattern + r'|清澈|清晰|明亮|柔和|洁净|整洁|稳定|可见|可辨|可读|呈现|处于|位于|仍|已经|不再|没有|禁止|不得|不要|关闭|打开')
+BOUNDARY = re.compile(r'([；;。！？!?，,\n]+|但是|然而|不过|而且|并且|随后|然后|而后|接着|同时|但|却|且|又|[并而](?=' + ACTION.pattern + r'))')
 ENUM = re.compile(r'(?:以及|或者|[、与和及或])')
 MUSIC_ITEM = re.compile(r'(?:任何)?(?:让)?(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)?\s*(?:BGM|背景音乐|额外配乐|配乐|音乐)(?:响起|播放|进入|渐入|切入|铺开|持续|开始)?', re.I)
 
@@ -27,7 +35,8 @@ def music_directives(value):
 
     Explicit negative noun enumerations inherit scope without a vocabulary of
     permitted visual objects. A new predicate or contrast resets that scope.
-    Double negation and modal/conditional instructions remain unresolved.
+    Negation of absence and negation of a ban have different meanings;
+    uncertain permissions and modal/conditional instructions stay unresolved.
     """
     original = str(value or '')
     text = _masked_quotes(original)
@@ -43,6 +52,10 @@ def music_directives(value):
             # A direct ban may contain its own verb; a later predicate may not
             # borrow a ban from the beginning of a different enumeration item.
             scoped = bool(neg and (not restart or match.start() < neg.end() + len(own)))
+            if neg and restart and MUSIC.search(prefix[neg.end():]):
+                # A later predicate after an already complete music object
+                # starts a new instruction, even without a punctuation mark.
+                scoped = False
             if neg and ENUM.search(prefix[neg.end():]):
                 scoped = (not restart or restart.start() == 0) and not re.search(r'则|时|之后|以后|即可', prefix)
             local_negative = re.search(r'(?:禁止|不要|不得|不使用|不生成|没有|不加|无)(?:任何)?'
@@ -50,8 +63,10 @@ def music_directives(value):
             negative_predicate = re.match(r'\s*(?:禁止|不得|不要|不应|不能|不会|不)(?:出现|响起|播放|加入|使用|生成)',
                                           clause[match.end():])
             scoped = scoped or bool(local_negative or negative_predicate)
-            if UNCERTAIN.search(body) or re.search(r'如果|若|倘若|假如|(?:禁止|不加).{0,20}(?:时|后|则)', body):
+            if UNCERTAIN.search(body) or RELAXED_BAN.search(body) or re.search(r'(?:禁止|不加).{0,20}(?:时|后|则)', body):
                 status = 'unknown'
+            elif REQUIRED_PRESENCE.search(body):
+                status = 'affirmative'
             elif scoped:
                 status = 'negative'
             elif ACTION.search(body):
@@ -76,6 +91,7 @@ def strip_negative_music(value):
     text = QUOTES.sub(protect, text)
     mentioned = False
     parts = BOUNDARY.split(text)
+    removed = set()
     for index, clause in enumerate(parts):
         records = music_directives(clause)
         if not records or any(row['status'] != 'negative' for row in records):
@@ -89,6 +105,22 @@ def strip_negative_music(value):
             continue
         mentioned = True
         parts[index] = prefix.group() + '、'.join(kept) if kept else ''
+        if not kept:
+            removed.add(index)
+            # Coordinated bare objects share the original negative operator;
+            # a full assertion or its own operator starts a separate clause.
+            if index + 2 < len(parts) and parts[index + 1] in {'且', '而且', '并且'}:
+                following = parts[index + 2].strip()
+                if (following and not NEGATIVE.match(following) and not ASSERTION.search(following)
+                        and not UNCERTAIN.search(following) and not REQUIRED_PRESENCE.search(following)
+                        and not RELAXED_BAN.search(following)):
+                    parts[index + 2] = prefix.group() + following
+    # Only connectors adjacent to an actually removed music atom disappear.
+    # Preserve every unrelated conjunction and all original punctuation.
+    for index in removed:
+        for neighbor in (index - 1, index + 1):
+            if 0 <= neighbor < len(parts) and parts[neighbor] and not re.fullmatch(r'[；;。！？!?，,\n]+', parts[neighbor]):
+                parts[neighbor] = ''
     result = ''.join(parts)
     for token, quote in protected.items():
         result = result.replace(token, quote)

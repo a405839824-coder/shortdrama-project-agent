@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import csv
 import datetime as dt
 import hashlib
@@ -1137,6 +1138,8 @@ def extract_xlsx(data: bytes, *, audit_only: bool = False) -> dict[str, Any]:
 
 def extract_xlsx_for_controlled_handoff_revalidation(
     data: bytes,
+    *,
+    audit_only: bool = False,
 ) -> dict[str, Any]:
     """Verify one immutable workbook for controlled handoff revalidation.
 
@@ -1278,6 +1281,15 @@ def extract_xlsx_for_controlled_handoff_revalidation(
         "00_范围与审计", list(scope_sheet.get("matrix") or [])
     )
 
+    saved_evidence = None
+    if audit_only:
+        mapped = _external_workbook_audit(sheets, hashlib.sha256(data).hexdigest())
+        if mapped is not None:
+            saved_evidence = mapped["audit_workbook_evidence"]
+            saved_evidence.update(historical_canonical_available=True,
+                identity_basis="verified_controlled_historical_handoff_with_current_audit_cells",
+                projection_integrity_verified=True, projection_contract=projection_contract,
+                selected_projector="shortdrama-projector/0.5.3-frozen" if compatibility_applied else projection_contract)
     public_sheets = [
         sheet
         for sheet in sheets
@@ -1289,6 +1301,7 @@ def extract_xlsx_for_controlled_handoff_revalidation(
         "sheets": public_sheets,
         "canonical_storyboard": canonical,
         "canonical_sidecar_present": True,
+        **({"audit_workbook_evidence": saved_evidence} if saved_evidence is not None else {}),
         "controlled_projection_revalidation": {
             "spec": "controlled-workbook-projection-revalidation-v1",
             "mode": (
@@ -1764,6 +1777,89 @@ def _write_scope_audit_sheet(
     sheet.column_dimensions["B"].width = 58
     sheet.freeze_panes = "A3"
     return sheet
+
+
+def audit_saved_workbook_overlay(
+    data: bytes,
+    storyboard: dict[str, Any],
+    audit_report: dict[str, Any],
+    *,
+    audit_overlay: _VerifiedAuditOverlay,
+    controlled_historical: bool = False,
+) -> bytes:
+    """Attach the existing audit page to an intact source, never re-project it."""
+    if not isinstance(audit_overlay, _VerifiedAuditOverlay):
+        raise ValueError("independent_audit_overlay_unverified")
+    if audit_overlay._as_dict().get("source_artifact_raw_sha256") != hashlib.sha256(data).hexdigest():
+        raise ValueError("independent_audit_overlay_source_fingerprint_mismatch")
+    # The service selects this only after its signed historical-handoff gates.
+    # There is no exception fallback from ordinary reading to compatibility.
+    reader = extract_xlsx_for_controlled_handoff_revalidation if controlled_historical else extract_xlsx
+    original = reader(data, audit_only=True)
+    if original.get("canonical_storyboard") != storyboard:
+        raise ValueError("independent_audit_overlay_source_canonical_mismatch")
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        keep_vba = "xl/vbaProject.bin" in archive.namelist()
+    workbook = load_workbook(io.BytesIO(data), data_only=False, keep_vba=keep_vba)
+    scope_name = "00_范围与审计"
+    scope_index = workbook.sheetnames.index(scope_name) if scope_name in workbook.sheetnames else 0
+    if scope_name in workbook.sheetnames:
+        workbook.remove(workbook[scope_name])
+    scope = _write_scope_audit_sheet(workbook, storyboard, audit_report, audit_overlay)
+    workbook.move_sheet(scope, offset=scope_index - workbook.sheetnames.index(scope_name))
+    # This updates only the audit-page binding, not the original payload, its
+    # projection hash, or its version. Unsigned inputs remain without a sidecar.
+    if CANONICAL_SIDECAR_SHEET in workbook.sheetnames:
+        sidecar = workbook[CANONICAL_SIDECAR_SHEET]
+        headers = [cell.value for cell in sidecar[1]]
+        if "audit_page_sha256" in headers:
+            column = headers.index("audit_page_sha256") + 1
+            digest = _visible_sheet_sha256(scope_name, _sheet_value_matrix(scope))
+            for row in range(2, sidecar.max_row + 1):
+                sidecar.cell(row, column, digest)
+    else:
+        # Reuse the existing row; do not imply historical production evidence.
+        for row in scope.iter_rows():
+            if row[0].value == "production_evidence_location":
+                row[1].value = "只读外部原件；未提供历史 canonical sidecar"
+    output = io.BytesIO()
+    workbook.save(output)
+    workbook.close()
+    result = output.getvalue()
+    restored = reader(result, audit_only=True)
+    if original["canonical_sidecar_present"]:
+        if restored["canonical_storyboard"] != storyboard:
+            raise ValueError("independent_audit_overlay_canonical_changed")
+    elif restored["canonical_sidecar_present"]:
+        raise ValueError("independent_audit_overlay_created_historical_sidecar")
+    # Round-trip every original content cell and its effective formatting,
+    # including reading copies for preservation only (never semantic scoring).
+    before = load_workbook(io.BytesIO(data), data_only=False)
+    after = load_workbook(io.BytesIO(result), data_only=False)
+    try:
+        for sheet in before.worksheets:
+            if sheet.title in {scope_name, CANONICAL_SIDECAR_SHEET}:
+                continue
+            peer = after[sheet.title]
+            if _sheet_value_matrix(sheet) != _sheet_value_matrix(peer):
+                raise ValueError("independent_audit_overlay_content_changed: " + sheet.title)
+            for row in sheet.iter_rows():
+                for cell in row:
+                    other = peer[cell.coordinate]
+                    for attr in ("font", "fill", "border", "alignment", "protection", "number_format"):
+                        if copy.copy(getattr(cell, attr)) != copy.copy(getattr(other, attr)):
+                            raise ValueError("independent_audit_overlay_format_changed: " + sheet.title + "!" + cell.coordinate)
+            if (str(sheet.merged_cells), sheet.freeze_panes, sheet.sheet_state,
+                {key: dict(value) for key, value in sheet.row_dimensions.items()},
+                {key: dict(value) for key, value in sheet.column_dimensions.items()}) != (
+                str(peer.merged_cells), peer.freeze_panes, peer.sheet_state,
+                {key: dict(value) for key, value in peer.row_dimensions.items()},
+                {key: dict(value) for key, value in peer.column_dimensions.items()}):
+                raise ValueError("independent_audit_overlay_layout_changed: " + sheet.title)
+    finally:
+        before.close()
+        after.close()
+    return result
 
 
 def storyboard_to_xlsx(

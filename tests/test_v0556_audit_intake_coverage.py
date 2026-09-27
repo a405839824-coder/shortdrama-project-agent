@@ -14,7 +14,7 @@ from openpyxl import Workbook, load_workbook
 from jsonschema import Draft202012Validator
 
 from shortdrama_mcp.audit_coverage import build_obligations, coverage_summary, validate_coverage
-from shortdrama_mcp.file_io import extract_xlsx
+from shortdrama_mcp.file_io import extract_xlsx, audit_saved_workbook_overlay, _seal_service_verified_audit_overlay
 from shortdrama_mcp.materializer import COMPACT_SHOT_FIELDS, MOTHER_TEMPLATE_COLUMNS, LEGACY_MOTHER_TEMPLATE_COLUMNS
 from shortdrama_mcp.models import SEMANTIC_AUDIT_LAYER_NAMES
 from shortdrama_mcp.service import StoryboardService, _draft_quality_metrics, canonical_storyboard_sha256
@@ -71,6 +71,18 @@ class ExternalAuditTests(unittest.TestCase):
             if not legacy:
                 with self.assertRaisesRegex(ValueError, 'requires its canonical sidecar'):
                     extract_xlsx(raw)
+            overlay = _seal_service_verified_audit_overlay({
+                'status': 'FAIL_CURRENT', 'conclusion': '只读审计缺证', 'initial_issue_count': 1,
+                'residual_issue_count': 1, 'introduced_issue_count': 0, 'blocking_issue_count': 1,
+                'audit_trace_id': 'TRACE-test', 'certificate_id': 'CERT-test', 'certificate_integrity_hmac': 'sealed-test',
+                'canonical_sha256': canonical_storyboard_sha256(candidate),
+                'source_artifact_raw_sha256': hashlib.sha256(raw).hexdigest()})
+            with patch('shortdrama_mcp.file_io.formal_mother_template_rows', side_effect=AssertionError('audit must not re-project')):
+                saved = audit_saved_workbook_overlay(raw, candidate, {'issues': [{'error_code': 'missing-evidence'}]}, audit_overlay=overlay)
+            reread = extract_xlsx(saved, audit_only=True)
+            self.assertFalse(reread['canonical_sidecar_present'])
+            self.assertEqual(reread['canonical_storyboard']['shots'], candidate['shots'])
+            self.assertEqual(reread['canonical_storyboard']['audit_workbook_evidence']['rows'], evidence['rows'])
 
     def test_present_invalid_sidecar_cannot_fall_back_to_unsigned_audit(self):
         book = load_workbook(io.BytesIO(workbook_bytes()))
@@ -214,7 +226,7 @@ class SignedWorkbookAuditFlowTests(unittest.IsolatedAsyncioTestCase):
         cert = h.service.store.get_project_record(h.namespace, project, kind='certificates',
             record_id=audited['data']['certificate']['certificate_id'])
         self.assertEqual(cert['canonical_sha256'], identity)
-        self.assertEqual(cert['artifact_raw_sha256'], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(cert['fingerprints']['artifact_raw'], hashlib.sha256(raw).hexdigest())
         metrics = cert['report']['quality_metrics']
         self.assertEqual(metrics['saved_workbook_evidence']['raw_sha256'], hashlib.sha256(raw).hexdigest())
         failed = [check for check in metrics['semantic_checks'] if check['check_id'] == 'saved_visible_capacity' and check['status'] == 'fail']
@@ -223,6 +235,31 @@ class SignedWorkbookAuditFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cert['semantic_obligation_coverage']['expected_count'], 14 * len(extract_xlsx(raw)['canonical_storyboard']['shots']))
         _, original_path = h.service.store.get_artifact(h.namespace, project, original['artifact_id'])
         self.assertEqual(original_path.read_bytes(), raw)
+        overlay_record, overlay_path = h.service.store.get_artifact(h.namespace, project, audited['data']['audited_workbook']['artifact_id'])
+        reread = extract_xlsx(overlay_path.read_bytes(), audit_only=True)
+        self.assertEqual(canonical_storyboard_sha256(reread['canonical_storyboard']), identity)
+        self.assertEqual(reread['audit_workbook_evidence']['projection_contract'], 'shortdrama-projector/0.5.46')
+        self.assertEqual(reread['audit_workbook_evidence']['rows'], metrics['saved_workbook_evidence']['rows'])
+        self.assertTrue(overlay_record['metadata']['read_only_audit'])
+        self.assertFalse(overlay_record['metadata']['regenerated_execution_fields'])
+        self.assertEqual(overlay_record['metadata']['source_projection_contract'], 'shortdrama-projector/0.5.46')
+        for key in ('schema_profile', 'materializer_contract', 'materialization_passes'):
+            self.assertNotIn(key, overlay_record['metadata'])
+        before, after = load_workbook(io.BytesIO(raw)), load_workbook(overlay_path)
+        try:
+            for sheet in before.worksheets:
+                if sheet.title in {'00_范围与审计', '__shortdrama_canonical_v1'}:
+                    continue
+                peer = after[sheet.title]
+                self.assertEqual(list(sheet.values), list(peer.values))
+                self.assertEqual(str(sheet.merged_cells), str(peer.merged_cells))
+                self.assertEqual(sheet.freeze_panes, peer.freeze_panes)
+                for row in sheet.iter_rows():
+                    for cell in row:
+                        for attr in ('font', 'fill', 'border', 'alignment', 'number_format', 'protection'):
+                            self.assertEqual(copy.copy(getattr(cell, attr)), copy.copy(getattr(peer[cell.coordinate], attr)))
+        finally:
+            before.close(); after.close()
 
     async def test_fresh_audit_uses_old_saved_F_and_retains_original_identity(self):
         await self.audit_original(paged=False)
@@ -253,6 +290,9 @@ class CoverageAccountingTests(unittest.TestCase):
         self.assertEqual(matrix['audit_layer_results']['源文对白']['status'], 'unknown')
         self.assertFalse(any(row['status'] == 'pass' for row in matrix['preventive_gate_results'].values()))
         self.assertIsNone(matrix['quality_thresholds']['source_and_key_dialogue_mapping_percent'])
+        unknown = next(issue for issue in enriched['issues'] if issue['error_code'] == 'E-AUDIT-COVERAGE-UNKNOWN')
+        self.assertEqual(unknown['shot_ids'], [candidate['shots'][0]['镜头编号']])
+        self.assertTrue(service._repair_issue_targets(candidate, [unknown]))
         schema_path = Path(__file__).resolve().parents[1] / 'skills/shortdrama-storyboard/references/agent_ledger_schema.json'
         schema = json.loads(schema_path.read_text(encoding='utf-8'))
         receipt_schema = schema['$defs']['independent_audit_certificate']['properties']['semantic_obligation_coverage']

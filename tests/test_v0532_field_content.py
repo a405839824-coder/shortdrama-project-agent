@@ -91,6 +91,7 @@ class FieldContentTests(unittest.TestCase):
         cases = [('机位','焦点落在江氏转身后的眼睛。'), ('起始状态','承接上一个镜头。'),
                  ('画面内容','江氏站定；未列人物不得出现。'),
                  ('画面内容','本轮仅核对三人站位。'), ('光源方向','光源离地2米。'),
+                 ('画面内容','江氏因本句决定性尾音“议。”在该窗口不眨眼。尾音压低。'),
                  ('空间站位描述','摄影机在门内，平视50mm。')]
         for field,text in cases:
             with self.subTest(field=field,text=text):self.assertTrue(faults(field,text))
@@ -100,6 +101,7 @@ class FieldContentTests(unittest.TestCase):
                  ('空间站位描述','江氏位于画面左侧、木案旁，她的目光略偏向摄影机右侧的邹氏。'),
                  ('画面内容','江氏没有开口。她推开窗，吹灭油灯。'),
                  ('画面内容','江氏在“没来晚”重音期间不眨眼。'),
+                 ('画面内容','江氏因本句决定性尾音“议。”在该窗口不眨眼。'),
                  ('光源来源','北侧木格窗关闭，光源离地2米。'),
                  ('心理音轨','内心独白：江氏心想：“我该怎么做？”人物不张嘴，不驱动口型，不生成字幕。'),
                  ('生成限制','9:16竖屏；禁止字幕、水印；禁止额外配乐。')]
@@ -117,7 +119,7 @@ class FieldContentTests(unittest.TestCase):
         obj=strict_fixture(); result=validate_project(obj)
         self.assertEqual(result['issues'],[])
         self.assertNotIn('尾音克制',obj['shots'][0]['画面内容'])
-        obj['shots'][0]['音色']=obj['shots'][0]['音色'].replace('带试探意味的问候','普通问候').replace('试探','确认').replace('克制上抬','未说明')
+        obj['shots'][0]['音色']=obj['shots'][0]['音色'].replace('带试探意味的问候','普通问候').replace('试探','确认').replace('克制上抬，保留询问','未说明')
         self.assertTrue(any(i['error_code']=='E-PUNCT-004' for i in validate_project(obj)['issues']))
 
     def test_static_projection_has_fixed_r5_routes_and_no_binding_status(self):

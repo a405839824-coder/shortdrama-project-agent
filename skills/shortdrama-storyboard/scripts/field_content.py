@@ -161,7 +161,7 @@ def _instruction_text(value, field, mask):
         # only the event label, never the following delivery or action clause.
         text = re.sub(r"(?:重音|尾音)(?=期间|结束后|落下后)",
                       lambda m: " " * len(m.group()), text)
-        text = re.sub(r"重音(?=\s*(?:“[^”]*”|‘[^’]*’|字|词)\s*(?:期间|时|上|在该窗口)\s*不眨眼)",
+        text = re.sub(r"(?:重音|尾音)(?=\s*(?:“[^”]*”|‘[^’]*’|字|词)\s*(?:期间|时|上|在该窗口)\s*不眨眼)",
                       lambda m: " " * len(m.group()), text)
     return text
 

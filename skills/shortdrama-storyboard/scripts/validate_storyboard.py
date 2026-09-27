@@ -3393,16 +3393,17 @@ def _communication_candidates(obj, shots):
     candidates = {}
     for row in records:
         source = str(row.get("source_text") or "")
+        targets = row.get("target_shots")
+        targets = [target for target in targets if isinstance(target, str)] if isinstance(targets, list) else []
         # A colon-delimited direct source line has supplied audible contents
         # even without typography quotes. Only the exact current speaker/text
         # closes this route; another quote elsewhere in the shot cannot.
-        direct_rows = [line for target in row.get("target_shots", []) for line in actual_by_shot.get(str(target), [])]
+        direct_rows = [line for target in targets for line in actual_by_shot.get(target, [])]
         direct_matches = [(speaker, line) for speaker, line in direct_rows if re.fullmatch(
             re.escape(speaker) + r'(?:说道|说|问道|问|答道|答|喊道)\s*[:：]\s*' + re.escape(line), source.strip())]
         unquoted = re.sub(r'(?:[^，。；;\n]{0,12}(?:' + NARRATIVE_SPEECH_ACT_RE.pattern + r')[:：]?)?[“「][^”」]*[”」]', '', source)
         unquoted = NEGATED_SPEECH_ACT_RE.sub('', oral_communication_candidate_text(unquoted))
         if NARRATIVE_SPEECH_ACT_RE.search(unquoted):
-            targets = row.get("target_shots") or []
             candidates[(source, tuple(targets))] = {"source_text": source, "target_shots": targets,
                 "source_unit_id": row.get("source_id"), "direct_wording_matches": bool(direct_matches),
                 "source_use_ids": [identity for identity, use in uses.items() if isinstance(use, dict)
@@ -4176,9 +4177,18 @@ def validate_project(
         verified_contract = (external_saved.get("projection_contract")
             if external_saved is not None and external_saved.get("projection_integrity_verified") is True else None)
         verified_contract = verified_contract if isinstance(verified_contract, str) and verified_contract.strip() else None
-        saved_rows = {str(row.get("shot_id")): row for row in workbook_evidence.get("rows", []) if isinstance(row, dict)}
+        raw_saved_rows = workbook_evidence.get("rows")
+        if not isinstance(raw_saved_rows, list):
+            issues.append(_issue(catalog, "E-TEMPLATE-001", "audit_workbook_evidence.rows",
+                "实际工作簿审计证据rows必须为数组；未取得的单元格保持未知。", blocking=True))
+            raw_saved_rows = []
+        saved_rows = {str(row.get("shot_id")): row for row in raw_saved_rows if isinstance(row, dict)}
         for shot in normalized_shots:
             cells = saved_rows.get(str(shot.get("镜头编号")), {}).get("cells", {})
+            if not isinstance(cells, dict):
+                issues.append(_issue(catalog, "E-TEMPLATE-001", "audit_workbook_evidence.cells",
+                    "实际工作簿单元格证据必须为对象；未取得的单元格保持未知。", blocking=True))
+                cells = {}
             saved = {name: cell.get("value") for name, cell in cells.items() if isinstance(cell, dict)}
             semantic_checks.extend(validate_saved_projection(shot, saved,
                 projection_contract_verified=verified_contract))

@@ -16,7 +16,8 @@ from boundary_decisions import BoundaryDecision
 from production_state import ProductionStateChain, CONTRACT as STATE_CONTRACT
 from staging_geometry import _direction, screen_direction
 from field_content import world_position_matches
-from timing_model import estimate_utterance, resolve_profile as timing_profile, _rules as timing_rules
+from timing_model import (estimate_utterance, normalize_pauses, segment_pauses, predicted_character_interval,
+                          resolve_profile as timing_profile, _rules as timing_rules)
 from production_environment import (METADATA_FIELDS, validate_editorial,
                                     render_environment, normalize_openings, opening_states, EnvironmentDecisionError)
 import production_actions as extended_actions
@@ -44,7 +45,7 @@ EPS = 1e-8
 
 
 def _action_keys(kind, action=None):
-    optional = {"timing"} if kind == "speak" and isinstance(action, dict) and "timing" in action else set()
+    optional = {"timing", "pauses"} & set(action) if kind == "speak" and isinstance(action, dict) else set()
     return (COMMON - {"actor"} if kind in {"speak", "narrate", "inner_voice"} else COMMON) | ACTION_FIELDS[kind] | optional
 
 
@@ -710,18 +711,13 @@ def _restraint_binding(action, actions, sources, ticks, profile, path):
         _need(span[1] == len(text) and bool(text[span[0]:].strip("。！？!?；;，, .…")), path + ".char_range", "decisive tail must bind the actual utterance ending, not punctuation alone")
     pieces = [(i, max(a, utterance["start"]), min(b, utterance["end"])) for i, (a, b) in enumerate(zip(ticks, ticks[1:]))
               if max(a, utterance["start"]) < min(b, utterance["end"])]
-    segments = _audio_segments(text, pieces, "bound-source", profile, path + ".audio_alignment")
+    pauses = utterance.get("pauses", [])
+    segments = _audio_segments(text, pieces, "bound-source", profile, path + ".audio_alignment", pauses)
     bounds = []
     for segment in segments:
         lo, hi = segment["char_range"]; left, right = max(lo, span[0]), min(hi, span[1])
         if left >= right: continue
-        counts = [float(estimate_utterance(c, profile)["units"]) for c in text[lo:hi]]
-        # Punctuation-only segments use declared character subdivision; neither
-        # this nor the ordinary profile is represented as measured audio.
-        if not sum(counts): counts = [1.0] * (hi - lo)
-        total = sum(counts); length = segment["end"] - segment["start"]
-        bounds.append((segment["start"] + length * sum(counts[:left-lo]) / total,
-                       segment["start"] + length * sum(counts[:right-lo]) / total))
+        bounds.append(predicted_character_interval(text, profile, pauses, segment, [left, right]))
     expected_start, expected_end = min(x[0] for x in bounds), max(x[1] for x in bounds)
     _need(utterance["start"] <= action["start"] < action["end"] <= utterance["end"] and
           action["start"] / 10 <= expected_start + EPS and action["end"] / 10 >= expected_end - EPS,
@@ -839,20 +835,23 @@ def _action_sentence(action, info, world, camera):
     return verb, sentence
 
 
-def _audio_segments(text, pieces, shot_id, profile, path):
+def _audio_segments(text, pieces, shot_id, profile, path, pauses=()):
     """Predict a contiguous character partition using the registered capacity.
 
     This is planned alignment, not measured audio. Integer characters that
     cannot be partitioned at a very short macro cut are an explicit limitation.
     """
     count = len(text); total_ticks = sum(hi - lo for _, lo, hi in pieces)
+    pauses = normalize_pauses(text, pauses)
+    unit_seconds = estimate_utterance("甲", profile)["seconds"]
     estimates = [0]
-    for character in text: estimates.append(estimates[-1] + estimate_utterance(character, profile)["units"])
+    for index, character in enumerate(text):
+        estimate = estimate_utterance(character, profile, segment_pauses(text, pauses, index, index + 1))
+        estimates.append(estimates[-1] + estimate["units"] + estimate["extra_pause_seconds"] / unit_seconds)
     prefix = [0]
     for _, lo, hi in pieces: prefix.append(prefix[-1] + hi - lo)
 
-    unit_seconds = estimate_utterance("甲", profile)["seconds"]
-    capacities = [math.floor(((hi - lo) / 10 + EPS) / unit_seconds) for _, lo, hi in pieces]
+    capacities = [((hi - lo) / 10 + EPS) / unit_seconds for _, lo, hi in pieces]
     possible = [[False] * (count + 1) for _ in range(len(pieces) + 1)]
     possible[-1][count] = True
     for index in range(len(pieces) - 1, -1, -1):
@@ -872,6 +871,42 @@ def _audio_segments(text, pieces, shot_id, profile, path):
         segments.append({"shot_id": shot_id, "start": lo / 10, "end": hi / 10, "char_range": [cursor, stop]})
         cursor = stop
     return segments
+
+
+def _voice_with_pauses(voice, text, pauses, path):
+    """Use the same declared extra waits in the existing voice pause field."""
+    if not pauses:
+        return voice
+    _need(isinstance(voice, dict), path, 'requires explicit voice decisions')
+    authored = str(voice.get('pauses') or '')
+    # Do not silently replace an already authored numerical performance. Only
+    # exact source-prefix/boundary anchors can be reconciled without guessing.
+    numeric = list(re.finditer(r'(?:\d+(?:\.\d+)?|[零〇一二两三四五六七八九十百半点]+)\s*(?:秒|[sS])', authored))
+    explicit = list(re.finditer(
+        r'(?P<anchor>开口前|本句结束后|句末|(?:说至本句)?“(?P<prefix>[^”]+)”后)'
+        r'(?P<extra>额外)?(?:停顿|短停)(?P<seconds>\d+(?:\.\d+)?)秒', authored))
+    for match in numeric:
+        bound = next((x for x in explicit if x.start() <= match.start() and match.end() <= x.end()), None)
+        _need(bound is not None, path, 'explicit numeric voice pause needs an exact structured source-prefix or utterance-boundary binding')
+        prefix = bound['prefix']
+        _need(prefix is None or text.startswith(prefix), path, 'numeric voice pause anchor is not this exact source prefix')
+        offset = len(prefix) if prefix is not None else 0 if bound['anchor'] == '开口前' else len(text)
+        _need(any(p['offset'] == offset and abs(p['seconds'] - float(bound['seconds'])) <= EPS
+                  and (not bound['extra'] or p['extra']) for p in pauses), path,
+              'numeric voice pause conflicts with the same structured utterance position')
+    extra = [p for p in pauses if p['extra'] and p['seconds'] > 0]
+    if not extra:
+        return voice
+    internal = any(0 < p['offset'] < len(text) for p in extra)
+    _need(not re.search(r'(?:全句|全程|始终|一直)(?:都)?不停顿|(?:无|没有)(?:任何|额外)?停顿', authored)
+          and not (internal and re.search(r'句中不停顿', authored)), path,
+          'voice pause instruction conflicts with the declared extra pause')
+    labels = []
+    for pause in extra:
+        offset = pause['offset']
+        anchor = '开口前' if offset == 0 else '本句结束后' if offset == len(text) else f'说至本句“{text[:offset]}”后'
+        labels.append(f"{anchor}额外停顿{pause['seconds']:g}秒")
+    return {**voice, 'pauses': '；'.join(labels) + '；其余按语义自然短停。'}
 
 
 def _screen_place(position, camera):
@@ -1225,6 +1260,9 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                 choice = choice or {}
                 use = sources["uses_by_id"][use_id]
                 try:
+                    if 'pauses' in action:
+                        action['pauses'] = normalize_pauses(use['text'], action['pauses'])
+                        action['voice'] = _voice_with_pauses(action['voice'], use['text'], action['pauses'], ap + '.voice.pauses')
                     audio_profiles[action["id"]] = timing_profile(
                         timing_rules(), choice.get("profile_id", default_audio_profile["id"]),
                         selection=choice.get("selection_evidence"),
@@ -1395,13 +1433,18 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     fields["心理音轨"] = psychological_text + psychological_safety_suffix()
                     source = {"shot_id": sid, "char_range": [char_start, char_start + len(use["text"])]}; audio_kind = "psychological"
                 profile = audio_profiles[action["id"]]
-                segments = _audio_segments(use["text"], world_pieces, sid, profile, ap + ".audio_alignment")
+                pauses = action.get('pauses', [])
+                segments = _audio_segments(use["text"], world_pieces, sid, profile, ap + ".audio_alignment", pauses)
                 timing["utterances"].append({"id": action["id"], "kind": audio_kind, "speaker": action["actor"] or "心理音轨",
                     "source": source, "segments": segments, "profile_id": profile["id"]})
                 if action.get("timing", {}).get("selection_evidence") is not None:
                     timing["utterances"][-1]["selection_evidence"] = copy.deepcopy(action["timing"]["selection_evidence"])
+                if pauses:
+                    timing['utterances'][-1]['pauses'] = copy.deepcopy(pauses)
                 audio_alignments.append({"id": action["id"], "profile_id": profile["id"], "method": "predicted_integer_character_partition",
-                                         "is_measured": False, "source_text_sha256": _hash(use["text"]), "segments": segments})
+                                         "is_measured": False, "source_text_sha256": _hash(use["text"]), "segments": segments,
+                                         **({'pauses': copy.deepcopy(pauses), 'source_use_id': action['source_use_id'],
+                                             'pause_semantic_status': 'pending_independent_review'} if pauses else {})})
             projection_dependencies[action["id"]] = [action["id"]] if is_audio else fragment_ids[-1:] or inherited
             world_events.append({"id": action["id"], "shot_id": sid, "actor": action["actor"], "kind": action["kind"],
                                  "start": action["start"] / 10, "end": action["end"] / 10, "after": action["after"],
