@@ -1245,7 +1245,9 @@ class V055QualityAndMigrationTests(unittest.TestCase):
         self.assertFalse(result.data["version_created"])
         self.assertFalse(result.data["xlsx_created"])
         self.assertFalse(result.data["handoff_created"])
-        self.assertGreater(result.data["quality"]["checked_shot_count"], 0)
+        self.assertGreater(result.data["quality"]["total_shot_count"], 0)
+        self.assertEqual(result.data["quality"]["checked_shot_count"], 0,
+                         "machine preflight is not completed independent semantic review")
         self.assertFalse(
             any(
                 str(row.get("location") or "").startswith("scope.scene")
@@ -2231,11 +2233,14 @@ class V055QualityAndMigrationTests(unittest.TestCase):
 
         self.assertEqual(quality["issue_point_count"], 2)
         self.assertEqual(quality["unique_affected_shot_count"], 1)
-        self.assertEqual(quality["first_draft_correctness_percent"], 99.0)
-        self.assertEqual(quality["direct_usability_percent"], 99.0)
-        self.assertEqual(quality["episode_correctness_percent"]["EP01"], 98.0)
-        self.assertEqual(quality["episode_correctness_percent"]["EP02"], 100.0)
+        self.assertEqual(quality["diagnostic_summary"]["no_reported_content_defect_shot_percent"], 99.0)
+        self.assertEqual(quality["diagnostic_summary"]["no_reported_content_or_contract_defect_shot_percent"], 99.0)
+        self.assertEqual(quality["diagnostic_summary"]["no_reported_content_defect_episode_percent"]["EP01"], 98.0)
+        self.assertEqual(quality["diagnostic_summary"]["no_reported_content_defect_episode_percent"]["EP02"], 100.0)
         self.assertEqual(len(quality["systemic_pattern_keys"]), 1)
+
+        self.assertIsNone(quality["first_draft_correctness_percent"])
+        self.assertEqual(quality["completed_shot_count"], 0)
 
     def test_ledger_status_metrics_use_independent_cycle_semantics(self) -> None:
         agent = service_module.storyboard_agent

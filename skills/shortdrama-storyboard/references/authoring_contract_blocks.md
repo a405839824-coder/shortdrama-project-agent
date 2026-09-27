@@ -132,10 +132,18 @@ its inputs are that shot's actual decisions. The helper cannot verify geometry,
 visibility, source height, existence of a reflector, or color fidelity.
 
 Supported narrow cases are day diffuse sky light through an open/closed paper
-window, or night light from an explicitly present and `lit` `oil_lamp`, `candle`,
+window, day natural light through an open/closed `glass_window`, or night light
+from an explicitly present and `lit` `oil_lamp`, `candle`,
 or `lantern`. `night` alone cannot generate a lamp. Other pairings and unlit or
 unknown sources are rejected. No direct-sun, weather, smoke, dust, fog, additional
 lamps or people are inferred. Use the full contract for other real scenes.
+
+For an established glass window, use the same six source keys with
+`kind: "glass_window"`, its actual name and `state: "open"` or `"closed"`.
+Closed glass transmits daylight; it does not diffuse light as window paper,
+establish an open aperture, or authorize visible rays. The production compiler
+requires its opening registry and light state to refer to the same named window.
+Night glass-window natural light and unknown states remain unsupported.
 
 The source object requires exactly the six example keys. World directions use
 the eight compass points; screen side is `左`, `右`, or `正前`. Height must be finite

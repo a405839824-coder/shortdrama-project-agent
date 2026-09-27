@@ -38,12 +38,15 @@ def public_issue(code="E-SOURCE-001", ids=()):
             "evidence": "公开控制缺项", "repair_action": "核对公开控制"}
 
 
-def persisted_quality(draft, issues):
+def persisted_quality(draft, issues, *, complete=False):
     """Use the real writer; bare score output is not its complete envelope."""
     service = object.__new__(StoryboardService)
     event = service._audit_event_content(
         project_id="SBP-quality-schema", artifact_record={"artifact_id": "A1", "fingerprint": "public"},
-        storyboard=draft, report={"issues": issues}, ledger={"events": []},
+        storyboard=draft, report={"issues": issues, "independent_evidence_matrix": {
+            "semantic_obligation_coverage": {"completed_shot_ids": [s['镜头编号'] for s in draft['shots']],
+                                             "passed_shot_ids": [s['镜头编号'] for s in draft['shots']],
+                                             "complete": True} if complete else {}}}, ledger={"events": []},
         cycle_id="C1", audit_class="independent_audit", audit_cache_key="public",
         prior_events=[], audit_round=1, known_pattern_keys=set())
     return event["first_draft_quality"]
@@ -87,7 +90,9 @@ class QualitySchemaRoundtripTests(unittest.TestCase):
     def test_actual_measured_A_and_C_roundtrip_all_snapshot_consumers(self):
         for issues in ([], [public_issue(ids=["EP01-001"])]):
             with self.subTest(issues=bool(issues)):
-                quality = persisted_quality(public_draft(), issues)
+                # Explicit synthetic completed-review fixture tests serialization;
+                # plain machine diagnostics do not establish measured accuracy.
+                quality = persisted_quality(public_draft(), issues, complete=True)
                 self.assertEqual(quality["measurement_state"], "measured")
                 self.assertIn("episode_direct_usability_percent", quality)
                 self.assertIn("minimum_episode_direct_usability_percent", quality)
@@ -141,7 +146,7 @@ class QualitySchemaRoundtripTests(unittest.TestCase):
                 self.assertTrue(project_agent._validate_first_draft_quality(quality, "quality"))
 
     def test_measured_and_legacy_null_values_are_not_treated_as_valid_unknown(self):
-        for name, base in (("v2", persisted_quality(public_draft(), [])),
+        for name, base in (("v2", persisted_quality(public_draft(), [], complete=True)),
                            ("legacy", legacy_snapshot())):
             with self.subTest(scorer=name):
                 quality = copy.deepcopy(base)

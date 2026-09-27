@@ -388,6 +388,28 @@ def check_registry_definition(registry, reference_root=None):
             failures.append(f"timing profile {profile.get('id')}: unknown evidence status")
         if profile.get("evidence_status") == "provisional" and profile.get("rate_basis") == "articulation":
             failures.append("unmeasured articulation rate cannot claim net speech measurement")
+        evidence = profile.get("evidence", {})
+        if evidence.get("source_kind") == "reference_video_asr":
+            if profile.get("evidence_status") != "provisional" or evidence.get("alignment_verified") is not False or evidence.get("reviewed") is not False:
+                failures.append("reference video ASR is provisional, not reviewed voice calibration")
+            limits = profile.get("candidate_range")
+            if (not isinstance(limits, list) or len(limits) != 2
+                    or any(not isinstance(value, (int, float)) or isinstance(value, bool)
+                           or not math.isfinite(value) or value <= 0 for value in limits)
+                    or limits[0] > limits[1] or not isinstance(speed, (int, float))
+                    or not limits[0] <= speed <= limits[1]):
+                failures.append("reference video candidate range must bound its positive central rate")
+            if profile.get("reference_range_kind") != "within_sample_turn_variation":
+                failures.append("reference video range is sample variation, not a confidence interval")
+            applicability = profile.get("applicability", {})
+            if (applicability.get("channels") != ["dialogue"]
+                    or applicability.get("speaker_categories") != ["adult_supported", "adult_inferred"]
+                    or applicability.get("delivery_classes") != ["continuous_explanation"]
+                    or applicability.get("source_bound_selection_required") is not True
+                    or applicability.get("semantic_review_required") is not True):
+                failures.append("reference video rate requires source-bound adult explanatory dialogue review")
+            if timing.get("default_profile_id") == profile.get("id"):
+                failures.append("reference video rate cannot be the project-wide default")
         if profile.get("evidence_status") == "measured":
             evidence = profile.get("evidence", {})
             sample = evidence.get("sample_sha256", "")

@@ -53,7 +53,27 @@ files. Such files have no formal delivery qualification. Host delivery and
 automation controllers must verify the online receipt; this package does not
 claim to sandbox the entire host or to prove real employee login acceptance.
 
-## Current 0.5.46 shot design and output
+## Current shot design and output
 
 Read `references/shot_design_contract.md` and the live `production_prevention_contract.shot_design_policy` before planning. Freeze each shot's design, real scene anchors, grounded performance and duration exception before rendering. Ordinary shots are at most four seconds; longer shots require the registered per-shot exception. A long line alone is not an exception. Preserve exact dialogue across camera changes. Close-class framing (medium_close/face) is an approximately 60% episode style target, never a forced quota.
 The master keeps A–J in place and adds K (`光影`) with all four labelled lighting values. E omits those lighting paragraphs and the literal `可见主体：` label but preserves names; F retains static lighting and identity. Copy E plus K for video execution. Never paste internal design reasoning into E/F. Old ten-column workbooks remain read-only compatibility inputs, not a current export choice.
+
+## 0.5.56 audit and timing
+
+Read the live timing policy and `references/audit_timing_upgrade.md`. Select a
+registered profile per utterance, preserving source text and established voice.
+Ordinary short/unknown dialogue keeps the provisional 5 units/s fallback. The
+new provisional 6.3 profile requires source-bound adult continuous explanatory
+in-scene speech. ASR evidence is not measured voice calibration; sample range
+5.8–6.9 is sensitivity information, never permission to accelerate. Keep 4/6/8
+shot rules, the episode duration bound, and meaningful extra pauses.
+
+Read-only external workbook audit retains actual cells and raw hashes, including
+saved E/F/K. It does not grant production evidence or create historical sign-off.
+Every applicable obligation needs pass/fail/unknown/not_applicable evidence;
+missing labels cannot remove obligations and unknown cannot sign. Reading-sheet
+copies do not become independent content truth. Report complete coverage C/N and
+accuracy P/C only for fully reviewed shots; without complete first-draft evidence
+the historical first-draft accuracy remains unknown. Software PASS is separate.
+Zero blinks and source-supported stillness are legal. Do not fill a motion quota,
+invent an age in a voice baseline, or rewrite old approved deliverables.

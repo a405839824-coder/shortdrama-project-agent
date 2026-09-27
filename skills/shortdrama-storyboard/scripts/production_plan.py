@@ -55,6 +55,9 @@ def model_production_contract():
             'source_dialogue_review': json.loads((REF / 'rule_registry.json').read_text(encoding='utf-8'))['runtime']['source_dialogue_review_policy'],
             'action_contract':{'reference':'references/source_actions_0537.md',
                 'parameters':{k:sorted(v) for k,v in sorted(ACTION_FIELDS.items())},
+                'optional_parameters': {'speak': {
+                    'timing': '{profile_id,selection_evidence}; registered source-bound selection only',
+                    'pauses': '[{id,offset,seconds,extra?}]; offset indexes this source use including punctuation, 0 before first character, len(text) after last; normal pauses included in utterance-average; unique extra pauses once; same-ID or same-position conflicts rejected; semantic support pending independent review'}},
                 'expression_poses': production_actions.EXPRESSION_POSES,
                 'source_modes':sorted(MODES),'postures':sorted(production_actions.POSTURES),
                 'frozen_source_required':sorted(production_actions.SOURCE_REQUIRED),
@@ -67,7 +70,7 @@ def model_production_contract():
                 'semantics':'pending_independent_review'},
             'world_presentation': {
                 'light': {
-                    'indoor': '{period:day,kind:paper_window,name,state:open|closed,position_xyz:[east,north,height],main_tone,shadow_tone,materials}; night permits explicitly lit oil_lamp|candle|lantern instead of paper_window',
+                    'indoor': '{period:day,kind:paper_window|glass_window,name,state:open|closed,position_xyz:[east,north,height],main_tone,shadow_tone,materials}; closed paper diffuses skylight; closed glass transmits natural daylight without invented beams or an open window; night permits explicitly lit oil_lamp|candle|lantern',
                     'outdoor': '{period:day,kind:outdoor_daylight,name,state:present,direction_xyz:[east,north,up],main_tone,shadow_tone,materials}; finite world direction toward daylight, up>0 and horizontal component>0, not a metre position; no position_xyz',
                     'projection': 'world bearing/elevation and camera screen side derive from the same direction; translation does not move distant daylight; no invented source height, paper window, lamp, visible sun or weather',
                     'evidence': 'freeze the actual scene light in production_plan; ordinary lighting choice may be director_choice, never fabricated source_fact or locked_setting; existing independent semantics and source gates remain required',

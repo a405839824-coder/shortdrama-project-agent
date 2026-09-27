@@ -22,12 +22,14 @@ from written_payload import context_instruction_text, protect_visual_text_fragme
 import repair_observations
 from field_content import (assert_field_content, field_content_findings,
                            voice_content_findings, preserved_voice_baseline, r5_keyframe_sections,
-                           FORMAL_EXECUTION_FIELDS, project_lighting)
+                           FORMAL_EXECUTION_FIELDS, project_lighting, music_directives, strip_negative_music)
 from continuity_checks import state_equal
 from performance_checks import eye_contract_faults, emphasis_binding_faults, visible_subject_annotation_faults, listener_reaction_faults
 from lighting_checks import affirmative_matches, lighting_context_faults, scene_lighting_continuity_faults
 from dialogue_occurrences import align_storyboard_dialogue
 from voice_sequence import (VOICE_TEMPLATE_LABELS, LEGACY_DIALOGUE_TAG_RE, extract_dialogues)
+from projection_semantics import (field_sha256, labelled_sections, tail_binding_faults,
+                                  explicit_state_conflicts, environment_phase_findings)
 from source_content_limits import (
     AFFORDANCE as SOURCE_LIMIT_AFFORDANCE,
     ENTAILMENT as SOURCE_LIMIT_ENTAILMENT,
@@ -69,11 +71,12 @@ VOICE_TEMPLATE_LINE_RE = re.compile(
 VOICE_NO_DIALOGUE_RE = re.compile(r"^无对白[，,；;。\s]*(?:本镜)?不适用[。.]?$|^不适用[：:]?\s*无对白[。.]?$")
 NARRATIVE_SPEECH_ACT_RE = re.compile(
     r"劝|说|说道|称|声称|宣称|陈述|解释|回答|答应|回应|问|反问|"
-    r"承认|指出|禀告|报告|吩咐|命令|要求|提醒|警告|承诺|拒绝|央求|叫嚷"
+    r"承认|指出|禀告|报告|吩咐|命令|要求|提醒|警告|承诺|拒绝|央求|叫嚷|"
+    r"告知|告诉|通知|通报|请求|恳请|宣读|追问|交代|说明|命人|派人|召见"
 )
 NEGATED_SPEECH_ACT_RE = re.compile(
-    r"(?:不敢继续|没有|并未|未曾|不再|无需|无须)[^。；，]{0,24}"
-    r"(?:劝|说|说道|称|陈述|解释|回答|回应|问|承认|指出|禀告|报告|吩咐|命令|提醒|警告|央求|叫嚷)"
+    r"(?:不敢继续|没有|并未|未曾|不再|无需|无须)[^。；，]{0,24}(?:"
+    + NARRATIVE_SPEECH_ACT_RE.pattern + r")"
 )
 ADAPTED_DIALOGUE_TREATMENTS = {
     "原文直接对白",
@@ -99,6 +102,7 @@ PERSISTED_DERIVED_FIELDS = {
     "Seedance 2.5独立正式执行分镜", "Seedance 2.0独立正式执行分镜",
 }
 COMPACT_TOP_LEVEL_FIELDS = {
+    "audit_workbook_evidence",
     "project_version", "schema_version", "schema_profile", "workflow_profile",
     "prevention_evidence", "source_ingestion", "chapter_intake",
     "field_order", "source_lock", "shots", "total_duration", "chapter_map", "source_mapping",
@@ -1057,6 +1061,9 @@ def _assert_projected_aspect_contract(value: Any, *, projection: str) -> None:
 def _normalize_generation_limits(value: Any) -> str:
     _assert_generation_aspect_contract(value)
     text = str(value or "").strip()
+    unknown_music = [row for row in music_directives(text) if row["status"] == "unknown"]
+    if unknown_music:
+        raise ValueError("generation_limit_audio_contract_unknown: unresolved music scope: " + repr(unknown_music[0]["text"]))
     active_music = _active_music_directive(text)
     if active_music:
         raise ValueError(
@@ -1859,7 +1866,7 @@ def _lighting_context_faults(shot: dict[str, Any]) -> list[str]:
             not aperture_open
             or not any(_aperture_reference_keys(authored_path, kind) for kind in ("门", "窗"))
         ):
-            faults.append("门窗闭合时不得写光线穿过、射入或形成窗门光柱；闭窗只能写窗纸漫射透光")
+            faults.append("门窗闭合不能授权可见光束或窗门光柱；闭合纸窗写窗纸漫射透光，已建立的闭合玻璃窗可透入日间自然光")
         if any(
             _has_aperture_state(authored_path, kind, "开启|打开|敞开|半开")
             for kind in ("门", "窗")
@@ -1906,97 +1913,13 @@ def _lighting_context_faults(shot: dict[str, Any]) -> list[str]:
 
 
 def _active_music_directive(value: Any) -> str:
-    without_bans, _mentioned = _strip_negative_music_clauses(value)
-    instruction_text, _protected = _protect_visual_text_fragments(without_bans)
-    instruction_text = KEYFRAME_QUOTED_DIALOGUE_RE.sub("", instruction_text)
-    instruction_text = KEYFRAME_LABELED_DIALOGUE_RE.sub("", instruction_text)
-    match = ACTIVE_MUSIC_DIRECTIVE_RE.search(instruction_text)
-    if match:
-        return match.group(0)
-    match = MUSIC_TERM_RE.search(instruction_text)
-    return match.group(0) if match else ""
+    records = music_directives(value)
+    affirmative = [row for row in records if row["status"] == "affirmative"]
+    return affirmative[0]["text"] if affirmative else ""
 
 
 def _strip_negative_music_clauses(value: Any) -> tuple[str, bool]:
-    """Remove proved music bans without editing quotes or borrowing negation."""
-    # A quoted statement is payload, not an instruction to this converter.
-    text, protected = _protect_visual_text_fragments(str(value or ""))
-    def protect_quote(match):
-        token = f"\ue010MUSICQUOTE{len(protected)}\ue011"
-        protected[token] = match.group(0)
-        return token
-    text = KEYFRAME_QUOTED_DIALOGUE_RE.sub(protect_quote, text)
-    mentioned = False
-    negative_start = re.compile(r"^\s*(?:禁止|不要|不得|不使用|不生成|没有|不加|无)(?:任何)?")
-    # These are known ban-list objects. An unfamiliar mixed list stays intact
-    # for the active/ambiguous-music gate rather than inheriting guessed polarity.
-    visual_item = re.compile(r"(?:字幕|水印|现代物件|现代元素|现代服饰|现代标识|现代logo|人物看镜头|塑料皮肤|过度锐化|雾化|烟雾|薄雾|柔焦|光晕|镜头扩散)", re.I)
-    music_item = re.compile(r"(?:任何)?(?:让)?(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)?\s*(?:BGM|背景音乐|额外配乐|配乐|音乐)(?:响起|播放|进入|渐入|切入|铺开|持续|开始)?", re.I)
-    connectors = re.compile(r"(?:以及|[、与和且及])")
-
-    def clean_atom(original):
-        nonlocal mentioned
-        clause = original.strip()
-        if not MUSIC_TERM_RE.search(clause):
-            return original
-        # Matching the complete negative atom excludes 未禁止/不必没有 and
-        # arbitrary prefixes. A later affirmative music clause remains visible.
-        if NEGATIVE_MUSIC_CLAUSE_RE.fullmatch(clause):
-            mentioned = True
-            return ""
-        prefix = negative_start.match(clause)
-        if prefix is None:
-            return original
-        rest = clause[prefix.end():]
-        items = [item.strip() for item in connectors.split(rest)]
-        if len(items) < 2 or not all(items):
-            return original
-        keep = []
-        removed = False
-        for item in items:
-            if music_item.fullmatch(item):
-                removed = True
-                continue
-            own_prefix = negative_start.match(item)
-            noun = item[own_prefix.end():] if own_prefix else item
-            if not visual_item.fullmatch(noun):
-                return original
-            keep.append(item)
-        if not removed:
-            return original
-        mentioned = True
-        if not keep:
-            return ""
-        retained = "、".join(keep)
-        return retained if negative_start.match(retained) else prefix.group(0).strip() + retained
-
-    parts = re.split(r"([；;。！？!?，,\n]+)", text)
-    for index in range(0, len(parts), 2):
-        original = parts[index]
-        cleaned = clean_atom(original)
-        if cleaned != original or not MUSIC_TERM_RE.search(original):
-            parts[index] = cleaned
-            continue
-        # Recognized noun enumeration was handled above. These conjunctions
-        # introduce separate assertions when that whole-list proof failed.
-        clauses = re.split(r"(但是|然而|不过|而且|并且|随后|然后|而后|接着|同时|但|却|且)", original)
-        if len(clauses) > 1:
-            atoms = [clean_atom(clauses[offset]) for offset in range(0, len(clauses), 2)]
-            if atoms != clauses[::2]:
-                retained = []
-                for ordinal, atom in enumerate(atoms):
-                    if not atom.strip():
-                        continue
-                    if retained and ordinal:
-                        retained.append(clauses[2 * ordinal - 1])
-                    retained.append(atom)
-                parts[index] = "".join(retained)
-    cleaned = "".join(parts)
-    # Restore quote placeholders before visual placeholders in case one wraps
-    # the other; no quoted words or internal punctuation are normalized.
-    for token, fragment in reversed(list(protected.items())):
-        cleaned = cleaned.replace(token, fragment)
-    return cleaned, mentioned
+    return strip_negative_music(value)
 
 
 def _protected_dialogue_alignment(
@@ -2035,6 +1958,7 @@ def _validate_adapted_dialogue_audit(
     obj: dict[str, Any],
     shots: list[dict[str, Any]],
     catalog: dict[str, dict[str, Any]],
+    *, production_verified: bool = False,
 ) -> list[dict[str, Any]]:
     """Validate the source-fact dialogue conversion ledger (THG-16).
 
@@ -2057,7 +1981,17 @@ def _validate_adapted_dialogue_audit(
     evidence = obj.get("prevention_evidence")
     audit = evidence.get("dialogue_adaptation_audit") if isinstance(evidence, dict) else None
     if not enabled and not isinstance(audit, dict):
-        return []
+        issues = []
+        for candidate in _communication_candidates(obj, shots):
+            if production_verified and candidate.get("direct_wording_matches") and candidate.get("source_use_ids"):
+                continue  # Replayed spoken source use and actual words; no invented adaptation.
+            issue = _issue(catalog, "E-ADAPTED-DIALOGUE-001", "source_communication",
+                "来源存在无引号会话候选，但缺来源单元到发送者、接收者、实际声音及收到时点的映射；"
+                "观众旁白不能自动赋予角色知情：" + candidate["source_text"], template_gate_id="THG-16")
+            issue.update(check_status="unknown", check_id="source_communication",
+                         shot_ids=list(candidate["target_shots"]))
+            issues.append(issue)
+        return issues
 
     issues: list[dict[str, Any]] = []
 
@@ -2183,7 +2117,10 @@ def _validate_adapted_dialogue_audit(
                 or re.search(r"朗读|朗诵|读出|念出", positive_speech_text)
                 or re.search(r"改编完整展开对白|保护对白完整展开", source_type)
             )
-            if has_protected_target:
+            # A protected quotation elsewhere in this shot cannot discharge a
+            # separate unquoted communication in the same source/target unit.
+            if has_protected_target and not _communication_candidates({}, [{
+                "镜头编号": targets[0] if targets else "", "原文支撑句": source_text}]):
                 continue
             expected_candidates.append({
                 "source_ledger_index": index,
@@ -3341,9 +3278,180 @@ def _validate_preventive_gates(
     return issues, metrics
 
 
+def _semantic_check(check_id, shot, status, reason, *, evidence=None, fields=None, findings=None):
+    layers = {"saved_projection_format": "正式母版单镜执行完整性",
+              "saved_keyframe_static": "正式母版单镜执行完整性", "saved_initial_state": "空间连续",
+              "saved_visible_capacity": "机位可见性", "saved_light_consistency": "空间连续",
+              "saved_projection_binding": "正式母版单镜执行完整性", "utterance_delivery_binding": "禁项与声音",
+              "environment_actor_phase": "空间连续", "music_semantic_scope": "禁项与声音"}
+    return {"check_id": check_id, "layer": layers[check_id], "status": status, "reason": reason,
+            "shot_ids": [str(shot.get("镜头编号") or "")],
+            "evidence": evidence or {},
+            "field_sha256": {key: field_sha256(value) for key, value in (fields or {}).items()},
+            "findings": findings or []}
+
+
+def _semantic_entities(shot):
+    from visible_entities import resolve_visible_subjects
+    return resolve_visible_subjects(shot.get("可见主体"),
+        speakers=[row[0] for row in extract_dialogues(shot.get("画面内容"))],
+        evidence_texts=[shot.get(field) for field in ("起始状态", "画面内容", "光影", "光源方向")])
+
+
+def validate_saved_projection(shot, saved_fields, *, bound_canonical=False,
+                              projection_contract_verified=None):
+    """Inspect actual workbook E/F/K before any optional deterministic comparison.
+
+    The caller supplies the original cell strings, not freshly generated cells.
+    A pass certifies only the named bounded check; source entailment and full
+    scene geometry require their separate production/independent evidence.
+    """
+    from field_content import field_policy
+    checks = []
+    actual = {key: saved_fields[key] for key in ("正式分镜母版", "GPT关键帧生成指令", "光影")
+              if key in saved_fields}
+    f = actual.get("GPT关键帧生成指令")
+    labels = [row["label"] for row in field_policy()["keyframe_sections"]]
+    required = [row["label"] for row in field_policy()["keyframe_sections"] if not row.get("optional")]
+    sections, duplicates = labelled_sections(f, labels)
+    missing = [label for label in required if not sections.get(label)]
+    format_faults = (["缺关键帧段：" + "、".join(missing)] if missing else [])
+    if duplicates:
+        format_faults.append("关键帧段重复：" + "、".join(duplicates))
+    checks.append(_semantic_check("saved_projection_format", shot,
+        "unknown" if f is None else "fail" if format_faults else "pass",
+        "实际F固定字段结构；格式与内容语义分开", fields=actual, findings=format_faults))
+    if f is None:
+        checks.append(_semantic_check("saved_keyframe_static", shot, "unknown", "缺实际F原始单元格", fields=actual))
+    else:
+        hits = sorted(set(_keyframe_forbidden_hits(f) + _keyframe_environment_process_hits(f)
+                          + _keyframe_eye_process_hits(f) + _keyframe_authored_process_hits(f)
+                          + _keyframe_unobservable_hits(f)))
+        context = [term for term in CROSS_SHOT_TERMS if term in _keyframe_instruction_text(f)]
+        # A framing purpose covering several endpoints is not a static pose.
+        process = re.findall(r'(?:从|由)[^，。；;\n]{1,32}(?:到|至)[^，。；;\n]{1,20}(?:全过程|全程)|'
+                             r'(?:起身|屈膝|坐下|落座|接物|取物|抱起|跌倒)后(?:的)?[^，。；;\n]{0,12}(?:接触|坐稳|站稳|落地)',
+                             sections.get("机位", ""))
+        findings = hits + ["跨镜代指未展开：" + term for term in context] + process
+        checks.append(_semantic_check("saved_keyframe_static", shot, "fail" if findings else "pass",
+            "检查实际F的静态指令、当前时刻和独立定位", fields=actual, findings=findings))
+
+    entities = _semantic_entities(shot)
+    names = list(entities.people)
+    conflicts = explicit_state_conflicts(shot.get("起始状态"), str(f or ''), names)
+    checks.append(_semantic_check("saved_initial_state", shot,
+        "fail" if conflicts else "unknown" if f is None or not shot.get("起始状态") or entities.faults else "pass",
+        "仅比较实际E/F明确逐人起态；不推定未写明的姿态", fields=actual, findings=conflicts))
+    visible = sections.get("镜头类型及可见主体", "")
+    from visible_entities import resolve_visible_subjects
+    resolution = resolve_visible_subjects(visible.split("；", 1)[-1], people=names, evidence_texts=[f])
+    actual_names = list(resolution.people)
+    capacity = [f"实际F主要可见人物{len(actual_names)}人，超过3人；须重选机位，不得删除世界人物"] if len(actual_names) > 3 else []
+    checks.append(_semantic_check("saved_visible_capacity", shot,
+        "fail" if capacity else "unknown" if not visible or resolution.faults else "pass", "实际F主要人物容量", fields=actual, findings=capacity + resolution.faults))
+    light = actual.get("光影")
+    k_sections, k_duplicates = labelled_sections(light, ("光影", "光源来源", "光源方向", "色温倾向"))
+    lighting_faults = []
+    lighting_unknown = light is None or not k_sections
+    for label in ("光影", "光源来源", "光源方向", "色温倾向"):
+        left, right = sections.get(label), k_sections.get(label)
+        if left and right and _normalized_clause(left) != _normalized_clause(right):
+            lighting_faults.append(f"实际F/K的{label}不一致，须从同一实体光源和当前机位重建")
+        elif not left or not right:
+            lighting_unknown = True
+    if k_duplicates:
+        lighting_faults.append("实际K光影子项重复：" + "、".join(k_duplicates))
+    checks.append(_semantic_check("saved_light_consistency", shot,
+        "fail" if lighting_faults else "unknown" if lighting_unknown else "pass",
+        "比较实际F/K光影；缺K的旧10列仍保留原合同，不伪造K", fields=actual, findings=lighting_faults))
+    projection_faults = []
+    if bound_canonical and not projection_contract_verified:
+        for field, compiler in (("正式分镜母版", project_formal_master), ("GPT关键帧生成指令", project_gpt_keyframe),
+                                ("光影", lambda row: project_lighting(row, _projection_text))):
+            try:
+                if field not in actual or actual[field] != compiler(shot):
+                    projection_faults.append(field + "实际保存字节与已绑定canonical投影不同")
+            except (ValueError, TypeError) as exc:
+                projection_faults.append(field + "绑定投影无法比较：" + str(exc))
+    checks.append(_semantic_check("saved_projection_binding", shot,
+        "fail" if projection_faults else "pass" if bound_canonical or projection_contract_verified else "unknown",
+        "服务端已按原投影合同验证旧工作簿完整性；当前语义单独检查，不重投影原件" if projection_contract_verified else
+        "已绑定canonical字节比对" if bound_canonical else "无已验证canonical绑定；实际文本检查不补生产证明",
+        evidence={"verified_projection_contract": projection_contract_verified} if projection_contract_verified else {},
+        fields=actual, findings=projection_faults))
+    return checks
+
+
+def _communication_candidates(obj, shots):
+    """Source content, not an author's workflow switch, creates the obligation."""
+    evidence = obj.get("prevention_evidence") or {}
+    ledger = evidence.get("source_ledger") if isinstance(evidence, dict) else None
+    records = [row for row in (ledger or []) if isinstance(row, dict)] if isinstance(ledger, list) else []
+    records += [{"source_text": row.get("原文支撑句"), "target_shots": [row.get("镜头编号")]} for row in shots]
+    actual_by_shot = {str(row.get("镜头编号")): extract_dialogues(row.get("画面内容")) for row in shots}
+    uses = timing_model.source_uses(obj)
+    candidates = {}
+    for row in records:
+        source = str(row.get("source_text") or "")
+        targets = row.get("target_shots")
+        targets = [target for target in targets if isinstance(target, str)] if isinstance(targets, list) else []
+        # A colon-delimited direct source line has supplied audible contents
+        # even without typography quotes. Only the exact current speaker/text
+        # closes this route; another quote elsewhere in the shot cannot.
+        direct_rows = [line for target in targets for line in actual_by_shot.get(target, [])]
+        direct_matches = [(speaker, line) for speaker, line in direct_rows if re.fullmatch(
+            re.escape(speaker) + r'(?:说道|说|问道|问|答道|答|喊道)\s*[:：]\s*' + re.escape(line), source.strip())]
+        unquoted = re.sub(r'(?:[^，。；;\n]{0,12}(?:' + NARRATIVE_SPEECH_ACT_RE.pattern + r')[:：]?)?[“「][^”」]*[”」]', '', source)
+        unquoted = NEGATED_SPEECH_ACT_RE.sub('', oral_communication_candidate_text(unquoted))
+        if NARRATIVE_SPEECH_ACT_RE.search(unquoted):
+            candidates[(source, tuple(targets))] = {"source_text": source, "target_shots": targets,
+                "source_unit_id": row.get("source_id"), "direct_wording_matches": bool(direct_matches),
+                "source_use_ids": [identity for identity, use in uses.items() if isinstance(use, dict)
+                    and use.get('mode') == 'spoken' and (use.get('actor'), use.get('text')) in direct_matches]}
+    return list(candidates.values())
+
+
+def _shot_semantic_checks(shot):
+    from field_content import voice_parts
+    from voice_sequence import has_markers, split_voice_sequence
+    checks = []
+    rows = extract_dialogues(shot.get("画面内容"))
+    voice = dict(voice_parts(shot.get("音色")))
+    sequence_markers = has_markers(str(shot.get("音色")))
+    unresolved_voice = bool(rows and (not voice or len(rows) > 1 and not sequence_markers))
+    silent = bool(VOICE_NO_DIALOGUE_RE.fullmatch(str(shot.get("音色") or '').strip()))
+    faults = []
+    if rows and voice:
+        blocks, errors = split_voice_sequence(voice, rows) if sequence_markers else ([voice], [])
+        faults.extend(errors)
+        for index, block in enumerate(blocks):
+            own = [rows[index]] if len(blocks) == len(rows) else rows
+            faults.extend(emphasis_binding_faults(block.get("重音"), own))
+            faults.extend(tail_binding_faults(block.get("尾音"), own))
+    checks.append(_semantic_check("utterance_delivery_binding", shot,
+        "fail" if faults else "unknown" if unresolved_voice or not rows and not silent else "pass" if rows else "not_applicable",
+        "声法未解析为每条实际发言的独立绑定，保留原值待查" if unresolved_voice or not rows and not silent else
+        "重音与尾音绑定实际本句；声线保持原值，话语目的适切性仍需独立语义审查",
+        fields={key: shot.get(key) for key in ("画面内容", "音色")}, findings=faults))
+    entities = _semantic_entities(shot)
+    names = list(entities.people)
+    environment = environment_phase_findings(shot, names)
+    checks.append(_semantic_check("environment_actor_phase", shot,
+        "fail" if any(row['status'] == 'fail' for row in environment) else "unknown" if environment or entities.faults or not shot.get("环境动态") else "pass",
+        "环境中的人物动作必须属于本镜阶段；未出现的演员事件不从场景常量继承",
+        fields={key: shot.get(key) for key in ("环境动态", "起始状态", "画面内容")}, findings=environment))
+    records = music_directives(shot.get("生成限制"))
+    status = "fail" if any(row['status'] == 'affirmative' for row in records) else "unknown" if any(row['status'] == 'unknown' for row in records) or not shot.get("生成限制") else "pass"
+    checks.append(_semantic_check("music_semantic_scope", shot, status,
+        "肯定、否定、未判定分别记录；否定句格式不合规范不能冒称主动配乐",
+        fields={"生成限制": shot.get("生成限制")}, evidence={"occurrences": records}))
+    return checks
+
+
 def validate_project(
     obj: dict[str, Any] | list[Any], mode: str = "audit", rules_path: str | None = None,
     *, timing_context: dict[str, Any] | None = None, episode_fragment: bool = False,
+    saved_workbook_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rules = load_runtime_rules(rules_path)
     catalog = _catalog_map(rules)
@@ -3353,6 +3461,15 @@ def validate_project(
     if not isinstance(obj, dict):
         issues.append(_issue(catalog, "E-TEMPLATE-001", "root", "输入必须是JSON对象或镜头数组。"))
         obj = {}
+    if obj.get("audit_workbook_evidence") is not None and mode != "audit":
+        issues.append(_issue(catalog, "E-GATE-001", "audit_workbook_evidence",
+            "只读审计映射不能作为生产canonical；须走正式有源生产和绑定导出入口。", blocking=True))
+    if saved_workbook_evidence is not None and mode != "audit":
+        issues.append(_issue(catalog, "E-GATE-001", "saved_workbook_evidence",
+            "实际工作簿审计证据参数仅限只读audit，不能作为生产canonical或生产证明。", blocking=True))
+    elif saved_workbook_evidence is not None and not isinstance(saved_workbook_evidence, dict):
+        issues.append(_issue(catalog, "E-TEMPLATE-001", "saved_workbook_evidence",
+            "实际工作簿审计证据必须为对象。", blocking=True))
 
     if obj.get("project_version") != VERSION:
         issues.append(_issue(catalog, "E-VERSION-001", "project_version", f"expected {VERSION}, got {obj.get('project_version')!r}"))
@@ -3986,6 +4103,7 @@ def validate_project(
         obj,
         normalized_shots,
         catalog,
+        production_verified=planned_performance,
     ))
 
     for scene_id, items in scene_groups.items():
@@ -4049,6 +4167,51 @@ def validate_project(
         'status': 'pending' if any(row['status'] == 'pending' for row in entity_mapping_rows) else 'resolved',
         'shots': entity_mapping_rows,
         'semantic_identity_review': 'separate_independent_review_required'}
+    semantic_checks = [check for shot in normalized_shots for check in _shot_semantic_checks(shot)]
+    # Only the service's separate read-only argument can attest original
+    # sidecar integrity. Identically named author JSON never gains that trust.
+    external_saved = saved_workbook_evidence if mode == "audit" and isinstance(saved_workbook_evidence, dict) else None
+    workbook_evidence = external_saved if external_saved is not None else obj.get("audit_workbook_evidence")
+    if isinstance(workbook_evidence, dict):
+        gate_metrics['saved_workbook_evidence'] = copy.deepcopy(workbook_evidence)
+        verified_contract = (external_saved.get("projection_contract")
+            if external_saved is not None and external_saved.get("projection_integrity_verified") is True else None)
+        verified_contract = verified_contract if isinstance(verified_contract, str) and verified_contract.strip() else None
+        raw_saved_rows = workbook_evidence.get("rows")
+        if not isinstance(raw_saved_rows, list):
+            issues.append(_issue(catalog, "E-TEMPLATE-001", "audit_workbook_evidence.rows",
+                "实际工作簿审计证据rows必须为数组；未取得的单元格保持未知。", blocking=True))
+            raw_saved_rows = []
+        saved_rows = {str(row.get("shot_id")): row for row in raw_saved_rows if isinstance(row, dict)}
+        for shot in normalized_shots:
+            cells = saved_rows.get(str(shot.get("镜头编号")), {}).get("cells", {})
+            if not isinstance(cells, dict):
+                issues.append(_issue(catalog, "E-TEMPLATE-001", "audit_workbook_evidence.cells",
+                    "实际工作簿单元格证据必须为对象；未取得的单元格保持未知。", blocking=True))
+                cells = {}
+            saved = {name: cell.get("value") for name, cell in cells.items() if isinstance(cell, dict)}
+            semantic_checks.extend(validate_saved_projection(shot, saved,
+                projection_contract_verified=verified_contract))
+    for candidate in _communication_candidates(obj, normalized_shots):
+        target_ids = set(candidate['target_shots'])
+        checks_failed = [issue for issue in issues if issue.get('error_code') == 'E-ADAPTED-DIALOGUE-001']
+        semantic_checks.append({"check_id": "source_communication", "layer": "源文对白", "shot_ids": sorted(target_ids),
+            "status": "unknown" if not planned_performance or any(row.get('check_status') == 'unknown' for row in checks_failed)
+                      else "fail" if checks_failed else "pass",
+            "reason": "缺接收者收到信息时刻的可重放证据；旁白不自动赋予角色知识" if not planned_performance else
+                      "生产计划重放已核实际角色知识时序；原文语义仍由独立审查负责",
+            "evidence": candidate, "field_sha256": {"source_text": field_sha256(candidate['source_text'])},
+            "findings": []})
+    gate_metrics['semantic_checks'] = semantic_checks
+    for check in semantic_checks:
+        # Missing production provenance is an audit coverage obligation. It is
+        # not an invented content failure on a historical or pre-export draft.
+        if check['status'] != 'fail':
+            continue
+        issue = _issue(catalog, "E-FIELD-CONTENT-001", check['check_id'],
+            check['reason'] + "：" + str(check.get('findings') or check.get('evidence')), severity="fail")
+        issue.update(check_id=check['check_id'], check_status='fail', shot_ids=check['shot_ids'])
+        issues.append(issue)
     if production_binding['present']:
         gate_metrics['production_derivation'] = {
             'valid': production_binding['valid'],

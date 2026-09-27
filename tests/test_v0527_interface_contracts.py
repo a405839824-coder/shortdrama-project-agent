@@ -127,7 +127,7 @@ class MusicAbsenceContractTests(unittest.TestCase):
 
     def test_affirmative_and_double_negative_music_stays_rejected(self):
         for text in ('没有额外配乐。随后加入背景音乐。', '不加音乐；开始播放BGM。',
-                     '没有禁止额外配乐。', '不是没有背景音乐。', '不能没有音乐。', '不禁止配乐。'):
+                     '不是没有背景音乐。', '不能没有音乐。'):
             with self.subTest(text=text):
                 self.assertTrue(standalone._active_music_directive(text))
                 self.assertTrue(server._active_music_directive(text))
@@ -146,8 +146,7 @@ class MusicAbsenceContractTests(unittest.TestCase):
             self.assertNotIn('没有空气清澈', result)
 
     def test_contrast_and_indirect_double_negation_do_not_become_music_bans(self):
-        for text in ('没有音乐但后来保留配乐。', '无音乐却恢复配乐。',
-                     '未禁止音乐。', '并未禁止配乐。', '不必没有音乐。', '无须禁止音乐。'):
+        for text in ('没有音乐但后来保留配乐。', '无音乐却恢复配乐。'):
             with self.subTest(text=text):
                 self.assertTrue(standalone._active_music_directive(text))
                 self.assertTrue(server._active_music_directive(text))
@@ -156,6 +155,26 @@ class MusicAbsenceContractTests(unittest.TestCase):
                 for compile_one in self.compilers():
                     with self.assertRaisesRegex(ValueError, 'audio_contract_violation'):
                         compile_one(shot)
+
+    def test_cancelled_bans_are_unknown_and_still_rejected_without_rewrite(self):
+        # A permission is not proof of an affirmative action or a music ban.
+        # The four-state audit preserves that distinction; production still
+        # rejects it instead of silently changing it to "禁止额外配乐".
+        for text in ('没有禁止额外配乐。', '不禁止配乐。', '未禁止音乐。',
+                     '并未禁止配乐。', '不必没有音乐。', '无须禁止音乐。'):
+            with self.subTest(text=text):
+                self.assertEqual({row['status'] for row in standalone.music_directives(text)}, {'unknown'})
+                self.assertEqual(standalone._active_music_directive(text), '')
+                self.assertEqual(server._active_music_directive(text), '')
+                for strip in (standalone._strip_negative_music_clauses, server._strip_negative_music_clauses):
+                    self.assertEqual(strip(text), (text, False))
+                shot = copy.deepcopy(compact_storyboard()['shots'][0])
+                shot['生成限制'] = '9:16竖屏；' + text
+                original = copy.deepcopy(shot)
+                for compile_one in self.compilers():
+                    with self.assertRaisesRegex(ValueError, 'audio_contract_unknown'):
+                        compile_one(shot)
+                self.assertEqual(shot, original)
 
     def test_written_music_ban_is_preserved_as_payload(self):
         for text, payload in (

@@ -73,10 +73,14 @@ def collection_has_signed_audit(service: Any, namespace: str, project_id: str,
                 proof.get("checks_sha256") != (cert.get("semantic_obligation_coverage") or {}).get("checks_sha256")):
             continue
         try:
-            verify_certificate_coverage(service, storyboard, cert)
+            receipt = verify_certificate_coverage(service, storyboard, cert)
         except (ValueError, KeyError, TypeError):
             continue
-        return True
+        metrics = (cert.get("report") or {}).get("quality_metrics") or {}
+        unknown_checks = any(row.get("status") == "unknown" for row in metrics.get("semantic_checks", []))
+        completion = metrics.get("review_completion") or {}
+        if receipt["complete"] and not unknown_checks and not completion.get("unknown_shot_count"):
+            return True
     return False
 
 
@@ -154,7 +158,7 @@ def process_coverage_page(service: Any, namespace: str, project_id: str, *,
             raise ValueError("audit_coverage_page_range_mismatch")
         partial = {**submission, "coverage": {"contract": CONTRACT,
                     "manifest_sha256": manifest["manifest_sha256"], "checks": page["checks"]}}
-        validate_coverage(storyboard, partial, context, _page_ids=expected)
+        validate_coverage(storyboard, partial, context, _page_ids=expected, allow_unresolved=True)
         # Preserve every declared finding, including one whose check is on a
         # later page. A caller must not drop an inconvenient declared issue by
         # omitting its issue_id from this page's checks.
@@ -241,7 +245,7 @@ def process_coverage_page(service: Any, namespace: str, project_id: str, *,
         result = copy.deepcopy(submission)
         result["coverage_page"] = None
         result["coverage"] = {"contract": CONTRACT, "manifest_sha256": manifest["manifest_sha256"], "checks": checks}
-        validate_coverage(storyboard, result, context)
+        validate_coverage(storyboard, result, context, allow_unresolved=True)
         result["_server_coverage_page_receipt"] = {
             "collection_id": collection_id, "page_ids": list(page["page_ids"]),
             "binding": binding, "manifest_sha256": manifest["manifest_sha256"],

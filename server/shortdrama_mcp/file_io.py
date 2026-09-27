@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import csv
 import datetime as dt
 import hashlib
@@ -80,15 +81,16 @@ CANONICAL_SIDECAR_HEADERS = [
     "audit_page_sha256",
 ]
 LEGACY_CANONICAL_SIDECAR_HEADERS = CANONICAL_SIDECAR_HEADERS[:-3]
-CURRENT_PROJECTION_CONTRACT = "shortdrama-projector/0.5.46"
+CURRENT_PROJECTION_CONTRACT = "shortdrama-projector/0.5.56"
+FROZEN_0555_PROJECTION_CONTRACT = "shortdrama-projector/0.5.46"
 R5_LEGACY_PROJECTION_CONTRACT = "shortdrama-projector/0.5.32"
 PREVIOUS_PROJECTION_CONTRACT = "shortdrama-projector/0.5.5"
-from . import frozen_projector_0531
+from . import frozen_projector_0531, frozen_projector_0555
 from .r5_workbook import (MASTER_NAME, WIDTHS, is_reading_sheet, reading_matrices,
                           workbook_audit_scope, write_reading_sheets)
 LEGACY_PROJECTION_CONTRACT = "shortdrama-projector/0.5.0"
 CONTROLLED_HISTORICAL_PROJECTION_CONTRACTS = frozenset(
-    {CURRENT_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT,
+    {CURRENT_PROJECTION_CONTRACT, FROZEN_0555_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT,
      PREVIOUS_PROJECTION_CONTRACT, "shortdrama-projector/0.5.4"}
 )
 
@@ -377,7 +379,7 @@ def _canonical_storyboard_from_sidecar(
         allowed_projection_contracts = (
             _allowed_projection_contracts
             if _allowed_projection_contracts is not None
-            else frozenset({CURRENT_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT, PREVIOUS_PROJECTION_CONTRACT})
+            else frozenset({CURRENT_PROJECTION_CONTRACT, FROZEN_0555_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT, PREVIOUS_PROJECTION_CONTRACT})
         )
         if projection_contract not in allowed_projection_contracts:
             raise _canonical_sidecar_error("projection contract marker mismatch")
@@ -705,7 +707,9 @@ def _rows_for_projection(storyboard, contract):
     if contract in {PREVIOUS_PROJECTION_CONTRACT, "shortdrama-projector/0.5.4"}:
         return frozen_projector_0531.formal_mother_template_rows(storyboard)
     if contract == R5_LEGACY_PROJECTION_CONTRACT:
-        return formal_mother_template_rows(storyboard, _legacy_layout=True)
+        return frozen_projector_0555.formal_mother_template_rows(storyboard, _legacy_layout=True)
+    if contract == FROZEN_0555_PROJECTION_CONTRACT:
+        return frozen_projector_0555.formal_mother_template_rows(storyboard)
     return formal_mother_template_rows(storyboard)
 
 
@@ -714,8 +718,10 @@ def _projection_columns(rows):
 
 
 def _assert_auxiliary_sheets(sheets, storyboard, expected_rows, contract, *, include_reading=False):
-    current = contract in {CURRENT_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT}
-    expected_aux = reading_matrices(storyboard, expected_rows,
+    current = contract in {CURRENT_PROJECTION_CONTRACT, FROZEN_0555_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT}
+    reader = (frozen_projector_0555.reading_matrices
+              if contract in {FROZEN_0555_PROJECTION_CONTRACT, R5_LEGACY_PROJECTION_CONTRACT} else reading_matrices)
+    expected_aux = reader(storyboard, expected_rows,
         _legacy_layout=contract == R5_LEGACY_PROJECTION_CONTRACT) if current else {}
     # Reading copies are outside audit. Only the exporter verifies its own
     # freshly generated copies; import, audit and recovery use the master.
@@ -1008,7 +1014,85 @@ def workbook_to_storyboard(
     return migrate_storyboard_to_compact(legacy)
 
 
-def extract_xlsx(data: bytes) -> dict[str, Any]:
+def _external_workbook_audit(sheets: list[dict[str, Any]], raw_sha256: str) -> dict[str, Any] | None:
+    """Read a saved master without materializing or certifying production history.
+
+    This adapter is deliberately separate from production/sidecar recovery. All
+    original cells remain evidence, including malformed or missing fields.
+    """
+    masters = _mother_sheet_candidates(sheets)
+    if not masters:
+        return None
+    if len(masters) != 1:
+        raise ValueError("workbook contains duplicate formal-master sheets")
+    sheet = masters[0]
+    headers = sheet["headers"]
+    labels = set(COMPACT_SHOT_FIELDS) | {"镜头类型"}
+    pattern = re.compile(r"(?m)^(" + "|".join(map(re.escape, labels)) + r")\s*[:：]")
+
+    def fields(text):
+        text = str(text or "")
+        matches = list(pattern.finditer(text))
+        result = {}
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+            value = text[match.end():end].strip()
+            # Preserve repeated sections rather than silently discarding one.
+            result[match[1]] = "\n".join(filter(None, (result.get(match[1]), value)))
+        return result
+
+    shots, rows = [], []
+    matrix = sheet.get("matrix", [])
+    header_index = next(index for index, values in enumerate(matrix[:20]) if any(value not in (None, "") for value in values))
+    extra_cells = [f"{get_column_letter(column)}{row_number}"
+                   for row_number, values in enumerate(matrix, 1)
+                   for column, value in enumerate(values, 1)
+                   if column > len(headers) and value not in (None, "")]
+    if extra_cells:
+        raise ValueError("external_workbook_unmapped_master_cells: " + ", ".join(extra_cells))
+    for row_number, values in enumerate(matrix[header_index + 1:], header_index + 2):
+        if not any(value is not None and value != "" for value in values):
+            continue
+        source = dict(zip(headers, values))
+        shot = fields(_formal_master_cell(source))
+        kind, separator, visible = str(shot.get("镜头类型") or "").partition("｜")
+        if separator:
+            shot["镜头类型"] = kind.strip()
+            shot["可见主体"] = visible.removeprefix("可见主体：").strip()
+        shot.update(fields(source.get("光影")))
+        shot.update({"镜头编号": source.get("分镜序号"), "时长": source.get("时长"),
+                     "累计时长": source.get("累计时长")})
+        shot["功能类型"], shot["场景连续性ID"] = _parse_function_scene_cell(source.get("功能类型/场景连续性ID"))
+        for field in ("参考图锚定", "覆盖原文", "原文依据类型", "原文支撑句"):
+            shot[field] = source.get(field)
+        missing = [field for field in COMPACT_SHOT_FIELDS if field not in shot]
+        shots.append({field: shot.get(field, "") for field in COMPACT_SHOT_FIELDS})
+        cells = {}
+        for column, header in enumerate(headers, 1):
+            value = source.get(header)
+            cells[header] = {"address": f"{get_column_letter(column)}{row_number}", "value": value,
+                             "sha256": hashlib.sha256(json.dumps(value, ensure_ascii=False,
+                                 sort_keys=True, default=str).encode("utf-8")).hexdigest()}
+        rows.append({"shot_id": shot["镜头编号"], "row": row_number, "cells": cells,
+                     "missing_fields": missing})
+    metadata, evidence = _metadata_from_sheets(
+        [s for s in sheets if not is_reading_sheet(s.get("name"))])
+    return {
+        "schema_version": COMPACT_SCHEMA_VERSION, "field_order": list(COMPACT_SHOT_FIELDS),
+        "shots": shots, "prevention_evidence": evidence,
+        "source_lock": metadata.get("source_lock", {}),
+        "audit_workbook_evidence": {
+            "contract": "external-workbook-audit-v1", "raw_sha256": raw_sha256,
+            "master_sheet": sheet["name"], "column_contract": len(headers), "rows": rows,
+            "workbook_audit_scope": workbook_audit_scope(),
+            "historical_canonical_available": False,
+            "production_provenance": "unknown", "production_eligible": False,
+            "identity_basis": "current_read_only_mapping_of_original_cells",
+        },
+    }
+
+
+def extract_xlsx(data: bytes, *, audit_only: bool = False) -> dict[str, Any]:
     _validate_zip_archive(data)
     workbook = load_workbook(io.BytesIO(data), data_only=False, read_only=True)
     sheets = []
@@ -1021,10 +1105,25 @@ def extract_xlsx(data: bytes) -> dict[str, Any]:
             "rows": rows,
             "matrix": _sheet_value_matrix(sheet),
         })
-    canonical = workbook_to_storyboard(sheets)
     canonical_sidecar_present = any(
         sheet.get("name") == CANONICAL_SIDECAR_SHEET for sheet in sheets
     )
+    # A present sidecar must always validate. An invalid sidecar is never
+    # downgraded into an unsigned external mapping by the audit option.
+    canonical = (_external_workbook_audit(sheets, hashlib.sha256(data).hexdigest())
+                 if audit_only and not canonical_sidecar_present else workbook_to_storyboard(sheets))
+    saved_evidence = None
+    if audit_only and canonical_sidecar_present:
+        mapped = _external_workbook_audit(sheets, hashlib.sha256(data).hexdigest())
+        if mapped is not None:
+            saved_evidence = mapped["audit_workbook_evidence"]
+            saved_evidence.update(historical_canonical_available=True,
+                identity_basis="verified_original_sidecar_with_separate_current_audit_cells",
+                projection_integrity_verified=True,
+                projection_contract=next((row.get("projection_contract") or LEGACY_PROJECTION_CONTRACT
+                    for sheet in sheets if sheet.get("name") == CANONICAL_SIDECAR_SHEET
+                    for row in sheet.get("rows", []) if row.get("record_type") == "manifest"), None))
+    workbook.close()
     public_sheets = [sheet for sheet in sheets if sheet.get("name") != CANONICAL_SIDECAR_SHEET]
     return {
         "kind": "workbook",
@@ -1033,11 +1132,14 @@ def extract_xlsx(data: bytes) -> dict[str, Any]:
         "workbook_audit_scope": workbook_audit_scope(),
         "canonical_storyboard": canonical,
         "canonical_sidecar_present": canonical_sidecar_present,
+        **({"audit_workbook_evidence": saved_evidence} if saved_evidence is not None else {}),
     }
 
 
 def extract_xlsx_for_controlled_handoff_revalidation(
     data: bytes,
+    *,
+    audit_only: bool = False,
 ) -> dict[str, Any]:
     """Verify one immutable workbook for controlled handoff revalidation.
 
@@ -1179,6 +1281,15 @@ def extract_xlsx_for_controlled_handoff_revalidation(
         "00_范围与审计", list(scope_sheet.get("matrix") or [])
     )
 
+    saved_evidence = None
+    if audit_only:
+        mapped = _external_workbook_audit(sheets, hashlib.sha256(data).hexdigest())
+        if mapped is not None:
+            saved_evidence = mapped["audit_workbook_evidence"]
+            saved_evidence.update(historical_canonical_available=True,
+                identity_basis="verified_controlled_historical_handoff_with_current_audit_cells",
+                projection_integrity_verified=True, projection_contract=projection_contract,
+                selected_projector="shortdrama-projector/0.5.3-frozen" if compatibility_applied else projection_contract)
     public_sheets = [
         sheet
         for sheet in sheets
@@ -1190,6 +1301,7 @@ def extract_xlsx_for_controlled_handoff_revalidation(
         "sheets": public_sheets,
         "canonical_storyboard": canonical,
         "canonical_sidecar_present": True,
+        **({"audit_workbook_evidence": saved_evidence} if saved_evidence is not None else {}),
         "controlled_projection_revalidation": {
             "spec": "controlled-workbook-projection-revalidation-v1",
             "mode": (
@@ -1300,10 +1412,11 @@ def _extract_mm(data: bytes) -> dict[str, Any]:
     }
 
 
-def extract_file(data: bytes, file_name: str, mime_type: str | None = None) -> dict[str, Any]:
+def extract_file(data: bytes, file_name: str, mime_type: str | None = None,
+                 *, audit_only: bool = False) -> dict[str, Any]:
     suffix = Path(file_name).suffix.casefold()
     if suffix in {".xlsx", ".xlsm"}:
-        return extract_xlsx(data)
+        return extract_xlsx(data, audit_only=audit_only)
     if suffix == ".docx":
         return _extract_docx(data)
     if suffix == ".pdf":
@@ -1664,6 +1777,89 @@ def _write_scope_audit_sheet(
     sheet.column_dimensions["B"].width = 58
     sheet.freeze_panes = "A3"
     return sheet
+
+
+def audit_saved_workbook_overlay(
+    data: bytes,
+    storyboard: dict[str, Any],
+    audit_report: dict[str, Any],
+    *,
+    audit_overlay: _VerifiedAuditOverlay,
+    controlled_historical: bool = False,
+) -> bytes:
+    """Attach the existing audit page to an intact source, never re-project it."""
+    if not isinstance(audit_overlay, _VerifiedAuditOverlay):
+        raise ValueError("independent_audit_overlay_unverified")
+    if audit_overlay._as_dict().get("source_artifact_raw_sha256") != hashlib.sha256(data).hexdigest():
+        raise ValueError("independent_audit_overlay_source_fingerprint_mismatch")
+    # The service selects this only after its signed historical-handoff gates.
+    # There is no exception fallback from ordinary reading to compatibility.
+    reader = extract_xlsx_for_controlled_handoff_revalidation if controlled_historical else extract_xlsx
+    original = reader(data, audit_only=True)
+    if original.get("canonical_storyboard") != storyboard:
+        raise ValueError("independent_audit_overlay_source_canonical_mismatch")
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        keep_vba = "xl/vbaProject.bin" in archive.namelist()
+    workbook = load_workbook(io.BytesIO(data), data_only=False, keep_vba=keep_vba)
+    scope_name = "00_范围与审计"
+    scope_index = workbook.sheetnames.index(scope_name) if scope_name in workbook.sheetnames else 0
+    if scope_name in workbook.sheetnames:
+        workbook.remove(workbook[scope_name])
+    scope = _write_scope_audit_sheet(workbook, storyboard, audit_report, audit_overlay)
+    workbook.move_sheet(scope, offset=scope_index - workbook.sheetnames.index(scope_name))
+    # This updates only the audit-page binding, not the original payload, its
+    # projection hash, or its version. Unsigned inputs remain without a sidecar.
+    if CANONICAL_SIDECAR_SHEET in workbook.sheetnames:
+        sidecar = workbook[CANONICAL_SIDECAR_SHEET]
+        headers = [cell.value for cell in sidecar[1]]
+        if "audit_page_sha256" in headers:
+            column = headers.index("audit_page_sha256") + 1
+            digest = _visible_sheet_sha256(scope_name, _sheet_value_matrix(scope))
+            for row in range(2, sidecar.max_row + 1):
+                sidecar.cell(row, column, digest)
+    else:
+        # Reuse the existing row; do not imply historical production evidence.
+        for row in scope.iter_rows():
+            if row[0].value == "production_evidence_location":
+                row[1].value = "只读外部原件；未提供历史 canonical sidecar"
+    output = io.BytesIO()
+    workbook.save(output)
+    workbook.close()
+    result = output.getvalue()
+    restored = reader(result, audit_only=True)
+    if original["canonical_sidecar_present"]:
+        if restored["canonical_storyboard"] != storyboard:
+            raise ValueError("independent_audit_overlay_canonical_changed")
+    elif restored["canonical_sidecar_present"]:
+        raise ValueError("independent_audit_overlay_created_historical_sidecar")
+    # Round-trip every original content cell and its effective formatting,
+    # including reading copies for preservation only (never semantic scoring).
+    before = load_workbook(io.BytesIO(data), data_only=False)
+    after = load_workbook(io.BytesIO(result), data_only=False)
+    try:
+        for sheet in before.worksheets:
+            if sheet.title in {scope_name, CANONICAL_SIDECAR_SHEET}:
+                continue
+            peer = after[sheet.title]
+            if _sheet_value_matrix(sheet) != _sheet_value_matrix(peer):
+                raise ValueError("independent_audit_overlay_content_changed: " + sheet.title)
+            for row in sheet.iter_rows():
+                for cell in row:
+                    other = peer[cell.coordinate]
+                    for attr in ("font", "fill", "border", "alignment", "protection", "number_format"):
+                        if copy.copy(getattr(cell, attr)) != copy.copy(getattr(other, attr)):
+                            raise ValueError("independent_audit_overlay_format_changed: " + sheet.title + "!" + cell.coordinate)
+            if (str(sheet.merged_cells), sheet.freeze_panes, sheet.sheet_state,
+                {key: dict(value) for key, value in sheet.row_dimensions.items()},
+                {key: dict(value) for key, value in sheet.column_dimensions.items()}) != (
+                str(peer.merged_cells), peer.freeze_panes, peer.sheet_state,
+                {key: dict(value) for key, value in peer.row_dimensions.items()},
+                {key: dict(value) for key, value in peer.column_dimensions.items()}):
+                raise ValueError("independent_audit_overlay_layout_changed: " + sheet.title)
+    finally:
+        before.close()
+        after.close()
+    return result
 
 
 def storyboard_to_xlsx(

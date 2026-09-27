@@ -1,0 +1,6 @@
+{
+  "source_commit": "0e2c4c744ca5a68633ba13231f5032268412f3f6",
+  "sha256": "9e620e145fc96cf9dde4ed191d74cc5faa9cb82f0b434a1fcf43bc4418d5a255",
+  "synthetic": true,
+  "recipe": "Original Git snapshot test_efficiency.valid_storyboard(); four explicitly visible actors; original storyboard_to_xlsx with status=fail/issues=[] and assume_compact=True; original extract_xlsx accepted the bytes. Immutable synthetic historical regression input, not a production delivery."
+}

@@ -8,7 +8,7 @@ from typing import Any, Iterable
 from .written_payload import context_instruction_text, protect_visual_text_fragments
 from .picture_presentation import display_picture, timed_picture
 from .field_content import (assert_field_content, r5_keyframe_sections, LIGHTING_FIELDS as LIGHTING_FIELDS,
-                            FORMAL_EXECUTION_FIELDS, project_lighting)
+                            FORMAL_EXECUTION_FIELDS, project_lighting, music_directives, strip_negative_music)
 
 
 FORMAL_MERGED_FIELD = "正式分镜母版"
@@ -482,101 +482,13 @@ def _protect_visual_text_fragments(value: Any, *, field_name: str = "") -> tuple
 
 
 def _active_music_directive(value: Any) -> str:
-    """Return any unambiguously non-negative in-shot music instruction."""
-
-    without_bans, _mentioned = _strip_negative_music_clauses(value)
-    instruction_text, _protected = _protect_visual_text_fragments(without_bans)
-    instruction_text = _QUOTED_DIALOGUE_RE.sub("", instruction_text)
-    instruction_text = _LABELED_DIALOGUE_RE.sub("", instruction_text)
-    match = _ACTIVE_MUSIC_DIRECTIVE_RE.search(instruction_text)
-    if match:
-        return match.group(0)
-    # After all recognized negative clauses/list-items are removed, any music
-    # term is affirmative or ambiguous and therefore unsafe to reinterpret.
-    match = _MUSIC_TERM_RE.search(instruction_text)
-    return match.group(0) if match else ""
+    records = music_directives(value)
+    affirmative = [row for row in records if row["status"] == "affirmative"]
+    return affirmative[0]["text"] if affirmative else ""
 
 
 def _strip_negative_music_clauses(value: Any) -> tuple[str, bool]:
-    """Remove proved music bans without editing quotes or borrowing negation."""
-    # A quoted statement is payload, not an instruction to this converter.
-    text, protected = _protect_visual_text_fragments(str(value or ""))
-    def protect_quote(match):
-        token = f"\ue010MUSICQUOTE{len(protected)}\ue011"
-        protected[token] = match.group(0)
-        return token
-    text = _QUOTED_DIALOGUE_RE.sub(protect_quote, text)
-    mentioned = False
-    negative_start = re.compile(r"^\s*(?:禁止|不要|不得|不使用|不生成|没有|不加|无)(?:任何)?")
-    # These are known ban-list objects. An unfamiliar mixed list stays intact
-    # for the active/ambiguous-music gate rather than inheriting guessed polarity.
-    visual_item = re.compile(r"(?:字幕|水印|现代物件|现代元素|现代服饰|现代标识|现代logo|人物看镜头|塑料皮肤|过度锐化|雾化|烟雾|薄雾|柔焦|光晕|镜头扩散)", re.I)
-    music_item = re.compile(r"(?:任何)?(?:让)?(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)?\s*(?:BGM|背景音乐|额外配乐|配乐|音乐)(?:响起|播放|进入|渐入|切入|铺开|持续|开始)?", re.I)
-    connectors = re.compile(r"(?:以及|[、与和且及])")
-
-    def clean_atom(original):
-        nonlocal mentioned
-        clause = original.strip()
-        if not _MUSIC_TERM_RE.search(clause):
-            return original
-        # Matching the complete negative atom excludes 未禁止/不必没有 and
-        # arbitrary prefixes. A later affirmative music clause remains visible.
-        if _NEGATIVE_MUSIC_CLAUSE_RE.fullmatch(clause):
-            mentioned = True
-            return ""
-        prefix = negative_start.match(clause)
-        if prefix is None:
-            return original
-        rest = clause[prefix.end():]
-        items = [item.strip() for item in connectors.split(rest)]
-        if len(items) < 2 or not all(items):
-            return original
-        keep = []
-        removed = False
-        for item in items:
-            if music_item.fullmatch(item):
-                removed = True
-                continue
-            own_prefix = negative_start.match(item)
-            noun = item[own_prefix.end():] if own_prefix else item
-            if not visual_item.fullmatch(noun):
-                return original
-            keep.append(item)
-        if not removed:
-            return original
-        mentioned = True
-        if not keep:
-            return ""
-        retained = "、".join(keep)
-        return retained if negative_start.match(retained) else prefix.group(0).strip() + retained
-
-    parts = re.split(r"([；;。！？!?，,\n]+)", text)
-    for index in range(0, len(parts), 2):
-        original = parts[index]
-        cleaned = clean_atom(original)
-        if cleaned != original or not _MUSIC_TERM_RE.search(original):
-            parts[index] = cleaned
-            continue
-        # Recognized noun enumeration was handled above. These conjunctions
-        # introduce separate assertions when that whole-list proof failed.
-        clauses = re.split(r"(但是|然而|不过|而且|并且|随后|然后|而后|接着|同时|但|却|且)", original)
-        if len(clauses) > 1:
-            atoms = [clean_atom(clauses[offset]) for offset in range(0, len(clauses), 2)]
-            if atoms != clauses[::2]:
-                retained = []
-                for ordinal, atom in enumerate(atoms):
-                    if not atom.strip():
-                        continue
-                    if retained and ordinal:
-                        retained.append(clauses[2 * ordinal - 1])
-                    retained.append(atom)
-                parts[index] = "".join(retained)
-    cleaned = "".join(parts)
-    # Restore quote placeholders before visual placeholders in case one wraps
-    # the other; no quoted words or internal punctuation are normalized.
-    for token, fragment in reversed(list(protected.items())):
-        cleaned = cleaned.replace(token, fragment)
-    return cleaned, mentioned
+    return strip_negative_music(value)
 
 
 def _assert_generation_aspect_contract(value: Any) -> None:
@@ -637,6 +549,9 @@ def _normalize_generation_limits(value: Any) -> str:
     """
 
     _assert_generation_aspect_contract(value)
+    unknown_music = [row for row in music_directives(value) if row["status"] == "unknown"]
+    if unknown_music:
+        raise ValueError("generation_limit_audio_contract_unknown: unresolved music scope: " + repr(unknown_music[0]["text"]))
     active_music = _active_music_directive(value)
     if active_music:
         raise ValueError(

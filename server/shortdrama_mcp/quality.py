@@ -44,7 +44,8 @@ def issue_domain(issue: dict[str, Any]) -> str:
 
 
 def measure_quality(storyboard, issues, *, resolve_ids: Callable,
-                    pattern_key: Callable, known_pattern_keys=None):
+                    pattern_key: Callable, known_pattern_keys=None, coverage=None, execution_checks=None,
+                    legacy_diagnostics_only=False):
     """Summarize supplied diagnostics; do not certify check coverage or generation.
 
     Historical first_draft_* names remain compatible. The service binds these
@@ -126,7 +127,7 @@ def measure_quality(storyboard, issues, *, resolve_ids: Callable,
                         and all(at_least(domains["content"], 98, ids) and at_least(unusable, 98, ids)
                                 for ids in episode_sets.values())
                         and 100 * len(unusable) <= 2 * len(shots)) else "B"
-    return {
+    result = {
         "quality_contract": QUALITY_CONTRACT, "measurement_state": "measured" if measured else "unavailable",
         "grade": grade, "checked_shot_count": len(shots), "issue_point_count": len(issues),
         "unique_affected_shot_count": len(unusable), "affected_shot_ids": sorted(unusable),
@@ -145,6 +146,71 @@ def measure_quality(storyboard, issues, *, resolve_ids: Callable,
         "commit_eligible": bool(grade == "A" and not actionable and identity_valid),
         "final_independent_audit_required_percent": 100.0,
     }
+    # Diagnostic absence is useful for machine admission, never proof that the
+    # complete applicable semantic review was performed on a frozen draft.
+    if legacy_diagnostics_only:
+        return result
+    result["diagnostic_summary"] = {
+        "measurement_basis": "reported_machine_diagnostics_only",
+        "no_reported_content_defect_shot_percent": correct,
+        "no_reported_content_or_contract_defect_shot_percent": usable,
+        "machine_draft_admission_eligible": result["commit_eligible"],
+        "diagnostic_grade": grade,
+        "no_reported_content_defect_episode_percent": episode_rates,
+        "no_reported_content_or_contract_defect_episode_percent": episode_usability,
+        "minimum_no_reported_content_defect_episode_percent": minimum,
+        "minimum_no_reported_content_or_contract_defect_episode_percent": minimum_usability,
+    }
+    covered = set((coverage or {}).get("completed_shot_ids", [])) & identity_set
+    for check in execution_checks or []:
+        if check.get("status") == "unknown":
+            covered -= set(check.get("shot_ids") or identity_set)
+    passed = set((coverage or {}).get("passed_shot_ids", [])) & covered
+    problems = set((coverage or {}).get("confirmed_problem_shot_ids", [])) & identity_set
+    for check in execution_checks or []:
+        if check.get("status") in {"fail", "fail_current"}:
+            problems |= set(check.get("shot_ids") or []) & identity_set
+    passed -= problems | unusable
+    unknown = identity_set - covered
+    full = bool(identity_valid and not unknown and not usability_unknown)
+    result.update({
+        "completed_shot_count": len(covered), "checked_shot_count": len(covered),
+        "total_shot_count": len(shots), "passed_shot_count": len(passed),
+        "failed_completed_shot_count": len(covered - passed),
+        "unknown_shot_count": len(unknown), "unknown_shot_ids": sorted(unknown),
+        "confirmed_problem_shot_count": len(problems), "confirmed_problem_shot_ids": sorted(problems),
+        "diagnostic_affected_shot_ids": sorted(unusable),
+        "confirmed_problem_basis": "independent_review_or_explicit_semantic_execution_failure; raw diagnostics remain separate and may block pass without confirming a semantic defect",
+        "known_problem_uncompleted_shot_ids": sorted(problems & unknown),
+        "review_coverage_percent": round(100 * len(covered) / len(shots), 2) if identity_valid else 0.0,
+        "completed_review_accuracy_percent": round(100 * len(passed) / len(covered), 2) if covered else None,
+        "measurement_basis": "complete_applicable_review_per_shot",
+        "independent_content_coverage_verified": full,
+        "first_draft_correctness_percent": round(100 * len(passed) / len(shots), 2) if full else None,
+        "direct_usability_percent": round(100 * len(passed) / len(shots), 2) if full else None,
+        "measurement_state": "measured" if full else "unavailable",
+        "commit_eligible": bool(full and result["commit_eligible"] and not problems),
+    })
+    if full:
+        reviewed_episode_rates = {ep: round(100 * len(ids & passed) / len(ids), 2)
+                                  if episode_identity_valid and ids else None for ep, ids in episode_sets.items()}
+        reviewed_minimum = min(reviewed_episode_rates.values()) if reviewed_episode_rates and all(
+            rate is not None for rate in reviewed_episode_rates.values()) else None
+        for key in ("episode_correctness_percent", "episode_direct_usability_percent"):
+            result[key] = reviewed_episode_rates.copy()
+        for key in ("minimum_episode_correctness_percent", "minimum_episode_direct_usability_percent"):
+            result[key] = reviewed_minimum
+        if result["grade"] in {"A", "B"}:
+            result["grade"] = "A" if (100 * len(passed) >= 98 * len(shots)
+                and all(100 * len(ids & passed) >= 98 * len(ids) for ids in episode_sets.values())) else "B"
+        result["commit_eligible"] = bool(result["commit_eligible"] and result["grade"] == "A")
+    if not full:
+        result["grade"] = "unavailable"
+        for key in ("minimum_episode_correctness_percent", "minimum_episode_direct_usability_percent"):
+            result[key] = None
+        for key in ("episode_correctness_percent", "episode_direct_usability_percent"):
+            result[key] = {episode: None for episode in result[key]}
+    return result
 
 
 def machine_preflight_quality(score, *, scope_kind):
@@ -155,12 +221,13 @@ def machine_preflight_quality(score, *, scope_kind):
     it cannot establish independent content quality or authorize delivery.
     """
     result = copy.deepcopy(score)
+    diagnostic = score.get("diagnostic_summary") or {}
     result["diagnostic_summary"] = {
         "measurement_basis": "reported_machine_diagnostics_only",
         "scope_kind": scope_kind,
-        "no_reported_content_defect_shot_percent": score["first_draft_correctness_percent"],
-        "no_reported_content_or_contract_defect_shot_percent": score["direct_usability_percent"],
-        "machine_draft_admission_eligible": bool(scope_kind == "full" and score["commit_eligible"]),
+        "no_reported_content_defect_shot_percent": diagnostic.get("no_reported_content_defect_shot_percent", score["first_draft_correctness_percent"]),
+        "no_reported_content_or_contract_defect_shot_percent": diagnostic.get("no_reported_content_or_contract_defect_shot_percent", score["direct_usability_percent"]),
+        "machine_draft_admission_eligible": bool(scope_kind == "full" and diagnostic.get("machine_draft_admission_eligible", score["commit_eligible"])),
     }
     result.update(measurement_state="unavailable", grade="unavailable",
                   measurement_basis="machine_preflight_without_independent_content_coverage",

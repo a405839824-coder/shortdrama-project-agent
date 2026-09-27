@@ -22,7 +22,7 @@ class QualityContractTests(unittest.TestCase):
     def test_global_repair_history_failure_blocks_workflow_without_invented_bad_shots(self):
         q = _draft_quality_metrics(draft(3), [defect("E-REGRESSION-001", "repair_history",
             location="repair_history[1]", shot_ids=[])])
-        self.assertEqual(q["first_draft_correctness_percent"], 100)
+        self.assertEqual(q["diagnostic_summary"]["no_reported_content_defect_shot_percent"], 100)
         self.assertEqual(q["content_affected_shot_ids"], [])
         self.assertEqual(q["workflow_issue_count"], 1)
         self.assertFalse(q["commit_eligible"])
@@ -35,26 +35,26 @@ class QualityContractTests(unittest.TestCase):
 
     def test_correctness_and_usability_measure_different_defects(self):
         q = _draft_quality_metrics(draft(), [defect("E-FIELDORDER-001", "字段顺序")])
-        self.assertEqual(q["first_draft_correctness_percent"], 100)
-        self.assertEqual(q["direct_usability_percent"], 99)
+        self.assertEqual(q["diagnostic_summary"]["no_reported_content_defect_shot_percent"], 100)
+        self.assertEqual(q["diagnostic_summary"]["no_reported_content_or_contract_defect_shot_percent"], 99)
         self.assertFalse(q["commit_eligible"])
 
     def test_nonblocking_known_advice_does_not_mark_shot_unusable(self):
         q = _draft_quality_metrics(draft(), [defect("N-TIMING-UNCALIBRATED", "语速标定",
                                   severity="warning", blocking=False)])
-        self.assertEqual(q["direct_usability_percent"], 100)
+        self.assertEqual(q["diagnostic_summary"]["no_reported_content_or_contract_defect_shot_percent"], 100)
         self.assertEqual(q["advisory_count"], 1)
 
     def test_blocking_warning_cannot_be_downgraded(self):
         q = _draft_quality_metrics(draft(), [defect("E-LIGHT-002", "光源方向",
                                   severity="warning", blocking=True)])
-        self.assertEqual(q["direct_usability_percent"], 99)
+        self.assertEqual(q["diagnostic_summary"]["no_reported_content_or_contract_defect_shot_percent"], 99)
         self.assertFalse(q["commit_eligible"])
 
     def test_real_lighting_warning_is_still_a_content_fault(self):
         q = _draft_quality_metrics(draft(), [defect("E-LIGHT-002", "光源方向",
                                   severity="warning", blocking=False)])
-        self.assertEqual(q["direct_usability_percent"], 99)
+        self.assertEqual(q["diagnostic_summary"]["no_reported_content_or_contract_defect_shot_percent"], 99)
         self.assertEqual(q["advisory_count"], 0)
 
     def test_unlocated_source_failure_has_unknown_rate_not_false_100(self):
@@ -65,7 +65,7 @@ class QualityContractTests(unittest.TestCase):
     def test_multiple_defects_on_same_shot_count_once(self):
         q = _draft_quality_metrics(draft(), [defect(), defect("E-CONTINUITY-001")])
         self.assertEqual(q["unique_affected_shot_count"], 1)
-        self.assertEqual(q["direct_usability_percent"], 99)
+        self.assertEqual(q["diagnostic_summary"]["no_reported_content_or_contract_defect_shot_percent"], 99)
 
     def event(self, report, *, prior=None, current=None):
         service = object.__new__(StoryboardService)
@@ -82,7 +82,7 @@ class QualityContractTests(unittest.TestCase):
 
     def test_clean_diagnostics_do_not_establish_raw_generation_quality(self):
         event = self.event({"issues": []})
-        self.assertEqual(event["first_delivery_quality"]["grade"], "A")
+        self.assertEqual(event["first_delivery_quality"]["grade"], "unavailable")
         self.assertIsNone(event["raw_generation_quality"])
         self.assertEqual(event["raw_generation_quality_state"], "requires_first_candidate_evidence")
 

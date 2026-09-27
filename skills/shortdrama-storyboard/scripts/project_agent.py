@@ -930,9 +930,9 @@ def _validate_first_draft_quality(value: Any, path: str) -> list[str]:
     if (
         isinstance(value.get("checked_shot_count"), int)
         and isinstance(value.get("unique_affected_shot_count"), int)
-        and value.get("unique_affected_shot_count") > value.get("checked_shot_count")
+        and value.get("unique_affected_shot_count") > value.get("total_shot_count", value.get("checked_shot_count"))
     ):
-        errors.append(f"{path}.unique_affected_shot_count exceeds checked_shot_count")
+        errors.append(f"{path}.unique_affected_shot_count exceeds total shot population")
     return errors
 
 

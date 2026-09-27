@@ -451,7 +451,7 @@
             "introduced_issue_count"
           ],
           "properties": {
-            "source_and_key_dialogue_mapping_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "source_and_key_dialogue_mapping_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
             "core_event_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
             "causal_link_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
             "character_state_change_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
@@ -477,8 +477,24 @@
             "context": {"type": "object"},
             "expected_count": {"type": "integer", "minimum": 1},
             "reviewed_count": {"type": "integer", "minimum": 1},
-            "coverage_percent": {"const": 100},
+            "coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
             "failed_count": {"type": "integer", "minimum": 0},
+            "complete": {"type": "boolean"},
+            "check_states": {"type": "object", "additionalProperties": {"type": "object", "required": ["status", "complete", "missing_evidence"], "properties": {"status": {"enum": ["pass", "fail", "unknown", "not_applicable"]}, "layer": {"type": ["string", "null"]}, "complete": {"type": "boolean"}, "missing_evidence": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}},
+            "completed_obligation_count": {"type": "integer", "minimum": 0},
+            "unresolved_obligation_ids": {"type": "array", "items": {"type": "string"}},
+            "obligation_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "total_shot_count": {"type": "integer", "minimum": 0},
+            "completed_shot_count": {"type": "integer", "minimum": 0},
+            "passed_shot_count": {"type": "integer", "minimum": 0},
+            "unknown_shot_count": {"type": "integer", "minimum": 0},
+            "confirmed_problem_shot_count": {"type": "integer", "minimum": 0},
+            "completed_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+            "passed_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+            "unknown_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+            "confirmed_problem_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+            "shot_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
+            "completed_shot_accuracy_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
             "checks_sha256": {"$ref": "#/$defs/sha256"},
             "meaning": {"type": "string"}
           },
@@ -502,7 +518,7 @@
             "pair_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
             "production_proof_verified": {"type": "boolean"},
             "production_failed_pair_count": {"type": "integer", "minimum": 0},
-            "spatial_layer_status": {"enum": ["pass", "fail_current"]}
+            "spatial_layer_status": {"enum": ["pass", "fail_current", "unknown"]}
           },
           "additionalProperties": false
         },
@@ -515,7 +531,7 @@
             "reviewed_voice_field_count": {"type": "integer", "minimum": 0},
             "coverage_percent": {"const": 100},
             "evidence_ids": {"type": "array", "items": {"type": "string", "pattern": "^field:.+\\.音色$"}, "uniqueItems": true},
-            "audio_layer_status": {"enum": ["pass", "fail_current"]},
+            "audio_layer_status": {"enum": ["pass", "fail_current", "unknown"]},
             "machine_voice_issue_count": {"type": "integer", "minimum": 0}
           },
           "additionalProperties": false
@@ -541,7 +557,7 @@
               "maxItems": 4
             },
             "evidence_ids": {"type": "array", "items": {"type": "string", "pattern": "^field:.+\\.(光影|光源来源|光源方向|色温倾向)$"}, "uniqueItems": true},
-            "camera_visibility_layer_status": {"enum": ["pass", "fail_current"]},
+            "camera_visibility_layer_status": {"enum": ["pass", "fail_current", "unknown"]},
             "machine_t2i_issue_count": {"type": "integer", "minimum": 0},
             "machine_lighting_issue_count": {"type": "integer", "minimum": 0}
           },
@@ -558,7 +574,7 @@
             "coverage_percent": {"const": 100},
             "ordered_entry_sha256": {"type": "string", "pattern": "^$|^[a-f0-9]{64}$"},
             "evidence_ids": {"type": "array", "items": {"type": "string", "pattern": "^field:.+\\.画面内容$"}, "uniqueItems": true},
-            "source_layer_status": {"enum": ["pass", "fail_current"]},
+            "source_layer_status": {"enum": ["pass", "fail_current", "unknown"]},
             "machine_adaptation_issue_count": {"type": "integer", "minimum": 0}
           },
           "additionalProperties": false
@@ -573,7 +589,7 @@
             "conversation_scene_count": {"type": "integer", "minimum": 0},
             "coverage_percent": {"const": 100},
             "evidence_ids": {"type": "array", "items": {"type": "string", "pattern": "^source-unit:.+$"}, "uniqueItems": true},
-            "source_layer_status": {"enum": ["pass", "fail_current"]}
+            "source_layer_status": {"enum": ["pass", "fail_current", "unknown"]}
           },
           "additionalProperties": false
         },
@@ -644,6 +660,22 @@
                 "affected_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
                 "quality_contract": {"const": "storyboard-quality-v2"},
                 "measurement_state": {"enum": ["measured", "unavailable"]},
+                "measurement_basis": {"type": "string"},
+                "diagnostic_summary": {"type": "object"},
+                "total_shot_count": {"type": "integer", "minimum": 0},
+                "completed_shot_count": {"type": "integer", "minimum": 0},
+                "passed_shot_count": {"type": "integer", "minimum": 0},
+                "failed_completed_shot_count": {"type": "integer", "minimum": 0},
+                "unknown_shot_count": {"type": "integer", "minimum": 0},
+                "unknown_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                "confirmed_problem_shot_count": {"type": "integer", "minimum": 0},
+                "confirmed_problem_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                "diagnostic_affected_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                "confirmed_problem_basis": {"type": "string"},
+                "known_problem_uncompleted_shot_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                "review_coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
+                "completed_review_accuracy_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                "independent_content_coverage_verified": {"type": "boolean"},
                 "content_affected_shot_ids": {"type": "array", "items": {"type": "string"}},
                 "contract_affected_shot_ids": {"type": "array", "items": {"type": "string"}},
                 "workflow_issue_count": {"type": "integer", "minimum": 0},
@@ -952,7 +984,7 @@
       "type": "object",
       "required": ["status", "evidence_count", "evidence_ids"],
       "properties": {
-        "status": {"enum": ["pass", "fail_current", "unable_to_check", "not_applicable"]},
+        "status": {"enum": ["pass", "fail_current", "unknown", "unable_to_check", "not_applicable"]},
         "evidence_count": {"type": "integer", "minimum": 0},
         "evidence_ids": {"type": "array", "items": {"type": "string"}},
         "not_applicable_reason": {"type": "string"}
@@ -968,7 +1000,7 @@
       "type": "object",
       "required": ["status", "summary", "evidence_count", "evidence_ids"],
       "properties": {
-        "status": {"enum": ["pass", "fail_current"]},
+        "status": {"enum": ["pass", "fail_current", "unknown"]},
         "summary": {"type": "string", "minLength": 1},
         "evidence_count": {"type": "integer", "minimum": 1},
         "evidence_ids": {

@@ -177,6 +177,8 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
         for sid, shot in zip(ids, shots) for field in COMPACT_SHOT_FIELDS
     }
     field_hashes = {ref: stable_json_hash(value) for ref, value in values.items()}
+    workbook = storyboard.get("audit_workbook_evidence") or {}
+    saved_rows = {row["shot_id"]: row for row in workbook.get("rows", [])}
     graph = {}
     try:
         graph = json.loads(storyboard['prevention_evidence']['production_derivation']['source_graph_json'])
@@ -243,9 +245,29 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
                 "layer": layer, "question": question,
                 "dependency_fields": dependencies,
                 "required_observation_refs": [f"field:{sid}.{field}" for field in observed],
-                "allowed_statuses": ["pass", "fail_current"],
+                "allowed_statuses": ["pass", "fail_current", "unknown"],
                 "applicability": "Required review; natural stillness, silent shots and prop-only frames are valid when supported, not omissions.",
             }
+            if sid in saved_rows:
+                saved = saved_rows[sid]
+                selected = (set(saved["cells"]) if rule == "field_ownership" else
+                            {"正式分镜母版", "正式分镜母版·字段合并", "GPT关键帧生成指令", "光影"}
+                            if rule in {"standalone_execution", "state_continuity", "camera_visibility", "observable_lighting"}
+                            else set())
+                for header, cell in saved["cells"].items():
+                    if header not in selected:
+                        continue
+                    ref = f"workbook:{sid}.{cell['address']}"
+                    values[ref] = _text(cell.get("value"))
+                    row["dependency_fields"][ref] = stable_json_hash(cell)
+                    row["required_observation_refs"].append(ref)
+                    row.setdefault("saved_workbook_evidence", []).append(
+                        {"reference": ref, "field": header, "text": values[ref]})
+                if rule == "source_fidelity":
+                    row["missing_evidence"] = ["complete_authorized_source_ledger" if not source_units
+                                               else "verified_authorized_source_binding"]
+                if saved.get("missing_fields") and rule == "field_ownership":
+                    row["missing_evidence"] = ["saved_field:" + field for field in saved["missing_fields"]]
             if rule == 'source_fidelity':
                 units = units_by_shot[sid]
                 if units:
@@ -411,7 +433,8 @@ def normalize_coverage_transport(submission: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_coverage(storyboard: dict[str, Any], submission: dict[str, Any],
-                      context: dict[str, str], *, _page_ids: list[str] | None = None) -> dict[str, Any]:
+                      context: dict[str, str], *, _page_ids: list[str] | None = None,
+                      allow_unresolved: bool = False) -> dict[str, Any]:
     manifest = build_obligations(storyboard, context)
     coverage = submission.get("coverage")
     if not isinstance(coverage, dict):
@@ -444,7 +467,9 @@ def validate_coverage(storyboard: dict[str, Any], submission: dict[str, Any],
             raise ValueError("audit_coverage_fragment_layer_mismatch")
         if check.get("dependency_sha256") != expected["dependency_sha256"]:
             raise ValueError("audit_coverage_dependency_stale: " + check["obligation_id"])
-        if check.get("status") not in expected["allowed_statuses"]:
+        if (check.get("status") not in expected["allowed_statuses"]
+                or (check.get("status") == "unknown" and not allow_unresolved)
+                or (expected.get("missing_evidence") and check.get("status") == "pass")):
             raise ValueError("audit_coverage_unresolved: unknown/unjustified not_applicable cannot pass")
         observations = check.get("observations") or []
         observed = [r.get("reference") for r in observations]
@@ -475,12 +500,48 @@ def validate_coverage(storyboard: dict[str, Any], submission: dict[str, Any],
                     raise ValueError("audit_coverage_failed_check_issue_mismatch")
         elif check.get("issue_ids"):
             raise ValueError("audit_coverage_passing_check_has_issues")
+    summary = coverage_summary(list(by_id.values()), rows)
     return {"contract": CONTRACT, "manifest_sha256": manifest["manifest_sha256"],
             "canonical_sha256": manifest["canonical_sha256"],
             "context": context, "expected_count": len(by_id), "reviewed_count": len(rows),
-            "coverage_percent": 100.0, "failed_count": failed,
+            "coverage_percent": summary["obligation_coverage_percent"], "failed_count": failed,
+            **summary,
             "checks_sha256": stable_json_hash(rows),
             "meaning": "Complete bound reviewer declarations; not proof of semantic correctness."}
+
+
+def coverage_summary(obligations: list[dict[str, Any]], checks: list[dict[str, Any]]) -> dict[str, Any]:
+    """A known failure does not complete the other checks on the same shot."""
+    by_id = {row["obligation_id"]: row for row in checks}
+    groups, states, problems, completed = {}, {}, set(), set()
+    for obligation in obligations:
+        identity, sid = obligation["obligation_id"], obligation["shot_id"]
+        check = by_id.get(identity, {})
+        state = check.get("status", "unknown")
+        if state in {"fail", "fail_current"}:
+            problems.add(sid)
+        resolved = state in {"pass", "fail", "fail_current", "not_applicable"} and not obligation.get("missing_evidence")
+        if state == "not_applicable" and state not in obligation.get("allowed_statuses", []):
+            resolved = False
+        states[identity] = {"status": "fail" if state == "fail_current" else state,
+                            "layer": obligation.get("layer"),
+                            "complete": resolved, "missing_evidence": obligation.get("missing_evidence", [])}
+        groups.setdefault(sid, []).append(resolved)
+        if resolved:
+            completed.add(identity)
+    c = {sid for sid, values in groups.items() if all(values)}
+    p = c - problems
+    n = len(groups)
+    return {"complete": len(completed) == len(obligations), "check_states": states,
+            "completed_obligation_count": len(completed),
+            "unresolved_obligation_ids": sorted(set(states) - completed),
+            "obligation_coverage_percent": round(100 * len(completed) / len(obligations), 2) if obligations else 0.0,
+            "total_shot_count": n, "completed_shot_count": len(c), "passed_shot_count": len(p),
+            "unknown_shot_count": n - len(c), "confirmed_problem_shot_count": len(problems),
+            "completed_shot_ids": sorted(c), "passed_shot_ids": sorted(p),
+            "unknown_shot_ids": sorted(set(groups) - c), "confirmed_problem_shot_ids": sorted(problems),
+            "shot_coverage_percent": round(100 * len(c) / n, 2) if n else 0.0,
+            "completed_shot_accuracy_percent": round(100 * len(p) / len(c), 2) if c else None}
 
 
 def verify_certificate_coverage(service: Any, storyboard: dict[str, Any], certificate: dict[str, Any]) -> dict[str, Any]:
@@ -488,7 +549,9 @@ def verify_certificate_coverage(service: Any, storyboard: dict[str, Any], certif
     submission = report.get("semantic_audit")
     if not isinstance(submission, dict):
         raise ValueError("audit_coverage_certificate_missing: " + NEXT_STEP)
-    receipt = validate_coverage(storyboard, submission, coverage_context(service))
+    receipt = validate_coverage(storyboard, submission, coverage_context(service), allow_unresolved=True)
+    if not receipt["complete"] and certificate.get("result") == "pass":
+        raise ValueError("audit_coverage_unresolved: incomplete coverage cannot certify PASS")
     if (certificate.get("semantic_obligation_coverage") != receipt or
             report.get("independent_evidence_matrix", {}).get("semantic_obligation_coverage") != receipt):
         raise ValueError("audit_coverage_certificate_binding_missing_or_stale: " + NEXT_STEP)
@@ -517,7 +580,7 @@ def _obligation_rule_definitions() -> dict[str, dict[str, Any]]:
             "dependency_fields": list(fields),
             "required_observation_fields": list(observed),
             "neighbor_dependency_fields": ["画面内容", "起始状态", "空间站位描述", "可见主体"] if adjacent else [],
-            "allowed_statuses": ["pass", "fail_current"],
+            "allowed_statuses": ["pass", "fail_current", "unknown"],
         }
         for rule, layer, question, fields, observed, adjacent in RULES
     }
@@ -533,6 +596,9 @@ def _compact_obligation(row: dict[str, Any], neighbor_ids: list[str], definition
         result['rhythm_evidence'] = row['rhythm_evidence']
     if 'source_evidence' in row:
         result['source_evidence'] = row['source_evidence']
+    for key in ('saved_workbook_evidence', 'missing_evidence'):
+        if key in row:
+            result[key] = row[key]
     dependencies = {f"field:{row['shot_id']}.{field}" for field in definition['dependency_fields']}
     dependencies.update(f"field:{sid}.{field}" for sid in neighbor_ids
                         for field in definition['neighbor_dependency_fields'])

@@ -24,3 +24,6 @@ appearance_anchor_text = _module.appearance_anchor_text
 assert_static_text_preserved = _module.assert_static_text_preserved
 model_field_contract = _module.model_field_contract
 voice_parts = _module.voice_parts
+
+music_directives = _module.music_directives
+strip_negative_music = _module.strip_negative_music
