@@ -70,6 +70,17 @@ def voice_block(*, mode: str, dialogue_rows: list[tuple[str, str]],
         if re.search(r"[、，,；;/／]", item):
             raise ContractBlockError("voice.prohibited_tones: one tone per item")
         forbidden.append(item)
+    tail_execution = authored(tail_execution, "voice.tail_execution")
+    # Bind a positional tail instruction to the supplied utterance without
+    # inventing intent, changing a word, or replacing the registered voice.
+    from projection_semantics import QUOTES, tail_binding_faults
+    if not QUOTES.search(tail_execution) and len(dialogue_rows) == 1:
+        ending = dialogue_rows[0][1].rstrip("。！？!?；;，, .…～~")
+        if ending:
+            tail_execution = "末字“" + ending[-1] + "”；" + tail_execution
+    tail_faults = tail_binding_faults(tail_execution, dialogue_rows)
+    if tail_faults:
+        raise ContractBlockError("voice.tail_execution: " + "; ".join(tail_faults))
     bodies = [baseline, speech_act, current_expression, "", volume, rhythm, breath,
               pauses, emphasis,
               direction + "；" + authored(tail_execution, "voice.tail_execution"), "、".join(forbidden)]
@@ -195,7 +206,7 @@ def scene_lighting_blocks(*, source: dict[str, Any], screen_side: str,
                              air: str, exposure: str) -> dict[str, Any]:
     """Render explicitly supplied ordinary indoor or outdoor daylight decisions.
 
-    Supported narrow cases: day paper-window daylight (open/closed), or a lit
+    Supported narrow cases: day paper/glass-window daylight (open/closed), or a lit
     night oil lamp/candle/lantern, or outdoor daylight. Screen side must come from the
     caller's actual staging; this function does not certify that computation.
     """
@@ -205,7 +216,7 @@ def scene_lighting_blocks(*, source: dict[str, Any], screen_side: str,
     if not isinstance(source, dict) or set(source) != required:
         raise ContractBlockError("source: requires exactly period, kind, name, state, world_side, " + dimension)
     period = _choice(source["period"], {"day", "night"}, "source.period")
-    kind = _choice(source["kind"], {"paper_window", "oil_lamp", "candle", "lantern", "outdoor_daylight"}, "source.kind")
+    kind = _choice(source["kind"], {"paper_window", "glass_window", "oil_lamp", "candle", "lantern", "outdoor_daylight"}, "source.kind")
     name = _label(source["name"], "source.name")
     world = _choice(source["world_side"], _WORLD, "source.world_side")
     screen = _choice(screen_side, {"左", "右", "正前"}, "screen_side")
@@ -237,6 +248,14 @@ def scene_lighting_blocks(*, source: dict[str, Any], screen_side: str,
         else:
             physical = f"室内日间；{name}敞开。"
             origin = f"日间漫射天光经场景{world}侧敞开的{name}进入，作为本镜主光。"
+    elif period == "day" and kind == "glass_window":
+        state = _choice(source["state"], {"open", "closed"}, "source.state")
+        if state == "closed":
+            physical = f"室内日间；玻璃窗（{name}）关闭，日间自然光透过玻璃进入室内。"
+            origin = f"日间自然光通过场景{world}侧{name}的闭合玻璃进入，作为本镜主光。"
+        else:
+            physical = f"室内日间；玻璃窗（{name}）敞开。"
+            origin = f"日间自然光经场景{world}侧敞开的{name}开口进入，作为本镜主光。"
     elif period == "night" and kind in {"oil_lamp", "candle", "lantern"}:
         _choice(source["state"], {"lit"}, "source.state")
         kinds = {"oil_lamp": "油灯", "candle": "蜡烛", "lantern": "灯笼"}

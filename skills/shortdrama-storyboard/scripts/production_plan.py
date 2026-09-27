@@ -67,7 +67,7 @@ def model_production_contract():
                 'semantics':'pending_independent_review'},
             'world_presentation': {
                 'light': {
-                    'indoor': '{period:day,kind:paper_window,name,state:open|closed,position_xyz:[east,north,height],main_tone,shadow_tone,materials}; night permits explicitly lit oil_lamp|candle|lantern instead of paper_window',
+                    'indoor': '{period:day,kind:paper_window|glass_window,name,state:open|closed,position_xyz:[east,north,height],main_tone,shadow_tone,materials}; closed paper diffuses skylight; closed glass transmits natural daylight without invented beams or an open window; night permits explicitly lit oil_lamp|candle|lantern',
                     'outdoor': '{period:day,kind:outdoor_daylight,name,state:present,direction_xyz:[east,north,up],main_tone,shadow_tone,materials}; finite world direction toward daylight, up>0 and horizontal component>0, not a metre position; no position_xyz',
                     'projection': 'world bearing/elevation and camera screen side derive from the same direction; translation does not move distant daylight; no invented source height, paper window, lamp, visible sun or weather',
                     'evidence': 'freeze the actual scene light in production_plan; ordinary lighting choice may be director_choice, never fabricated source_fact or locked_setting; existing independent semantics and source gates remain required',

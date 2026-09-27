@@ -568,7 +568,7 @@ def effects(initial, action, tick):
         light=copy.deepcopy(scene['light'])
         if end:
             states[action['opening']]=action['to']
-            if light['kind']=='paper_window' and light['name']==action['opening']:light['state']=action['to']
+            if light['kind'] in {'paper_window','glass_window'} and light['name']==action['opening']:light['state']=action['to']
         result[('scenes',a['scene_id'],'door_window_state')]=normalize_openings(states,light,'action.opening')
         result[('scenes',a['scene_id'],'light')]=light
     elif k == 'scene_light':

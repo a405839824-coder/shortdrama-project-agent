@@ -45,11 +45,104 @@ def _profile(rules, profile_id=None):
         raise ValueError("未知计时口径")
     if profile.get("evidence_status") not in {"provisional", "measured"}:
         raise ValueError("未知语速证据状态")
+    proof = profile.get("evidence", {})
+    if proof.get("source_kind") == "reference_video_asr" and (
+            profile.get("evidence_status") != "provisional"
+            or profile.get("rate_basis") != "utterance_average"
+            or proof.get("alignment_verified") is not False or proof.get("reviewed") is not False):
+        raise ValueError("ASR参考样本只能作为未标定的平均语速候选，不能冒充实测")
     if profile.get("rate_basis") == "articulation" or profile.get("evidence_status") == "measured":
         proof = profile.get("evidence", {})
         if profile.get("evidence_status") != "measured" or not all(proof.get(key) for key in ("sample_sha256", "alignment_verified", "reviewed", "model_version", "voice")):
             raise ValueError("实测或净发声配置缺已核对的音频对齐证据")
     return profile
+
+
+SELECTION_FIELDS = {"speaker_category", "delivery_class", "source_use_id", "basis_fact_ids", "rationale"}
+SPEAKER_CATEGORIES = {"adult_supported", "adult_inferred", "child", "unknown"}
+DELIVERY_CLASSES = {"continuous_explanation", "ordinary_question_or_reply", "special_delivery", "unknown"}
+
+
+def source_uses(project):
+    """Reuse existing source bindings, never infer adulthood from a name."""
+    evidence = project.get("prevention_evidence") or {}
+    compilation = (evidence.get("production_derivation") or {}).get("source_compilation") or {}
+    if compilation.get("uses_by_id"):
+        return compilation["uses_by_id"]
+    rows = (evidence.get("source_decisions") or {}).get("uses", [])
+    return {row["id"]: row for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str)}
+
+
+def resolve_profile(rules=None, profile_id=None, *, selection=None, kind=None,
+                    speaker=None, text=None, uses=None, voice=None, default=False):
+    """One source-bound selection for compiler, segment checks and chapter budget.
+
+    Source IDs bind assertions; the meaning of age/delivery remains independently
+    reviewable. No text length, character name or available window selects a rate.
+    """
+    profile = _profile(_rules(rules), profile_id)
+    applicability = profile.get("applicability")
+    if default and applicability:
+        raise ValueError("受限语速配置不能作为项目默认，必须逐发言提供适用依据")
+    if selection is not None:
+        if not isinstance(selection, dict) or set(selection) != SELECTION_FIELDS:
+            raise ValueError("语速选择依据字段不完整或包含自报语速")
+        if (not isinstance(selection["speaker_category"], str) or selection["speaker_category"] not in SPEAKER_CATEGORIES
+                or not isinstance(selection["delivery_class"], str) or selection["delivery_class"] not in DELIVERY_CLASSES
+                or not isinstance(selection["source_use_id"], str)
+                or not isinstance(selection["rationale"], str) or not selection["rationale"].strip()):
+            raise ValueError("语速选择缺明确年龄类别、表达类别或有源推定说明")
+        fact_ids = selection["basis_fact_ids"]
+        use = (uses or {}).get(selection["source_use_id"])
+        if (not isinstance(fact_ids, list) or not fact_ids
+                or any(not isinstance(value, str) for value in fact_ids)
+                or len(set(fact_ids)) != len(fact_ids)
+                or not isinstance(use, dict)
+                or use.get("actor") != speaker or use.get("text") != text
+                or use.get("mode") != "spoken"
+                or not set(fact_ids) <= set(use.get("fact_ids", []))):
+            raise ValueError("语速依据未绑定当前说话人、完整原句及其真实来源事实")
+    if applicability:
+        if (selection is None or kind not in applicability["channels"]
+                or selection["speaker_category"] not in applicability["speaker_categories"]
+                or selection["delivery_class"] not in applicability["delivery_classes"]):
+            raise ValueError("语速配置仅适用有源成人的场内连续解释对白；短问、儿童、未知或特殊发声不能借用")
+        # Only inspect affirmative current voice instructions. Prohibited tones
+        # and quoted dialogue mentioning crying are not actual crying delivery.
+        from timing_events import _positive
+        voice = voice if isinstance(voice, dict) else {}
+        baseline = str(voice.get("baseline", voice.get("基础声线", "")))
+        delivery = "；".join(str(voice.get(key, "")) for key in
+                            ("current_expression", "volume", "rhythm", "breath",
+                             "当前表达", "音量", "语速与节奏", "呼吸"))
+        if _positive(r"童声|儿童|幼儿|幼童|孩童", baseline) or _positive(
+                r"哭|泣|哽咽|喘|喊|吼|缓慢|慢速|刻意慢", delivery):
+            raise ValueError("当前基础声线或发声条件与成人连续解释候选冲突")
+    return profile
+
+
+def _utterance_voice(shot, index):
+    """Read the existing per-utterance voice projection, excluding prohibitions."""
+    from validate_storyboard import _parse_voice_template
+    from voice_sequence import has_markers, split_voice_sequence, extract_dialogues
+    parsed = _parse_voice_template(str(shot.get("音色") or ""))[0]
+    if has_markers(str(shot.get("音色") or "")):
+        blocks, errors = split_voice_sequence(parsed, extract_dialogues(shot.get("画面内容")))
+        return blocks[index] if not errors and index < len(blocks) else {}
+    return parsed
+
+
+def _continuation_voice(shot):
+    """A restricted rate needs the receiving shot's unambiguous actual voice."""
+    from validate_storyboard import _parse_voice_template
+    from voice_sequence import has_markers, extract_dialogues, VOICE_TEMPLATE_LABELS
+    text = str(shot.get("音色") or "")
+    parsed, order, errors = _parse_voice_template(text)
+    if (errors or order != list(VOICE_TEMPLATE_LABELS) or has_markers(text)
+            or extract_dialogues(shot.get("画面内容"))
+            or any(not parsed.get(label) for label in VOICE_TEMPLATE_LABELS if label != "发声方式")):
+        raise ValueError("受限语速的跨镜承接缺明确完整的单一发言声法；未知或其他发言声法不能借用源镜配置")
+    return parsed
 
 
 def estimate_utterance(text, profile=None, pauses=()):
@@ -80,11 +173,28 @@ def estimate_utterance(text, profile=None, pauses=()):
         positions[offset] = (seconds, pause.get("extra") is True)
         if profile.get("rate_basis") == "articulation" or pause.get("extra") is True:
             extra += seconds
-    return {"seconds": units / rate + extra, "units": units,
+    result = {"seconds": units / rate + extra, "units": units,
             "profile_id": profile.get("id"), "evidence_status": profile.get("evidence_status"),
             "rate_basis": profile.get("rate_basis"), "extra_pause_seconds": extra,
             "mixed_reading_requires_review": bool(re.search(r"[A-Za-z0-9]", text)),
             "punctuation_token_count": len(list(PUNCT.finditer(text)))}
+    if profile.get("reference_range_kind") == "within_sample_turn_variation":
+        low, high = map(_number, profile["candidate_range"])
+        if not 0 < low <= rate <= high:
+            raise ValueError("样本语速参考范围非法")
+        result["reference_seconds"] = [units / high + extra, units / low + extra]
+        result["reference_range_kind"] = "within_sample_turn_variation_not_confidence_or_guarantee"
+    return result
+
+
+def _reference_advisory(estimate, window, *, shot_id, utterance_id):
+    if estimate.get("reference_seconds", [0, 0])[1] > window + EPS:
+        return {"kind": "provisional_capacity_risk", "shot_id": shot_id, "utterance_id": utterance_id,
+                "profile_id": estimate["profile_id"], "central_seconds": estimate["seconds"],
+                "reference_seconds": estimate["reference_seconds"], "available_seconds": window,
+                "actual_audio_verified": False,
+                "message": "样本内较慢表达可能超出本句窗口；参考带不是置信区间或保证，须逐句核时，不能用其他快句抵消或取快端凑容量"}
+    return None
 
 
 def _phase_rows(shot):
@@ -168,7 +278,7 @@ def validate_timing(project, shots, rules=None):
     if set(timing) - {"contract", "default_profile_id", "utterances", "events"}:
         fault("计时证据不接受自报语速、实测标签或未登记字段")
     try:
-        default = _profile(rules, timing.get("default_profile_id"))
+        default = resolve_profile(rules, timing.get("default_profile_id"), default=True)
     except (ValueError, KeyError, TypeError) as exc:
         fault(str(exc))
         default = _profile(rules)
@@ -222,7 +332,10 @@ def validate_timing(project, shots, rules=None):
             key, row = candidates[0]
             if kind == "dialogue" and item.get("speaker") != row["speaker"]:
                 raise ValueError("计时发言人物与实际台词不一致")
-            profile = _profile(rules, item.get("profile_id") or default["id"])
+            profile = resolve_profile(
+                rules, item.get("profile_id") or default["id"], selection=item.get("selection_evidence"),
+                kind=kind, speaker=row["speaker"], text=row["text"], uses=source_uses(project),
+                voice=_utterance_voice(shot_map[sid], key[2]) if kind == "dialogue" else None)
             if strict and target and profile.get("target_model") not in (None, "unmatched", target):
                 raise ValueError("发言配置与当前目标模型不匹配")
             if profile.get("evidence_status") == "measured":
@@ -261,6 +374,18 @@ def validate_timing(project, shots, rules=None):
                     reference = PSYCH_REFERENCE.match(str(shot_map[segment_sid].get("心理音轨") or ""))
                     if not reference or reference.group(1) != identity:
                         raise ValueError("跨镜心理音轨须在承接镜明确引用同一音轨身份")
+                if kind == "dialogue" and segment_sid != sid and profile.get("applicability"):
+                    # The source establishes age and delivery intent; every
+                    # receiving shot must still support the actual delivery.
+                    # A later crying/unknown voice cannot inherit fast capacity.
+                    resolve_profile(rules, profile["id"], selection=item.get("selection_evidence"),
+                        kind=kind, speaker=row["speaker"], text=row["text"], uses=source_uses(project),
+                        voice=_continuation_voice(shot_map[segment_sid]))
+                if segment_sid != sid and profile.get("evidence_status") == "measured":
+                    import hashlib
+                    actual_voice_hash = hashlib.sha256(str(shot_map[segment_sid].get("音色") or "").encode("utf-8")).hexdigest()
+                    if profile.get("voice_spec_sha256") != actual_voice_hash:
+                        raise ValueError("承接镜实测语速配置未绑定当前实际音色规格")
                 global_start, global_end = bases[segment_sid] + start, bases[segment_sid] + end
                 if previous_end is not None and abs(global_start - previous_end) > EPS:
                     raise ValueError("同一连续发言的时间片段存在间隙、重叠或错序")
@@ -268,9 +393,15 @@ def validate_timing(project, shots, rules=None):
                 estimate = estimate_utterance(row["text"][bounds[0]:bounds[1]], profile, pauses)
                 if estimate["seconds"] > end - start + EPS:
                     fault(f"按配置{profile['id']}预算需{estimate['seconds']:.3f}s，片段仅{end-start:.3f}s；这是文本预算不足，非音视频实测结论", segment_sid, code="E-DIALOGUE-003" if kind == "dialogue" else "E-PSYCH-001")
+                risk = _reference_advisory(estimate, end - start, shot_id=segment_sid, utterance_id=identity)
+                if risk:
+                    advisories.append(risk)
                 spans.append({"id": identity, "utterance_id": identity, "shot_id": segment_sid, "speaker": item.get("speaker"), "kind": kind,
                               "start": start, "end": end, "global_start": global_start, "global_end": global_end,
-                              "char_range": bounds, "profile_id": profile["id"], "planned_seconds": estimate["seconds"]})
+                              "char_range": bounds, "profile_id": profile["id"], "planned_seconds": estimate["seconds"],
+                              "reference_seconds": estimate.get("reference_seconds"),
+                              "selection_evidence": item.get("selection_evidence"),
+                              "selection_semantic_status": "pending_independent_review" if profile.get("applicability") else None})
                 cursor, previous_end = bounds[1], global_end
             if cursor != len(row["text"]):
                 raise ValueError("发言片段未覆盖完整原句及标点")
@@ -368,7 +499,7 @@ def chapter_budget(dialogues, rules=None, project=None, *, budget=None):
         fault("章节计时证据必须是对象")
         timing = {}
     try:
-        default = _profile(rules, timing.get("default_profile_id"))
+        default = resolve_profile(rules, timing.get("default_profile_id"), default=True)
     except (ValueError, TypeError, AttributeError, KeyError) as exc:
         fault(str(exc))
         default = _profile(rules)
@@ -445,7 +576,11 @@ def chapter_budget(dialogues, rules=None, project=None, *, budget=None):
                             else f"{row['shot_id']}:dialogue:{row['index']}")
             try:
                 if item is not None:
-                    profile = _profile(rules, item.get("profile_id") or default["id"])
+                    owned_shot = next((s for s in shots if s.get("镜头编号") == row["shot_id"]), {})
+                    profile = resolve_profile(
+                        rules, item.get("profile_id") or default["id"], selection=item.get("selection_evidence"),
+                        kind="dialogue", speaker=row["speaker"], text=row["text"], uses=source_uses(project),
+                        voice=_utterance_voice(owned_shot, row["index"]))
                     pauses = item.get("pauses", [])
                 selected[profile["id"]] = profile
                 amount += estimate_utterance(row["text"], profile, pauses)["seconds"]

@@ -1,0 +1,46 @@
+{
+  "source_commit": "c315c60af23883a6807f5df71d9e868e452d8800",
+  "purpose": "Read-only byte-frozen v0.5.55 workbook projection; never use for new production.",
+  "files": {
+    "scripts/materializer.py": {
+      "source": "server/shortdrama_mcp/materializer.py",
+      "git_blob": "83012ea91787f528208e02ff0cc8afaa650e280a",
+      "sha256": "71a4ceae14d18efc292dbbec56ef169047a98de51011b92acb238a705a94ea32"
+    },
+    "scripts/r5_workbook.py": {
+      "source": "server/shortdrama_mcp/r5_workbook.py",
+      "git_blob": "998c294e6e745b17781bd9d342617db250b8c3f6",
+      "sha256": "a1ba4803f0bb712215b7509f89ad73101c92ba85f9b2105513c61a9147ef751d"
+    },
+    "scripts/field_content.py": {
+      "source": "skills/shortdrama-storyboard/scripts/field_content.py",
+      "git_blob": "19597b3299bb3af698979f5365e9789d1dd8c0f8",
+      "sha256": "d8499d4e5bed1908bcd2499b694b741b0d961dcf5c9546c039af98d02f88d4af"
+    },
+    "scripts/written_payload.py": {
+      "source": "skills/shortdrama-storyboard/scripts/written_payload.py",
+      "git_blob": "7988915e584f8f0368d8ff65464fb02d02436f0f",
+      "sha256": "02cb04891cec8d221ec4d61209619ae51166a59f22bc278e3c249aabd1fdb729"
+    },
+    "scripts/picture_presentation.py": {
+      "source": "skills/shortdrama-storyboard/scripts/picture_presentation.py",
+      "git_blob": "ab71e439299dc81cf279f810ad54d0df4479a502",
+      "sha256": "2dd5124295b30fe920421128c7012b2ab527575f633256de8beba8a5ed4452da"
+    },
+    "scripts/voice_sequence.py": {
+      "source": "skills/shortdrama-storyboard/scripts/voice_sequence.py",
+      "git_blob": "32227af204fc68fdacdcc2845c0dd966f68a0c81",
+      "sha256": "fef942cece7d0035cdcbd588531a24e66f3d302000c4e021417f6e518edd08a9"
+    },
+    "scripts/visible_entities.py": {
+      "source": "skills/shortdrama-storyboard/scripts/visible_entities.py",
+      "git_blob": "4c13edb3162018b572b4ad9d8a48731ac59f2564",
+      "sha256": "7053411ba424294db37d86b49c35681e424282505b9ec271c169cb2b3e26cd08"
+    },
+    "references/rule_registry.json": {
+      "source": "skills/shortdrama-storyboard/references/rule_registry.json",
+      "git_blob": "41029a5b50e834db2d3544a0fd9f55ec7e5d3e37",
+      "sha256": "e223f103a36fe6edae4e11b2feac6b3ee32c74116989b5dc7a4f9799d25eb9d1"
+    }
+  }
+}

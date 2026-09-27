@@ -1,0 +1,181 @@
+"""Bounded prose checks shared by saved-field audit and both renderers.
+
+These checks certify explicit bindings, not unrestricted source understanding.
+An unparsed relation is unknown, never proof that the scene is correct.
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+
+QUOTES = re.compile(r'“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|"[^"\n]*"')
+MUSIC = re.compile(r'BGM|背景音乐|额外配乐|配乐|音乐', re.I)
+NEGATIVE = re.compile(r'^(?:禁止|不要|不得|不使用|不生成|没有|不加|无)(?:任何)?')
+UNCERTAIN = re.compile(r'是否|可能|酌情|视情况|待定|考虑|不一定|未禁止|不必|并非|不是|不再禁止|不能没有')
+ACTION = re.compile(r'加入|加上|播放|配上|使用|采用|允许|生成|插入|铺设|搭配|切入|响起|渐入|铺开|伴随|保留|开启')
+BOUNDARY = re.compile(r'([；;。！？!?，,\n]+|但是|然而|不过|而且|并且|随后|然后|而后|接着|同时|但|却|且|又|并(?=加入|播放|使用|生成|允许))')
+ENUM = re.compile(r'(?:以及|或者|[、与和及或])')
+MUSIC_ITEM = re.compile(r'(?:任何)?(?:让)?(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)?\s*(?:BGM|背景音乐|额外配乐|配乐|音乐)(?:响起|播放|进入|渐入|切入|铺开|持续|开始)?', re.I)
+
+
+def _masked_quotes(text):
+    return QUOTES.sub(lambda m: ' ' * len(m.group()), text)
+
+
+def music_directives(value):
+    """Classify each music occurrence without treating a residual noun as an act.
+
+    Explicit negative noun enumerations inherit scope without a vocabulary of
+    permitted visual objects. A new predicate or contrast resets that scope.
+    Double negation and modal/conditional instructions remain unresolved.
+    """
+    original = str(value or '')
+    text = _masked_quotes(original)
+    records = []
+    offset = 0
+    for clause in BOUNDARY.split(text):
+        for match in MUSIC.finditer(clause):
+            prefix = clause[:match.start()]
+            body = clause.strip()
+            own = re.split(r'[、与和及或]', prefix)[-1].lstrip()
+            neg = NEGATIVE.match(body)
+            restart = ACTION.search(own)
+            # A direct ban may contain its own verb; a later predicate may not
+            # borrow a ban from the beginning of a different enumeration item.
+            scoped = bool(neg and (not restart or match.start() < neg.end() + len(own)))
+            if neg and ENUM.search(prefix[neg.end():]):
+                scoped = (not restart or restart.start() == 0) and not re.search(r'则|时|之后|以后|即可', prefix)
+            local_negative = re.search(r'(?:禁止|不要|不得|不使用|不生成|没有|不加|无)(?:任何)?'
+                                       r'(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)?\s*$', prefix)
+            negative_predicate = re.match(r'\s*(?:禁止|不得|不要|不应|不能|不会|不)(?:出现|响起|播放|加入|使用|生成)',
+                                          clause[match.end():])
+            scoped = scoped or bool(local_negative or negative_predicate)
+            if UNCERTAIN.search(body) or re.search(r'如果|若|倘若|假如|(?:禁止|不加).{0,20}(?:时|后|则)', body):
+                status = 'unknown'
+            elif scoped:
+                status = 'negative'
+            elif ACTION.search(body):
+                status = 'affirmative'
+            else:
+                status = 'unknown'
+            records.append({'status': status, 'text': original[offset:offset + len(clause)],
+                            'span': [offset + match.start(), offset + match.end()],
+                            'term': match.group()})
+        offset += len(clause)
+    return records
+
+
+def strip_negative_music(value):
+    """Remove only proved music-ban items, preserving arbitrary visual nouns."""
+    text = str(value or '')
+    protected = {}
+    def protect(match):
+        token = '\ue010Q' + str(len(protected)) + '\ue011'
+        protected[token] = match.group()
+        return token
+    text = QUOTES.sub(protect, text)
+    mentioned = False
+    parts = BOUNDARY.split(text)
+    for index, clause in enumerate(parts):
+        records = music_directives(clause)
+        if not records or any(row['status'] != 'negative' for row in records):
+            continue
+        prefix = NEGATIVE.match(clause.strip())
+        if not prefix:
+            continue
+        items = ENUM.split(clause.strip()[prefix.end():])
+        kept = [item for item in items if not MUSIC_ITEM.fullmatch(item.strip())]
+        if len(kept) == len(items):
+            continue
+        mentioned = True
+        parts[index] = prefix.group() + '、'.join(kept) if kept else ''
+    result = ''.join(parts)
+    for token, quote in protected.items():
+        result = result.replace(token, quote)
+    return result, mentioned
+
+
+def field_sha256(value):
+    return hashlib.sha256(str(value or '').encode('utf-8')).hexdigest()
+
+
+def labelled_sections(value, labels):
+    pattern = re.compile(r'(?m)^\s*(' + '|'.join(map(re.escape, labels)) + r')\s*[:：]')
+    text = str(value or '')
+    matches = list(pattern.finditer(text))
+    result = {}
+    duplicates = []
+    for index, match in enumerate(matches):
+        label = match.group(1)
+        if label in result:
+            duplicates.append(label)
+        result[label] = text[match.end():matches[index + 1].start() if index + 1 < len(matches) else len(text)].strip()
+    return result, duplicates
+
+
+def tail_binding_faults(value, dialogue_rows):
+    """A quoted tail must be an ending of this utterance, not another line."""
+    text = str(value or '')
+    quotes = [m.group()[1:-1] for m in QUOTES.finditer(text)]
+    if not quotes:
+        return ['尾音未绑定本句实际末字或末词；通用收尾方向不能代替本句执行定位']
+    endings = [line.rstrip('。！？!?；;，, .…～~') for _, line in dialogue_rows]
+    return [f'尾音“{fragment}”不是当前发言的实际句末' for fragment in quotes
+            if not fragment or not any(line.endswith(fragment) for line in endings)]
+
+
+def explicit_state_conflicts(initial, projected, names):
+    """Compare explicit per-person first-frame predicates; never infer a pose."""
+    states = {'eye': ((r'闭眼|合眼|(?:双眼|眼睛)[^，。；;]{0,6}(?:合拢|闭合)', 'closed'),
+                      (r'睁眼|眼睛[^，。；;]{0,6}睁开|双眼[^，。；;]{0,6}睁开', 'open')),
+              'posture': ((r'坐着|坐姿|坐在|坐于|落座|坐稳', 'seated'),
+                          (r'站着|站姿|站在|站于|站立', 'standing'))}
+    def claims(value, person, patterns):
+        found = set()
+        owner = None
+        for clause in re.split(r'[；;。，,\n]', _masked_quotes(str(value or ''))):
+            named = [(match.start(), name) for name in names
+                     for match in [re.search(r'(?:^|：|:)\s*' + re.escape(name), clause)] if match]
+            if named:
+                owner = min(named)[1]
+            if owner != person:
+                continue
+            for pattern, state in patterns:
+                for match in re.finditer(pattern, clause):
+                    if not re.search(r'不|未|禁止|避免|避开', clause[max(0, match.start() - 5):match.start()]):
+                        found.add(state)
+        return found
+    faults = []
+    for name in names:
+        for kind, patterns in states.items():
+            before, after = claims(initial, name, patterns), claims(projected, name, patterns)
+            if len(before) == 1 and after and after != before:
+                faults.append(f'{name}的{kind}静态起态冲突：E={sorted(before)}，F={sorted(after)}')
+    # An unqualified rule applies to all visible eyes, including a closed one.
+    if re.search(r'(?:所有|全部|入画|可见)(?:人物)?(?:的)?(?:双眼|眼睛)[^；。\n]{0,12}(?:自然)?睁开', projected):
+        for name in names:
+            if claims(initial, name, states['eye']) == {'closed'}:
+                faults.append(f'{name}明确闭眼起态与F统一睁眼要求冲突')
+    return faults
+
+
+def environment_phase_findings(shot, names):
+    """Scene-level prose cannot assert an actor event absent from this shot."""
+    environment = _masked_quotes(str(shot.get('环境动态') or ''))
+    picture = _masked_quotes(str(shot.get('画面内容') or ''))
+    initial = str(shot.get('起始状态') or '')
+    groups = ((r'起身|站起', r'坐着|坐姿|坐稳|保持坐'),
+              (r'急步|行走|走动|迈步', r'停步|站定|停住|站稳'))
+    findings = []
+    for name in names:
+        for action, stationary in groups:
+            trigger = re.search(re.escape(name) + r'[^，；。\n]{0,12}(?:' + action + ')', environment)
+            if not trigger:
+                continue
+            event = re.search(re.escape(name) + r'[^，；。\n]{0,16}(?:' + action + ')', picture)
+            if event:
+                continue
+            stable = re.search(re.escape(name) + r'[^，；。\n]{0,16}(?:' + stationary + ')', initial + '；' + picture)
+            findings.append({'status': 'fail' if stable else 'unknown', 'message':
+                f'环境动态引用{name}的动作“{trigger.group()}”，本镜画面无对应事件' + ('且已有静止状态' if stable else '，需逐阶段绑定')})
+    return findings

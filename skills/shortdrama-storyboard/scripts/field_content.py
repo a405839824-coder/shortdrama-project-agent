@@ -30,6 +30,23 @@ WORLD_POSITION_RE = re.compile(
     r"|(?:东|東|西|南|北)\s*-?\d+(?:\.\d+)?\s*米")
 
 
+@lru_cache(maxsize=1)
+def _projection_semantics():
+    path = Path(__file__).with_name("projection_semantics.py")
+    spec = spec_from_file_location("shortdrama_projection_semantics", path)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def music_directives(value):
+    return _projection_semantics().music_directives(value)
+
+
+def strip_negative_music(value):
+    return _projection_semantics().strip_negative_music(value)
+
+
 def world_position_matches(text):
     return WORLD_POSITION_RE.finditer(str(text or ""))
 
@@ -156,7 +173,7 @@ def _findings_for_value(field, value, *, mask, subfield=None, dialogue_rows=(), 
     if field == "音色" and subfield == "基础声线" and preserved_voice_baseline(original):
         return []  # Exact whole-value compatibility, never a clause/subfield wildcard.
     text = _instruction_text(original, field, mask)
-    if subfield in {"重音", "停顿"}:
+    if subfield in {"重音", "停顿", "尾音"}:
         # A genuine quoted dialogue span is data, not a camera/voice directive.
         for match in re.finditer(r'“([^”]*)”|「([^」]*)」|"([^"\n]*)"', text):
             literal = next((v for v in match.groups() if v is not None), "")
@@ -401,6 +418,11 @@ def r5_keyframe_sections(values, *, aspect, visual_limits, appearance_anchor):
     sound, voice, transition or audit metadata is an input to this renderer.
     """
     values = dict(values, 可见主体=_keyframe_visible_subjects(values.get('可见主体')))
+    from visible_entities import resolve_visible_subjects
+    people = resolve_visible_subjects(values['可见主体'], evidence_texts=[values.get('起始状态')]).people
+    if len(people) > 3:
+        raise ValueError('keyframe_subject_capacity: visible main actors exceed three; '
+                         'reframe or split the shot without deleting world actors')
     result = []
     for section in field_policy()["keyframe_sections"]:
         label = section["label"]

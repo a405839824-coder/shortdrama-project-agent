@@ -1524,7 +1524,8 @@ def _legacy_draft_quality_metrics(
     }
 
 
-def _draft_quality_metrics(storyboard, issues, *, project_id="quality", known_pattern_keys=None):
+def _draft_quality_metrics(storyboard, issues, *, project_id="quality", known_pattern_keys=None, coverage=None, execution_checks=None,
+                           legacy_diagnostics_only=False):
     def pattern(issue):
         normalized = {
             "error_code": issue.get("error_code"),
@@ -1536,7 +1537,8 @@ def _draft_quality_metrics(storyboard, issues, *, project_id="quality", known_pa
         }
         return storyboard_agent.issue_pattern_key(project_id, normalized)
     return measure_quality(storyboard, issues, resolve_ids=_issue_shot_ids,
-                           pattern_key=pattern, known_pattern_keys=known_pattern_keys)
+                           pattern_key=pattern, known_pattern_keys=known_pattern_keys, coverage=coverage,
+                           execution_checks=execution_checks, legacy_diagnostics_only=legacy_diagnostics_only)
 
 
 class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
@@ -1890,6 +1892,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             cached = artifact_record.get("metadata", {}).get("source_fingerprint")
             if cached:
                 return str(cached)
+        if storyboard.get("audit_workbook_evidence"):
+            # This is the actual external input hash, not a invented novel or
+            # historical source-ledger fingerprint. Missing source proof stays
+            # explicit in the intake and semantic obligations.
+            return storyboard["audit_workbook_evidence"]["raw_sha256"]
         source_lock = storyboard.get("source_lock") or {}
         explicit = source_lock.get("source_fingerprint") if isinstance(source_lock, dict) else None
         return str(explicit or sha256_bytes(_stable_json_bytes(source_lock)))
@@ -3732,9 +3739,32 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         )
         submission_hash = sha256_bytes(_stable_json_bytes(submission))
         obligation_coverage = validate_coverage(
-            storyboard, submission, coverage_context(self)
+            storyboard, submission, coverage_context(self), allow_unresolved=True
         )
-        quality = _draft_quality_metrics(storyboard, issues)
+        machine_checks = (report.get("quality_metrics") or {}).get("semantic_checks", [])
+        unknown_checks = [row for row in machine_checks if row.get("status") == "unknown"]
+        if not obligation_coverage["complete"] or unknown_checks:
+            clean = False
+            unresolved = [state for state in obligation_coverage["check_states"].values() if not state["complete"]]
+            unresolved.extend(unknown_checks)
+            unknown_layers = {row.get("layer") for row in unresolved}
+            for layer, row in layer_matrix.items():
+                if layer in unknown_layers or None in unknown_layers:
+                    if row["status"] == "pass":
+                        row["status"] = "unknown"
+                    row["summary"] += "｜适用检查或证据未完成，不能据无问题记录确认通过"
+            # Gates aggregate the full review, so none can certify completion
+            # while a required check remains unresolved. Preserve known failures.
+            for row in gate_matrix.values():
+                if row["status"] == "pass":
+                    row["status"] = "unknown"
+                    row["evidence_ids"] = ["coverage:unresolved_required_checks"]
+                    row["evidence_count"] = 1
+            issues.append({"error_code": "E-AUDIT-COVERAGE-UNKNOWN", "severity": "fail", "blocking": True,
+                           "location": "audit_coverage", "evidence": "Applicable review or required evidence remains unresolved.",
+                           "repair_action": "Complete the current bound obligations and missing evidence; do not infer PASS from absent findings."})
+        quality = _draft_quality_metrics(storyboard, issues, coverage=obligation_coverage, execution_checks=machine_checks)
+        enriched.setdefault("quality_metrics", {})["review_completion"] = quality
         source_issue_count = sum(
             _issue_category(str(item.get("error_code") or "")) == "源文对白"
             for item in issues
@@ -3743,10 +3773,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         enriched["semantic_audit_sha256"] = submission_hash
         enriched["independent_evidence_matrix"] = {
             "semantic_obligation_coverage": obligation_coverage,
+            "machine_execution_checks": machine_checks,
             "preventive_gate_results": gate_matrix,
             "audit_layer_results": layer_matrix,
             "quality_thresholds": {
-                "source_and_key_dialogue_mapping_percent": 100 if source_issue_count == 0 else 0,
+                "source_and_key_dialogue_mapping_percent": (100 if source_issue_count == 0 else 0) if layer_matrix["源文对白"]["status"] != "unknown" and obligation_coverage["complete"] else None,
                 "blocking_error_count": sum(
                     bool(item.get("blocking", True)) for item in issues
                 ),
@@ -13469,7 +13500,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 )
                 extracted = self.store.read_json(extracted_path)
             else:
-                extracted = extract_file(data, file_name, mime_type)
+                extracted = extract_file(data, file_name, mime_type, audit_only=source_role == "storyboard")
                 extracted_record = self.store.save_artifact_json(
                     namespace,
                     project_id,
@@ -13518,7 +13549,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "telemetry": telemetry,
                 },
             )
-        extracted = extract_file(data, file_name, mime_type)
+        extracted = extract_file(data, file_name, mime_type, audit_only=source_role == "storyboard")
         extracted_ns = time.perf_counter_ns()
         artifacts = self.store.list_artifacts(namespace, project_id)
         version = _artifact_version(artifacts, artifact_type)
@@ -13530,7 +13561,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             artifact_type=artifact_type,
             version=version,
             work_order_id=work_order_id,
-            metadata={"chatgpt_file_id": file.file_id, "mime_type": mime_type},
+            metadata={"chatgpt_file_id": file.file_id, "mime_type": mime_type,
+                      "intake_origin": "external_input", "source_role": source_role},
         )
         extracted_record = self.store.save_artifact_json(
             namespace,
@@ -13886,6 +13918,18 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             data={"artifact": record, "required_validation_gates": work_order["required_validation_gates"]},
         )
 
+    def _saved_workbook_audit_evidence(self, namespace: str, project_id: str,
+                                     artifact_id: str) -> dict[str, Any] | None:
+        """Bind actual workbook cells without changing its canonical identity."""
+        record, path = self.store.get_artifact(namespace, project_id, artifact_id)
+        if path.suffix.lower() not in {".xlsx", ".xlsm"}:
+            return None
+        raw = path.read_bytes()
+        if sha256_bytes(raw) != record.get("fingerprint"):
+            raise ValueError("external_audit_original_fingerprint_mismatch")
+        extracted = extract_file(raw, record["file_name"], (record.get("metadata") or {}).get("mime_type"), audit_only=True)
+        return extracted.get("audit_workbook_evidence")
+
     def _storyboard_from_artifact(
         self,
         namespace: str,
@@ -13897,6 +13941,18 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         record, payload_path = self.store.get_artifact(namespace, project_id, artifact_id)
         metadata = record.get("metadata", {})
+        if record.get("artifact_type") == "source:storyboard" and payload_path.suffix.lower() in {".xlsx", ".xlsm"}:
+            # Source intake is not production. Re-read the registered original,
+            # not an editable extraction cache or a reconstructed sidecar.
+            raw = payload_path.read_bytes()
+            if sha256_bytes(raw) != record.get("fingerprint"):
+                raise ValueError("external_audit_original_fingerprint_mismatch")
+            extracted = extract_file(raw, record["file_name"], metadata.get("mime_type"), audit_only=True)
+            storyboard = extracted.get("canonical_storyboard")
+            if isinstance(storyboard, dict) and storyboard.get("audit_workbook_evidence"):
+                # This hash identifies today's exact read-only mapping. It is
+                # never saved as a recovered historical production canonical.
+                return storyboard, record
         canonical_id = metadata.get("canonical_json_artifact_id")
         if canonical_id:
             if require_bound_projection and metadata.get(
@@ -13916,6 +13972,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             storyboard = self.store.read_json(canonical_path)
             if not isinstance(storyboard, dict) or "shots" not in storyboard:
                 raise ValueError("linked canonical storyboard is invalid")
+            if storyboard.get("audit_workbook_evidence"):
+                raise ValueError("audit_workbook_evidence_untrusted: read the registered original workbook")
             actual_canonical_hash = canonical_storyboard_sha256(storyboard)
             expected_hash = metadata.get("canonical_sha256") or canonical_record.get("metadata", {}).get(
                 "canonical_sha256"
@@ -13945,6 +14003,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             storyboard = None
         if not isinstance(storyboard, dict) or "shots" not in storyboard:
             raise ValueError("artifact does not contain a canonical storyboard")
+        if storyboard.get("audit_workbook_evidence"):
+            raise ValueError("audit_workbook_evidence_untrusted: read the registered original workbook")
         canonical_hash = canonical_storyboard_sha256(storyboard)
         expected_hash = record.get("metadata", {}).get("canonical_sha256")
         if expected_hash and str(expected_hash) != canonical_hash:
@@ -14218,6 +14278,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         audit_round: int,
         known_pattern_keys: set[str] | None = None,
         assessment_contract: str | None = QUALITY_CONTRACT,
+        historical_quality_compatibility: bool = False,
     ) -> dict[str, Any]:
         """Build the deterministic, authoritative content of one audit event."""
 
@@ -14375,6 +14436,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     issues,
                     project_id=project_id,
                     known_pattern_keys=known_patterns,
+                    **({"legacy_diagnostics_only": True} if historical_quality_compatibility and context is not None else
+                       {"coverage": (report.get("independent_evidence_matrix") or {}).get("semantic_obligation_coverage"),
+                        "execution_checks": (report.get("quality_metrics") or {}).get("semantic_checks", [])}
+                       if context is not None else {}),
                 )
                 first_draft_quality["threshold_met"] = (
                     first_draft_quality["grade"] == "A"
@@ -15758,6 +15823,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 ledger, event_index
             ),
             assessment_contract=event.get("assessment_contract"),
+            # This path reconstructs an existing durable event from its bound
+            # report. A new audit never selects compatibility by missing tags.
+            historical_quality_compatibility="complete" not in (report.get("independent_evidence_matrix", {}).get("semantic_obligation_coverage") or {}),
         )
         raw_expected_issues = copy.deepcopy(expected_content["issues"])
         expected_content["issues"] = [
@@ -18449,7 +18517,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             },
             "fingerprints": fingerprints,
             "objective_evidence": {
-                "source_manifest": {"fingerprint": fingerprints["source_bytes"]},
+                "source_manifest": {"fingerprint": fingerprints["source_bytes"],
+                                    "basis": "external_input_bytes" if storyboard.get("audit_workbook_evidence") else "bound_source",
+                                    "authorized_source_evidence": "missing" if storyboard.get("audit_workbook_evidence") else "see_source_binding"},
                 "workbook_manifest": {
                     "artifact_id": record["artifact_id"],
                     "raw_sha256": fingerprints["artifact_raw"],
@@ -18459,6 +18529,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     or record["artifact_id"]
                 ),
                 "approved_locks": {"audit_read_only": True},
+                "historical_production_verified": False,
+                "canonical_identity_basis": "current_audit_mapping" if storyboard.get("audit_workbook_evidence") else "supplied_canonical",
                 "deterministic_statistics": {"shot_count": len(storyboard.get("shots", []))},
             },
             "producer_claims": {
@@ -23388,7 +23460,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         )
         if handoff is None:
             internal_production = bool(
-                record.get("work_order_id")
+                (record.get("work_order_id") and record.get("artifact_type") != "source:storyboard")
                 or record.get("metadata", {}).get("production_certificate_id")
             )
             if internal_production:
@@ -23708,7 +23780,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "submit the complete eight-layer semantic review"
                 )
             report = self._attach_independent_evidence_matrix(
-                validate_storyboard.validate_project(storyboard, mode="audit"),
+                validate_storyboard.validate_project(storyboard, mode="audit",
+                    saved_workbook_evidence=self._saved_workbook_audit_evidence(namespace, project_id, artifact_id)),
                 storyboard,
                 semantic_audit,
             )

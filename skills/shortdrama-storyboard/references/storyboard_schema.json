@@ -452,6 +452,32 @@
     "project_anchors": {"type": ["object", "array"]},
     "stage_evidence": {"type": "object", "additionalProperties": true},
     "human_review": {"type": "object", "additionalProperties": true},
+    "audit_workbook_evidence": {
+      "type": "object",
+      "description": "只读审计原件逐格证据。必须由服务端核对原字节；不是生产证据或历史签发凭证。",
+      "required": ["contract", "raw_sha256", "master_sheet", "column_contract", "rows"],
+      "properties": {
+        "contract": {"const": "external-workbook-audit-v1"},
+        "raw_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "master_sheet": {"type": "string", "minLength": 1},
+        "column_contract": {"enum": [10, 11]},
+        "rows": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "required": ["shot_id", "row", "cells"],
+          "properties": {
+            "shot_id": {"type": "string", "minLength": 1},
+            "row": {"type": "integer", "minimum": 1},
+            "cells": {"type": "object", "minProperties": 1, "additionalProperties": {
+              "type": "object", "required": ["address", "value", "sha256"],
+              "properties": {
+                "address": {"type": "string", "pattern": "^[A-Z]+[1-9][0-9]*$"},
+                "value": {"type": "string"},
+                "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+              }, "additionalProperties": false
+            }}
+          }, "additionalProperties": false
+        }}
+      }, "additionalProperties": false
+    },
     "canonical_extension": {
       "type": "object",
       "description": "已登记的兼容扩展容器；不得在根级新增任意字段，也不得嵌套Seedance/i2v/batch/derived/cache状态，递归禁项由功能验证器执行。",
@@ -595,6 +621,17 @@
                 "additionalProperties": false
               },
               "profile_id": {"type": "string", "minLength": 1},
+              "selection_evidence": {
+                "type": "object", "additionalProperties": false,
+                "required": ["speaker_category", "delivery_class", "source_use_id", "basis_fact_ids", "rationale"],
+                "properties": {
+                  "speaker_category": {"enum": ["adult_supported", "adult_inferred", "child", "unknown"]},
+                  "delivery_class": {"enum": ["continuous_explanation", "ordinary_question_or_reply", "special_delivery", "unknown"]},
+                  "source_use_id": {"type": "string", "minLength": 1},
+                  "basis_fact_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+                  "rationale": {"type": "string", "minLength": 1}
+                }
+              },
               "segments": {
                 "type": "array", "minItems": 1,
                 "items": {
@@ -786,7 +823,7 @@
   },
   "x-top-level-allowlist": [
     "project_version", "schema_version", "schema_profile", "workflow_profile",
-    "prevention_evidence", "source_ingestion", "chapter_intake",
+    "prevention_evidence", "source_ingestion", "chapter_intake", "audit_workbook_evidence",
     "field_order", "source_lock", "shots", "total_duration", "chapter_map", "source_mapping",
     "protected_dialogue", "cognition_matrix", "scene_state", "coverage", "anchors",
     "character_anchors", "scene_anchors", "prop_anchors", "costume_anchors", "project_anchors",

@@ -23,6 +23,7 @@ TEST_MODULES = (
     "test_hand_grasp",
     "test_generated_action_binding",
     "test_knowledge_events",
+    "test_audit_timing_contract",
 )
 
 

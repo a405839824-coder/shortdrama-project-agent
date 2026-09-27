@@ -38,7 +38,7 @@ def opening_states(value, path='scene.openings'):
     """One opening-state registry; accept only a finite old prose grammar.
 
     General prose cannot change the door/window snapshot behind the light
-    renderer. The paper-window entry must be the same actual declared state.
+    renderer. A window-light entry must be the same actual declared state.
     """
     openings = {}
     if value == "无门窗。":
@@ -64,9 +64,9 @@ def opening_states(value, path='scene.openings'):
 
 def normalize_openings(value, light, path):
     openings=opening_states(value,path)
-    if light["kind"] == "paper_window":
+    if light["kind"] in {"paper_window", "glass_window"}:
         _need(openings.get(light["name"]) == light["state"], path,
-              "paper-window opening state must match the same shared light state")
+              light["kind"].replace("_", "-") + " opening state must match the same shared light state")
     return "".join(f"{name}{'开启' if state == 'open' else '关闭'}。" for name, state in sorted(openings.items())) or "无门窗。"
 
 

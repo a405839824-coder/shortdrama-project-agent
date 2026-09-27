@@ -16,7 +16,7 @@ from boundary_decisions import BoundaryDecision
 from production_state import ProductionStateChain, CONTRACT as STATE_CONTRACT
 from staging_geometry import _direction, screen_direction
 from field_content import world_position_matches
-from timing_model import estimate_utterance, _profile as timing_profile, _rules as timing_rules
+from timing_model import estimate_utterance, resolve_profile as timing_profile, _rules as timing_rules
 from production_environment import (METADATA_FIELDS, validate_editorial,
                                     render_environment, normalize_openings, opening_states, EnvironmentDecisionError)
 import production_actions as extended_actions
@@ -43,8 +43,9 @@ RESTRAINT_REASONS = {"emphasis": "重音", "decisive_tail": "决定性尾音", "
 EPS = 1e-8
 
 
-def _action_keys(kind):
-    return (COMMON - {"actor"} if kind in {"speak", "narrate", "inner_voice"} else COMMON) | ACTION_FIELDS[kind]
+def _action_keys(kind, action=None):
+    optional = {"timing"} if kind == "speak" and isinstance(action, dict) and "timing" in action else set()
+    return (COMMON - {"actor"} if kind in {"speak", "narrate", "inner_voice"} else COMMON) | ACTION_FIELDS[kind] | optional
 
 
 class ProductionDecisionError(ValueError):
@@ -253,6 +254,8 @@ def _view(world, camera, scene):
     for identity, prop in world["props"].items():
         ps, position = _anchor(world, prop)
         if ps == scene and _in_frame(world, scene, camera, position): props.append(identity)
+    _need(len(actors) <= 3, "camera.visible_actors",
+          "at most three identifiable main actors may be visible; reframe or split the shot, preserve world actors")
     return {"actors": actors, "props": props}
 
 
@@ -1131,6 +1134,11 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
     timing = evidence.get("audio_workflow", {}).get("timing")
     _need(isinstance(timing, dict) and not timing.get("utterances") and "events" not in timing, "project.audio_workflow.timing", "utterances/events are derived from actions")
     timing["utterances"] = []
+    try:
+        default_audio_profile = timing_profile(timing_rules(), timing.get("default_profile_id"), default=True)
+    except ValueError as exc:
+        raise ProductionDecisionError("project.audio_workflow.timing.default_profile_id", str(exc)) from exc
+    audio_profiles = {}
     authored = evidence.setdefault("authoring_evidence", {})
     _need(isinstance(authored, dict), "project.authoring_evidence", "requires object")
     authored["production_state_contract"] = STATE_CONTRACT
@@ -1204,11 +1212,27 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
         for j, action in enumerate(actions):
             ap = f"{path}.actions[{j}]"
             _need(isinstance(action, dict) and action.get("kind") in ACTION_FIELDS, ap, "unsupported action kind")
-            _obj(action, _action_keys(action["kind"]), ap)
+            _obj(action, _action_keys(action["kind"], action), ap)
             if action["kind"] in {"speak", "narrate", "inner_voice"}:
                 use_id = action["source_use_id"]
                 _need(use_id in sources["uses_by_id"], ap + ".source_use_id", "unknown compiled audio use")
                 action["actor"] = sources["uses_by_id"][use_id]["actor"]
+                choice = action.get("timing")
+                if choice is not None:
+                    _obj(choice, {"profile_id", "selection_evidence"}, ap + ".timing")
+                elif "timing" in action:
+                    raise ProductionDecisionError(ap + ".timing", "timing must be an explicit selection object")
+                choice = choice or {}
+                use = sources["uses_by_id"][use_id]
+                try:
+                    audio_profiles[action["id"]] = timing_profile(
+                        timing_rules(), choice.get("profile_id", default_audio_profile["id"]),
+                        selection=choice.get("selection_evidence"),
+                        kind="dialogue" if action["kind"] == "speak" else "psychological",
+                        speaker=use["actor"], text=use["text"], uses=sources["uses_by_id"],
+                        voice=action.get("voice"))
+                except ValueError as exc:
+                    raise ProductionDecisionError(ap + ".timing", str(exc)) from exc
             _name(action["id"], ap + ".id")
             if action["kind"] == "narrate": _need(action["actor"] is None, ap, "objective narration has no in-scene speaking actor")
             else: _name(action["actor"], ap + ".actor")
@@ -1234,7 +1258,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                 _need(end is not None and end <= elapsed + action["start"], ap, "missing or unfinished action prerequisite")
             if action["kind"] == "blink_restraint":
                 action["_restraint_binding"] = _restraint_binding(action, actions, sources, ticks,
-                    timing_profile(timing_rules(), timing.get("default_profile_id")), ap)
+                    audio_profiles.get(action["utterance_id"], default_audio_profile), ap)
         samples = []
         for tick in range(ticks[-1] + 1):
             # Finish prior actions before starting new actions at this exact tick.
@@ -1370,13 +1394,12 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     psychological_text += prefix + use["text"] + '”；'
                     fields["心理音轨"] = psychological_text + psychological_safety_suffix()
                     source = {"shot_id": sid, "char_range": [char_start, char_start + len(use["text"])]}; audio_kind = "psychological"
-                try:
-                    profile = timing_profile(timing_rules(), timing.get("default_profile_id"))
-                except ValueError as exc:
-                    raise ProductionDecisionError(ap + ".audio_profile", str(exc)) from exc
+                profile = audio_profiles[action["id"]]
                 segments = _audio_segments(use["text"], world_pieces, sid, profile, ap + ".audio_alignment")
                 timing["utterances"].append({"id": action["id"], "kind": audio_kind, "speaker": action["actor"] or "心理音轨",
-                    "source": source, "segments": segments})
+                    "source": source, "segments": segments, "profile_id": profile["id"]})
+                if action.get("timing", {}).get("selection_evidence") is not None:
+                    timing["utterances"][-1]["selection_evidence"] = copy.deepcopy(action["timing"]["selection_evidence"])
                 audio_alignments.append({"id": action["id"], "profile_id": profile["id"], "method": "predicted_integer_character_partition",
                                          "is_measured": False, "source_text_sha256": _hash(use["text"]), "segments": segments})
             projection_dependencies[action["id"]] = [action["id"]] if is_audio else fragment_ids[-1:] or inherited
@@ -1552,7 +1575,7 @@ def inspect_production_decisions(payload: dict, *, source_compilation=None, sour
                     _source_action_call(validate_source_step_reference, action, ap)
                     return
                 _need(isinstance(action, dict) and action.get("kind") in ACTION_FIELDS, ap, "unsupported action kind")
-                _obj(action, _action_keys(action["kind"]), ap)
+                _obj(action, _action_keys(action["kind"], action), ap)
                 _tick(action["start"], ap + ".start"); _tick(action["end"], ap + ".end")
             check(ap, shape)
     if source_unavailable:
