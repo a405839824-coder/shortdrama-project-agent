@@ -5053,6 +5053,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "production_quality_block"
             )
             data["production_quality_block"] = copy.deepcopy(quality_block)
+            quality_evidence_pending = (
+                isinstance(quality_block, dict)
+                and quality_block.get("active")
+                and quality_block.get("grade") == "unavailable"
+            )
             draft_failure_state = self._draft_preflight_failure_state(ledger)
             data["draft_preflight_repair_pending"] = bool(
                 draft_failure_state["blocked"]
@@ -5185,7 +5190,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
             data["required_next_role"] = (
                 "independent_audit"
-                if pending_independent_audit
+                if pending_independent_audit or quality_evidence_pending
                 else (
                     "repair"
                     if (
@@ -5225,9 +5230,16 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             elif isinstance(quality_block, dict) and quality_block.get("active"):
                 response_status = "action_required"
                 data["execution_available"] = True
-                data["execution_mode"] = "root_cause_repair_only"
-                data["allowed_storyboard_operations"] = ["storyboard_repair"]
-                summary += "｜初版质量门阻断下一批｜需根因修复"
+                if quality_evidence_pending:
+                    data["execution_mode"] = "audit_resolution"
+                    # Mixed incomplete reviews can also have signed, targeted
+                    # repair packages.  Existing repair authority stays strict.
+                    data["allowed_storyboard_operations"] = ["storyboard_audit", "storyboard_repair"]
+                    summary += "｜初版质量证据不足｜需补齐独立审计证据后判定，下一批仍阻断"
+                else:
+                    data["execution_mode"] = "root_cause_repair_only"
+                    data["allowed_storyboard_operations"] = ["storyboard_repair"]
+                    summary += "｜初版质量门阻断下一批｜需根因修复"
             elif pending_independent_audit:
                 response_status = "action_required"
                 data["execution_available"] = True
@@ -13501,7 +13513,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 and quality_block.get("active")
             ):
                 raise ValueError(
-                    "first_draft_quality_blocked: repair the recorded root cause before starting another production batch"
+                    "first_draft_quality_blocked: "
+                    + (
+                        "complete the recorded independent audit evidence before starting another production batch"
+                        if quality_block.get("grade") == "unavailable"
+                        else "repair the recorded root cause before starting another production batch"
+                    )
                 )
             result = project_agent.create_work_order(hub, request)
             hub["project_state"]["current_stage"] = result["work_order_status"]
@@ -24439,11 +24456,19 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 ):
                     hub["project_state"]["production_quality_block"] = {
                         "active": True,
-                        "reason": "first_draft_quality_below_threshold",
+                        "reason": (
+                            "first_draft_quality_evidence_incomplete"
+                            if first_quality.get("grade") == "unavailable"
+                            else "first_draft_quality_below_threshold"
+                        ),
                         "grade": first_quality.get("grade"),
                         "artifact_id": artifact_id,
                         "audit_cycle_id": audit_cycle_id,
-                        "required_action": "repair_root_cause_and_revalidate_prevention_gate",
+                        "required_action": (
+                            "complete_independent_audit_evidence"
+                            if first_quality.get("grade") == "unavailable"
+                            else "repair_root_cause_and_revalidate_prevention_gate"
+                        ),
                         "created_at": utc_stamp(),
                     }
         audit_blocked = audit_result.get("status") == "blocked"

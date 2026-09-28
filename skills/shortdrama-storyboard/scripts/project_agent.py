@@ -987,11 +987,20 @@ def _validate_project_state(state: Any) -> list[str]:
                     errors.append(f"project_state.production_quality_block missing field: {field}")
             if not isinstance(block.get("active"), bool):
                 errors.append("project_state.production_quality_block.active must be boolean")
-            if block.get("reason") != "first_draft_quality_below_threshold":
+            evidence_incomplete = block.get("reason") == "first_draft_quality_evidence_incomplete"
+            if block.get("reason") not in {
+                "first_draft_quality_below_threshold", "first_draft_quality_evidence_incomplete",
+            } or (evidence_incomplete and block.get("grade") != "unavailable"):
                 errors.append("project_state.production_quality_block.reason is invalid")
-            if block.get("grade") not in {"B", "C"}:
-                errors.append("project_state.production_quality_block.grade must be B or C")
-            if block.get("required_action") != "repair_root_cause_and_revalidate_prevention_gate":
+            if block.get("grade") not in {"B", "C", "unavailable"}:
+                errors.append("project_state.production_quality_block.grade must be B, C or unavailable")
+            # Keep historical unavailable/below-threshold records readable;
+            # current writers distinguish missing evidence from measured failure.
+            expected_action = (
+                "complete_independent_audit_evidence" if evidence_incomplete
+                else "repair_root_cause_and_revalidate_prevention_gate"
+            )
+            if block.get("required_action") != expected_action:
                 errors.append("project_state.production_quality_block.required_action is invalid")
             for field in ["artifact_id", "audit_cycle_id", "created_at"]:
                 if not isinstance(block.get(field), str) or not block.get(field, "").strip():
@@ -1023,8 +1032,8 @@ def _validate_project_state(state: Any) -> list[str]:
             # The active block is bound to its own artifact and audit cycle.
             # `latest_first_draft_quality` may legitimately describe a later,
             # unrelated audit whose lineage is not allowed to clear this block.
-    if isinstance(quality, dict) and quality.get("grade") in {"B", "C"} and not isinstance(block, dict):
-        errors.append("project_state.production_quality_block is required for below-threshold first-draft quality")
+    if isinstance(quality, dict) and quality.get("grade") in {"B", "C", "unavailable"} and not isinstance(block, dict):
+        errors.append("project_state.production_quality_block is required for below-threshold or unavailable first-draft quality")
     return errors
 
 

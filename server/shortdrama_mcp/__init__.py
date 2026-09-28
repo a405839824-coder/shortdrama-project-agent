@@ -1,3 +1,3 @@
 """Short-drama project Agent MCP service."""
 
-__version__ = "0.5.58"
+__version__ = "0.5.59"
