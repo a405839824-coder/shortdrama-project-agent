@@ -180,7 +180,7 @@
       "镜尾视线与状态",
       "自然先后动作描述；数字制作计时仅在内部绑定记录 对外画面内容使用自然动作顺序，不显示数字制作时间标记；计时注释仅在picture_timing中绑定正文，修正不得将时间码补回正文。"
     ],
-    "plugin_version": "0.5.57",
+    "plugin_version": "0.5.58",
     "projection_text_normalization": "UTF-8_NFC_LF",
     "removed_new_write_fields": [
       "运镜主体",
@@ -4564,7 +4564,7 @@
       "module": "BOOTSTRAP",
       "repair_action": "加载AGENTS/SKILL/R10_BOOTSTRAP并重跑",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "未加载R10启动文件或版本不一致",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4576,7 +4576,7 @@
       "module": "VERSION",
       "repair_action": "统一到R10并应用废弃映射",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "运行时使用旧版本或新旧规则并行active",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4588,7 +4588,7 @@
       "module": "TEMPLATE",
       "repair_action": "使用R10 canonical shot schema",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "缺正式模板",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4600,7 +4600,7 @@
       "module": "TEMPLATE",
       "repair_action": "补齐字段，无法填写时写无/不适用+原因",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "镜头缺必填字段",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4612,7 +4612,7 @@
       "module": "TEMPLATE",
       "repair_action": "按canonical_shot_fields重排",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "字段顺序与R10不一致",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4624,7 +4624,7 @@
       "module": "VISIBILITY",
       "repair_action": "按主要人物拆镜或把必要普通人物分入不抢戏的背景生态层；删除不可见表演",
       "required_evidence": "shot_id、主要可见人物清单/计数、背景生态分层或主体/可见部位对照",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-06：具名/主要可见人物超过3人，或主体与可见部位不一致；公共场景普通人物作为背景生态另行记录",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4636,7 +4636,7 @@
       "module": "VISIBILITY",
       "repair_action": "改为书页镜+人物反应镜",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "书页/手部/背影/远景写不可见面部表演",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4648,7 +4648,7 @@
       "module": "EXPRESSION",
       "repair_action": "按嘴角/眼神/面部/手部/身体/视线拆解",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "只写抽象情绪词",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4660,7 +4660,7 @@
       "module": "EXPRESSION",
       "repair_action": "补到至少4类可观察细节",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "warning",
       "trigger_condition": "重要情绪镜可见细节少于4类",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4672,7 +4672,7 @@
       "module": "EXPRESSION",
       "repair_action": "核对角色/道具类型及真实视线、可见性、闭眼状态、眨眼次数和时序，只修已证明冲突；缺映射先补证，不因自然静止或缺固定套话补表演。",
       "required_evidence": "镜头编号、已解析人物及可见区间、实际眼部事件、起始/最终视线和对应来源；内部时序证据与重音/不眨区间。映射待核验单列E-VIS-001/input_mapping。",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-13：已写视线、可见性、闭眼状态、眨眼次数/时序或不眨区间存在具体冲突；不以缺旧动作链或固定禁项套话判错",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4684,7 +4684,7 @@
       "module": "MOTION",
       "repair_action": "选择16种之一或明确无运镜",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "运镜空泛或不在允许菜单",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4696,7 +4696,7 @@
       "module": "MOTION",
       "repair_action": "在运镜方式同一字段补充运镜主体，不创建运镜主体字段",
       "required_evidence": "镜头编号、运镜方式及缺失的主体描述",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "移动镜头的运镜方式字段未写明运镜主体",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4708,7 +4708,7 @@
       "module": "MOTION",
       "repair_action": "写明为什么移动及叙事效果",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "warning",
       "trigger_condition": "运镜功能与类型弱匹配",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4720,7 +4720,7 @@
       "module": "CAMERA",
       "repair_action": "明确机位高度、方向或视角",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "机位为空或不可执行",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4732,7 +4732,7 @@
       "module": "CINEMATIC",
       "repair_action": "分别明确主要受光关系、唯一有源主光/弱补光、画面方向/衰减和无Kelvin的定性暖冷空间关系；普通室内改用前侧/侧面漫射明暗并锁定清澈空气、清晰背景和门窗原状态；删除雾烟、穿插光束、柔焦扩散与无依据逆光。室外或剧情介质按物理前提局部使用",
       "required_evidence": "镜头编号、室内外、时间天气、门窗开合、光影四项、背景清晰度、实际灯火/自然光通路、介质范围、受光面和同场连续性",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-17：光影四项缺失/空泛/候选冲突；色温倾向含Kelvin/K数值、只有暖中性等泛词或缺场景暖冷空间关系；场景不支持主光或特效；普通室内出现雾烟、穿插光束、柔焦扩散、强逆光、背景泛白或光影擅改门窗；剧情介质未限制为局部",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4744,7 +4744,7 @@
       "module": "T2I_PROMPT",
       "repair_action": "把必要含义转为一个确定瞬间可见的眼神、唇线、手部、距离、道具、环境活动、材质和有源光色；其余从关键帧删除",
       "required_evidence": "镜头编号、GPT关键帧投影、命中的不可见语义及其canonical来源字段",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-17：GPT关键帧含单帧不可证明的作者旁白、未来信息、象征结论，或把声音、连续事件和抽象氛围直接当成静态可见事实",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4756,7 +4756,7 @@
       "module": "CINEMATIC",
       "repair_action": "统一同一场景连续性字段",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "warning",
       "trigger_condition": "连续镜光源方向或色温冲突",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4768,7 +4768,7 @@
       "module": "DIALOGUE",
       "repair_action": "按场景实际交流闭环重新判定全部叙述单元；会话单元拆成对白节拍，直接对白维持逐字逐标点，事实转化对白只重组原文已给事实，并重做音色、时长、口型、听者反应和连续性证据",
       "required_evidence": "source_ledger顺序、逐条事实转化台账、说话人和改编对白、fact_atoms、plot_change=false、new_plot_facts=[]、entailed_by_source、100%覆盖率及有序集合SHA-256；窄例外须source_content_partitions、source_content_limit、pending状态及最终独立source-limit/实际字段精确证据；不认证未给细项",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-16：授权范围内叙述单元未逐条完成会话／混合会话／非会话场景语义判定；叙述性会话或混合会话的问答、劝决、令应、报听、辩核、证判被改成无声动作；或事实转化对白未绑定原文事实、交流双方、说话人依据、目标镜头与无新增剧情证明；或source-content-limit窄例外跳过已给交流/直接引语、来源分段及实际输出哈希失配或独立限定证据缺失",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4780,7 +4780,7 @@
       "module": "VOICE",
       "repair_action": "只在音色字段内按fixed-voice-template-v1补齐；发声方式仅作音色内部空值分组标题，画面内容只保留声画同步时点，不创建顶层发声方式字段",
       "required_evidence": "镜头编号、音色字段、本镜实际对白、固定标签顺序、重音逐字匹配和独审field:镜头编号.音色覆盖证明",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-15：带对白镜的音色未按固定顺序完整填写基础声线、言语行为、当前表达、发声方式六项和2—4项禁止语气，重音不在本镜实际对白、尾音方向无效、附加统一中性模板，或无对白镜未明确不适用",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4792,7 +4792,7 @@
       "module": "VOICE",
       "repair_action": "补足至少4项；核心情绪补足6项",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "warning",
       "trigger_condition": "非R10-SPC-1只读兼容输入中的普通对白发声维度少于4项",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4804,7 +4804,7 @@
       "module": "PUNCT",
       "repair_action": "逐句把标点效果写入画面内容，不创建标点语气字段",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "画面内容中的对白标点未通过停顿、上扬、重落或收住体现语气作用",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4816,7 +4816,7 @@
       "module": "PUNCT",
       "repair_action": "按R10标点映射修正",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "画面内容中的对白标点效果与发声不匹配",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4828,7 +4828,7 @@
       "module": "DIALOGUE",
       "repair_action": "保留原句及标点，重排所在阶段、延长实际时间或按原句字符范围合法拆镜；不得删改原句以通过容量检查",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "按所选可信配置计算的发声及去重额外停顿预算超过实际所在阶段或镜长；候选估算不是厂商上限或音视频实测结论",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4840,7 +4840,7 @@
       "module": "DIALOGUE",
       "repair_action": "选择当前注册源中匹配的timing_policy配置，报告provisional或measured状态并用同一口径重算",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "语速配置身份、证据状态、发音计数或计时口径不一致，或以未核实速率规避容量",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4852,7 +4852,7 @@
       "module": "PSYCH",
       "repair_action": "在心理音轨同一字段内补不张嘴、不口型、不字幕、不计入，不创建心理音轨属性字段",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "心理音轨字段内缺不张嘴/不口型/不字幕/不计入对白安全属性，或未计实际音轨时长/跨镜覆盖/与对白的可听辨重叠",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4864,7 +4864,7 @@
       "module": "PSYCH",
       "repair_action": "移至唯一心理音轨字段并标明不口型；GPT投影删除心理原句",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "心理原句作为口型对白进入画面内容或GPT关键帧投影",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4876,7 +4876,7 @@
       "module": "COMPACT_MASTER",
       "repair_action": "只读迁移旧数据，创建无退休字段和无批次的compact successor",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "新canonical或XLSX出现batches、生成批次、Seedance独立列/工作表或旧独立字段回写",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4888,7 +4888,7 @@
       "module": "COMPACT_MASTER",
       "repair_action": "在内部计时视图中重排为恰好3个一位小数连续阶段；不得生成4秒包装批次 对外画面内容使用自然动作顺序，不显示数字制作时间标记；计时注释仅在picture_timing中绑定正文，修正不得将时间码补回正文。",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "R10-SPC-1内部计时视图不是恰好3个【0.0—x.x秒】一位小数阶段，或未从0.0开始、存在空段/间隙/重叠、末段不等于镜头时长 对外画面内容使用自然动作顺序，不显示数字制作时间标记；计时注释仅在picture_timing中绑定正文，修正不得将时间码补回正文。",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4900,7 +4900,7 @@
       "module": "COMPACT_MASTER",
       "repair_action": "按原句出现身份与字符范围拆镜、调整阶段/镜长或删除非核心动作；并行事件不重复收费，保留必要叙事停顿",
       "required_evidence": "shot_id、发言/动作事件身份、profile_id及证据状态、所在阶段起止、发音单位数、独立停顿与依赖、预算差值",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-10：发言、心理音轨、额外停顿或有先后依赖动作超出所在阶段/镜头，或时间轴依赖不可执行",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4912,7 +4912,7 @@
       "module": "COMPACT_MASTER",
       "repair_action": "拆为独立镜头并各保留一个主机位/主运镜，不创建批次",
       "required_evidence": "shot_id、core_function、main_action_stage、viewpoint_count和camera_position",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-07：单镜含多个主机位、多个主运镜、多个视角或第二个独立核心阶段",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4924,7 +4924,7 @@
       "module": "SOURCE",
       "repair_action": "补齐源文边界与逐镜证据",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "Source Lock/边界/支撑句缺失",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4936,7 +4936,7 @@
       "module": "SOURCE",
       "repair_action": "删除或登记用户授权",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "新增无源剧情或动作因果",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4948,7 +4948,7 @@
       "module": "REFERENCE",
       "repair_action": "明确继承与排除",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "参考图锚定缺失或污染",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4960,7 +4960,7 @@
       "module": "STAT",
       "repair_action": "复算并同步JSON",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "时长、镜数、十一列投影或统计不闭合",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4972,7 +4972,7 @@
       "module": "ARCHIVE",
       "repair_action": "保持原生产XLSX不可变且为PENDING_AUDIT；由独立审计创建匹配的签名overlay新工件/后继工作簿，人工签核后再归档",
       "required_evidence": "PENDING_AUDIT生产工件、不可变签名audit overlay新工件、问题计数、audit_trace_id、canonical/artifact指纹、证书及人工签核",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-12：独立审计签发前预填PASS/0问题/trace、试图就地回填原生产XLSX，或签名审计后继工件缺匹配证书、trace、指纹和真实人工终审",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4984,7 +4984,7 @@
       "module": "ARCHIVE",
       "repair_action": "撤销例外",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "例外授权越过安全硬线",
       "version": "V16.3-148-R10-StableRuntime"
@@ -4996,7 +4996,7 @@
       "module": "INTEGRATION",
       "repair_action": "修复解析/投影根因，从canonical重建资产并重跑实际XLSX多行round-trip",
       "required_evidence": "shot_id、canonical/投影/XLSX字段字符数与归一化哈希、多行分段及文件状态",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-11：canonical→正式母版/GPT→XLSX→反向解析在UTF-8 NFC+LF归一化后哈希不一致、多行对白丢行，或文件损坏",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5008,7 +5008,7 @@
       "module": "INTEGRATION",
       "repair_action": "运行功能黄金测试",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "黄金测试未实际执行校验器",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5020,7 +5020,7 @@
       "module": "INTEGRATION",
       "repair_action": "使用R10根目录或兼容搜索",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "warning",
       "trigger_condition": "路径布局与AGENTS不一致",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5032,7 +5032,7 @@
       "module": "PREVENTIVE_GATES",
       "repair_action": "补齐R10-PG1前置门禁证据后重跑",
       "required_evidence": "workflow_profile、scope_lock、audit_layers及缺失字段",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "R10-PG1流程档案、范围锁或分层审计证据缺失",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5044,7 +5044,7 @@
       "module": "SOURCE",
       "repair_action": "重建源文—对白—镜头映射并补齐授权",
       "required_evidence": "source_id、source_text、treatment、target_shots、缺失必含词",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "源文台账未覆盖镜头、关键必含内容缺失或删合压无授权",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5056,7 +5056,7 @@
       "module": "CHANGE_LOCK",
       "repair_action": "删除残留并对保护范围执行正反向差异检查",
       "required_evidence": "must_exclude命中词及命中的镜头或导出字段",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "旧剧情、旧对白或本轮明确删除内容仍残留",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5068,7 +5068,7 @@
       "module": "COGNITION",
       "repair_action": "补齐人物认知矩阵并回查全部相关台词与动作",
       "required_evidence": "人物、已知、未知、关系阶段、情感阶段和禁止项",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "人物认知、关系或情感阶段表缺失/不完整",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5080,7 +5080,7 @@
       "module": "CONTINUITY",
       "repair_action": "回退错误起始状态并按成片顺序重建全部N-1对；逐对闭合七项状态/道具，跨场跨集写明切换，再重算状态与有序pair哈希",
       "required_evidence": "全部N-1对pair_id、左右shot_id、边界类型、七项状态向量、左end/right start哈希、transition_explanation、覆盖率与ordered_pair_sha256",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-08、THG-09与THG-14：起始状态预写本镜结果、道具双持/跳手，或成片顺序N-1任一相邻镜头组缺证据、逆序/重复、七项状态不闭合、跨场/跨集边界无说明、状态哈希或有序pair哈希不一致",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5092,7 +5092,7 @@
       "module": "SHOT_GRANULARITY",
       "repair_action": "按核心叙事阶段重切，单镜保留一个视角与摄影机位置",
       "required_evidence": "shot_id、core_function、viewpoint_count和camera_position",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "单镜缺核心功能、含多个视角/摄影机位置或隐形切镜",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5104,7 +5104,7 @@
       "module": "SHOT_GRANULARITY",
       "repair_action": "补叙事功能；无功能则合并或删除特写",
       "required_evidence": "shot_id、镜头类型和detail_shot_function",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "warning",
       "trigger_condition": "特写未说明剧情、信息或情绪功能，存在碎片化风险",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5116,7 +5116,7 @@
       "module": "PERFORMANCE_CHAIN",
       "repair_action": "按可见性重写完整演员反应链，并回查听话人反应",
       "required_evidence": "shot_id及缺失的performance_chain字段",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "台词/重要情绪镜缺刺激—反应—视线—表情—身体—结束状态链",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5128,7 +5128,7 @@
       "module": "JIMENG_TIMING",
       "repair_action": "从canonical静态白名单重新投影含画幅：9:16竖屏的GPT列；数字制作时点只留在内部计时记录，不进入正式母版画面内容。",
       "required_evidence": "shot_id、目标模型、镜头时长、画面内容阶段边界及GPT动态/时间/音频命中",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-03：GPT关键帧投影含时间码、运镜、切镜/转场、对白/音频或随后/接着/几秒后等过程词；亦覆盖未知/旧模型硬时间码和Seedance 2.5阶段错误",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5140,7 +5140,7 @@
       "module": "COMPACT_MASTER",
       "repair_action": "从27字段原子从零投影空间站位、静态起始姿态、动作/结束状态及GPT静态事实",
       "required_evidence": "shot_id、正式母版/GPT投影及命中的跨上下文禁词",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-04：正式分镜母版或GPT关键帧出现同上、承接上一镜、继续刚才、保持上一关键帧等历史上下文代指",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5152,7 +5152,7 @@
       "module": "COMPACT_MASTER",
       "repair_action": "补齐compact原子和三个逐镜执行位置的9:16竖屏，重做确定性投影并做空白上下文测试",
       "required_evidence": "shot_id、27字段原子及生成限制/正式母版/GPT画幅或字段缺失项",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-01：生成限制、正式母版或GPT缺干净的9:16竖屏，或正式母版缺固定字段",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5164,7 +5164,7 @@
       "module": "AUDIO_WORKFLOW",
       "repair_action": "单镜负面限制改写为禁止额外配乐且BGM字面量零命中；画面锁定后再独立设计音乐Cue",
       "required_evidence": "shot_id、正式母版/GPT命中内容或audio_workflow字段",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "正式单镜母版或GPT投影出现BGM字面量/要求附加配乐，或音乐未放到画面锁定后的独立阶段",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5176,7 +5176,7 @@
       "module": "REGRESSION",
       "repair_action": "扩大到规定影响范围，修净后重跑原错误与相邻镜头",
       "required_evidence": "审计轮次、初审数、残留数、镜头和错误码",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "修正后仍残留原问题",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5188,7 +5188,7 @@
       "module": "REGRESSION",
       "repair_action": "撤销副作用，按影响范围回归并比较修正前后差异",
       "required_evidence": "审计轮次、新增错误数、差异范围和受影响镜头",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "修正引入新的问题或越界修改保护字段",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5200,7 +5200,7 @@
       "module": "SYSTEMIC_ESCALATION",
       "repair_action": "核对当前残留、根因与依赖，按实际影响选择局部修复或上游重建；不按轮数停止或强制重建",
       "required_evidence": "当前残留、实际修复前后差异、受影响依赖和最新完整复核；连续轮数仅作历史记录",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "连续多轮存在已观测残留且根因尚未闭合；已真实修复不得仅按轮数判失败",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5212,7 +5212,7 @@
       "module": "CHAPTER_INTAKE",
       "repair_action": "停止生成，补齐全部章节分块与边界，重建章节剧情地图后重跑。",
       "required_evidence": "chapter_id、chunk_count、chunks_read、boundary_context、events、causal_links、character_state_changes和uncertainty_status",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "章节未完整读取、边界/剧情地图/因果/人物状态缺失，或歧义未解决仍进入分镜生成",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5224,7 +5224,7 @@
       "module": "SOURCE_SELECTION",
       "repair_action": "重建无损取舍与保护对白映射，从canonical重投影后做实际XLSX多行round-trip。",
       "required_evidence": "source_unit_id、value_axes、treatment、protected_dialogue及canonical/正式母版/XLSX多行对白与说话人对照",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-05：源文单元无处理去向、删除无授权/冗余证据、保护对白映射不足100%，或对白文字/标点/顺序/分句/说话人在canonical、正式母版和XLSX间不一致",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5236,7 +5236,7 @@
       "module": "ADAPTATION_BUDGET",
       "repair_action": "重新取舍、调整目标时长或重排节拍，不得把过量内容塞入镜头。",
       "required_evidence": "target_duration_seconds、dialogue_seconds、action_seconds、transition_seconds、shot_count_min/max、beat_id和event_ids",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "保护对白/动作/转场最低时长超过目标、镜头数范围非法或核心事件未进入节拍",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5248,7 +5248,7 @@
       "module": "SOURCE_EXPANSION",
       "repair_action": "删除新增剧情，用有源依据且不改变剧情的可见微动作、摄影或环境表达替代。",
       "required_evidence": "new_plot_events或visualization_license中的source_unit_ids、category和plot_change",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "为视觉效果新增原文不存在的事件、冲突、行为、决定、动机、信息或结果",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5260,7 +5260,7 @@
       "module": "COMPACT_MASTER",
       "repair_action": "迁移为R10-SPC-1精确十一列，以正式分镜母版为唯一执行列并停止后台Seedance生成。",
       "required_evidence": "mother_template_columns、sheet_names、canonical keys及后台生成计数",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "正式母版导出不是精确十一列，出现Seedance 2.0/2.5独立列、生成批次工作表或后台Seedance产物",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5272,7 +5272,7 @@
       "module": "PUBLIC_SCENE_ECOLOGY",
       "repair_action": "按地点补齐普通人物角色与可见活动；若剧情要求空场，同时写明空场状态和宵禁/闭市/封锁/疏散等原因。",
       "required_evidence": "镜头编号、场景词、人物角色、空场描述、豁免原因及生成限制命中内容",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "公共流动场景没有与地点/时代匹配的普通人物生态，生成限制排除必要普通人物，或空场缺可核验原因",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5284,7 +5284,7 @@
       "module": "PUBLIC_SCENE_ECOLOGY",
       "repair_action": "补齐人流密度、地点角色、彼此独立的生活动作和与景别匹配的前中后景分布。",
       "required_evidence": "镜头编号及空间站位描述、起始状态、画面内容、环境动态中的缺失项",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "公共场景只写人群/路人泛称，缺密度、地点角色、错峰动作或空间层次",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5296,7 +5296,7 @@
       "module": "PUBLIC_SCENE_ECOLOGY",
       "repair_action": "按景别补齐至少两至三类具体声源和两至三层声场；对白出现时写明环境底声压低且不遮盖台词。",
       "required_evidence": "镜头编号、景别、环境音效、具体声源族、近中远声场和对白避让描述",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "公共场景环境音缺具体声源或声场层次，只有泛称环境声，或对白镜未做环境声避让",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5308,7 +5308,7 @@
       "module": "PUBLIC_SCENE_ECOLOGY",
       "repair_action": "对齐画内/画外声源，删除匿名群演完整对白和时代错位声音，并在compact原子与正式母版中从零复现。",
       "required_evidence": "镜头编号、声源词、可见来源、环境音效、环境动态和正式母版",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "公共场景可识别声音无画内/可信画外声源，匿名群演说清晰完整对白，出现时代错位声源，或唯一正式母版未复现人物与声音生态",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5320,7 +5320,7 @@
       "module": "PUBLIC_SCENE_ECOLOGY",
       "repair_action": "统一相邻镜的公共人物和环境声状态，或用涌入、散开、疏散、离开、时间推进等可见过渡解释变化。",
       "required_evidence": "场景连续性ID、相邻镜头编号、前后密度/声源和缺失的过渡",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "同一公共场景连续镜的人流密度、流向或环境声床无画面原因跳变",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5332,7 +5332,7 @@
       "module": "COMPACT_SCHEMA",
       "repair_action": "将动作、表演和角色说道：“精确对白”合入画面内容，将旧发声参数保留到音色并显式标记待按固定子模板修订，将标点时点保留在画面内容；将运镜主体和叙事功能合入运镜方式，只删除退休顶层字段、旧标签和两条冗长旧短语并保留9:16竖屏。",
       "required_evidence": "镜头编号及命中的旧字段名",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "R10.1镜头仍含退休字段、旧【角色】对白标签，或正式/GPT提示词残留9:16竖屏真人古装短剧截图质感、9:16竖屏真人古装短剧单帧两条冗长旧短语；干净的9:16竖屏是必需项",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5344,7 +5344,7 @@
       "module": "COMPACT_TIMELINE",
       "repair_action": "修正为恰好3个从0.0秒连续覆盖到镜头结束的一位小数阶段；旧自然阶段仅作只读迁移输入。",
       "required_evidence": "镜头编号、镜头时长及全部解析到的起止秒数",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "R10-SPC-1内部计时视图不是恰好3个【0.0—x.x秒】一位小数阶段，或未从0.0秒开始、阶段为空、重叠、不连续或未覆盖完整镜头时长 对外画面内容使用自然动作顺序，不显示数字制作时间标记；计时注释仅在picture_timing中绑定正文，修正不得将时间码补回正文。",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5356,7 +5356,7 @@
       "module": "GENERATION_DEDUP",
       "repair_action": "从结构化transition只渲染一次并去重；canonical只保留一次语义原子，停止后台批次与衍生提示词重复生成。",
       "required_evidence": "shot_id、转场原文与归一化重复索引，或命中的顶层批次数、衍生字段/母版列名",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "THG-02：切镜/转场提示词含；；、。。或标点归一化后的相邻重复句；亦覆盖canonical持久化batches/衍生长文本或十一列母版含独立Seedance列",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5368,7 +5368,7 @@
       "module": "FINAL",
       "repair_action": "修复全部fail后重跑",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "存在未处理阻塞项却声明pass",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5382,7 +5382,7 @@
       "final_status_if_unfixed": "fail_current",
       "required_evidence": "镜号、字段路径、实际违规片段、语义角色及来源／状态依赖",
       "repair_action": "修正所属结构化决定并同步母版、GPT和阅读页；不静默删句、不编造依据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "version": "V16.3-148-R10-StableRuntime"
     },
     {
@@ -5394,7 +5394,7 @@
       "final_status_if_unfixed": "fail_current",
       "required_evidence": "原始请求、来源图/计划指纹、具体决定或事件路径、判定状态和受影响依赖",
       "repair_action": "回到事实或计划拥有的决定，核对合法例外并重算依赖；不补造依据、不限制修正轮数",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "version": "V16.3-148-R10-StableRuntime"
     },
     {
@@ -5404,7 +5404,7 @@
       "module": "EPISODE_RULES",
       "repair_action": "回到已锁来源、分集边界或所属决定修正；不编造事实、不提速凑数；重跑全量适用检查。",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "整集时长与范围不合规或证据不足",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5416,7 +5416,7 @@
       "module": "EPISODE_RULES",
       "repair_action": "回到已锁来源、分集边界或所属决定修正；不编造事实、不提速凑数；重跑全量适用检查。",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "分集合同身份不合规或证据不足",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5428,7 +5428,7 @@
       "module": "EPISODE_RULES",
       "repair_action": "回到已锁来源、分集边界或所属决定修正；不编造事实、不提速凑数；重跑全量适用检查。",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "开头面部窗口不合规或证据不足",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5440,7 +5440,7 @@
       "module": "EPISODE_RULES",
       "repair_action": "回到已锁来源、分集边界或所属决定修正；不编造事实、不提速凑数；重跑全量适用检查。",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "节拍与钩子交付不合规或证据不足",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5452,7 +5452,7 @@
       "module": "EPISODE_RULES",
       "repair_action": "回到已锁来源、分集边界或所属决定修正；不编造事实、不提速凑数；重跑全量适用检查。",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "对白实际占用不合规或证据不足",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5464,7 +5464,7 @@
       "module": "EPISODE_RULES",
       "repair_action": "回到已锁来源、分集边界或所属决定修正；不编造事实、不提速凑数；重跑全量适用检查。",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "短镜缺少实际叙事功能或统计证据不闭合；低于历史8%/15%不作为当前错误",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5476,7 +5476,7 @@
       "module": "EPISODE_RULES",
       "repair_action": "回到已锁来源、分集边界或所属决定修正；不编造事实、不提速凑数；重跑全量适用检查。",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "来源功能聚合预算不合规或证据不足",
       "version": "V16.3-148-R10-StableRuntime"
@@ -5488,13 +5488,13 @@
       "module": "EPISODE_RULES",
       "repair_action": "回到已锁来源、分集边界或所属决定修正；不编造事实、不提速凑数；重跑全量适用检查。",
       "required_evidence": "镜头编号/字段/原文句/计算值/文件状态中的至少一项具体证据",
-      "rule_revision": "0.5.57",
+      "rule_revision": "0.5.58",
       "severity": "fail",
       "trigger_condition": "跨集借用与后续边界不合规或证据不足",
       "version": "V16.3-148-R10-StableRuntime"
     }
   ],
   "rule_registry_contract": "r10-rule-registry-v1",
-  "rule_registry_revision": "0.5.57",
-  "rule_registry_sha256": "30e797cdb1f2c3e2d9d6804c50e8dd8bf44d01f4a4f035c1b2e2d64ba8ca5a0d"
+  "rule_registry_revision": "0.5.58",
+  "rule_registry_sha256": "eafaf20521f5260dc138c6c7bb8b4f6d79ce3acaa342ef7e5537ff547aa01f15"
 }

@@ -6,11 +6,13 @@ import copy
 import functools
 import hashlib
 import inspect
+import io
 import json
 import re
 import sys
 import time
 import uuid
+import zipfile
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -4247,7 +4249,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         overlay_record: dict[str, Any],
         source_record: dict[str, Any],
         certificate: dict[str, Any],
-    ) -> None:
+    ) -> dict[str, Any]:
         """Bind every visible audit-page claim to the signed certificate."""
 
         overlay_id = str(overlay_record.get("artifact_id") or "")
@@ -4347,17 +4349,47 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         ):
             raise ValueError("authoritative_audit_overlay_source_fingerprint_invalid")
 
+        _, source_path = self.store.get_artifact(namespace, project_id, source_id)
+        # Select the same route as export from the verified source, never from
+        # mutable overlay metadata that could disable preservation checks.
+        read_only_overlay = source_path.suffix.lower() in {".xlsx", ".xlsm"}
+        if read_only_overlay and not (
+            overlay_metadata.get("read_only_audit") is True
+            and overlay_metadata.get("audit_output_mode") == "original_workbook_with_report_overlay"
+            and overlay_metadata.get("regenerated_execution_fields") is False
+        ):
+            raise ValueError("authoritative_audit_overlay_preservation_contract_invalid")
         extracted = extract_file(
             overlay_path.read_bytes(),
             str(current_overlay.get("file_name") or "audit-overlay.xlsx"),
+            audit_only=read_only_overlay,
         )
         canonical = extracted.get("canonical_storyboard")
         sheets = extracted.get("sheets")
+        canonical_binding_hash = canonical_storyboard_sha256(canonical) if isinstance(canonical, dict) else ""
+        if read_only_overlay and isinstance(canonical, dict) and not extracted.get("canonical_sidecar_present"):
+            # External mappings include the actual workbook's raw hash. An
+            # added report changes that hash, but must change no content field
+            # or source evidence. Compare both real mappings without that one
+            # transport identity; retain the derived file's real hash on read.
+            source_extracted = extract_file(source_path.read_bytes(), source_record["file_name"], audit_only=True)
+            source_canonical = source_extracted.get("canonical_storyboard")
+            if not isinstance(source_canonical, dict) or source_extracted.get("canonical_sidecar_present"):
+                raise ValueError("authoritative_audit_overlay_source_mapping_invalid")
+            mappings = [copy.deepcopy(value) for value in (canonical, source_canonical)]
+            for value in mappings:
+                evidence = value.get("audit_workbook_evidence") or {}
+                if evidence.get("contract") != "external-workbook-audit-v1":
+                    raise ValueError("authoritative_audit_overlay_external_mapping_invalid")
+                evidence.pop("raw_sha256", None)
+            if mappings[0] != mappings[1]:
+                raise ValueError("authoritative_audit_overlay_content_mapping_changed")
+            canonical_binding_hash = canonical_storyboard_sha256(source_canonical)
         if (
             extracted.get("kind") != "workbook"
-            or extracted.get("canonical_sidecar_present") is not True
+            or (not read_only_overlay and extracted.get("canonical_sidecar_present") is not True)
             or not isinstance(canonical, dict)
-            or canonical_storyboard_sha256(canonical) != canonical_hash
+            or canonical_binding_hash != canonical_hash
             or not isinstance(sheets, list)
         ):
             raise ValueError("authoritative_audit_overlay_workbook_binding_invalid")
@@ -4406,7 +4438,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             ("total_duration", canonical.get("total_duration")),
             (
                 "production_evidence_location",
-                "canonical sidecar（生产证据不作为独立审计结论）",
+                ("只读外部原件；未提供历史 canonical sidecar"
+                 if read_only_overlay and not extracted.get("canonical_sidecar_present")
+                 else "canonical sidecar（生产证据不作为独立审计结论）"),
             ),
         ]
         expected_matrix: list[list[Any]] = [
@@ -4460,6 +4494,28 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         ]
         if actual_matrix != expected_matrix:
             raise ValueError("authoritative_audit_overlay_visible_claim_mismatch")
+        if read_only_overlay:
+            # The master mapping deliberately excludes reading copies and
+            # opaque workbook parts. Bind those preserved bytes too, without
+            # treating them as semantic evidence or manufacturing a sidecar.
+            source_bytes = source_path.read_bytes()
+            source_canonical = extract_file(source_bytes, source_record["file_name"], audit_only=True)["canonical_storyboard"]
+            expected_bytes = audit_saved_workbook_overlay(
+                source_bytes, source_canonical, report,
+                audit_overlay=_seal_service_verified_audit_overlay({
+                    "status": overlay_status, "conclusion": str(semantic_conclusion["summary"]),
+                    **expected_counts, "audit_trace_id": audit_trace_id,
+                    "certificate_id": certificate_id, "certificate_integrity_hmac": certificate_hmac,
+                    "canonical_sha256": canonical_hash, "source_artifact_raw_sha256": source_raw_hash,
+                }),
+            )
+            with zipfile.ZipFile(io.BytesIO(expected_bytes)) as expected_zip, zipfile.ZipFile(overlay_path) as actual_zip:
+                if (actual_zip.comment != expected_zip.comment
+                        or len(actual_zip.infolist()) != len(expected_zip.infolist())
+                        or set(actual_zip.namelist()) != set(expected_zip.namelist())
+                        or any(actual_zip.read(name) != expected_zip.read(name) for name in expected_zip.namelist())):
+                    raise ValueError("authoritative_audit_overlay_preservation_mismatch")
+        return extracted
 
     def _project_reuse_summary(
         self,
@@ -13659,6 +13715,22 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         self, namespace: str, project_id: str, artifact_id: str
     ) -> tuple[dict[str, Any], dict[str, Any], Path]:
         record, path = self.store.get_artifact(namespace, project_id, artifact_id)
+        if record.get("artifact_type") == "storyboard_audit_overlay":
+            metadata = record.get("metadata") or {}
+            source_id = str(record.get("source_artifact_id") or "")
+            source_record, _source_path = self.store.get_artifact(namespace, project_id, source_id)
+            certificate = self._load_verified_independent_audit_certificate(
+                namespace, project_id,
+                certificate_id=str(metadata.get("independent_audit_certificate_id") or ""),
+                artifact_id=source_id,
+                canonical_sha256=str(metadata.get("canonical_sha256") or ""),
+                source_artifact_raw_sha256=str(source_record.get("fingerprint") or ""),
+            )
+            extracted = self._verify_authoritative_audit_overlay(
+                namespace, project_id, overlay_record=record,
+                source_record=source_record, certificate=certificate,
+            )
+            return extracted, record, path
         extracted_id = record.get("metadata", {}).get("extracted_artifact_id")
         if extracted_id:
             _extracted_record, extracted_path = self.store.get_artifact(namespace, project_id, str(extracted_id))
@@ -14303,6 +14375,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         known_pattern_keys: set[str] | None = None,
         assessment_contract: str | None = QUALITY_CONTRACT,
         historical_quality_compatibility: bool = False,
+        scope_artifact_id: str | None = None,
     ) -> dict[str, Any]:
         """Build the deterministic, authoritative content of one audit event."""
 
@@ -14491,7 +14564,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         )
         content = {
             "episode_id": episode_id,
-            "file_name": f"storyboard-{audit_class}-{cycle_id}",
+            "file_name": (f"storyboard-{audit_class}-{cycle_id}"
+                          + (f"-{scope_artifact_id}" if scope_artifact_id else "")),
             "artifact_file_name": artifact_record.get("file_name")
             or "storyboard",
             "file_fingerprint": artifact_record.get("fingerprint")
@@ -14583,6 +14657,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             for event in ledger.get("events", [])
             if event.get("audit_cycle_id") == cycle_id
             and event.get("audit_class", AUDIT_CLASS_PRODUCTION_PREFLIGHT) == audit_class
+            and event.get("file_name") == f"storyboard-{audit_class}-{cycle_id}-{root_artifact}"
         ]
         audit_round = 1 + max((int(event.get("audit_round", 0)) for event in prior_events), default=0)
         event = {
@@ -14599,6 +14674,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 audit_cache_key=audit_cache_key,
                 prior_events=prior_events,
                 audit_round=audit_round,
+                scope_artifact_id=root_artifact,
             ),
         }
         if audit_class == AUDIT_CLASS_INDEPENDENT:
@@ -15817,6 +15893,13 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
         event_index = indexes[0]
         cycle_id = str(event.get("audit_cycle_id") or "")
+        # Historical signed events keep their exact legacy scope. New scopes
+        # include server-derived artifact lineage so episodes sharing a work
+        # order cannot share rounds, first-draft statistics or latest authority.
+        legacy_file_name = f"storyboard-{AUDIT_CLASS_INDEPENDENT}-{cycle_id}"
+        root_artifact = self._root_artifact_id(namespace, project_id, artifact_record["artifact_id"])
+        scope_artifact_id = None if event.get("file_name") == legacy_file_name else root_artifact
+        expected_file_name = legacy_file_name + (f"-{scope_artifact_id}" if scope_artifact_id else "")
         prior_events = [
             row
             for row in ledger.get("events", [])[:event_index]
@@ -15824,6 +15907,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             and row.get("audit_cycle_id") == cycle_id
             and row.get("audit_class", AUDIT_CLASS_PRODUCTION_PREFLIGHT)
             == AUDIT_CLASS_INDEPENDENT
+            and (scope_artifact_id is None or row.get("file_name") == expected_file_name)
         ]
         expected_round = 1 + max(
             (
@@ -15843,6 +15927,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             audit_cache_key=str(event.get("audit_cache_key") or ""),
             prior_events=prior_events,
             audit_round=expected_round,
+            scope_artifact_id=scope_artifact_id,
             known_pattern_keys=self._known_prevention_pattern_keys_before_event(
                 ledger, event_index
             ),
