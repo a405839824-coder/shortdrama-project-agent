@@ -528,6 +528,8 @@
           "properties": {
             "contract": {"const": "fixed-voice-template-v1"},
             "expected_dialogue_shot_count": {"type": "integer", "minimum": 0},
+            "expected_voice_field_count": {"type": "integer", "minimum": 0},
+            "scope": {"const": "all_existing_voice_fields"},
             "reviewed_voice_field_count": {"type": "integer", "minimum": 0},
             "coverage_percent": {"const": 100},
             "evidence_ids": {"type": "array", "items": {"type": "string", "pattern": "^field:.+\\.音色$"}, "uniqueItems": true},

@@ -724,6 +724,22 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     ) -> ToolResponse:
         namespace = request_namespace(settings)
         trace = WorkflowTrace()
+        if section == "audit_contract":
+            if diagnose_storyboard or diagnostic_episode_ids is not None or bulk_ranges is not None or if_none_match is not None:
+                raise ValueError("audit_contract cannot be combined with diagnostics, bulk ranges or ETag reads")
+            from .audit_coverage import read_audit_contract
+            return read_audit_contract(service, namespace, project_id, artifact_id,
+                offset=offset, limit=limit, max_chars=max_chars)
+        if section == "audit_coverage" or section and section.startswith("audit_coverage:"):
+            if diagnose_storyboard or diagnostic_episode_ids is not None or bulk_ranges is not None or if_none_match is not None:
+                raise ValueError("audit_coverage cannot be combined with diagnostics, bulk ranges or ETag reads")
+            from .audit_coverage import read_audit_coverage
+            parts = section.split(":")
+            if len(parts) > 2 or len(parts) == 2 and not parts[1]:
+                raise ValueError("audit_coverage_section_invalid")
+            return read_audit_coverage(service, namespace, project_id, artifact_id,
+                collection_id=parts[1] if len(parts) == 2 else None,
+                offset=offset, limit=limit, max_chars=max_chars)
         if section and section.startswith("audit_evidence:"):
             from .audit_evidence_view import read_audit_evidence
             if diagnose_storyboard or diagnostic_episode_ids is not None or bulk_ranges is not None or if_none_match is not None:
@@ -1154,12 +1170,15 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         title="审计并记录分镜",
         description=(
             "独立审计已存在的分镜文件时调用。*_逐镜阅读页排除审计，不据此报错、计分或要求修正；正式母版、GPT关键帧及全部镜头的其余检查保留。首次或指纹变化后的审计必须提交semantic_audit："
-            "先read_project_artifact(section=audit_obligations)读取完整当前义务与提交合同；"
+            "先read_project_artifact(section=audit_contract)读取当前精确提交合同，再以section=audit_obligations读取全部义务；"
             "大批次用coverage_page逐页暂存，再显式finalize全部页，coverage_pending不是审计通过。"
+            "section=audit_coverage或audit_coverage:集合ID读取已签原页、更正记录及有效快照。"
+            "误判用revise绑定完整page_ids和expected_snapshot_sha256追加更正；规则升级用rebind新建零检查集合并重新复核，不沿用旧签名。"
+            "外部原件rebind必须显式带原handoff_artifact_id、原工单及审计周期，之后使用响应中的新handoff_manifest.handoff_id续审。"
             "旧schema可用该读取响应提供的版本化evidence_ids封套，仍执行相同校验。"
             "绑定准确canonical哈希、全表镜头数、N-1相邻镜头组数与有序pair清单SHA-256；"
             "空间连续层必须按canonical顺序逐组提交全部pair:左镜->右镜证据，覆盖率必须100%。"
-            "禁项与声音层必须按canonical顺序提交每个带对白镜的field:镜头编号.音色证据，"
+            "禁项与声音层必须按canonical顺序提交全部现有field:镜头编号.音色证据，含旁白、非逐字声音和静默，"
             "并与THG-15固定音色子模板机器门禁共同闭合。"
             "源文对白层必须按Source Ledger顺序提交每个source-unit:单元ID，独立复核"
             "会话／混合会话／非会话判定；并按canonical顺序提交每个事实转化对白目标镜的"
@@ -1170,8 +1189,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "同时逐一提交恰好八层的结论、摘要、具体证据ID"
             "及语义问题，reviewed_batch_count固定为0且禁止batch证据/目标；第六层审计正式母版"
             "单镜执行完整性；表演层按实际可见事件核对眼球、眼睑、眨眼、重音与多人时序，不为合法静止或无需回应的听者强加动作；自然度独立判断。"
-            "服务端再合并完整机器校验问题。只有完全匹配且已签名的独立审计证书"
-            "缓存命中时才可省略semantic_audit。同一安全缓存键重复审计不增加轮次。"
+            "服务端再合并完整机器校验问题。"
+            "证据不足可签发未确认报告但不能宣称完整或通过；只读外部审计不自动授权生产修复。"
+            "只有完全匹配且已签名的独立审计证书缓存命中时才可省略semantic_audit。同一安全缓存键重复审计不增加轮次。"
         ),
         annotations=_annotations(read_only=False),
         meta=meta("正在处理审计证据…", "审计步骤已记录"),

@@ -655,7 +655,13 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
         data.update({
             "rule_definitions": definitions,
             "submission_schema": SemanticAuditCoverageInput.model_json_schema(),
-            "page_submission_schema": SemanticAuditCoveragePageInput.model_json_schema(),
+            "page_submission_schema_reference": {
+                "schema_sha256": stable_json_hash(SemanticAuditCoveragePageInput.model_json_schema()),
+                "record_kind": "page_submission_schema",
+                "next_call": {"project_id": project_id, "artifact_id": artifact_id,
+                              "section": "audit_contract", "offset": 0, "limit": 1, "max_chars": 16_000},
+                "meaning": "The complete append/finalize/revise/rebind schema is paginated there; follow record fragments if present.",
+            },
             "read_contract": {
                 "row_fields": "Use rule_definitions[row.rule_id] for layer, question, dependency fields and required observation fields.",
                 "dependencies": "Expand dependency_fields with row.shot_id, then neighbor_dependency_fields with each row.neighbor_shot_ids (absent means none), using reference_pattern. Include planning_evidence.reference, rhythm_evidence.reference and all additional_dependency_refs when present; deduplicate references.",
@@ -675,6 +681,9 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
                 "initial_append": "collection_key + offset=0 + current contiguous checks (at most 64)",
                 "next_append": "server-issued collection_id + next offset + contiguous checks",
                 "finalize": "collection_id + explicit complete unique server-issued page_ids; no checks",
+                "recover": "read_project_artifact(section='audit_coverage') lists collections; section='audit_coverage:<collection_id>' returns signed original pages, issues, revisions and effective checks with next_call pagination, including stale evidence.",
+                "revise": "Read the complete collection first. action=revise requires collection_id, current manifest_sha256, exact page_ids, expected_snapshot_sha256 and reason. checks replace only staged obligations; issue_upserts and retract_issue_ids explicitly amend findings. Outer issues must equal the resulting effective issues. Old pages remain immutable; repeat the exact revision for idempotent recovery.",
+                "rebind": "After a runtime/rules fingerprint change, action=rebind requires the old collection_id, exact page_ids, expected_snapshot_sha256, reason and current manifest_sha256. The original content/source/anchors and authorized review identity must match. The server creates an explicit child collection with zero checks: read all current obligations and review again. No historical check or signature becomes current evidence.",
                 "page_status": "coverage_pending; never PASS, certificate or delivery eligibility"},
         })
     response = ToolResponse(status="audit_obligations", summary="当前逐镜审计义务｜按共享规则逐项读取并判断",
@@ -701,4 +710,242 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
             raise ValueError('audit_obligations_item_exceeds_transport: complete obligation exceeds 64000 characters; '
                              'audit remains blocked, evidence was not truncated. ' + SOURCE_TRANSPORT_RECOVERY)
         raise ValueError("audit_obligations_max_chars_too_small: increase max_chars to 64000")
+    return response
+
+
+def read_audit_coverage(service: Any, namespace: str, project_id: str, artifact_id: str,
+                        *, collection_id: str | None = None, offset: int = 0,
+                        limit: int | None = 50, max_chars: int = 24_000) -> ToolResponse:
+    """Lossless recovery view of signed history, not a new audit declaration."""
+    from .audit_coverage_pages import COLLECTION_KIND, collection_snapshot
+
+    records = []
+    snapshot = None
+    if collection_id is None:
+        for collection in service.store.list_project_records_strict(namespace, project_id, kind=COLLECTION_KIND):
+            if (collection.get("binding") or {}).get("artifact_id") != artifact_id:
+                continue
+            value = collection_snapshot(service, namespace, project_id, collection["collection_id"])
+            records.append({"kind": "collection_summary", "collection_id": collection["collection_id"],
+                "binding": collection["binding"], "parent": collection.get("parent"),
+                "snapshot_sha256": value["snapshot_sha256"], "revision_ids": value["revision_ids"],
+                "page_ids": [r["page_id"] for r in value["pages"]],
+                "accepted_count": len(value["checks"]), "expected_count": collection["expected_count"],
+                "read_section": "audit_coverage:" + collection["collection_id"]})
+    else:
+        snapshot = collection_snapshot(service, namespace, project_id, collection_id)
+        if snapshot["collection"]["binding"].get("artifact_id") != artifact_id:
+            raise ValueError("audit_coverage_read_artifact_mismatch")
+        records.append({"kind": "original_collection", "value": snapshot["collection"]})
+        for page in snapshot["pages"]:
+            records.append({"kind": "original_page", "value": {k: v for k, v in page.items() if k not in {"checks", "issues"}}})
+            for kind, key in (("original_check", "checks"), ("original_issue", "issues")):
+                records.extend({"kind": kind, "page_id": page["page_id"], "index": index, "value": row}
+                               for index, row in enumerate(page.get(key, [])))
+        for revision in snapshot["revisions"]:
+            records.append({"kind": "revision", "value": {k: v for k, v in revision.items() if k not in {"checks", "issue_upserts"}}})
+            for kind, key in (("revision_check", "checks"), ("revision_issue_upsert", "issue_upserts")):
+                records.extend({"kind": kind, "revision_id": revision["revision_id"], "index": index, "value": row}
+                               for index, row in enumerate(revision.get(key, [])))
+        records.extend({"kind": "effective_check", "value": row} for row in snapshot["checks"])
+        records.extend({"kind": "effective_issue", "value": row} for row in snapshot["issues"])
+        records.extend({"kind": "unresolved_issue_conflict", "issue_id": identity, "versions": versions}
+                       for identity, versions in snapshot["issue_conflicts"].items())
+
+    # One pathological observation/issue must not make the old collection
+    # unreadable. Fragments preserve the whole JSON, including literal quotes.
+    items = []
+    for index, record in enumerate(records):
+        encoded = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded) <= 6_000:
+            items.append({"record_index": index, **record})
+        else:
+            parts = [encoded[n:n + 6_000] for n in range(0, len(encoded), 6_000)]
+            digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+            items.extend({"kind": "record_fragment", "record_index": index, "part_index": n,
+                          "part_count": len(parts), "json_utf8_sha256": digest, "text": part}
+                         for n, part in enumerate(parts))
+    if offset < 0 or offset > len(items):
+        raise ValueError("audit_coverage_read_offset_invalid")
+    limit = min(max(int(limit or 50), 1), 100)
+    budget = min(max(int(max_chars or 24_000), 1), 64_000)
+    next_call = {"project_id": project_id, "artifact_id": artifact_id,
+        "section": "audit_coverage" + (":" + collection_id if collection_id else ""),
+        "offset": offset, "limit": limit, "max_chars": budget}
+    data = {"contract": "audit-coverage-recovery-v1", "collection_id": collection_id,
+        "snapshot_sha256": snapshot["snapshot_sha256"] if snapshot else None,
+        "total_items": len(items), "offset": offset, "records": [], "next_offset": offset,
+        "complete": False, "next_call": next_call, "counts_as_complete": False,
+        "meaning": "Signed stored history and effective declarations; reading is not review or PASS.",
+        "fragment_contract": "Group record_fragment by record_index, concatenate text by part_index, verify json_utf8_sha256, then JSON-decode. Never omit a fragment. Snapshot must remain constant across collection pages; on change reread from zero."}
+    response = ToolResponse(status="audit_coverage", summary="审计历史恢复｜原页、更正链和当前有效判断", project_id=project_id,
+                            artifact_id=artifact_id, data=data)
+    for item in items[offset:offset + limit]:
+        response.data["records"].append(item)
+        if len(response.model_dump_json()) > budget:
+            response.data["records"].pop()
+            break
+    end = offset + len(response.data["records"])
+    response.data.update({"next_offset": None if end == len(items) else end, "complete": end == len(items),
+                         "next_call": None if end == len(items) else {**next_call, "offset": end}})
+    if (offset < len(items) and not response.data["records"]) or len(response.model_dump_json()) > budget:
+        raise ValueError("audit_coverage_read_max_chars_too_small: increase max_chars to 64000")
+    return response
+
+
+def audit_submission_contract(storyboard: dict[str, Any]) -> dict[str, Any]:
+    """Exact caller envelope requirements; no reviewer judgement is generated."""
+    import validate_storyboard
+    from episode_rules import review_obligations
+    from production_derivation import inspect_derivation
+    from .models import SEMANTIC_AUDIT_LAYER_NAMES
+
+    shots = [r for r in storyboard.get("shots", []) if isinstance(r, dict)]
+    ids = [str(r.get("镜头编号") or r.get("shot_uid") or "").strip() for r in shots]
+    pairs = [f"{a}->{b}" for a, b in zip(ids, ids[1:])]
+    groups = {layer: [] for layer in SEMANTIC_AUDIT_LAYER_NAMES}
+    required = {layer: [] for layer in SEMANTIC_AUDIT_LAYER_NAMES}
+    blockers = []
+
+    def malformed(path: str) -> None:
+        raise ValueError("audit_contract_malformed_evidence: " + path)
+
+    evidence = storyboard.get("prevention_evidence", {})
+    if not isinstance(evidence, dict):
+        malformed("prevention_evidence")
+    adaptation = evidence.get("dialogue_adaptation_audit", {})
+    if not isinstance(adaptation, dict):
+        malformed("prevention_evidence.dialogue_adaptation_audit")
+    entries = adaptation.get("entries", [])
+    if not isinstance(entries, list):
+        malformed("prevention_evidence.dialogue_adaptation_audit.entries")
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict) or ("target_shots" in entry and not isinstance(entry["target_shots"], list)):
+            malformed(f"prevention_evidence.dialogue_adaptation_audit.entries[{index}]")
+
+    def ordered(layer: str, values: list[str]) -> None:
+        groups[layer].append(values)
+        required[layer].extend(values)
+
+    episodes = review_obligations(storyboard)
+    for layer in groups:
+        rows = [r for r in episodes if r["layer"] == layer]
+        ordered(layer, [r["evidence_id"] for r in rows])
+        required[layer].extend(ref for row in rows for ref in row["field_evidence_ids"])
+    limits = validate_storyboard.inspect_source_content_limits(storyboard, shots,
+        protected_alignment=validate_storyboard._protected_dialogue_alignment(storyboard, shots))
+    blockers.extend({"kind": "source_limit", "reason": str(v)} for v in limits["issues"])
+    ordered("源文对白", [r["evidence_id"] for r in limits["obligations"]])
+    ordered("源文对白", list(dict.fromkeys(ref for row in limits["obligations"] for ref in row["field_evidence_ids"])))
+    derivation = inspect_derivation(storyboard)
+    if derivation["present"] and not derivation["valid"]:
+        blockers.extend({"kind": "source_derivation", "reason": str(v)} for v in derivation["faults"])
+    decisions = derivation["source_obligations"] if derivation["present"] else []
+    ordered("源文对白", [r["evidence_id"] for r in decisions])
+    required["源文对白"].extend(ref for row in decisions for ref in row["field_evidence_ids"])
+    ordered("源文对白", [f"source-unit:{str(r['source_unit_id']).strip()}" for r in entries if str(r.get("source_unit_id") or "").strip()])
+    adapted = {str(sid).strip() for r in entries if r.get("treatment") == "原文事实转化对白"
+               for sid in r.get("target_shots", [])}
+    ordered("源文对白", [f"field:{sid}.画面内容" for sid in ids if sid in adapted])
+    ordered("空间连续", ["pair:" + pair for pair in pairs])
+    voice = [f"field:{sid}.音色" for sid, shot in zip(ids, shots) if "音色" in shot]
+    ordered("禁项与声音", voice)
+    lighting = [f"field:{sid}.{field}" for sid in ids for field in ("光影", "光源来源", "光源方向", "色温倾向")]
+    ordered("机位可见性", lighting)
+
+    # Some fields occur in more than one required group. Preserve every group's
+    # relative order without duplicate references (duplicates are forbidden).
+    result = {}
+    for layer, refs in required.items():
+        remaining = dict.fromkeys(refs)
+        predecessors = {ref: set() for ref in remaining}
+        for group in groups[layer]:
+            if len(group) != len(set(group)):
+                blockers.append({"kind": "duplicate_required_reference", "layer": layer, "references": group})
+            for left, right in zip(group, group[1:]):
+                predecessors[right].add(left)
+        order = []
+        while remaining:
+            ready = next((ref for ref in remaining if not predecessors[ref].intersection(remaining)), None)
+            if ready is None:
+                blockers.append({"kind": "required_reference_order_conflict", "layer": layer, "references": list(remaining)})
+                order.extend(remaining)
+                break
+            order.append(ready)
+            del remaining[ready]
+        result[layer] = order or ["canonical:" + canonical_sha256(storyboard)]
+    shot_map = dict(zip(ids, shots))
+    for layer, refs in result.items():
+        for ref in refs:
+            if ref.startswith("field:"):
+                sid, _, field = ref[6:].partition(".")
+                if sid not in shot_map or field not in shot_map[sid]:
+                    blockers.append({"kind": "required_field_missing", "layer": layer, "reference": ref})
+    return {"canonical_sha256": canonical_sha256(storyboard), "reviewed_shot_count": len(shots),
+        "reviewed_adjacent_pair_count": len(pairs), "reviewed_batch_count": 0,
+        "adjacent_pair_order_sha256": stable_json_hash(pairs), "ordered_pair_ids": pairs,
+        "pair_hash_encoding": "SHA256(UTF-8(JSON.stringify(ordered_pair_ids))); compact JSON array, no pair: prefixes, no spaces or ASCII escaping",
+        "voice_field_evidence_ids": voice, "required_layer_evidence_ids": result,
+        "ordered_evidence_groups": groups, "episode_obligations": episodes,
+        "source_limit_obligations": limits["obligations"], "source_decision_obligations": decisions,
+        "blockers": blockers, "semantic_truth_guaranteed": False}
+
+
+def read_audit_contract(service: Any, namespace: str, project_id: str, artifact_id: str,
+                        *, offset: int = 0, limit: int | None = 50, max_chars: int = 24_000) -> ToolResponse:
+    storyboard, artifact = service._storyboard_from_artifact(namespace, project_id, artifact_id,
+        persist_recovered_canonical=False, require_bound_projection=True)
+    contract = audit_submission_contract(storyboard)
+    fingerprints = service._fingerprint_bundle(storyboard, artifact,
+        canonical_hash=contract["canonical_sha256"],
+        source_fingerprint=service._source_fingerprint(namespace, project_id, storyboard, artifact.get("source_artifact_id"), artifact),
+        boundary_hash=service._boundary_hash(storyboard))
+    page_schema = SemanticAuditCoveragePageInput.model_json_schema()
+    records = [{"kind": "page_submission_schema", "schema_sha256": stable_json_hash(page_schema), "value": page_schema}]
+    records.extend({"kind": "required_layer_evidence", "layer": layer, "index": index, "evidence_id": ref}
+                   for layer, refs in contract["required_layer_evidence_ids"].items() for index, ref in enumerate(refs))
+    records.extend({"kind": "ordered_pair", "index": index, "pair_id": pair, "evidence_id": "pair:" + pair}
+                   for index, pair in enumerate(contract["ordered_pair_ids"]))
+    for key in ("episode_obligations", "source_limit_obligations", "source_decision_obligations"):
+        records.extend({"kind": key, "value": row} for row in contract[key])
+    records.extend({"kind": "blocker", "value": row} for row in contract["blockers"])
+    # Paginate large obligation text without truncation, as in recovery reads.
+    items = []
+    for index, record in enumerate(records):
+        encoded = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded) <= 6_000:
+            items.append({"record_index": index, **record})
+        else:
+            chunks = [encoded[n:n + 6_000] for n in range(0, len(encoded), 6_000)]
+            items.extend({"kind": "record_fragment", "record_index": index, "part_index": n,
+                "part_count": len(chunks), "json_utf8_sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest(), "text": chunk}
+                for n, chunk in enumerate(chunks))
+    if offset < 0 or offset > len(items):
+        raise ValueError("audit_contract_offset_invalid")
+    limit = min(max(int(limit or 50), 1), 100)
+    budget = min(max(int(max_chars or 24_000), 1), 64_000)
+    next_call = {"project_id": project_id, "artifact_id": artifact_id, "section": "audit_contract",
+                 "offset": offset, "limit": limit, "max_chars": budget}
+    data = {"contract": "semantic-audit-submission-contract-v1",
+        "contract_sha256": stable_json_hash({"submission": contract, "page_schema": page_schema}),
+        "fingerprints": fingerprints, "manifest_sha256": build_obligations(storyboard, coverage_context(service))["manifest_sha256"],
+        **{k: contract[k] for k in ("canonical_sha256", "reviewed_shot_count", "reviewed_adjacent_pair_count",
+                                   "reviewed_batch_count", "adjacent_pair_order_sha256", "pair_hash_encoding")},
+        "required_layer_evidence_counts": {k: len(v) for k, v in contract["required_layer_evidence_ids"].items()},
+        "voice_field_rule": "Every existing 音色 field in canonical shot order, including narration, offscreen speech, nonverbal sound and explicit silence; never infer applicability from a speech verb.",
+        "offset": offset, "total_items": len(items), "records": [], "next_offset": offset,
+        "next_call": next_call, "complete": False, "blocker_count": len(contract["blockers"]),
+        "counts_as_review": False, "fragment_contract": "Concatenate record_fragment text by record_index/part_index, verify json_utf8_sha256, JSON-decode. Follow every next_call; contract_sha256 and fingerprints must stay unchanged."}
+    response = ToolResponse(status="audit_contract", summary="正式审计提交合同｜当前精确证据清单，不代表已核查",
+                            project_id=project_id, artifact_id=artifact_id, data=data)
+    for item in items[offset:offset + limit]:
+        response.data["records"].append(item)
+        if len(response.model_dump_json()) > budget:
+            response.data["records"].pop()
+            break
+    end = offset + len(response.data["records"])
+    response.data.update({"next_offset": None if end == len(items) else end, "complete": end == len(items),
+                         "next_call": None if end == len(items) else {**next_call, "offset": end}})
+    if (offset < len(items) and not response.data["records"]) or len(response.model_dump_json()) > budget:
+        raise ValueError("audit_contract_max_chars_too_small: increase max_chars to 64000")
     return response

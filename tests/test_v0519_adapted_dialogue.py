@@ -272,7 +272,8 @@ class AdaptedDialogueIndependentAuditTests(unittest.TestCase):
             if layer == "空间连续":
                 evidence = ["pair:EP13-001->EP13-002"]
             elif layer == "禁项与声音":
-                evidence.append("field:EP13-001.音色")
+                evidence.extend(f"field:{shot['镜头编号']}.音色"
+                                for shot in self.storyboard["shots"] if "音色" in shot)
             elif layer == "机位可见性":
                 evidence.extend(
                     f"field:{shot['镜头编号']}.{field_name}"

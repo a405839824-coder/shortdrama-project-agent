@@ -98,6 +98,8 @@ def submission_for(storyboard, requirements):
         refs = [f"canonical:{identity}"]
         if layer == "空间连续":
             refs.extend(f"pair:{pair}" for pair in pairs)
+        if layer == "禁项与声音":
+            refs.extend(f"field:{s['镜头编号']}.音色" for s in shots if "音色" in s)
         if layer == "机位可见性":
             refs.extend(f"field:{s['镜头编号']}.{f}" for s in shots
                         for f in ("光影", "光源来源", "光源方向", "色温倾向"))

@@ -245,7 +245,7 @@ class SourceLimitIndependentTests(legacy_dialogue_tests.AdaptedDialogueIndepende
         for row in self.submission["layers"]:
             ev = [f"canonical:{canonical}"]
             if row["layer"] == "空间连续": ev = [f"pair:{x}" for x in pair_ids]
-            if row["layer"] == "禁项与声音": ev += [f'field:{shots[0]["镜头编号"]}.音色']
+            if row["layer"] == "禁项与声音": ev += [f'field:{s["镜头编号"]}.音色' for s in shots if "音色" in s]
             if row["layer"] == "机位可见性": ev += [f'field:{s["镜头编号"]}.{f}' for s in shots for f in ("光影", "光源来源", "光源方向", "色温倾向")]
             if row["layer"] == "源文对白":
                 ev += [f'field:{shots[0]["镜头编号"]}.画面内容']
