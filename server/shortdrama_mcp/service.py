@@ -18713,6 +18713,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         self,
         storyboard: dict[str, Any],
         issues: list[Any],
+        *,
+        allow_report_only: bool = False,
     ) -> list[dict[str, str]]:
         """Normalize every repairable issue to exact canonical shot targets."""
 
@@ -18748,7 +18750,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             field = str(
                 issue.get("field") or location.rsplit(".", 1)[-1]
             ).strip()
-            explicit_references = issue.get("shot_ids") or []
+            explicit_references = issue.get("shot_ids", [])
             if not isinstance(explicit_references, list):
                 raise ValueError(
                     "repair_package_target_invalid: issue shot_ids must be a list"
@@ -18795,8 +18797,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 raise ValueError(
                     "repair_package_target_conflict: explicit shot_ids and location disagree"
                 )
+            if allow_report_only and issue.get("error_code") == "E-AUDIT-COVERAGE-UNKNOWN":
+                # These are the shots still awaiting review, not confirmed
+                # defective fields. Complete the review instead of editing them.
+                continue
             shot_ids = explicit_shot_ids or location_shot_ids
-            if (not shot_ids and str(issue.get("error_code")) in {
+            if (not allow_report_only and not shot_ids and str(issue.get("error_code")) in {
                     "E-GATE-001", "E-REGRESSION-001", "E-REGRESSION-002", "E-SYSTEMIC-001"}
                     and re.fullmatch(r"(?:prevention_evidence\.)?repair_history(?:\[\d+\]|\.current_check)?", location)):
                 # History is candidate-wide evidence. Rebind it for the exact
@@ -18805,6 +18811,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 shot_ids = set(shot_reference_to_id.values())
                 field = "prevention_evidence.repair_history"
             if bool(issue.get("blocking", True)) and not shot_ids:
+                if allow_report_only:
+                    # External reports may contain artifact-level evidence
+                    # gaps. Retain them in the certificate without granting
+                    # permission to edit any invented shot target.
+                    continue
                 raise ValueError(
                     "repair_package_target_required: every blocking audit issue must authorize a concrete shot"
                 )
@@ -18831,7 +18842,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             for row in issue_targets
         }
         normalized = list(unique.values())
-        if considered_issue_count and not normalized:
+        if considered_issue_count and not normalized and not allow_report_only:
             raise ValueError(
                 "repair_package_target_required: audit issues cannot produce an empty repair route"
             )
@@ -18849,14 +18860,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """Build the exact immutable portion of a failed-audit repair route."""
 
-        if production_handoff.get("handoff_type") == "audit_intake":
-            # An external read-only audit can report missing artifact-level
-            # evidence. It is not a production/repair authorization and must
-            # not invent faulty shot targets to issue that report.
-            return None, None
         issue_targets = self._repair_issue_targets(
             storyboard,
             list(certificate.get("report", {}).get("issues", [])),
+            allow_report_only=production_handoff.get("handoff_type") == "audit_intake",
         )
         if not issue_targets:
             return None, None
@@ -23944,14 +23951,15 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 artifact_record=record,
                 certificate=certificate,
             )
-        if report.get("issues") and handoff.get("handoff_type") != "audit_intake":
+        if report.get("issues"):
             # Production repair authorization is separate from read-only
             # external audit reports, which retain artifact-level gaps.
             # Repair authorization is part of the audit contract. Validate
             # every target before the handoff claim, ledger event, certificate,
             # or successor route is allowed to become durable.
             self._repair_issue_targets(
-                storyboard, list(report.get("issues", []))
+                storyboard, list(report.get("issues", [])),
+                allow_report_only=handoff.get("handoff_type") == "audit_intake",
             )
         recovering_event_only = bool(
             reused_audit_event is not None

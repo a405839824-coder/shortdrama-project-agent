@@ -99,6 +99,26 @@ class SubmissionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'audit_coverage_incomplete'):
             self.attach(value)
 
+    def test_report_only_gaps_never_authorize_invented_targets(self):
+        gap = {'error_code': 'E-GATE-001', 'location': 'prevention_evidence', 'blocking': True}
+        actual = {'error_code': 'E-TEMPLATE-008', 'location': 'shots[1].光源来源',
+                  'shot_ids': ['EP10-001'], 'field': '光源来源', 'blocking': True}
+        gaps = [gap, {**gap, 'location': 'prevention_evidence.repair_history'},
+                {**gap, 'error_code': 'E-AUDIT-COVERAGE-UNKNOWN',
+                 'location': 'audit_coverage', 'shot_ids': ['EP10-001', 'EP10-002']}]
+        self.assertEqual(self.service._repair_issue_targets(
+            self.candidate, gaps, allow_report_only=True), [])
+        targets = self.service._repair_issue_targets(
+            self.candidate, [*gaps, actual], allow_report_only=True)
+        self.assertEqual([(r['shot_id'], r['field']) for r in targets], [('EP10-001', '光源来源')])
+        with self.assertRaisesRegex(ValueError, 'repair_package_target_required'):
+            self.service._repair_issue_targets(self.candidate, [gap, actual])
+        for bad in ({**actual, 'shot_ids': ['missing']},
+                    {**actual, 'shot_ids': ['EP10-002']},
+                    {**gap, 'shot_ids': {}}, {**gap, 'shot_ids': ''}):
+            with self.assertRaisesRegex(ValueError, 'repair_package_target_(invalid|conflict)'):
+                self.service._repair_issue_targets(self.candidate, [gap, bad], allow_report_only=True)
+
 
 class CompleteExternalFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -130,7 +150,16 @@ class CompleteExternalFlowTests(unittest.IsolatedAsyncioTestCase):
         _, original = h.service.store.get_artifact(h.namespace, project, record['artifact_id'])
         self.assertEqual(original.read_bytes(), raw)
         self.assertTrue(audited['data']['audited_workbook']['artifact_id'])
-        self.assertIsNone(audited['data']['repair_package'])
+        # This fixture also has actual field-format defects. A scoped repair
+        # package may record those targets; it does not execute a repair.
+        package = audited['data']['repair_package']
+        self.assertTrue(h.service.store.project_record_is_signed(package))
+        self.assertTrue(package['issue_targets'])
+        for target in package['issue_targets']:
+            self.assertNotEqual(target['issue_code'], 'E-AUDIT-COVERAGE-UNKNOWN')
+            self.assertTrue(any(target['issue_code'] == issue['error_code']
+                                and target['location'] == issue['location']
+                                for issue in cert['report']['issues']))
         self.assertTrue(any(not row.get('shot_ids') for row in cert['report']['issues']))
 
 

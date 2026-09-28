@@ -4,7 +4,7 @@
 
 软件回归通过不等于分镜逐镜审计完成。既有失败、未知及撤回记录仍须保留，缺少来源或无法解析的状态不得改成通过。客户端必须读取 MCP 返回的完整 `content[].text`，不能以结构化摘要替代错误正文。
 
-通过 `read_project_artifact(section="audit_contract")` 读取精确提交合同，通过 `audit_coverage:<collection_id>` 恢复已签原页及更正记录，均须跟随全部 `next_call`。`coverage_page.action=rebind` 必须携带原 `handoff_artifact_id`、原工单/审计周期、完整页清单及快照哈希；后续新页使用响应 `data.handoff_manifest.handoff_id`。旧记录保留，新集合从零检查开始。外部只读审计可报告文件级缺证，不自动产生生产修复授权。
+通过 `read_project_artifact(section="audit_contract")` 读取精确提交合同，通过 `audit_coverage:<collection_id>` 恢复已签原页及更正记录，均须跟随全部 `next_call`。完整分页提交 schema 由义务首页提供的精确调用读取，避免首个返回页面超过字符预算。`coverage_page.action=rebind` 必须携带原 `handoff_artifact_id`、原工单/审计周期、完整页清单及快照哈希；后续新页使用响应 `data.handoff_manifest.handoff_id`。旧记录保留，新集合从零检查开始。外部只读审计的文件级缺证和未完成检查保留在报告中，不据此虚构错误镜头或修复目标。明确错误仍可生成绑定具体镜头、字段的修复包，实际修改仍须另有显式授权的修复工单。
 
 ## Library 数据保护
 
