@@ -2384,7 +2384,7 @@ class V051ServiceGuardTests(unittest.TestCase):
         failed_semantic = self._failed_semantic(fixture["clean_semantic"])
         with patch.object(
             service_module,
-            "_export_compact_storyboard",
+            "audit_saved_workbook_overlay",
             side_effect=RuntimeError("simulated legacy pair boundary"),
         ):
             with self.assertRaisesRegex(RuntimeError, "legacy pair"):
@@ -2758,7 +2758,7 @@ class V051ServiceGuardTests(unittest.TestCase):
                 elif fault == "overlay":
                     fault_patcher = patch.object(
                         service_module,
-                        "_export_compact_storyboard",
+                        "audit_saved_workbook_overlay",
                         side_effect=RuntimeError(error),
                     )
                 elif fault == "telemetry":
@@ -3005,7 +3005,7 @@ class V051ServiceGuardTests(unittest.TestCase):
         failed_semantic = self._failed_semantic(fixture["clean_semantic"])
         with patch.object(
             service_module,
-            "_export_compact_storyboard",
+            "audit_saved_workbook_overlay",
             side_effect=RuntimeError("simulated overlay interruption"),
         ):
             with self.assertRaisesRegex(RuntimeError, "overlay interruption"):
