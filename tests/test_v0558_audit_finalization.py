@@ -10,6 +10,7 @@ from openpyxl import load_workbook
 
 from shortdrama_mcp.file_io import (
     audit_saved_workbook_overlay, extract_xlsx, _seal_service_verified_audit_overlay,
+    storyboard_to_xlsx,
 )
 from shortdrama_mcp.service import canonical_storyboard_sha256
 from semantic_audit_helpers import semantic_audit_for_artifact
@@ -153,6 +154,42 @@ class AuditFinalizationFlowTests(unittest.IsolatedAsyncioTestCase):
         events = [x for x in ledger['events'] if x.get('audit_class') == 'independent_audit']
         self.assertEqual(events[-1]['audit_round'], 2)
         self.assertEqual(events[-1]['scope_key'], events[-3]['scope_key'])
+
+    async def test_workbook_source_cannot_disable_preservation_via_overlay_metadata(self):
+        h = self.flow
+        project = await h.create_project('synthetic overlay contract binding')
+        order = await h.begin_storyboard_task(project, operation='storyboard_audit', mode='audit_only')
+        raw = storyboard_to_xlsx(efficiency_support.valid_storyboard(), {'issues': []}, assume_compact=True)
+        original = h.service.store.save_artifact_bytes(h.namespace, project, raw,
+            file_name='synthetic-sidecar.xlsx', artifact_type='source:storyboard', version='current')
+        semantic = semantic_audit_for_artifact(h.service, h.settings, project, original['artifact_id'])
+        semantic['conclusion']['status'] = 'fail_current'
+        for check in semantic['coverage']['checks']:
+            check['status'] = 'unknown'
+        for layer in semantic['layers']:
+            layer['status'] = 'fail_current'
+        result = await h.call('audit_storyboard', dict(project_id=project, artifact_id=original['artifact_id'],
+            work_order_id=order, semantic_audit=semantic))
+        record, path = h.service.store.get_artifact(h.namespace, project, result['data']['audited_workbook']['artifact_id'])
+        value = await h.call('read_project_artifact', dict(project_id=project, artifact_id=record['artifact_id'],
+            section='正式分镜母版', automatic_bulk=False))
+        self.assertEqual(value['status'], 'ok')
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(path) as source, zipfile.ZipFile(buffer, 'w') as output:
+            output.comment = source.comment + b' tampered package'
+            for info in source.infolist():
+                output.writestr(info, source.read(info))
+        for field, changed in (('read_only_audit', False), ('audit_output_mode', 'compact'),
+                               ('regenerated_execution_fields', True)):
+            with self.subTest(field=field):
+                metadata = copy.deepcopy(record['metadata'])
+                metadata[field] = changed
+                forged = h.service.store.save_artifact_bytes(h.namespace, project, buffer.getvalue(),
+                    file_name='forged.xlsx', artifact_type='storyboard_audit_overlay', version='current',
+                    source_artifact_id=original['artifact_id'], metadata=metadata)
+                with self.assertRaisesRegex(Exception, 'preservation_contract_invalid'):
+                    await h.call('read_project_artifact', dict(project_id=project, artifact_id=forged['artifact_id'],
+                        section='正式分镜母版', automatic_bulk=False))
 
 
 if __name__ == '__main__':

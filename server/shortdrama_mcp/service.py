@@ -4349,11 +4349,16 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         ):
             raise ValueError("authoritative_audit_overlay_source_fingerprint_invalid")
 
-        read_only_overlay = (
+        _, source_path = self.store.get_artifact(namespace, project_id, source_id)
+        # Select the same route as export from the verified source, never from
+        # mutable overlay metadata that could disable preservation checks.
+        read_only_overlay = source_path.suffix.lower() in {".xlsx", ".xlsm"}
+        if read_only_overlay and not (
             overlay_metadata.get("read_only_audit") is True
             and overlay_metadata.get("audit_output_mode") == "original_workbook_with_report_overlay"
             and overlay_metadata.get("regenerated_execution_fields") is False
-        )
+        ):
+            raise ValueError("authoritative_audit_overlay_preservation_contract_invalid")
         extracted = extract_file(
             overlay_path.read_bytes(),
             str(current_overlay.get("file_name") or "audit-overlay.xlsx"),
@@ -4367,7 +4372,6 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             # added report changes that hash, but must change no content field
             # or source evidence. Compare both real mappings without that one
             # transport identity; retain the derived file's real hash on read.
-            _, source_path = self.store.get_artifact(namespace, project_id, source_id)
             source_extracted = extract_file(source_path.read_bytes(), source_record["file_name"], audit_only=True)
             source_canonical = source_extracted.get("canonical_storyboard")
             if not isinstance(source_canonical, dict) or source_extracted.get("canonical_sidecar_present"):
@@ -4494,7 +4498,6 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             # The master mapping deliberately excludes reading copies and
             # opaque workbook parts. Bind those preserved bytes too, without
             # treating them as semantic evidence or manufacturing a sidecar.
-            _, source_path = self.store.get_artifact(namespace, project_id, source_id)
             source_bytes = source_path.read_bytes()
             source_canonical = extract_file(source_bytes, source_record["file_name"], audit_only=True)["canonical_storyboard"]
             expected_bytes = audit_saved_workbook_overlay(
