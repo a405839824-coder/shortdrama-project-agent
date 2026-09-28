@@ -11,6 +11,7 @@ import io
 import ipaddress
 import json
 import mimetypes
+import posixpath
 import re
 import socket
 import ssl
@@ -22,6 +23,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
+from xml.parsers import expat
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -1798,34 +1800,235 @@ def audit_saved_workbook_overlay(
     original = reader(data, audit_only=True)
     if original.get("canonical_storyboard") != storyboard:
         raise ValueError("independent_audit_overlay_source_canonical_mismatch")
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        keep_vba = "xl/vbaProject.bin" in archive.namelist()
-    workbook = load_workbook(io.BytesIO(data), data_only=False, keep_vba=keep_vba)
+    # Only serialize a new audit sheet. Loading/saving the original with
+    # openpyxl can normalize empty strings, rich text and formula caches.
+    workbook = Workbook()
+    workbook.remove(workbook.active)
     scope_name = "00_范围与审计"
-    scope_index = workbook.sheetnames.index(scope_name) if scope_name in workbook.sheetnames else 0
-    if scope_name in workbook.sheetnames:
-        workbook.remove(workbook[scope_name])
     scope = _write_scope_audit_sheet(workbook, storyboard, audit_report, audit_overlay)
-    workbook.move_sheet(scope, offset=scope_index - workbook.sheetnames.index(scope_name))
-    # This updates only the audit-page binding, not the original payload, its
-    # projection hash, or its version. Unsigned inputs remain without a sidecar.
-    if CANONICAL_SIDECAR_SHEET in workbook.sheetnames:
-        sidecar = workbook[CANONICAL_SIDECAR_SHEET]
-        headers = [cell.value for cell in sidecar[1]]
-        if "audit_page_sha256" in headers:
-            column = headers.index("audit_page_sha256") + 1
-            digest = _visible_sheet_sha256(scope_name, _sheet_value_matrix(scope))
-            for row in range(2, sidecar.max_row + 1):
-                sidecar.cell(row, column, digest)
-    else:
+    if not original["canonical_sidecar_present"]:
         # Reuse the existing row; do not imply historical production evidence.
         for row in scope.iter_rows():
             if row[0].value == "production_evidence_location":
                 row[1].value = "只读外部原件；未提供历史 canonical sidecar"
-    output = io.BytesIO()
-    workbook.save(output)
+    digest = _visible_sheet_sha256(scope_name, _sheet_value_matrix(scope))
+    generated = io.BytesIO()
+    workbook.save(generated)
     workbook.close()
+
+    main_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    doc_rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    types_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+
+    def spans(payload: bytes) -> dict[str, Any]:
+        """Locate XML nodes without reserializing untouched bytes/prefixes."""
+        parser = expat.ParserCreate(namespace_separator="}")
+        stack: list[dict[str, Any]] = []
+        roots: list[dict[str, Any]] = []
+
+        def start(name: str, attrs: dict[str, str]) -> None:
+            offset = parser.CurrentByteIndex
+            token = re.match(rb'''<(?:"[^"]*"|'[^']*'|[^'">])*>''', payload[offset:])
+            assert token is not None
+            node = {"tag": name, "attrs": attrs, "start": offset,
+                    "open_end": offset + token.end(), "children": []}
+            (stack[-1]["children"] if stack else roots).append(node)
+            stack.append(node)
+
+        def end(_name: str) -> None:
+            node = stack.pop()
+            empty = payload[node["start"]:node["open_end"]].endswith(b"/>")
+            node["close"] = node["open_end"] - 2 if empty else parser.CurrentByteIndex
+            node["end"] = node["open_end"] if empty else payload.index(b">", node["close"]) + 1
+
+        parser.StartElementHandler, parser.EndElementHandler = start, end
+        parser.Parse(payload, True)
+        return roots[0]
+
+    def append_nodes(payload: bytes, node: dict[str, Any], additions: bytes,
+                     count: int | None = None) -> bytes:
+        opening = payload[node["start"]:node["open_end"]]
+        if count is not None:
+            opening, replaced = re.subn(rb'''\bcount\s*=\s*(?:"[^"]*"|'[^']*')''',
+                                        f'count="{count}"'.encode(), opening, count=1)
+            if not replaced:
+                pos = len(opening) - (2 if opening.endswith(b"/>") else 1)
+                opening = opening[:pos] + f' count="{count}"'.encode() + opening[pos:]
+        if opening.endswith(b"/>"):
+            tag = re.match(rb"<([^\s/>]+)", opening).group(1)
+            replacement = opening[:-2] + b">" + additions + b"</" + tag + b">"
+        else:
+            replacement = opening + payload[node["open_end"]:node["close"]] + additions + payload[node["close"]:node["end"]]
+        return payload[:node["start"]] + replacement + payload[node["end"]:]
+
+    def resolve(base: str, target: str) -> str:
+        path = urllib.parse.unquote(urllib.parse.urlsplit(target).path)
+        path = posixpath.normpath(path.lstrip("/") if path.startswith("/") else posixpath.join(posixpath.dirname(base), path))
+        if path.startswith("../") or path in {"", ".", ".."}:
+            raise ValueError("independent_audit_overlay_unsafe_part_target")
+        return path
+
+    with zipfile.ZipFile(io.BytesIO(data)) as archive, zipfile.ZipFile(generated) as new:
+        parts = {entry.filename: archive.read(entry) for entry in archive.infolist()}
+        if len(parts) != len(archive.infolist()):
+            raise ValueError("independent_audit_overlay_duplicate_zip_part")
+        changes: dict[str, bytes] = {}
+        package_rels = ElementTree.fromstring(parts["_rels/.rels"])
+        office = next(r for r in package_rels if r.get("Type", "").endswith("/officeDocument"))
+        book_path = resolve("", office.attrib["Target"])
+        rel_path = posixpath.join(posixpath.dirname(book_path), "_rels", posixpath.basename(book_path) + ".rels")
+        book_root = ElementTree.fromstring(parts[book_path])
+        rel_root = ElementTree.fromstring(parts[rel_path])
+        relationships = {r.attrib["Id"]: r for r in rel_root}
+        sheets = book_root.find(f"{{{main_ns}}}sheets")
+        sheet_parts = {s.attrib["name"]: resolve(book_path, relationships[s.attrib[f"{{{doc_rel_ns}}}id"]].attrib["Target"]) for s in sheets}
+
+        def add_relationship(path: str, kind: str) -> str:
+            existing = {r.attrib["Id"] for r in ElementTree.fromstring(changes.get(rel_path, parts[rel_path]))}
+            index = 1
+            while f"rIdAudit{index}" in existing:
+                index += 1
+            rid = f"rIdAudit{index}"
+            element = ElementTree.Element(f"{{{rel_ns}}}Relationship", {
+                "Id": rid, "Type": doc_rel_ns + "/" + kind,
+                "Target": posixpath.relpath(path, posixpath.dirname(book_path))})
+            payload = changes.get(rel_path, parts[rel_path])
+            changes[rel_path] = append_nodes(payload, spans(payload), ElementTree.tostring(element))
+            return rid
+
+        def add_content_type(path: str, content_type: str) -> None:
+            payload = changes.get("[Content_Types].xml", parts["[Content_Types].xml"])
+            element = ElementTree.Element(f"{{{types_ns}}}Override", {"PartName": "/" + path, "ContentType": content_type})
+            changes["[Content_Types].xml"] = append_nodes(payload, spans(payload), ElementTree.tostring(element))
+
+        scope_xml = ElementTree.fromstring(new.read("xl/worksheets/sheet1.xml"))
+        style_rel = next((r for r in rel_root if r.get("Type", "").endswith("/styles")), None)
+        if style_rel is None:
+            style_path = posixpath.join(posixpath.dirname(book_path), "auditStyles.xml")
+            if style_path in parts:
+                raise ValueError("independent_audit_overlay_style_part_collision")
+            changes[style_path] = new.read("xl/styles.xml")
+            add_relationship(style_path, "styles")
+            add_content_type(style_path, "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml")
+        else:
+            style_path = resolve(book_path, style_rel.attrib["Target"])
+            original_styles = parts[style_path]
+            style_tree = ElementTree.fromstring(original_styles)
+            generated_styles = ElementTree.fromstring(new.read("xl/styles.xml"))
+            mappings: dict[str, dict[int, int]] = {}
+            # Existing indexes and every original style node remain untouched.
+            for name in ("numFmts", "fonts", "fills", "borders", "cellStyleXfs", "cellXfs"):
+                source = generated_styles.find(f"{{{main_ns}}}{name}")
+                if source is None or not len(source):
+                    mappings[name] = {}
+                    continue
+                target = style_tree.find(f"{{{main_ns}}}{name}")
+                existing_nodes = list(target) if target is not None else []
+                mapping: dict[int, int] = {}
+                additions = []
+                for index, item in enumerate(source):
+                    item = copy.deepcopy(item)
+                    for attr, table in (("fontId", "fonts"), ("fillId", "fills"), ("borderId", "borders"), ("xfId", "cellStyleXfs"), ("numFmtId", "numFmts")):
+                        if attr in item.attrib and table in mappings:
+                            old_id = int(item.attrib[attr])
+                            item.set(attr, str(mappings[table].get(old_id, old_id)))
+                    encoded = ElementTree.tostring(item)
+                    match = next((i for i, old in enumerate(existing_nodes) if ElementTree.tostring(old) == encoded), None)
+                    if name == "numFmts":
+                        old_id = int(item.attrib["numFmtId"])
+                        match = next((i for i, old in enumerate(existing_nodes) if old.get("formatCode") == item.get("formatCode")), None)
+                        if match is None:
+                            item.set("numFmtId", str(max([163, *[int(x.attrib["numFmtId"]) for x in existing_nodes]]) + 1))
+                    if match is None:
+                        match = len(existing_nodes)
+                        existing_nodes.append(item)
+                        additions.append(ElementTree.tostring(item))
+                    mapping[old_id if name == "numFmts" else index] = int(existing_nodes[match].attrib["numFmtId"]) if name == "numFmts" else match
+                mappings[name] = mapping
+                if additions:
+                    node = next((n for n in spans(original_styles)["children"] if n["tag"] == main_ns + "}" + name), None)
+                    if node is None:
+                        # Only optional numFmts can be absent in a valid style sheet.
+                        if name != "numFmts":
+                            raise ValueError("independent_audit_overlay_missing_style_table: " + name)
+                        element = ElementTree.Element(f"{{{main_ns}}}{name}", {"count": str(len(existing_nodes))})
+                        element.extend(existing_nodes)
+                        root = spans(original_styles)
+                        original_styles = original_styles[:root["open_end"]] + ElementTree.tostring(element) + original_styles[root["open_end"]:]
+                    else:
+                        original_styles = append_nodes(original_styles, node, b"".join(additions), len(existing_nodes))
+            if original_styles != parts[style_path]:
+                changes[style_path] = original_styles
+            for cell in scope_xml.iter(f"{{{main_ns}}}c"):
+                if "s" in cell.attrib:
+                    cell.set("s", str(mappings["cellXfs"][int(cell.attrib["s"])]))
+
+        if scope_name in sheet_parts:
+            scope_path = sheet_parts[scope_name]
+        else:
+            index = 1
+            while True:
+                scope_path = posixpath.join(posixpath.dirname(book_path), "worksheets", f"auditScope{index}.xml")
+                if scope_path not in parts:
+                    break
+                index += 1
+            rid = add_relationship(scope_path, "worksheet")
+            add_content_type(scope_path, "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml")
+            element = ElementTree.Element(f"{{{main_ns}}}sheet", {"name": scope_name,
+                "sheetId": str(max(int(s.attrib["sheetId"]) for s in sheets) + 1), f"{{{doc_rel_ns}}}id": rid})
+            node = next(n for n in spans(parts[book_path])["children"] if n["tag"] == main_ns + "}sheets")
+            changes[book_path] = append_nodes(parts[book_path], node, ElementTree.tostring(element))
+        changes[scope_path] = ElementTree.tostring(scope_xml, encoding="utf-8")
+
+        if CANONICAL_SIDECAR_SHEET in sheet_parts:
+            # Read values for header/shared-string resolution; never save this book.
+            before = load_workbook(io.BytesIO(data), read_only=True, data_only=False)
+            try:
+                sidecar = before[CANONICAL_SIDECAR_SHEET]
+                headers = [cell.value for cell in next(sidecar.iter_rows(max_row=1))]
+                if "audit_page_sha256" in headers:
+                    column = get_column_letter(headers.index("audit_page_sha256") + 1)
+                    path = sheet_parts[CANONICAL_SIDECAR_SHEET]
+                    payload = parts[path]
+                    sheet_data = next(n for n in spans(payload)["children"] if n["tag"] == main_ns + "}sheetData")
+                    xml_cells = {c.attrib["r"]: c for c in ElementTree.fromstring(payload).iter(f"{{{main_ns}}}c")}
+                    edits = []
+                    for row in sheet_data["children"]:
+                        if int(row["attrs"].get("r", 0)) < 2:
+                            continue
+                        address = column + row["attrs"]["r"]
+                        cell = next((c for c in row["children"] if c["attrs"].get("r") == address), None)
+                        if cell is None:
+                            raise ValueError("independent_audit_overlay_missing_binding_cell")
+                        # Sidecar binding cells contain only a digest; other cells
+                        # (including base64 chunks and all hashes) remain byte exact.
+                        element = copy.deepcopy(xml_cells[address])
+                        for child in list(element):
+                            if child.tag in {f"{{{main_ns}}}{name}" for name in ("v", "is", "f")}:
+                                element.remove(child)
+                        element.set("t", "inlineStr")
+                        inline = ElementTree.Element(f"{{{main_ns}}}is")
+                        ElementTree.SubElement(inline, f"{{{main_ns}}}t").text = digest
+                        element.insert(0, inline)
+                        edits.append((cell["start"], cell["end"], ElementTree.tostring(element)))
+                    for start, end, replacement in reversed(edits):
+                        payload = payload[:start] + replacement + payload[end:]
+                    changes[path] = payload
+            finally:
+                before.close()
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as destination:
+            destination.comment = archive.comment
+            for entry in archive.infolist():
+                destination.writestr(entry, changes.get(entry.filename, parts[entry.filename]))
+            for path in changes.keys() - parts.keys():
+                destination.writestr(path, changes[path])
     result = output.getvalue()
+    with zipfile.ZipFile(io.BytesIO(result)) as saved:
+        for path, payload in parts.items():
+            if path not in changes and saved.read(path) != payload:
+                raise ValueError("independent_audit_overlay_part_changed: " + path)
     restored = reader(result, audit_only=True)
     if original["canonical_sidecar_present"]:
         if restored["canonical_storyboard"] != storyboard:
