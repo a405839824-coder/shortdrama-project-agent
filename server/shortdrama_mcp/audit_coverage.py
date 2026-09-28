@@ -655,7 +655,13 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
         data.update({
             "rule_definitions": definitions,
             "submission_schema": SemanticAuditCoverageInput.model_json_schema(),
-            "page_submission_schema": SemanticAuditCoveragePageInput.model_json_schema(),
+            "page_submission_schema_reference": {
+                "schema_sha256": stable_json_hash(SemanticAuditCoveragePageInput.model_json_schema()),
+                "record_kind": "page_submission_schema",
+                "next_call": {"project_id": project_id, "artifact_id": artifact_id,
+                              "section": "audit_contract", "offset": 0, "limit": 1, "max_chars": 16_000},
+                "meaning": "The complete append/finalize/revise/rebind schema is paginated there; follow record fragments if present.",
+            },
             "read_contract": {
                 "row_fields": "Use rule_definitions[row.rule_id] for layer, question, dependency fields and required observation fields.",
                 "dependencies": "Expand dependency_fields with row.shot_id, then neighbor_dependency_fields with each row.neighbor_shot_ids (absent means none), using reference_pattern. Include planning_evidence.reference, rhythm_evidence.reference and all additional_dependency_refs when present; deduplicate references.",
@@ -894,8 +900,10 @@ def read_audit_contract(service: Any, namespace: str, project_id: str, artifact_
         canonical_hash=contract["canonical_sha256"],
         source_fingerprint=service._source_fingerprint(namespace, project_id, storyboard, artifact.get("source_artifact_id"), artifact),
         boundary_hash=service._boundary_hash(storyboard))
-    records = [{"kind": "required_layer_evidence", "layer": layer, "index": index, "evidence_id": ref}
-               for layer, refs in contract["required_layer_evidence_ids"].items() for index, ref in enumerate(refs)]
+    page_schema = SemanticAuditCoveragePageInput.model_json_schema()
+    records = [{"kind": "page_submission_schema", "schema_sha256": stable_json_hash(page_schema), "value": page_schema}]
+    records.extend({"kind": "required_layer_evidence", "layer": layer, "index": index, "evidence_id": ref}
+                   for layer, refs in contract["required_layer_evidence_ids"].items() for index, ref in enumerate(refs))
     records.extend({"kind": "ordered_pair", "index": index, "pair_id": pair, "evidence_id": "pair:" + pair}
                    for index, pair in enumerate(contract["ordered_pair_ids"]))
     for key in ("episode_obligations", "source_limit_obligations", "source_decision_obligations"):
@@ -918,7 +926,8 @@ def read_audit_contract(service: Any, namespace: str, project_id: str, artifact_
     budget = min(max(int(max_chars or 24_000), 1), 64_000)
     next_call = {"project_id": project_id, "artifact_id": artifact_id, "section": "audit_contract",
                  "offset": offset, "limit": limit, "max_chars": budget}
-    data = {"contract": "semantic-audit-submission-contract-v1", "contract_sha256": stable_json_hash(contract),
+    data = {"contract": "semantic-audit-submission-contract-v1",
+        "contract_sha256": stable_json_hash({"submission": contract, "page_schema": page_schema}),
         "fingerprints": fingerprints, "manifest_sha256": build_obligations(storyboard, coverage_context(service))["manifest_sha256"],
         **{k: contract[k] for k in ("canonical_sha256", "reviewed_shot_count", "reviewed_adjacent_pair_count",
                                    "reviewed_batch_count", "adjacent_pair_order_sha256", "pair_hash_encoding")},

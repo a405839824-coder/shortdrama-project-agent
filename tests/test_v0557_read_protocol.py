@@ -11,7 +11,8 @@ import unittest
 from unittest.mock import patch
 
 from shortdrama_mcp.audit_coverage_pages import collection_snapshot
-from shortdrama_mcp.models import SemanticAuditIssueInput
+from shortdrama_mcp.models import SemanticAuditIssueInput, SemanticAuditCoveragePageInput
+from shortdrama_mcp.canonical import stable_json_hash
 from test_v0557_audit_intake_pairs import unplanned_project
 from test_v0557_audit_submission import declare_unknown, external_bytes
 import test_efficiency as efficiency_support
@@ -77,6 +78,18 @@ class ReadProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record['fingerprint'], hashlib.sha256(self.raw).hexdigest())
 
     async def test_contract_next_call_covers_every_required_ref_and_bare_pair(self):
+        obligations = await self.raw_call('read_project_artifact', {**self.base, 'section': 'audit_obligations',
+                                                                   'limit': 1, 'max_chars': 16000})
+        self.assertLessEqual(len(json.dumps(obligations, ensure_ascii=False, separators=(',', ':'))), 16000)
+        reference = obligations['data']['page_submission_schema_reference']
+        # The old obligations entry point supplies the exact public call;
+        # callers do not have to infer the new schema's section or offset.
+        schema_page = await self.raw_call('read_project_artifact', reference['next_call'])
+        schema_record = schema_page['data']['records'][0]
+        self.assertEqual(schema_record['kind'], reference['record_kind'])
+        self.assertEqual(schema_record['value'], SemanticAuditCoveragePageInput.model_json_schema())
+        self.assertEqual(stable_json_hash(schema_record['value']), reference['schema_sha256'])
+        self.assertEqual(schema_record['schema_sha256'], reference['schema_sha256'])
         records, pages = await self.read_all('audit_contract')
         self.assertGreater(len(pages), 1)
         expected_counts = pages[0]['required_layer_evidence_counts']
