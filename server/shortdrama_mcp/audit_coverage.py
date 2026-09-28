@@ -801,6 +801,22 @@ def audit_submission_contract(storyboard: dict[str, Any]) -> dict[str, Any]:
     required = {layer: [] for layer in SEMANTIC_AUDIT_LAYER_NAMES}
     blockers = []
 
+    def malformed(path: str) -> None:
+        raise ValueError("audit_contract_malformed_evidence: " + path)
+
+    evidence = storyboard.get("prevention_evidence", {})
+    if not isinstance(evidence, dict):
+        malformed("prevention_evidence")
+    adaptation = evidence.get("dialogue_adaptation_audit", {})
+    if not isinstance(adaptation, dict):
+        malformed("prevention_evidence.dialogue_adaptation_audit")
+    entries = adaptation.get("entries", [])
+    if not isinstance(entries, list):
+        malformed("prevention_evidence.dialogue_adaptation_audit.entries")
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict) or ("target_shots" in entry and not isinstance(entry["target_shots"], list)):
+            malformed(f"prevention_evidence.dialogue_adaptation_audit.entries[{index}]")
+
     def ordered(layer: str, values: list[str]) -> None:
         groups[layer].append(values)
         required[layer].extend(values)
@@ -821,29 +837,9 @@ def audit_submission_contract(storyboard: dict[str, Any]) -> dict[str, Any]:
     decisions = derivation["source_obligations"] if derivation["present"] else []
     ordered("源文对白", [r["evidence_id"] for r in decisions])
     required["源文对白"].extend(ref for row in decisions for ref in row["field_evidence_ids"])
-    def malformed(path: str) -> None:
-        blockers.append({"kind": "malformed_evidence", "path": path,
-                         "reason": "Evidence has an invalid object/list shape; no review or absence of obligations is inferred."})
-
-    evidence = storyboard.get("prevention_evidence", {})
-    if not isinstance(evidence, dict):
-        malformed("prevention_evidence")
-        evidence = {}
-    adaptation = evidence.get("dialogue_adaptation_audit", {})
-    if not isinstance(adaptation, dict):
-        malformed("prevention_evidence.dialogue_adaptation_audit")
-        adaptation = {}
-    entries = adaptation.get("entries", [])
-    if not isinstance(entries, list):
-        malformed("prevention_evidence.dialogue_adaptation_audit.entries")
-        entries = []
-    for index, entry in enumerate(entries):
-        if not isinstance(entry, dict) or ("target_shots" in entry and not isinstance(entry["target_shots"], list)):
-            malformed(f"prevention_evidence.dialogue_adaptation_audit.entries[{index}]")
-    entries = [r for r in entries if isinstance(r, dict)]
     ordered("源文对白", [f"source-unit:{str(r['source_unit_id']).strip()}" for r in entries if str(r.get("source_unit_id") or "").strip()])
     adapted = {str(sid).strip() for r in entries if r.get("treatment") == "原文事实转化对白"
-               for sid in (r.get("target_shots") if isinstance(r.get("target_shots"), list) else [])}
+               for sid in r.get("target_shots", [])}
     ordered("源文对白", [f"field:{sid}.画面内容" for sid in ids if sid in adapted])
     ordered("空间连续", ["pair:" + pair for pair in pairs])
     voice = [f"field:{sid}.音色" for sid, shot in zip(ids, shots) if "音色" in shot]
