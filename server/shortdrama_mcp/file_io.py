@@ -262,7 +262,7 @@ def _unique_headers(headers: list[str]) -> list[str]:
 
 
 def _rows_from_sheet(sheet: Any) -> tuple[list[str], list[dict[str, Any]]]:
-    values = list(sheet.iter_rows(values_only=True))
+    values = _used_value_matrix(list(sheet.iter_rows(values_only=True)))
     if not values:
         return [], []
     header_index = 0
@@ -273,7 +273,12 @@ def _rows_from_sheet(sheet: Any) -> tuple[list[str], list[dict[str, Any]]]:
             break
     raw_headers = [str(value).strip() if value is not None else "" for value in values[header_index]]
     last = max((index for index, value in enumerate(raw_headers) if value), default=-1)
-    unique_headers = _unique_headers(raw_headers[: last + 1])
+    declared_headers = raw_headers[: last + 1]
+    # Generic sheets may start with a merged title. Keep later populated
+    # columns, but retain formal master identity so its strict matrix check
+    # still rejects any cells outside the versioned column contract.
+    formal = _normalized_mother_headers(declared_headers) in [MOTHER_TEMPLATE_COLUMNS, LEGACY_MOTHER_TEMPLATE_COLUMNS]
+    unique_headers = _unique_headers(declared_headers if formal else raw_headers)
     rows = []
     for raw in values[header_index + 1 :]:
         row = {header: json_safe(raw[index] if index < len(raw) else None) for index, header in enumerate(unique_headers)}

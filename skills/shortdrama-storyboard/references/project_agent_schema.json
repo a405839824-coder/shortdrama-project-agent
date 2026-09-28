@@ -217,11 +217,11 @@
       ],
       "properties": {
         "active": {"type": "boolean"},
-        "reason": {"const": "first_draft_quality_below_threshold"},
+        "reason": {"enum": ["first_draft_quality_below_threshold", "first_draft_quality_evidence_incomplete"]},
         "grade": {"enum": ["B", "C", "unavailable"]},
         "artifact_id": {"type": "string", "minLength": 1},
         "audit_cycle_id": {"type": "string", "minLength": 1},
-        "required_action": {"const": "repair_root_cause_and_revalidate_prevention_gate"},
+        "required_action": {"enum": ["repair_root_cause_and_revalidate_prevention_gate", "complete_independent_audit_evidence"]},
         "created_at": {"type": "string", "minLength": 1},
         "cleared_at": {"type": "string", "minLength": 1},
         "cleared_by_audit_cycle_id": {"type": "string", "minLength": 1},
@@ -229,6 +229,16 @@
         "cleared_by_certificate_id": {"type": "string", "minLength": 1}
       },
       "allOf": [
+        {
+          "if": {"properties": {"reason": {"const": "first_draft_quality_evidence_incomplete"}}},
+          "then": {"properties": {
+            "grade": {"const": "unavailable"},
+            "required_action": {"const": "complete_independent_audit_evidence"}
+          }},
+          "else": {"properties": {
+            "required_action": {"const": "repair_root_cause_and_revalidate_prevention_gate"}
+          }}
+        },
         {
           "if": {
             "properties": {"active": {"const": false}},

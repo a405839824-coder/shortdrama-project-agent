@@ -170,10 +170,10 @@ class StartupRestoreTests(unittest.TestCase):
             restore._restore(self.data, self.runtime, version='0.5.46')
         self.assertFalse(self.runtime.exists())
 
-    def test_v0558_binding_rejects_signed_previous_release(self):
+    def test_v0559_binding_rejects_signed_previous_release(self):
         self.assertEqual((restore.TARGET_VERSION, restore.CONTRACT, restore.DIRECTORY),
-                         ('0.5.58', 'library-runtime-transfer-0558-v1', '.upgrade-0558'))
-        self.manifest.update(target_version='0.5.57', contract='library-runtime-transfer-0557-v1')
+                         ('0.5.59', 'library-runtime-transfer-0559-v1', '.upgrade-0559'))
+        self.manifest.update(target_version='0.5.58', contract='library-runtime-transfer-0558-v1')
         self.sign()
         before = restore._tree(self.data)
         with self.assertRaisesRegex(ValueError, 'manifest_binding'):
@@ -182,7 +182,7 @@ class StartupRestoreTests(unittest.TestCase):
         self.assertEqual(restore._tree(self.data), before)
 
     def test_previous_release_archive_and_markers_remain_untouched(self):
-        previous = self.data / '.upgrade-0557'
+        previous = self.data / '.upgrade-0558'
         previous.mkdir()
         for name in ('runtime.tar.gz', 'manifest.json', 'manifest.consumed.json', 'restore-receipt.json'):
             (previous / name).write_bytes(b'historical release bytes: ' + name.encode())
