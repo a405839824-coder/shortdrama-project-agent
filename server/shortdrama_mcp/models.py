@@ -273,23 +273,45 @@ class SemanticAuditCoveragePageInput(BaseModel):
     """Bound staging transport; it never represents an audit PASS."""
     model_config = ConfigDict(extra="forbid")
     contract: Literal["semantic-obligation-pages-v1"]
-    action: Literal["append", "finalize"]
+    action: Literal["append", "finalize", "revise", "rebind"]
     manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     collection_key: str | None = Field(default=None, min_length=1, max_length=64)
     collection_id: str | None = Field(default=None, min_length=1, max_length=128)
     offset: int = Field(default=0, ge=0, le=16_384)
     checks: list[SemanticAuditCheckInput] = Field(default_factory=list, max_length=64)
     page_ids: list[str] = Field(default_factory=list, max_length=16_384)
+    expected_snapshot_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    reason: str | None = Field(default=None, min_length=12, max_length=2_000)
+    issue_upserts: list[SemanticAuditIssueInput] = Field(default_factory=list, max_length=64)
+    retract_issue_ids: list[str] = Field(default_factory=list, max_length=64)
 
     @model_validator(mode="after")
     def validate_operation(self) -> "SemanticAuditCoveragePageInput":
+        if len(self.page_ids) != len(set(self.page_ids)):
+            raise ValueError("audit_coverage_duplicate_page_id")
+        changed = [issue.issue_id for issue in self.issue_upserts]
+        if (len(changed) != len(set(changed)) or
+                len(self.retract_issue_ids) != len(set(self.retract_issue_ids)) or
+                set(changed) & set(self.retract_issue_ids)):
+            raise ValueError("audit_coverage_revision_issue_ids_invalid")
+        if self.action in {"revise", "rebind"}:
+            if (not self.collection_id or self.collection_key or self.offset or
+                    not self.expected_snapshot_sha256 or not self.reason or len(self.reason.strip()) < 12):
+                raise ValueError("audit_coverage_revision_binding_required")
+            if self.action == "revise" and not (self.checks or self.issue_upserts or self.retract_issue_ids):
+                raise ValueError("audit_coverage_revision_empty")
+            if self.action == "rebind" and (self.checks or self.issue_upserts or self.retract_issue_ids):
+                raise ValueError("audit_coverage_rebind_cannot_copy_review")
+            return self
+        if self.expected_snapshot_sha256 or self.reason or self.issue_upserts or self.retract_issue_ids:
+            raise ValueError("audit_coverage_revision_fields_outside_revision")
         if self.action == "append":
             if not self.checks or self.page_ids or bool(self.collection_key) == bool(self.collection_id):
                 raise ValueError("audit_coverage_page_append_invalid")
             if self.collection_key and self.offset != 0:
                 raise ValueError("audit_coverage_collection_must_start_at_zero")
         elif (not self.collection_id or self.collection_key or self.checks or self.offset or
-              not self.page_ids or len(self.page_ids) != len(set(self.page_ids))):
+              not self.page_ids):
             raise ValueError("audit_coverage_page_finalize_invalid")
         return self
 

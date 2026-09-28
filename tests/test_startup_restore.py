@@ -170,16 +170,31 @@ class StartupRestoreTests(unittest.TestCase):
             restore._restore(self.data, self.runtime, version='0.5.46')
         self.assertFalse(self.runtime.exists())
 
-    def test_v0556_binding_rejects_signed_previous_release(self):
+    def test_v0557_binding_rejects_signed_previous_release(self):
         self.assertEqual((restore.TARGET_VERSION, restore.CONTRACT, restore.DIRECTORY),
-                         ('0.5.56', 'library-runtime-transfer-0556-v1', '.upgrade-0556'))
-        self.manifest.update(target_version='0.5.55', contract='library-runtime-transfer-0555-v1')
+                         ('0.5.57', 'library-runtime-transfer-0557-v1', '.upgrade-0557'))
+        self.manifest.update(target_version='0.5.56', contract='library-runtime-transfer-0556-v1')
         self.sign()
         before = restore._tree(self.data)
         with self.assertRaisesRegex(ValueError, 'manifest_binding'):
             self.run_restore()
         self.assertFalse(self.runtime.exists())
         self.assertEqual(restore._tree(self.data), before)
+
+    def test_previous_release_archive_and_markers_remain_untouched(self):
+        previous = self.data / '.upgrade-0556'
+        previous.mkdir()
+        for name in ('runtime.tar.gz', 'manifest.json', 'manifest.consumed.json', 'restore-receipt.json'):
+            (previous / name).write_bytes(b'historical release bytes: ' + name.encode())
+        before = restore._tree(previous)
+        self.assertTrue(self.run_restore()['restored'])
+        self.assertEqual(restore._tree(previous), before)
+        self.assertEqual(restore._tree(self.runtime), self.manifest['files'])
+        import shutil
+        shutil.rmtree(self.runtime)
+        self.assertIsNone(self.run_restore())
+        self.assertFalse(self.runtime.exists())
+        self.assertEqual(restore._tree(previous), before)
 
     def test_startup_gate_precedes_create_and_listener_on_both_transports(self):
         import main

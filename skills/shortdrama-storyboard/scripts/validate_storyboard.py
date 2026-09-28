@@ -23,7 +23,7 @@ import repair_observations
 from field_content import (assert_field_content, field_content_findings,
                            voice_content_findings, preserved_voice_baseline, r5_keyframe_sections,
                            FORMAL_EXECUTION_FIELDS, project_lighting, music_directives, strip_negative_music)
-from continuity_checks import state_equal
+from continuity_checks import state_equal, audit_adjacent_text
 from performance_checks import eye_contract_faults, emphasis_binding_faults, visible_subject_annotation_faults, listener_reaction_faults
 from lighting_checks import affirmative_matches, lighting_context_faults, scene_lighting_continuity_faults
 from dialogue_occurrences import align_storyboard_dialogue
@@ -4140,6 +4140,11 @@ def validate_project(
         catalog,
     )
     issues.extend(gate_issues)
+    # Imported/older originals do not carry the production workflow profile.
+    # Its gate must not suppress actual N-1 machine observations in an audit.
+    adjacent_text_checks = []
+    if "adjacent_continuity" not in gate_metrics:
+        gate_metrics["adjacent_continuity"], adjacent_text_checks = audit_adjacent_text(obj, normalized_shots)
     gate_metrics.update(public_metrics)
     chapter_issues, chapter_metrics = _validate_chapter_intake(obj, rules, catalog)
     issues.extend(chapter_issues)
@@ -4167,7 +4172,7 @@ def validate_project(
         'status': 'pending' if any(row['status'] == 'pending' for row in entity_mapping_rows) else 'resolved',
         'shots': entity_mapping_rows,
         'semantic_identity_review': 'separate_independent_review_required'}
-    semantic_checks = [check for shot in normalized_shots for check in _shot_semantic_checks(shot)]
+    semantic_checks = adjacent_text_checks + [check for shot in normalized_shots for check in _shot_semantic_checks(shot)]
     # Only the service's separate read-only argument can attest original
     # sidecar integrity. Identically named author JSON never gains that trust.
     external_saved = saved_workbook_evidence if mode == "audit" and isinstance(saved_workbook_evidence, dict) else None

@@ -44,7 +44,7 @@ def semantic_audit_for_artifact(
     layer_evidence["禁项与声音"].extend(
         f"field:{shot_id}.音色"
         for shot_id, shot in zip(shot_ids, shots)
-        if re.search(r'说道\s*[：:]?\s*[“"]', str(shot.get("画面内容") or ""))
+        if "音色" in shot
     )
     prevention = storyboard.get("prevention_evidence")
     adaptation = (

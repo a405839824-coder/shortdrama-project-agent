@@ -34,6 +34,7 @@ from .canonical import (
 )
 from .config import Settings
 from .audit_coverage import (
+    build_obligations,
     coverage_context, normalize_coverage_transport, validate_coverage,
     verify_certificate_coverage,
 )
@@ -3302,6 +3303,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         from episode_rules import review_obligations
         episode_obligations = review_obligations(storyboard)
         episode_by_id = {row['evidence_id']: row for row in episode_obligations}
+        # Workbook references originate in the server's current-byte coverage
+        # manifest, not in a caller-authored coordinate or a reading-page alias.
+        workbook_evidence_ids = {
+            ref for ref in build_obligations(storyboard, coverage_context(self))["_values"]
+            if ref.startswith("workbook:")
+        }
 
         def validate_evidence_id(evidence_id: str) -> None:
             kind, value = evidence_id.split(":", 1)
@@ -3311,11 +3318,13 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 raise ValueError(
                     "semantic_audit_evidence_invalid: evidence references must use non-empty kind:id"
                 )
-            if kind not in {"shot", "field", "canonical", "pair", "source-unit", "source-limit", "source-decision", "episode-review"}:
+            if kind not in {"shot", "field", "canonical", "pair", "source-unit", "source-limit", "source-decision", "episode-review", "workbook"}:
                 raise ValueError(
                     "semantic_audit_evidence_invalid: evidence kind must be one of "
-                    "shot, field, canonical, pair, source-unit, source-limit, or source-decision"
+                    "shot, field, canonical, pair, source-unit, source-limit, source-decision, episode-review, or workbook"
                 )
+            if kind == "workbook" and evidence_id not in workbook_evidence_ids:
+                raise ValueError("semantic_audit_workbook_binding_mismatch: workbook evidence must match a current server-observed cell")
             if kind == 'episode-review' and evidence_id not in episode_by_id:
                 raise ValueError('semantic_audit_episode_binding_mismatch: episode evidence is missing or stale')
             if kind == "source-decision" and evidence_id not in expected_source_decision_ids:
@@ -3399,16 +3408,15 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "author-side unknown or pending declarations cannot sign a pass"
             )
 
-        dialogue_shot_refs = [
+        voice_shot_refs = [
             str(row.get("镜头编号") or row.get("shot_uid") or "").strip()
             for row in shots
-            if re.search(
-                r"说道\s*[：:]?\s*[“\"]",
-                str(row.get("画面内容") or ""),
-            )
+            if "音色" in row
         ]
+        from voice_sequence import extract_dialogues
+        dialogue_shot_count = sum(bool(extract_dialogues(str(row.get("画面内容") or ""))) for row in shots)
         expected_voice_evidence_ids = [
-            f"field:{shot_ref}.音色" for shot_ref in dialogue_shot_refs
+            f"field:{shot_ref}.音色" for shot_ref in voice_shot_refs
         ]
         submitted_voice_evidence_ids = [
             str(evidence_id)
@@ -3419,7 +3427,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         if submitted_voice_evidence_ids != expected_voice_evidence_ids:
             raise ValueError(
                 "semantic_audit_voice_field_coverage_incomplete: 禁项与声音层必须按canonical顺序"
-                "逐镜提交全部带对白镜的field:镜头编号.音色证据；"
+                "逐镜提交全部现有音色字段（含对白、旁白、非逐字声音和静默）的证据；"
                 f"expected={expected_voice_evidence_ids}, submitted={submitted_voice_evidence_ids}"
             )
 
@@ -3534,13 +3542,23 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
 
         semantic_issues = submission["issues"]
+        # Unknown is an auditable evidence gap, not a defect the reviewer must
+        # invent. It still blocks completion/PASS below. Validate the actual
+        # bound check declarations before allowing an issue-free failed layer.
+        obligation_coverage = validate_coverage(
+            storyboard, submission, coverage_context(self), allow_unresolved=True
+        )
+        unresolved_layers = {
+            state["layer"] for state in obligation_coverage["check_states"].values()
+            if state["status"] == "unknown"
+        }
         failed_layers = {
             str(row["layer"])
             for row in layer_rows
             if row.get("status") == "fail_current"
         }
         issue_layers = {str(row["layer"]) for row in semantic_issues}
-        if failed_layers - issue_layers:
+        if failed_layers - issue_layers - unresolved_layers:
             raise ValueError(
                 "semantic_audit_issue_required: every failed layer requires at least one semantic issue"
             )
@@ -3553,7 +3571,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             raise ValueError(
                 "semantic_audit_conclusion_mismatch: pass requires eight passing layers and zero semantic issues"
             )
-        if conclusion.get("status") == "fail_current" and not semantic_issues:
+        if conclusion.get("status") == "fail_current" and not semantic_issues and not unresolved_layers:
             raise ValueError(
                 "semantic_audit_issue_required: fail_current conclusion requires a semantic issue"
             )
@@ -3699,6 +3717,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             evidence_ids = list(dict.fromkeys(evidence_ids))
             layer_matrix[layer] = {
                 "status": (
+                    "unknown"
+                    if layer in unresolved_layers and layer not in issue_layers and not machine_relevant
+                    else
                     "fail_current"
                     if submitted["status"] == "fail_current" or machine_relevant
                     else "pass"
@@ -3739,9 +3760,6 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             and all(row["status"] == "pass" for row in layer_matrix.values())
         )
         submission_hash = sha256_bytes(_stable_json_bytes(submission))
-        obligation_coverage = validate_coverage(
-            storyboard, submission, coverage_context(self), allow_unresolved=True
-        )
         machine_checks = (report.get("quality_metrics") or {}).get("semantic_checks", [])
         unknown_checks = [row for row in machine_checks if row.get("status") == "unknown"]
         if not obligation_coverage["complete"] or unknown_checks:
@@ -3819,7 +3837,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             },
             "voice_field_coverage": {
                 "contract": "fixed-voice-template-v1",
-                "expected_dialogue_shot_count": len(dialogue_shot_refs),
+                "expected_dialogue_shot_count": dialogue_shot_count,
+                "expected_voice_field_count": len(voice_shot_refs),
+                "scope": "all_existing_voice_fields",
                 "reviewed_voice_field_count": len(submitted_voice_evidence_ids),
                 "coverage_percent": 100.0,
                 "evidence_ids": expected_voice_evidence_ids,
@@ -18458,6 +18478,84 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "repair_return_audit_mismatch: current audit authority is not a descendant of the return authority"
                 )
 
+    def _rebind_audit_intake(
+        self, namespace: str, project_id: str, *, storyboard: dict[str, Any],
+        record: dict[str, Any], audit_work_order: dict[str, Any], handoff: dict[str, Any],
+        fingerprints: dict[str, str], source_fingerprint: str, boundary_hash: str,
+        submission: dict[str, Any], stage_trace_id: str,
+    ) -> ToolResponse:
+        """Rebind unchanged external input; old evidence is never copied as review."""
+        from .audit_coverage_pages import validate_rebind_snapshot, collection_has_signed_audit
+
+        with self.store.project_write_lock(namespace, project_id):
+            old = self.store.get_project_record(namespace, project_id, kind="handoffs",
+                                                record_id=handoff["handoff_id"])
+            if (not self.store.project_record_is_signed(old) or old != handoff or
+                    old.get("handoff_type") != "audit_intake" or old.get("audit_class") != "audit_intake" or
+                    old.get("from_window_role") != "external_input" or
+                    old.get("to_window_role") != "independent_audit" or
+                    old.get("status") not in {"prepared", "consumed"} or
+                    old.get("audit_cycle_id") != f"AUD-{audit_work_order['work_order_id']}" or
+                    old.get("storyboard_artifact_id") != record["artifact_id"] or
+                    old.get("canonical_sha256") != canonical_storyboard_sha256(storyboard) or
+                    old.get("source_fingerprint") != source_fingerprint or
+                    old.get("boundary_hash") != boundary_hash):
+                raise ValueError("audit_intake_rebind_identity_changed")
+            verified = validate_rebind_snapshot(self, namespace, project_id, storyboard=storyboard,
+                artifact=record, audit_work_order=audit_work_order, handoff=old,
+                fingerprints=fingerprints, submission=submission)
+            snapshot, binding = verified["snapshot"], verified["binding"]
+            prior_binding = snapshot["collection"]["binding"]
+            if (prior_binding.get("handoff_id") != old["handoff_id"] or
+                    prior_binding.get("fingerprints") != old.get("fingerprints")):
+                raise ValueError("audit_intake_rebind_collection_handoff_mismatch")
+            # The request is replayable without overwriting either signed HND.
+            new_id = "HND-" + sha256_bytes(_stable_json_bytes({
+                "parent_collection": snapshot["collection"]["collection_id"],
+                "parent_snapshot": snapshot["snapshot_sha256"], "binding": binding,
+            }))[:32]
+            binding = {**binding, "handoff_id": new_id}
+            parent = {"collection_id": snapshot["collection"]["collection_id"],
+                      "snapshot_sha256": snapshot["snapshot_sha256"],
+                      "revision_ids": snapshot["revision_ids"],
+                      "reason": submission["coverage_page"]["reason"]}
+            from .canonical import stable_json_hash
+            child_id = "ACOL-" + stable_json_hash({"binding": binding, "parent": parent})[:40]
+            # All protocol/CAS/pending checks precede minting; the same project
+            # lock covers the new HND and the zero-check child collection.
+            for collection in self.store.list_project_records_strict(
+                    namespace, project_id, kind="audit_coverage_collections"):
+                if (collection.get("binding") == binding and collection["collection_id"] != child_id and
+                        not collection_has_signed_audit(self, namespace, project_id, storyboard, collection)):
+                    raise ValueError("audit_coverage_collection_already_pending")
+            existing = next((row for row in self.store.list_project_records_strict(
+                namespace, project_id, kind="handoffs") if row["handoff_id"] == new_id), None)
+            if existing is not None:
+                if (not self.store.project_record_is_signed(existing) or
+                        existing.get("fingerprints") != fingerprints or
+                        existing.get("handoff_type") != "audit_intake" or existing.get("audit_class") != "audit_intake" or
+                        existing.get("from_window_role") != "external_input" or
+                        existing.get("to_window_role") != "independent_audit" or
+                        existing.get("status") not in {"prepared", "consumed"} or
+                        existing.get("audit_cycle_id") != old["audit_cycle_id"] or
+                        existing.get("storyboard_artifact_id") != record["artifact_id"] or
+                        existing.get("canonical_sha256") != old["canonical_sha256"] or
+                        existing.get("source_fingerprint") != source_fingerprint or
+                        existing.get("boundary_hash") != boundary_hash):
+                    raise ValueError("audit_intake_rebind_successor_conflict")
+                current = existing
+            else:
+                current = self._persist_audit_intake(namespace, project_id, storyboard=storyboard,
+                    record=record, audit_work_order=audit_work_order, stage_trace_id=stage_trace_id,
+                    handoff_id=new_id)
+            result = process_coverage_page(self, namespace, project_id, storyboard=storyboard,
+                artifact=record, audit_work_order=audit_work_order, handoff=current,
+                fingerprints=fingerprints, submission=submission)
+            result.data["handoff_manifest"] = self._handoff_summary(current)
+            result.data["audit_cycle_id"] = current["audit_cycle_id"]
+            result.data["previous_handoff_id"] = old["handoff_id"]
+            return result
+
     def _persist_audit_intake(
         self,
         namespace: str,
@@ -18467,6 +18565,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         record: dict[str, Any],
         audit_work_order: dict[str, Any],
         stage_trace_id: str,
+        handoff_id: str | None = None,
     ) -> dict[str, Any]:
         canonical_hash = canonical_storyboard_sha256(storyboard)
         source_fingerprint = self._source_fingerprint(
@@ -18484,7 +18583,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             source_fingerprint=source_fingerprint,
             boundary_hash=boundary_hash,
         )
-        handoff_id = _new_id("HND")
+        handoff_id = handoff_id or _new_id("HND")
         audit_work_order_id = str(audit_work_order["work_order_id"])
         producer_work_order_id = str(record.get("work_order_id") or "")
         if not producer_work_order_id or producer_work_order_id == audit_work_order_id:
@@ -18750,6 +18849,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """Build the exact immutable portion of a failed-audit repair route."""
 
+        if production_handoff.get("handoff_type") == "audit_intake":
+            # An external read-only audit can report missing artifact-level
+            # evidence. It is not a production/repair authorization and must
+            # not invent faulty shot targets to issue that report.
+            return None, None
         issue_targets = self._repair_issue_targets(
             storyboard,
             list(certificate.get("report", {}).get("issues", [])),
@@ -23446,6 +23550,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             request_session_id=request_session_id,
         )
         runtime_test_certificate = self._require_runtime_test_certificate(namespace, project_id)
+        if semantic_audit is not None:
+            semantic_audit = self._normalized_semantic_audit_submission(semantic_audit)
+        requested_rebind = bool(semantic_audit and
+            (semantic_audit.get("coverage_page") or {}).get("action") == "rebind")
+        if requested_rebind and not handoff_artifact_id:
+            raise ValueError("audit_intake_rebind_explicit_handoff_required")
         stage_trace_id = _new_id("TRC")
         storyboard, record = self._storyboard_from_artifact(
             namespace,
@@ -23512,6 +23622,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 record,
             )
         )
+        if requested_rebind:
+            # A saved HND's source cache cannot establish unchanged current input.
+            source_fingerprint = self._source_fingerprint(
+                namespace, project_id, storyboard, record.get("source_artifact_id"), record)
         fingerprints = self._fingerprint_bundle(
             storyboard,
             record,
@@ -23519,6 +23633,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             source_fingerprint=source_fingerprint,
             boundary_hash=boundary_hash,
         )
+        if requested_rebind:
+            return self._rebind_audit_intake(namespace, project_id, storyboard=storyboard,
+                record=record, audit_work_order=audit_work_order, handoff=handoff,
+                fingerprints=fingerprints, source_fingerprint=source_fingerprint,
+                boundary_hash=boundary_hash, submission=semantic_audit, stage_trace_id=stage_trace_id)
         handoff_fingerprints = handoff.get("fingerprints")
         if not isinstance(handoff_fingerprints, dict) or any(
             handoff_fingerprints.get(key) != value
@@ -23543,7 +23662,6 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
         coverage_page_receipt = None
         if semantic_audit is not None:
-            semantic_audit = self._normalized_semantic_audit_submission(semantic_audit)
             if semantic_audit.get("coverage_page") is not None:
                 staged = process_coverage_page(
                     self, namespace, project_id, storyboard=storyboard, artifact=record,
@@ -23826,8 +23944,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 artifact_record=record,
                 certificate=certificate,
             )
-        if report.get("issues"):
-            # Repair authorization is part of the audit contract.  Validate
+        if report.get("issues") and handoff.get("handoff_type") != "audit_intake":
+            # Production repair authorization is separate from read-only
+            # external audit reports, which retain artifact-level gaps.
+            # Repair authorization is part of the audit contract. Validate
             # every target before the handoff claim, ledger event, certificate,
             # or successor route is allowed to become durable.
             self._repair_issue_targets(
