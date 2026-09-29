@@ -10816,6 +10816,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         supported_phases = {
             "handoff_recovery",
             "preflight_evidence_backfill",
+            "audit_intake_recovery",
         }
         if phase is None:
             hub = self.store.load_hub(namespace, project_id)
@@ -10860,6 +10861,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             raise ValueError(
                 f"handoff_ids must contain 1-{MAX_HANDOFF_RECOVERY_ITEMS} unique ids"
             )
+        if phase == "audit_intake_recovery":
+            from .audit_intake_recovery import recover_intake
+            return recover_intake(self, namespace, project_id=project_id,
+                work_order_id=work_order_id, gap_id=gap_id, handoff_ids=clean_ids,
+                action=action, expected_plan_sha256=expected_plan_sha256,
+                confirmation=confirmation, request_session_id=request_session_id)
         if (
             phase == "preflight_evidence_backfill"
             and gap_id == CONTROLLED_V053_PREFLIGHT_GAP_ID
@@ -18668,7 +18675,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         audit_work_order: dict[str, Any],
         stage_trace_id: str,
         handoff_id: str | None = None,
+        recovery_id: str | None = None,
     ) -> dict[str, Any]:
+        started_ns = time.perf_counter_ns()
         canonical_hash = canonical_storyboard_sha256(storyboard)
         source_fingerprint = self._source_fingerprint(
             namespace,
@@ -18759,7 +18768,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "dependency_fingerprints": fingerprints,
                 }
             ],
-            "stage_trace_id": stage_trace_id,
+            # Intake binding is a real, separately persisted event, not the
+            # later audit request (which may return after only one page).
+            "stage_trace_id": _new_id("TRC"),
             "status": "prepared",
             "storyboard_artifact_id": str(record["artifact_id"]),
             "canonical_artifact_id": str(
@@ -18780,17 +18791,44 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )[:20],
             "from_session_fingerprint": None,
         }
+        if recovery_id is not None:
+            handoff["audit_intake_recovery_id"] = recovery_id
         self._validate_schema_record(self._project_schema, "handoff_manifest", handoff)
-        persisted = self.store.save_project_record(
-            namespace,
-            project_id,
-            kind="handoffs",
-            record_id=handoff_id,
-            value=handoff,
-        )
-        with self.store.mutate_project(namespace, project_id) as (hub, _ledger):
-            hub.setdefault("handoffs", []).append(copy.deepcopy(persisted))
+        with self.store.project_write_lock(namespace, project_id):
+            trace = self._save_telemetry(namespace, project_id,
+                operation="audit_storyboard", started_ns=started_ns,
+                stages_ms={"canonical_load": (time.perf_counter_ns()-started_ns)/1_000_000},
+                artifact_id=str(record["artifact_id"]), telemetry_id=handoff["stage_trace_id"],
+                window_role="independent_audit", task_type="independent_audit",
+                input_fingerprints=fingerprints, shot_count=len(storyboard.get("shots", [])),
+                unmeasured_stages=["independent_semantic_audit", "machine_validation"], _persist=False)
+            trace.update(intake_binding_only=True, audit_completed=False, handoff_id=handoff_id)
+            trace = self.store.save_project_record(namespace, project_id, kind="telemetry",
+                record_id=trace["trace_id"], value=trace)
+            persisted = self.store.save_project_record(namespace, project_id, kind="handoffs",
+                record_id=handoff_id, value=handoff)
+            with self.store.mutate_project(namespace, project_id) as (hub, ledger):
+                hub.setdefault("handoffs", []).append(copy.deepcopy(persisted))
+                ledger.setdefault("performance_traces", []).append(copy.deepcopy(trace))
         return persisted
+
+    def _assert_audit_trace_references(self, namespace: str, project_id: str, *,
+            handoff: dict[str, Any], artifact_id: str, audit_trace: dict[str, Any] | None = None) -> None:
+        """Never sign a certificate whose source or audit event is absent."""
+        root = handoff
+        if handoff.get("reaudit_root_handoff_id"):
+            root = self.store.get_project_record(namespace, project_id, kind="handoffs",
+                record_id=handoff["reaudit_root_handoff_id"])
+        refs = [(root.get("stage_trace_id"), root.get("fingerprints"))]
+        if handoff.get("reaudit_route_trace_id"):
+            refs.append((handoff["reaudit_route_trace_id"], handoff.get("fingerprints")))
+        if audit_trace is not None:
+            refs.append((audit_trace.get("trace_id"), handoff.get("fingerprints")))
+        for trace_id, fingerprints in refs:
+            trace = self.store.get_project_record(namespace, project_id, kind="telemetry", record_id=str(trace_id or ""))
+            if (not self.store.project_record_is_signed(trace) or trace.get("trace_id") != trace_id
+                    or trace.get("artifact_id") != artifact_id or trace.get("input_fingerprints") != fingerprints):
+                raise ValueError("audit_trace_reference_invalid: signed source/audit trace identity differs")
 
     @staticmethod
     def _topology_fingerprint(storyboard: dict[str, Any]) -> str:
@@ -19165,6 +19203,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         audit_work_order: dict[str, Any],
         root_handoff: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        audit_trace = self.store.get_project_record(namespace, project_id, kind="telemetry",
+            record_id=str(certificate.get("stage_trace_id") or ""))
+        self._assert_audit_trace_references(namespace, project_id, handoff=production_handoff,
+            artifact_id=str(certificate["artifact_id"]), audit_trace=audit_trace)
         package, repair_handoff = (
             self._deterministic_repair_package_and_handoff(
                 namespace,
@@ -23706,6 +23748,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             storyboard=storyboard,
             artifact_id=artifact_id,
         )
+        if handoff.get("audit_intake_recovery_id"):
+            from .audit_intake_recovery import assert_recovery_published
+            assert_recovery_published(self, namespace, project_id, handoff)
         signed_cycle_id = str(handoff.get("audit_cycle_id") or "")
         if audit_cycle_id is not None and str(audit_cycle_id) != signed_cycle_id:
             raise ValueError(
@@ -23753,6 +23798,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             for key, value in fingerprints.items()
         ):
             raise ValueError("handoff_fingerprint_mismatch: source/artifact/canonical/runtime binding changed")
+        self._assert_audit_trace_references(namespace, project_id, handoff=handoff, artifact_id=artifact_id)
         resolved_reaudit_root: dict[str, Any] | None = None
         resolved_reaudit_latest: dict[str, Any] | None = None
         completed_reaudit_replay = False
@@ -24517,6 +24563,60 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 thresholds["introduced_issue_count"] = int(
                     event_summary.get("introduced_issue_count", 0)
                 )
+        telemetry = None
+        if cache_hit:
+            try:
+                telemetry = self.store.get_project_record(
+                    namespace,
+                    project_id,
+                    kind="telemetry",
+                    record_id=stage_trace_id,
+                )
+            except ValueError as exc:
+                if not str(exc).startswith("unknown telemetry record_id:"):
+                    raise
+                if not (
+                    recovering_reaudit_completion
+                    or recovering_root_completion
+                ):
+                    raise ValueError(
+                        "cached independent audit telemetry is missing"
+                    ) from exc
+            if telemetry is not None and (
+                not self.store.project_record_is_signed(telemetry)
+                or telemetry.get("operation") != "audit_storyboard"
+                or telemetry.get("artifact_id") != artifact_id
+                or telemetry.get("input_fingerprints") != fingerprints
+            ):
+                raise ValueError(
+                    "reaudit_recovery_invalid: audit telemetry changed identity"
+                )
+        if telemetry is None:
+            telemetry = self._save_telemetry(
+                namespace,
+                project_id,
+                operation="audit_storyboard",
+                started_ns=started_ns,
+                stages_ms={
+                    "canonical_load": (loaded_ns - started_ns) / 1_000_000,
+                    "machine_validation": (validated_ns - loaded_ns)
+                    / 1_000_000,
+                    "ledger": (time.perf_counter_ns() - validated_ns) / 1_000_000,
+                },
+                cache_hit=cache_hit,
+                artifact_id=artifact_id,
+                telemetry_id=stage_trace_id,
+                window_role="independent_audit",
+                task_type="independent_audit",
+                input_fingerprints=fingerprints,
+                shot_count=len(storyboard.get("shots", [])),
+                # This metric counts batches generated by the v0.5 stage, not
+                # legacy read-only rows present in an old artifact.
+                batch_count=0,
+                unmeasured_stages=["certificate_and_export_projection"],
+            )
+        self._assert_audit_trace_references(namespace, project_id, handoff=handoff,
+            artifact_id=artifact_id, audit_trace=telemetry)
         if cached_certificate is None:
             self._assert_work_order_session(
                 namespace, audit_work_order, request_session_id
@@ -24779,57 +24879,6 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "independent_audit_summary": certificate_summary,
                     "signed_audit_overlay": True,
                 },
-            )
-        telemetry = None
-        if cache_hit:
-            try:
-                telemetry = self.store.get_project_record(
-                    namespace,
-                    project_id,
-                    kind="telemetry",
-                    record_id=stage_trace_id,
-                )
-            except ValueError as exc:
-                if not str(exc).startswith("unknown telemetry record_id:"):
-                    raise
-                if not (
-                    recovering_reaudit_completion
-                    or recovering_root_completion
-                ):
-                    raise ValueError(
-                        "cached independent audit telemetry is missing"
-                    ) from exc
-            if telemetry is not None and (
-                not self.store.project_record_is_signed(telemetry)
-                or telemetry.get("operation") != "audit_storyboard"
-                or telemetry.get("artifact_id") != artifact_id
-                or telemetry.get("input_fingerprints") != fingerprints
-            ):
-                raise ValueError(
-                    "reaudit_recovery_invalid: audit telemetry changed identity"
-                )
-        if telemetry is None:
-            telemetry = self._save_telemetry(
-                namespace,
-                project_id,
-                operation="audit_storyboard",
-                started_ns=started_ns,
-                stages_ms={
-                    "canonical_load": (loaded_ns - started_ns) / 1_000_000,
-                    "machine_validation": (validated_ns - loaded_ns)
-                    / 1_000_000,
-                    "ledger": (recorded_ns - validated_ns) / 1_000_000,
-                },
-                cache_hit=cache_hit,
-                artifact_id=artifact_id,
-                telemetry_id=stage_trace_id,
-                window_role="independent_audit",
-                task_type="independent_audit",
-                input_fingerprints=fingerprints,
-                shot_count=len(storyboard.get("shots", [])),
-                # This metric counts batches generated by the v0.5 stage, not
-                # legacy read-only rows present in an old artifact.
-                batch_count=0,
             )
         with self.store.mutate_project(namespace, project_id) as (hub, ledger):
             if not any(
