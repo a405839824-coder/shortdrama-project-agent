@@ -18988,6 +18988,35 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
         return normalized
 
+    def _repair_source_session_fingerprint(self, handoff: dict[str, Any]) -> str:
+        """Resolve the same source binding when issuing and checking a repair.
+
+        A server-signed external intake has no historical producer transport.
+        Its artifact-derived identity is a binding, not a claimed MCP session.
+        Callers still verify the signed handoff and its complete source chain.
+        """
+        session = handoff.get("from_session_fingerprint")
+        if session:
+            return session
+        artifact_id = str(handoff.get("storyboard_artifact_id") or "")
+        external_intake = (
+            handoff.get("handoff_type") == "audit_intake"
+            and handoff.get("from_window_role") == "external_input"
+            and handoff.get("to_window_role") == "independent_audit"
+            and handoff.get("materializer_contract") == "read-only-audit-intake:no-materialization"
+            and bool(artifact_id)
+            and handoff.get("from_window_binding_id")
+            == "EXTWIN-" + sha256_bytes(f"window:{artifact_id}".encode("utf-8"))[:20]
+            and handoff.get("from_actor_binding_id")
+            == "EXTACT-" + sha256_bytes(f"actor:{artifact_id}".encode("utf-8"))[:20]
+        )
+        if self.settings.deployment_mode == "cloud" and not external_intake:
+            raise ValueError(
+                "repair_package_binding_mismatch: production transport session is missing"
+            )
+        return sha256_bytes(("local-server-bound-production:"
+            + str(handoff.get("from_window_binding_id") or "missing")).encode("utf-8"))
+
     def _deterministic_repair_package_and_handoff(
         self,
         namespace: str,
@@ -19035,12 +19064,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             audit_work_order=audit_work_order,
         )
         protected = production_handoff.get("scope", {}).get("protected_scope", [])
-        production_session = production_handoff.get("from_session_fingerprint") or sha256_bytes(
-            (
-                "local-server-bound-production:"
-                + str(production_handoff.get("from_window_binding_id") or "missing")
-            ).encode("utf-8")
-        )
+        production_session = self._repair_source_session_fingerprint(production_handoff)
         audit_session = audit_binding.get("session_fingerprint") or sha256_bytes(
             (
                 "local-server-bound-audit:"
@@ -20505,7 +20529,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
         if (
             self.settings.deployment_mode == "cloud"
-            and production_handoff.get("from_session_fingerprint")
+            and self._repair_source_session_fingerprint(production_handoff)
             != package.get("production_session_fingerprint")
         ):
             raise ValueError(

@@ -18,8 +18,8 @@ import tarfile
 import tempfile
 
 TARGET_VERSION = "0.5.60"
-CONTRACT = "library-runtime-transfer-0560-r2-v1"
-DIRECTORY = ".upgrade-0560-r2"
+CONTRACT = "library-runtime-transfer-0560-r3-v1"
+DIRECTORY = ".upgrade-0560-r3"
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 MAX_FILES = 100_000
