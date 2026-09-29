@@ -24,6 +24,62 @@ def _signed(service: Any, namespace: str, project: str, kind: str, identity: str
     return value
 
 
+def _historical_lineage(service: Any, namespace: str, project: str, root: dict,
+                        latest: dict, artifact: dict, audit_order: dict, ledger: dict, hub: dict) -> set[str]:
+    """Verify signed history without treating an old runtime as current."""
+    routes = [row for row in service.store.list_project_records_strict(namespace, project, kind="handoffs")
+              if row.get("reaudit_root_handoff_id") == root["handoff_id"]]
+    routes.sort(key=lambda row: int(row.get("reaudit_sequence") or 0))
+    ordered = [root, *routes]
+    if ordered[-1]["handoff_id"] != latest["handoff_id"]:
+        raise ValueError("audit_intake_recovery_current_route_not_latest")
+    previous_cert = previous_event = None
+    for sequence, row in enumerate(ordered):
+        if (not service.store.project_record_is_signed(row) or row.get("status") != "consumed"
+                or row.get("fingerprints") != root.get("fingerprints")
+                or service._reaudit_immutable_identity(row) != service._reaudit_immutable_identity(root)):
+            raise ValueError("audit_intake_recovery_historical_lineage_mismatch")
+        cert = service._load_verified_independent_audit_certificate(namespace, project,
+            certificate_id=str(row.get("audit_certificate_id") or ""), artifact_id=artifact["artifact_id"],
+            canonical_sha256=root["canonical_sha256"], source_artifact_raw_sha256=artifact["fingerprint"])
+        events = [event for event in ledger.get("events", []) if event.get("event_id") == cert.get("event_id")]
+        if len(events) != 1:
+            raise ValueError("audit_intake_recovery_historical_event_required")
+        event = events[0]
+        if (cert.get("handoff_id") != row["handoff_id"] or cert.get("work_order_id") != audit_order["work_order_id"]
+                or cert.get("production_stage_trace_id") != root["stage_trace_id"]
+                or cert.get("production_trace_id") != row["stage_trace_id"]
+                or event.get("handoff_id") != row["handoff_id"]
+                or event.get("stage_trace_id") != cert.get("stage_trace_id")
+                or event.get("window_key") != audit_order["work_order_id"]
+                or event.get("canonical_fingerprint") != root["canonical_sha256"]
+                or event.get("semantic_audit_sha256") != cert["report"].get("semantic_audit_sha256")
+                or ("event_sha256" in cert and cert["event_sha256"] != stable_json_hash(event))):
+            raise ValueError("audit_intake_recovery_historical_certificate_event_mismatch")
+        if sequence:
+            parent = ordered[sequence-1]
+            service._verified_reaudit_route_authority(namespace, project, route=row, audit_work_order=audit_order, hub=hub)
+            if (row.get("reaudit_kind") != "independent_audit_successor" or row.get("server_minted_lineage") is not True
+                    or row.get("reaudit_sequence") != sequence or row.get("reaudit_parent_handoff_id") != parent["handoff_id"]
+                    or row.get("previous_audit_certificate_id") != previous_cert["certificate_id"]
+                    or row.get("previous_audit_certificate_hmac") != previous_cert["integrity_hmac"]
+                    or row.get("previous_audit_event_sha256") != stable_json_hash(previous_event)
+                    or row.get("reaudit_lineage_sha256") != stable_json_hash(
+                        service._reaudit_lineage_payload(root=root, parent=parent, successor=row))
+                    or row.get("reaudit_event_trace_id") != cert.get("stage_trace_id")
+                    or row.get("reaudit_route_trace_id") != row["stage_trace_id"]
+                    or [h for h in hub.get("handoffs", []) if h.get("handoff_id") == row["handoff_id"]]
+                        != [service._handoff_record_projection(row)]):
+                raise ValueError("audit_intake_recovery_historical_parent_bridge_mismatch")
+            trace = _signed(service, namespace, project, "telemetry", row["stage_trace_id"])
+            if (trace.get("operation") != "audit_storyboard_reaudit_route"
+                    or trace.get("artifact_id") != artifact["artifact_id"]
+                    or trace.get("input_fingerprints") != row["fingerprints"]):
+                raise ValueError("audit_intake_recovery_historical_route_trace_mismatch")
+        previous_cert, previous_event = cert, event
+    return {row["handoff_id"] for row in ordered}
+
+
 def _prepare(service: Any, namespace: str, project: str, handoff_id: str) -> dict:
     from .service import canonical_storyboard_sha256, _find_work_order, sha256_bytes
 
@@ -55,8 +111,10 @@ def _prepare(service: Any, namespace: str, project: str, handoff_id: str) -> dic
     if canonical != old.get("canonical_sha256") or any(
             current.get(key) != (old.get("fingerprints") or {}).get(key) for key in CONTENT_KEYS):
         raise ValueError("audit_intake_recovery_content_changed")
-    certificate_id = str(old.get("latest_audit_certificate_id") or old.get("audit_certificate_id") or "")
-    if not certificate_id or artifact.get("metadata", {}).get("independent_audit_certificate_id") != certificate_id:
+    # A consumed root retains its first certificate; later audits have their
+    # own signed successor. The unchanged artifact names the current authority.
+    certificate_id = str(artifact.get("metadata", {}).get("independent_audit_certificate_id") or "")
+    if not certificate_id:
         raise ValueError("audit_intake_recovery_latest_certificate_mismatch")
     cert = service._load_verified_independent_audit_certificate(namespace, project,
         certificate_id=certificate_id, artifact_id=artifact_id, canonical_sha256=canonical,
@@ -66,12 +124,31 @@ def _prepare(service: Any, namespace: str, project: str, handoff_id: str) -> dic
     route = _signed(service, namespace, project, "handoffs", str(cert.get("handoff_id") or ""))
     if (route["handoff_id"] != handoff_id and route.get("reaudit_root_handoff_id") != handoff_id):
         raise ValueError("audit_intake_recovery_route_root_mismatch")
+    if (route.get("status") != "consumed" or route.get("audit_certificate_id") != certificate_id
+            or route.get("latest_audit_certificate_id", certificate_id) != certificate_id
+            or route.get("storyboard_artifact_id") != artifact_id
+            or route.get("canonical_sha256") != canonical
+            or (route.get("production_stage_trace_id") or route.get("stage_trace_id")) != missing_id
+            or route.get("stage_trace_id") != cert.get("production_trace_id")):
+        raise ValueError("audit_intake_recovery_current_route_mismatch")
     route_fingerprints = route.get("fingerprints") or {}
+    if any(route_fingerprints.get(key) != current.get(key) for key in CONTENT_KEYS):
+        raise ValueError("audit_intake_recovery_route_content_mismatch")
     certificate_fingerprints = {key: route_fingerprints.get({"source": "source_bytes", "boundary": "episode_boundary"}.get(key, key))
         for key in ("source", "boundary", "artifact_raw", "artifact_semantic", "canonical", "parser", "schema",
                     "runtime", "rules", "validator", "project_anchors", "target_model_contract")}
     if certificate_fingerprints != cert.get("fingerprints"):
         raise ValueError("audit_intake_recovery_route_fingerprint_mismatch")
+    if route["handoff_id"] != handoff_id:
+        route_trace = _signed(service, namespace, project, "telemetry", route["stage_trace_id"])
+        if (route.get("reaudit_kind") != "independent_audit_successor"
+                or route.get("reaudit_route_trace_id") != route["stage_trace_id"]
+                or route_trace.get("operation") != "audit_storyboard_reaudit_route"
+                or route_trace.get("artifact_id") != artifact_id
+                or route_trace.get("input_fingerprints") != route_fingerprints):
+            raise ValueError("audit_intake_recovery_current_route_trace_mismatch")
+    hub = service.store.load_hub(namespace, project)
+    audit_order = _find_work_order(hub, str(cert["work_order_id"]))
     packages = [p for p in service.store.list_project_records_strict(namespace, project, kind="repair_packages")
                 if p.get("audit_certificate_id") == certificate_id]
     if len(packages) != 1 or not service.store.project_record_is_signed(packages[0]):
@@ -91,6 +168,7 @@ def _prepare(service: Any, namespace: str, project: str, handoff_id: str) -> dic
             or audit_trace.get("input_fingerprints") != route_fingerprints):
         raise ValueError("audit_intake_recovery_audit_event_trace_mismatch")
     ledger = service.store.load_ledger(namespace, project)
+    lineage_ids = _historical_lineage(service, namespace, project, old, route, artifact, audit_order, ledger, hub)
     events = [e for e in ledger.get("events", []) if e.get("event_id") == cert.get("event_id")]
     if len(events) != 1:
         raise ValueError("audit_intake_recovery_audit_event_required")
@@ -115,7 +193,12 @@ def _prepare(service: Any, namespace: str, project: str, handoff_id: str) -> dic
         snapshot = collection_snapshot(service, namespace, project, str(proof.get("collection_id") or ""))
         if (snapshot["issue_conflicts"] or proof != report.get("audit_coverage_page_receipt")
                 or proof.get("binding") != snapshot["collection"]["binding"]
-                or proof.get("binding", {}).get("handoff_id") != route["handoff_id"]
+                or proof.get("binding", {}).get("handoff_id") not in lineage_ids
+                or any(proof.get("binding", {}).get(key) != value for key, value in {
+                    "namespace_sha256": stable_json_hash(namespace), "project_id": project,
+                    "artifact_id": artifact_id, "artifact_sha256": current["artifact_raw"],
+                    "work_order_id": cert["work_order_id"], "fingerprints": route_fingerprints,
+                    "manifest_sha256": receipt["manifest_sha256"]}.items())
                 or proof.get("checks_sha256") != stable_json_hash(snapshot["checks"])
                 or proof.get("checks_sha256") != receipt["checks_sha256"]
                 or proof.get("page_ids") != [p["page_id"] for p in snapshot["pages"]]
@@ -123,8 +206,6 @@ def _prepare(service: Any, namespace: str, project: str, handoff_id: str) -> dic
                 or proof.get("revision_ids", []) != snapshot["revision_ids"]):
             raise ValueError("audit_intake_recovery_coverage_snapshot_mismatch")
         snapshot_hash = snapshot["snapshot_sha256"]
-    hub = service.store.load_hub(namespace, project)
-    audit_order = _find_work_order(hub, str(cert["work_order_id"]))
     public = {"old_handoff_id": handoff_id, "old_handoff_sha256": stable_json_hash(old),
         "old_missing_trace_id": missing_id, "artifact_id": artifact_id,
         "raw_sha256": current["artifact_raw"], "canonical_sha256": canonical,

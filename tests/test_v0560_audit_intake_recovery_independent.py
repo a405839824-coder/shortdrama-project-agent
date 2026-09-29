@@ -138,6 +138,7 @@ class IntakeRecoveryAuthorityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.old["status"], "consumed")
         self.directory = self.store.project_dir(f.namespace, self.project)
         self.missing_path = self.directory / "telemetry" / (self.old["stage_trace_id"] + ".json")
+        self.original_root_trace_bytes = self.missing_path.read_bytes()
         self.missing_path.unlink(missing_ok=True)  # Only this isolated synthetic fixture.
         self.gap_id = "GAP-synthetic-intake-loss"
         with self.store.mutate_project(f.namespace, self.project) as (hub, _ledger):
@@ -175,6 +176,121 @@ class IntakeRecoveryAuthorityTests(unittest.IsolatedAsyncioTestCase):
         return await self.flow.call("recover_storyboard_handoff", {**self.base_args, "action": "execute",
             "expected_plan_sha256": plan["plan_sha256"],
             "confirmation": "REVALIDATE_EXTERNAL_INTAKE_PRESERVE_HISTORY"})
+
+    async def current_reaudit_successor(self):
+        """Create a genuine successor through audit, then lose only the root."""
+        root_path = self.directory / "handoffs" / (self.old["handoff_id"] + ".json")
+        root_bytes = root_path.read_bytes()
+        # Restore the exact fixture bytes while running an ordinary real audit;
+        # this helper never synthesizes a historical signed event.
+        self.missing_path.write_bytes(self.original_root_trace_bytes)
+        try:
+            semantic = declare_unknown(self.flow.service, self.flow.settings,
+                                       self.project, self.artifact["artifact_id"])
+            semantic["layers"][0]["summary"] += " Actual second synthetic review; evidence remains unknown."
+            coverage = semantic.pop("coverage")
+            args = {
+                "project_id": self.project, "artifact_id": self.artifact["artifact_id"],
+                "work_order_id": self.audit_order, "handoff_artifact_id": self.old["handoff_id"],
+                "force_machine_recheck": True}
+            # UNKNOWN is reported but not complete; preserve the accepted
+            # collection instead of attempting to discard it under a new key.
+            original_pages = [p["page_id"] for p in self.old_coverage["pages"]]
+            result = await self.flow.call("audit_storyboard", {**args, "semantic_audit": {
+                **semantic, "coverage_page": {"contract": "semantic-obligation-pages-v1",
+                    "action": "finalize", "manifest_sha256": coverage["manifest_sha256"],
+                    "collection_id": self.collection_id, "page_ids": original_pages}}})
+        finally:
+            self.missing_path.unlink(missing_ok=True)
+        self.assertEqual(result["status"], "fail_current")
+        self.assertEqual(root_path.read_bytes(), root_bytes)
+        current = result["data"]["certificate"]
+        self.assertNotEqual(current["certificate_id"], self.cert["certificate_id"])
+        route = self.store.get_project_record(self.flow.namespace, self.project,
+            kind="handoffs", record_id=current["handoff_id"])
+        self.assertEqual(route["status"], "consumed")
+        self.assertEqual(route["reaudit_root_handoff_id"], self.old["handoff_id"])
+        self.assertEqual(self.old["audit_certificate_id"], self.cert["certificate_id"])
+        self.old_files = {p.relative_to(self.directory).as_posix(): p.read_bytes()
+            for parent in ("artifacts", "handoffs", "certificates", "repair_packages",
+                           "audit_coverage_collections", "audit_coverage_pages", "audit_coverage_revisions")
+            for p in (self.directory / parent).glob("**/*") if p.is_file()}
+        return result, route
+
+    async def test_current_reaudit_authority_is_selected_without_rewriting_initial_root(self):
+        current, route = await self.current_reaudit_successor()
+        plan = await self.plan()
+        item = plan["items"][0]
+        self.assertEqual(item["certificate_id"], current["data"]["certificate"]["certificate_id"])
+        self.assertEqual(item["repair_package_id"], current["data"]["repair_package"]["repair_package_id"])
+        self.assertNotEqual(item["certificate_id"], self.cert["certificate_id"])
+        result = await self.execute(plan)
+        self.assertEqual(result["data"]["mappings"][0]["status"], "PENDING_AUDIT")
+        self.assertFalse(result["data"].get("audit_pass", False))
+        self.assertGreater(current["data"]["certificate"]["semantic_obligation_coverage"]["unknown_shot_count"], 0)
+        self.assert_history_preserved()
+
+    async def test_signed_successor_with_wrong_root_content_or_route_is_rejected(self):
+        _current, route = await self.current_reaudit_successor()
+        path = self.directory / "handoffs" / (route["handoff_id"] + ".json")
+        original = path.read_bytes()
+        cases = [
+            ({"reaudit_root_handoff_id": "HND-unrelated"}, "route_root_mismatch"),
+            ({"production_stage_trace_id": "TRC-unrelated"}, "current_route_mismatch"),
+            ({"status": "prepared"}, "current_route_mismatch"),
+            ({"fingerprints": {**route["fingerprints"], "canonical": "f" * 64}}, "route_content_mismatch"),
+            ({"reaudit_route_trace_id": "TRC-unrelated"}, "current_route_trace_mismatch"),
+        ]
+        for changes, expected in cases:
+            with self.subTest(changes=changes):
+                value = {**route, **changes}
+                value["integrity_hmac"] = self.store._record_integrity_hmac(value)
+                self.store.atomic_write_json(path, value)
+                baseline = {p.relative_to(self.directory).as_posix(): p.read_bytes()
+                            for p in self.directory.rglob("*") if p.is_file()}
+                try:
+                    error = await self.flow.rejection_text("recover_storyboard_handoff", {
+                        **self.base_args, "action": "plan"})
+                    self.assertIn(expected, error)
+                    self.assertEqual({p.relative_to(self.directory).as_posix(): p.read_bytes()
+                                      for p in self.directory.rglob("*") if p.is_file()}, baseline)
+                finally:
+                    path.write_bytes(original)
+        self.assert_history_preserved()
+
+    async def test_signed_successor_trace_for_another_artifact_is_rejected(self):
+        _current, route = await self.current_reaudit_successor()
+        path = self.directory / "telemetry" / (route["stage_trace_id"] + ".json")
+        original = path.read_bytes()
+        value = self.store.read_json(path)
+        value["artifact_id"] = "ART-unrelated"
+        value["integrity_hmac"] = self.store._record_integrity_hmac(value)
+        self.store.atomic_write_json(path, value)
+        try:
+            error = await self.flow.rejection_text("recover_storyboard_handoff", {
+                **self.base_args, "action": "plan"})
+            self.assertIn("current_route_trace_mismatch", error)
+        finally:
+            path.write_bytes(original)
+        self.assert_history_preserved()
+
+    async def test_metadata_cannot_roll_back_from_signed_successor_to_initial_certificate(self):
+        await self.current_reaudit_successor()
+        path = self.directory / "artifacts" / (self.artifact["artifact_id"] + ".meta.json")
+        original = path.read_bytes()
+        self.store.update_artifact_metadata(self.flow.namespace, self.project, self.artifact["artifact_id"], {
+            "independent_audit_certificate_id": self.cert["certificate_id"]})
+        baseline = {p.relative_to(self.directory).as_posix(): p.read_bytes()
+                    for p in self.directory.rglob("*") if p.is_file()}
+        try:
+            error = await self.flow.rejection_text("recover_storyboard_handoff", {
+                **self.base_args, "action": "plan"})
+            self.assertRegex(error, "latest|superseded|lineage|current_route|repair_package")
+            self.assertEqual({p.relative_to(self.directory).as_posix(): p.read_bytes()
+                              for p in self.directory.rglob("*") if p.is_file()}, baseline)
+        finally:
+            path.write_bytes(original)
+        self.assert_history_preserved()
 
     def assert_history_preserved(self):
         for relative, raw in self.old_files.items():
