@@ -20279,7 +20279,13 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 raise ValueError(f"repair_window_separation_required: repair reuses {label} window")
             if repair_actor and actor and repair_actor == actor:
                 raise ValueError(f"repair_window_separation_required: repair reuses {label} actor")
-            if repair_session and session and repair_session == session:
+            if (
+                work_order.get("window_access_contract")
+                != WINDOW_NEUTRAL_ACCESS_CONTRACT
+                and repair_session
+                and session
+                and repair_session == session
+            ):
                 raise ValueError(f"repair_window_separation_required: repair reuses {label} session")
 
     def _full_repair_authorization(
