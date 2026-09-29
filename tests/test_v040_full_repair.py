@@ -388,10 +388,18 @@ class CompactMasterFullRepairTests(unittest.IsolatedAsyncioTestCase):
         package = audited["data"]["repair_package"]
         self.assertEqual(intake_handoff["handoff_type"], "audit_intake")
         self.assertEqual(intake_handoff["from_window_role"], "external_input")
-        self.assertEqual(
+        self.assertNotEqual(
             certificate["stage_trace_id"],
             certificate["production_stage_trace_id"],
         )
+        intake_trace = self.service.store.get_project_record(
+            self.namespace, project_id, kind="telemetry",
+            record_id=certificate["production_stage_trace_id"],
+        )
+        self.assertTrue(self.service.store.project_record_is_signed(intake_trace))
+        self.assertTrue(intake_trace["intake_binding_only"])
+        self.assertEqual(intake_trace["artifact_id"], artifact_id)
+        self.assertEqual(intake_trace["input_fingerprints"], intake_handoff["fingerprints"])
         self.assertEqual(
             package["production_handoff_id"], intake_handoff["handoff_id"]
         )
