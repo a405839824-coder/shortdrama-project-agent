@@ -18,6 +18,7 @@ from .canonical import etag_matches, stable_json_hash
 from .config import Settings
 from .members import MEMBER_CONTRACT, load_registry
 from .external_storage import ExternalProjectStorage
+from .retention import RetentionWorker
 from .file_io import DEFAULT_BULK_RESPONSE_CHARS, preview_extracted_bulk
 from .formal_delivery import delivery_contract, inspect_formal_delivery
 from .diagnostic_view import diagnostic_page
@@ -182,6 +183,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
     server.access = AccessStore(settings)
     server.storyboard_service = service
     external_storage = ExternalProjectStorage(service, settings)
+    server.retention_worker = RetentionWorker(external_storage)
     schemes = security_schemes(settings)
 
     def meta(invoking: str, invoked: str, *, file_params: list[str] | None = None) -> dict[str, Any]:
@@ -1322,6 +1324,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
                 "account_role_restrictions": True,
                 "bootstrap_admin_configured": bool(settings.admin_subjects) and not settings.member_connection_access,
                 "member_connection_access": settings.member_connection_access,
+                "data_retention": server.retention_worker.status(),
             }
         )
 

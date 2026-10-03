@@ -440,6 +440,10 @@ class ExternalProjectStorage:
             "expires_epoch": int(time.time()) + 3_600,
         }
         self._exports[export_id] = value
+        # Persist deletion proof separately from expiring download tokens.
+        descriptor = {**value, 'namespace': namespace}
+        descriptor['integrity_hmac'] = self.store._record_integrity_hmac(descriptor)
+        self.store.atomic_write_json(path.with_suffix('.json'), descriptor)
         return {**value, "download_url": self._signed_export_url(value)}
 
     def _signed_export_url(self, value: dict[str, Any]) -> str:
