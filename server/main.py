@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 
@@ -21,13 +22,24 @@ MAX_MCP_REQUEST_BODY_BYTES = 32 * 1024 * 1024
 
 
 def create_http_app(server, settings: Settings):
-    return server.streamable_http_app(
+    app = server.streamable_http_app(
         streamable_http_path="/mcp",
         json_response=True,
         stateless_http=True,
         host=settings.host,
         max_request_body_size=MAX_MCP_REQUEST_BODY_BYTES,
     )
+    original_lifespan = app.router.lifespan_context
+    @asynccontextmanager
+    async def lifespan(application):
+        async with original_lifespan(application) as state:
+            server.retention_worker.start()
+            try:
+                yield state
+            finally:
+                server.retention_worker.stop()
+    app.router.lifespan_context = lifespan
+    return app
 
 
 def build_parser() -> argparse.ArgumentParser:

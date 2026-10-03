@@ -207,5 +207,21 @@ class StartupRestoreTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'gate blocked'): main.main()
                 create.assert_not_called()
 
+    def test_maintenance_transfer_has_separate_binding_and_preserves_old_receipt(self):
+        self.run_restore()
+        old = restore._tree(self.transfer)
+        self.transfer = self.data / restore.MAINTENANCE_DIRECTORY
+        self.transfer.mkdir()
+        self.arm()
+        self.manifest['contract'] = restore.MAINTENANCE_CONTRACT
+        self.sign()
+        result = restore._restore(self.data, self.runtime, version=restore.TARGET_VERSION,
+            directory=restore.MAINTENANCE_DIRECTORY, contract=restore.MAINTENANCE_CONTRACT)
+        self.assertFalse(result['restored'])
+        self.assertEqual(restore._tree(self.data / restore.DIRECTORY), old)
+        with self.assertRaisesRegex(ValueError, 'undeclared_transfer'):
+            restore._restore(self.data, self.runtime, version=restore.TARGET_VERSION,
+                directory='../escape', contract='custom')
+
 
 if __name__ == '__main__': unittest.main()

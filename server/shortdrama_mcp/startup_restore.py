@@ -20,6 +20,8 @@ import tempfile
 TARGET_VERSION = "0.5.60"
 CONTRACT = "library-runtime-transfer-0560-r3-v1"
 DIRECTORY = ".upgrade-0560-r3"
+MAINTENANCE_DIRECTORY = ".upgrade-retention-20261003"
+MAINTENANCE_CONTRACT = "library-runtime-transfer-retention-20261003-v1"
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 MAX_FILES = 100_000
@@ -83,8 +85,11 @@ def _tree(root: Path) -> dict[str, str]:
     return result
 
 
-def _restore(data_dir: Path, runtime_root: Path, *, version: str) -> dict | None:
-    transfer = data_dir / DIRECTORY
+def _restore(data_dir: Path, runtime_root: Path, *, version: str,
+             directory: str = DIRECTORY, contract: str = CONTRACT) -> dict | None:
+    if (directory, contract) not in {(DIRECTORY, CONTRACT), (MAINTENANCE_DIRECTORY, MAINTENANCE_CONTRACT)}:
+        raise ValueError('startup_restore_undeclared_transfer')
+    transfer = data_dir / directory
     marker = transfer / "manifest.json"
     if not marker.exists():
         return None
@@ -95,7 +100,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str) -> dict | None
     if (transfer / "manifest.consumed.json").exists():
         raise ValueError("startup_restore_already_consumed")
     manifest = json.loads(marker.read_text(encoding="utf-8"))
-    if (manifest.get("contract") != CONTRACT or manifest.get("target_version") != version or version != TARGET_VERSION
+    if (manifest.get("contract") != contract or manifest.get("target_version") != version or version != TARGET_VERSION
             or manifest.get("runtime_root") != str(runtime_root)
             or manifest.get("data_dir") != str(data_dir)
             or manifest.get("old_writer_frozen") is not True):
@@ -154,7 +159,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str) -> dict | None
         else:
             os.replace(stage, runtime_root)
             restored = True
-        receipt = {"contract": CONTRACT, "status": "pass", "target_version": version,
+        receipt = {"contract": contract, "status": "pass", "target_version": version,
                    "archive_sha256": manifest["archive_sha256"], "manifest_sha256": _hash(_json_bytes(manifest)),
                    "runtime_root": str(runtime_root), "files_verified": len(expected),
                    "restored": restored, "existing_files_overwritten": 0,
@@ -171,13 +176,16 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str) -> dict | None
 
 
 def restore_release_runtime_if_requested(settings) -> dict | None:
-    marker = settings.data_dir / DIRECTORY / "manifest.json"
-    if not marker.exists():
+    pending = [(d, c) for d, c in ((DIRECTORY, CONTRACT), (MAINTENANCE_DIRECTORY, MAINTENANCE_CONTRACT))
+               if (settings.data_dir / d / 'manifest.json').exists()]
+    if not pending:
         return None
+    if len(pending) != 1:
+        raise ValueError('startup_restore_multiple_transfers')
     root = Path(os.environ.get("SHORTDRAMA_RUNTIME_DATA_DIR") or "/tmp/shortdrama-library-runtime")
     if (settings.data_dir != Path("/data") or root != Path("/tmp/shortdrama-library-runtime")
             or settings.deployment_mode != "cloud"
             or os.environ.get("SHORTDRAMA_PROJECT_STORAGE_MODE", "persistent") != "library"):
         raise ValueError("startup_restore_explicit_library_cloud_required")
     from . import __version__
-    return _restore(settings.data_dir, root, version=__version__)
+    return _restore(settings.data_dir, root, version=__version__, directory=pending[0][0], contract=pending[0][1])
