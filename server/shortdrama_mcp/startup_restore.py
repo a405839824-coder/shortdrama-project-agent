@@ -22,6 +22,9 @@ CONTRACT = "library-runtime-transfer-0560-r3-v1"
 DIRECTORY = ".upgrade-0560-r3"
 MAINTENANCE_DIRECTORY = ".upgrade-retention-20261003"
 MAINTENANCE_CONTRACT = "library-runtime-transfer-retention-20261003-v1"
+AUDIT_ENVIRONMENT_DIRECTORY = ".upgrade-audit-environment-20261004"
+AUDIT_ENVIRONMENT_CONTRACT = "library-runtime-transfer-audit-environment-20261004-v1"
+AUDIT_ENVIRONMENT_VERSION = "0.5.61"
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 MAX_FILES = 100_000
@@ -92,7 +95,12 @@ def _tree(root: Path) -> dict[str, str]:
 
 def _restore(data_dir: Path, runtime_root: Path, *, version: str,
              directory: str = DIRECTORY, contract: str = CONTRACT) -> dict | None:
-    if (directory, contract) not in {(DIRECTORY, CONTRACT), (MAINTENANCE_DIRECTORY, MAINTENANCE_CONTRACT)}:
+    target_version = {
+        (DIRECTORY, CONTRACT): TARGET_VERSION,
+        (MAINTENANCE_DIRECTORY, MAINTENANCE_CONTRACT): TARGET_VERSION,
+        (AUDIT_ENVIRONMENT_DIRECTORY, AUDIT_ENVIRONMENT_CONTRACT): AUDIT_ENVIRONMENT_VERSION,
+    }.get((directory, contract))
+    if target_version is None:
         raise ValueError('startup_restore_undeclared_transfer')
     transfer = data_dir / directory
     marker = transfer / "manifest.json"
@@ -105,7 +113,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
     if (transfer / "manifest.consumed.json").exists():
         raise ValueError("startup_restore_already_consumed")
     manifest = json.loads(marker.read_text(encoding="utf-8"))
-    if (manifest.get("contract") != contract or manifest.get("target_version") != version or version != TARGET_VERSION
+    if (manifest.get("contract") != contract or manifest.get("target_version") != version or version != target_version
             or manifest.get("runtime_root") != str(runtime_root)
             or manifest.get("data_dir") != str(data_dir)
             or manifest.get("old_writer_frozen") is not True):
@@ -181,7 +189,8 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
 
 
 def restore_release_runtime_if_requested(settings) -> dict | None:
-    pending = [(d, c) for d, c in ((DIRECTORY, CONTRACT), (MAINTENANCE_DIRECTORY, MAINTENANCE_CONTRACT))
+    pending = [(d, c) for d, c in ((DIRECTORY, CONTRACT), (MAINTENANCE_DIRECTORY, MAINTENANCE_CONTRACT),
+                                 (AUDIT_ENVIRONMENT_DIRECTORY, AUDIT_ENVIRONMENT_CONTRACT))
                if (settings.data_dir / d / 'manifest.json').exists()]
     if not pending:
         return None

@@ -11,7 +11,9 @@ from .canonical import stable_json_hash
 from .models import ToolResponse
 
 PHASE = "audit_intake_recovery"
+ENVIRONMENT_PHASE = "audit_environment_recovery"
 CONFIRMATION = "REVALIDATE_EXTERNAL_INTAKE_PRESERVE_HISTORY"
+ENVIRONMENT_CONFIRMATION = "REVALIDATE_STALE_ENVIRONMENT_PRESERVE_HISTORY"
 CONTRACT = "external-intake-recovery-v1"
 CONTENT_KEYS = ("source_bytes", "normalized_source", "episode_boundary", "artifact_raw",
                 "artifact_semantic", "canonical", "project_anchors")
@@ -80,24 +82,30 @@ def _historical_lineage(service: Any, namespace: str, project: str, root: dict,
     return {row["handoff_id"] for row in ordered}
 
 
-def _prepare(service: Any, namespace: str, project: str, handoff_id: str) -> dict:
+def _prepare(service: Any, namespace: str, project: str, handoff_id: str, *, phase: str = PHASE) -> dict:
     from .service import canonical_storyboard_sha256, _find_work_order, sha256_bytes
 
     old = _signed(service, namespace, project, "handoffs", handoff_id)
     if (old.get("handoff_type") != "audit_intake" or old.get("audit_class") != "audit_intake"
             or old.get("from_window_role") != "external_input" or old.get("status") != "consumed"
-            or old.get("reaudit_kind") or old.get("audit_intake_recovery_id")):
+            or old.get("reaudit_kind") or (old.get("audit_intake_recovery_id") and phase == PHASE)):
         raise ValueError("audit_intake_recovery_external_consumed_root_required")
+    if old.get("audit_intake_recovery_id"):
+        assert_recovery_published(service, namespace, project, old)
     missing_id = str(old.get("stage_trace_id") or "")
     if not missing_id:
         raise ValueError("audit_intake_recovery_missing_reference_required")
-    try:
-        service.store.get_project_record(namespace, project, kind="telemetry", record_id=missing_id)
-    except ValueError as exc:
-        if str(exc) != f"unknown telemetry record_id: {missing_id}":
-            raise
+    if phase == ENVIRONMENT_PHASE:
+        service._assert_audit_trace_references(namespace, project, handoff=old,
+            artifact_id=str(old.get("storyboard_artifact_id") or ""))
     else:
-        raise ValueError("audit_intake_recovery_trace_already_present")
+        try:
+            service.store.get_project_record(namespace, project, kind="telemetry", record_id=missing_id)
+        except ValueError as exc:
+            if str(exc) != f"unknown telemetry record_id: {missing_id}":
+                raise
+        else:
+            raise ValueError("audit_intake_recovery_trace_already_present")
     artifact_id = str(old.get("storyboard_artifact_id") or "")
     storyboard, artifact = service._storyboard_from_artifact(namespace, project, artifact_id,
         persist_recovered_canonical=False, require_bound_projection=True)
@@ -119,6 +127,11 @@ def _prepare(service: Any, namespace: str, project: str, handoff_id: str) -> dic
     cert = service._load_verified_independent_audit_certificate(namespace, project,
         certificate_id=certificate_id, artifact_id=artifact_id, canonical_sha256=canonical,
         source_artifact_raw_sha256=current["artifact_raw"])
+    runtime_certificate = service._matching_runtime_certificate(namespace, project)
+    if (phase == ENVIRONMENT_PHASE and old.get("fingerprints") == current
+            and (cert.get("cache_components") or {}).get("runtime_test_certificate_id")
+                == (runtime_certificate or {}).get("certificate_id")):
+        raise ValueError("audit_environment_recovery_profile_unchanged")
     if cert.get("production_stage_trace_id") != missing_id:
         raise ValueError("audit_intake_recovery_root_trace_mismatch")
     route = _signed(service, namespace, project, "handoffs", str(cert.get("handoff_id") or ""))
@@ -151,17 +164,19 @@ def _prepare(service: Any, namespace: str, project: str, handoff_id: str) -> dic
     audit_order = _find_work_order(hub, str(cert["work_order_id"]))
     packages = [p for p in service.store.list_project_records_strict(namespace, project, kind="repair_packages")
                 if p.get("audit_certificate_id") == certificate_id]
-    if len(packages) != 1 or not service.store.project_record_is_signed(packages[0]):
+    if len(packages) > 1 or (not packages and (phase == PHASE or cert.get("result") != "pass")):
         raise ValueError("audit_intake_recovery_signed_repair_package_required")
-    package = packages[0]
-    if package.get("status") != "issued":
+    package = packages[0] if packages else None
+    if package is not None and not service.store.project_record_is_signed(package):
+        raise ValueError("audit_intake_recovery_signed_repair_package_required")
+    if package is not None and package.get("status") not in ({"issued", "consumed"} if phase == ENVIRONMENT_PHASE else {"issued"}):
         raise ValueError("audit_intake_recovery_repair_package_not_issued")
     bindings = {"base_artifact_id": artifact_id, "base_canonical_sha256": canonical,
         "source_production_stage_trace_id": missing_id, "source_audit_handoff_id": route["handoff_id"],
         "source_audit_event_trace_id": cert.get("stage_trace_id"),
         "source_audit_route_trace_id": cert.get("production_trace_id"),
         "audit_event_id": cert.get("event_id"), "fingerprints": route_fingerprints}
-    if any(package.get(key) != value for key, value in bindings.items()):
+    if package is not None and any(package.get(key) != value for key, value in bindings.items()):
         raise ValueError("audit_intake_recovery_repair_package_mismatch")
     audit_trace = _signed(service, namespace, project, "telemetry", str(cert.get("stage_trace_id") or ""))
     if (audit_trace.get("artifact_id") != artifact_id or audit_trace.get("operation") != "audit_storyboard"
@@ -207,10 +222,12 @@ def _prepare(service: Any, namespace: str, project: str, handoff_id: str) -> dic
             raise ValueError("audit_intake_recovery_coverage_snapshot_mismatch")
         snapshot_hash = snapshot["snapshot_sha256"]
     public = {"old_handoff_id": handoff_id, "old_handoff_sha256": stable_json_hash(old),
-        "old_missing_trace_id": missing_id, "artifact_id": artifact_id,
+        ("old_trace_id" if phase == ENVIRONMENT_PHASE else "old_missing_trace_id"): missing_id,
+        "artifact_id": artifact_id,
         "raw_sha256": current["artifact_raw"], "canonical_sha256": canonical,
         "certificate_id": certificate_id, "certificate_sha256": stable_json_hash(cert),
-        "repair_package_id": package["repair_package_id"], "repair_package_sha256": stable_json_hash(package),
+        "repair_package_id": package["repair_package_id"] if package else None,
+        "repair_package_sha256": stable_json_hash(package) if package else None,
         "audit_event_id": event["event_id"], "audit_event_sha256": stable_json_hash(event),
         "audit_trace_sha256": stable_json_hash(audit_trace), "route_sha256": stable_json_hash(route),
         "coverage_snapshot_sha256": snapshot_hash, "coverage_receipt_sha256": stable_json_hash(receipt),
@@ -234,22 +251,25 @@ def assert_recovery_published(service: Any, namespace: str, project: str, handof
 def recover_intake(service: Any, namespace: str, *, project_id: str, work_order_id: str,
                    gap_id: str, handoff_ids: list[str], action: str,
                    expected_plan_sha256: str | None, confirmation: str | None,
-                   request_session_id: str | None) -> ToolResponse:
+                   request_session_id: str | None, phase: str = PHASE) -> ToolResponse:
     from .service import _find_work_order, utc_stamp
 
+    if phase not in {PHASE, ENVIRONMENT_PHASE}:
+        raise ValueError("audit_intake_recovery_phase_invalid")
+    expected_confirmation = ENVIRONMENT_CONFIRMATION if phase == ENVIRONMENT_PHASE else CONFIRMATION
     store = service.store
     with store.project_write_lock(namespace, project_id):
         hub = store.load_hub(namespace, project_id)
         order = _find_work_order(hub, work_order_id)
         service._assert_handoff_recovery_authority(namespace, order, gap_id=gap_id,
-            handoff_ids=handoff_ids, phase=PHASE, request_session_id=request_session_id)
+            handoff_ids=handoff_ids, phase=phase, request_session_id=request_session_id)
         service._require_capability_gap(hub, gap_id)
         runtime = service._require_runtime_test_certificate(namespace, project_id)
-        prepared = [_prepare(service, namespace, project_id, h) for h in handoff_ids]
-        body = {"contract": CONTRACT, "phase": PHASE, "project_id": project_id,
+        prepared = [_prepare(service, namespace, project_id, h, phase=phase) for h in handoff_ids]
+        body = {"contract": CONTRACT, "phase": phase, "project_id": project_id,
             "work_order_id": work_order_id, "gap_id": gap_id, "handoff_ids": handoff_ids,
             "runtime_test_certificate_id": runtime["certificate_id"],
-            "items": [p["public"] for p in prepared], "expected_confirmation": CONFIRMATION,
+            "items": [p["public"] for p in prepared], "expected_confirmation": expected_confirmation,
             "history_records_deleted": 0, "storyboard_artifacts_modified": 0,
             "independent_audit_verdict_issued": False}
         plan_hash = stable_json_hash(body)
@@ -270,12 +290,12 @@ def recover_intake(service: Any, namespace: str, *, project_id: str, work_order_
                 prior = store.save_project_record(namespace, project_id, kind="handoff_recoveries",
                     record_id=recovery_id, value={"recovery_id": recovery_id, "contract": CONTRACT,
                         "status": "planned", "created_at": utc_stamp(), "plan": plan})
-            return ToolResponse(status="audit_intake_recovery_plan_ready", summary="缺失根记录恢复方案已核验；原审计结论保留",
+            return ToolResponse(status="audit_intake_recovery_plan_ready", summary="审计入库恢复方案已核验；历史原文与结论保留，当前仍须完整复审",
                 project_id=project_id, work_order_id=work_order_id, data={"recovery_plan": plan,
                     "plan_integrity_hmac": prior["integrity_hmac"]})
         if expected_plan_sha256 != plan_hash:
             raise ValueError("audit_intake_recovery_plan_stale")
-        if confirmation != CONFIRMATION:
+        if confirmation != expected_confirmation:
             raise ValueError("audit_intake_recovery_confirmation_required")
         if prior is None:
             raise ValueError("audit_intake_recovery_signed_plan_required")
