@@ -71,6 +71,31 @@ class StartupRestoreTests(unittest.TestCase):
         self.assertTrue((self.transfer / 'manifest.consumed.json').is_file())
         self.assertFalse((self.transfer / 'manifest.json').exists())
 
+    def test_new_audit_environment_transfer_cannot_replay_old_snapshot(self):
+        self.run_restore()
+        old = restore._tree(self.transfer)
+        latest = dict(self.files)
+        latest['projects/namespace/SBP-test/ledger.json'] = b'new signed audit after old maintenance'
+        (self.runtime / 'projects/namespace/SBP-test/ledger.json').write_bytes(
+            latest['projects/namespace/SBP-test/ledger.json'])
+        self.transfer = self.data / restore.AUDIT_ENVIRONMENT_DIRECTORY
+        self.transfer.mkdir()
+        self.arm(files=latest)
+        self.manifest.update(contract=restore.AUDIT_ENVIRONMENT_CONTRACT,
+                             target_version=restore.AUDIT_ENVIRONMENT_VERSION)
+        self.sign()
+        args = dict(directory=restore.AUDIT_ENVIRONMENT_DIRECTORY,
+                    contract=restore.AUDIT_ENVIRONMENT_CONTRACT)
+        with self.assertRaisesRegex(ValueError, 'manifest_binding'):
+            restore._restore(self.data, self.runtime, version=restore.TARGET_VERSION, **args)
+        receipt = restore._restore(self.data, self.runtime, version=restore.AUDIT_ENVIRONMENT_VERSION, **args)
+        self.assertEqual(receipt['target_version'], '0.5.61')
+        self.assertFalse(receipt['restored'])
+        self.assertEqual(restore._tree(self.runtime), self.manifest['files'])
+        self.assertEqual(restore._tree(self.data / restore.DIRECTORY), old)
+        self.assertIsNone(restore._restore(self.data, self.runtime,
+            version=restore.AUDIT_ENVIRONMENT_VERSION, **args))
+
     def test_consumed_marker_never_rolls_back_new_writes_or_cold_restart(self):
         self.run_restore()
         hub = self.runtime / next(iter(self.files))

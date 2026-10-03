@@ -405,6 +405,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "可对缺少旧生产预检字段的不可变交接执行当前验证器复验并追加签名证据；"
             "省略phase时只允许从当前会话绑定工单中唯一且精确的controlled_phase令牌推断。"
             "audit_intake_recovery仅为已签外部审计缺失根记录建立当前时间的新恢复链，保留旧证据并要求重新完整独审。"
+            "audit_environment_recovery用于原件与历史签名完整、仅运行环境或测试证书变化的外部审计，"
+            "新建当前环境待审入口；历史通过结论不会沿用为当前通过。"
             "各阶段均须先action=plan预演，execute回传精确"
             "plan_sha256和对应确认字面量。恢复逐条使用签名日志与CAS，将失效的prepared "
             "production_to_audit handoff原子标记为superseded并按当前完整指纹重新签发；"
@@ -429,7 +431,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         ctx: Context,
         action: Literal["plan", "execute"] = "plan",
         phase: Literal[
-            "handoff_recovery", "preflight_evidence_backfill", "audit_intake_recovery"
+            "handoff_recovery", "preflight_evidence_backfill", "audit_intake_recovery", "audit_environment_recovery"
         ] | None = None,
         expected_plan_sha256: str | None = None,
         confirmation: str | None = None,

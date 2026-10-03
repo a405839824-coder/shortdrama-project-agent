@@ -1545,6 +1545,15 @@ def _draft_quality_metrics(storyboard, issues, *, project_id="quality", known_pa
                            execution_checks=execution_checks, legacy_diagnostics_only=legacy_diagnostics_only)
 
 
+class AuditEvidenceRequiresReaudit(ValueError):
+    """Authentic, unchanged historical content whose execution profile expired."""
+
+    def __init__(self, reason: str, certificate: dict[str, Any], artifact: dict[str, Any]):
+        super().__init__(reason)
+        self.certificate = certificate
+        self.artifact = artifact
+
+
 class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     def __init__(self, settings: Settings):
         settings.validate_acceptance_control()
@@ -4680,6 +4689,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             effective_audit_status = "PENDING_AUDIT"
             effective_issue_count: int | None = None
             audit_evidence_state = "missing_certificate"
+            audit_staleness_reason: str | None = None
             verified_certificate: dict[str, Any] | None = None
             if certificate_id:
                 try:
@@ -4693,15 +4703,14 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                             project_id,
                             str(authoritative.get("artifact_id")),
                         )
-                    (
-                        verified_certificate,
-                        verified_artifact_record,
-                    ) = self._load_current_independent_audit_certificate(
-                        namespace,
-                        project_id,
-                        certificate_id=str(certificate_id),
-                        artifact_id=str(selected.get("artifact_id")),
-                    )
+                    try:
+                        verified_certificate, verified_artifact_record = self._load_current_independent_audit_certificate(
+                            namespace, project_id, certificate_id=str(certificate_id),
+                            artifact_id=str(selected.get("artifact_id")),
+                        )
+                    except AuditEvidenceRequiresReaudit as stale:
+                        verified_certificate, verified_artifact_record = stale.certificate, stale.artifact
+                        audit_staleness_reason = str(stale)
                     selected = verified_artifact_record
                     metadata = selected.get("metadata")
                     if not isinstance(metadata, dict):
@@ -4727,7 +4736,14 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                         effective_issue_count != 0 or report.get("issues")
                     ):
                         raise ValueError("clean certificate is inconsistent")
-                    audit_evidence_state = "verified_independent_certificate"
+                    if audit_staleness_reason:
+                        # Still verify the overlay bytes/authority above. Expired
+                        # evidence permits re-audit, never a current PASS or export.
+                        effective_audit_status = "PENDING_AUDIT"
+                        effective_issue_count = None
+                        audit_evidence_state = "stale_environment"
+                    else:
+                        audit_evidence_state = "verified_independent_certificate"
                 except (AttributeError, KeyError, OSError, TypeError, ValueError):
                     effective_audit_status = "AUDIT_EVIDENCE_INVALID"
                     effective_issue_count = None
@@ -4738,7 +4754,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     reuse_state_errors.append(
                         "AUTHORITATIVE_OVERLAY_CERTIFICATE_MISSING: audit overlay has no independent audit certificate"
                     )
-                elif audit_evidence_state != "verified_independent_certificate":
+                elif audit_evidence_state not in {"verified_independent_certificate", "stale_environment"}:
                     reuse_state_errors.append(
                         "AUTHORITATIVE_OVERLAY_AUDIT_EVIDENCE_INVALID: audit overlay certificate, binding, or artifact bytes are invalid"
                     )
@@ -4776,6 +4792,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "legacy_issue_count": raw_issue_count,
                 "legacy_claim_accepted": False,
                 "audit_evidence_state": audit_evidence_state,
+                "audit_staleness_reason": audit_staleness_reason,
+                "historical_independent_audit_certificate_id": certificate_id,
                 "production_preflight_status": metadata.get(
                     "production_preflight_status"
                 ),
@@ -10817,6 +10835,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             "handoff_recovery",
             "preflight_evidence_backfill",
             "audit_intake_recovery",
+            "audit_environment_recovery",
         }
         if phase is None:
             hub = self.store.load_hub(namespace, project_id)
@@ -10861,12 +10880,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             raise ValueError(
                 f"handoff_ids must contain 1-{MAX_HANDOFF_RECOVERY_ITEMS} unique ids"
             )
-        if phase == "audit_intake_recovery":
+        if phase in {"audit_intake_recovery", "audit_environment_recovery"}:
             from .audit_intake_recovery import recover_intake
             return recover_intake(self, namespace, project_id=project_id,
                 work_order_id=work_order_id, gap_id=gap_id, handoff_ids=clean_ids,
                 action=action, expected_plan_sha256=expected_plan_sha256,
-                confirmation=confirmation, request_session_id=request_session_id)
+                confirmation=confirmation, request_session_id=request_session_id, phase=phase)
         if (
             phase == "preflight_evidence_backfill"
             and gap_id == CONTROLLED_V053_PREFLIGHT_GAP_ID
@@ -15158,15 +15177,6 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 artifact_record.get("fingerprint") or ""
             ),
         )
-        runtime_certificate = self._matching_runtime_certificate(
-            namespace, project_id
-        )
-        if (
-            runtime_certificate is None
-            or runtime_certificate.get("result") != "pass"
-            or not self.store.project_record_is_signed(runtime_certificate)
-        ):
-            raise ValueError("current_runtime_test_certificate_required")
         handoff_id = str(certificate.get("handoff_id") or "")
         if not handoff_id:
             raise ValueError("independent_audit_handoff_binding_missing")
@@ -15197,8 +15207,14 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             source_fingerprint=source_fingerprint,
             boundary_hash=boundary_hash,
         )
-        if handoff.get("fingerprints") != expected_fingerprints:
-            raise ValueError("independent_audit_handoff_fingerprint_stale")
+        environment_keys = {"parser", "schema", "runtime", "rules", "validator", "scripts",
+                            "dependencies_environment", "target_model_contract"}
+        historical_fingerprints = handoff.get("fingerprints")
+        if (not isinstance(historical_fingerprints, dict)
+                or set(historical_fingerprints) != set(expected_fingerprints)
+                or any(historical_fingerprints[key] != value
+                       for key, value in expected_fingerprints.items() if key not in environment_keys)):
+            raise ValueError("independent_audit_handoff_content_binding_invalid")
         certificate_fingerprint_map = {
             "source": "source_bytes",
             "boundary": "episode_boundary",
@@ -15216,10 +15232,15 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         certificate_fingerprints = certificate.get("fingerprints")
         if not isinstance(certificate_fingerprints, dict) or any(
             certificate_fingerprints.get(certificate_key)
-            != expected_fingerprints.get(bundle_key)
+            != historical_fingerprints.get(bundle_key)
             for certificate_key, bundle_key in certificate_fingerprint_map.items()
         ):
-            raise ValueError("independent_audit_certificate_fingerprint_stale")
+            raise ValueError("independent_audit_certificate_handoff_binding_invalid")
+        # Only after signed authority and all immutable content match may an
+        # environment change be classified as recoverable instead of corruption.
+        self._assert_audit_trace_references(
+            namespace, project_id, handoff=handoff, artifact_id=artifact_id)
+        runtime_certificate = self._matching_runtime_certificate(namespace, project_id)
         expected_components = self._audit_cache_components(
             canonical_hash=canonical_hash,
             source_fingerprint=source_fingerprint,
@@ -15229,9 +15250,25 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             storyboard=storyboard,
             scope=self._independent_audit_cache_scope(handoff, artifact_id),
             runtime_test_certificate_id=str(
-                runtime_certificate["certificate_id"]
+                (runtime_certificate or {}).get("certificate_id")
+                or (certificate.get("cache_components") or {}).get("runtime_test_certificate_id")
             ),
         )
+        cache_environment_keys = {"ruleset", "validator", "parser", "schema", "runtime", "scripts",
+                                  "dependencies", "target_model", "runtime_test_certificate_id",
+                                  "semantic_audit_contract"}
+        historical_components = certificate.get("cache_components")
+        if (not isinstance(historical_components, dict)
+                or any(historical_components.get(key) != value
+                       for key, value in expected_components.items() if key not in cache_environment_keys)):
+            raise ValueError("independent_audit_certificate_cache_identity_invalid")
+        if historical_fingerprints != expected_fingerprints:
+            raise AuditEvidenceRequiresReaudit(
+                "independent_audit_handoff_fingerprint_stale", certificate, artifact_record)
+        if (runtime_certificate is None or runtime_certificate.get("result") != "pass"
+                or not self.store.project_record_is_signed(runtime_certificate)):
+            raise AuditEvidenceRequiresReaudit(
+                "current_runtime_test_certificate_required", certificate, artifact_record)
         if (
             certificate.get("cache_components") != expected_components
             or certificate.get("cache_key")
@@ -15239,7 +15276,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             or certificate.get("semantic_audit_contract")
             != SEMANTIC_AUDIT_CONTRACT_VERSION
         ):
-            raise ValueError("independent_audit_certificate_environment_stale")
+            raise AuditEvidenceRequiresReaudit(
+                "independent_audit_certificate_environment_stale", certificate, artifact_record)
         verify_certificate_coverage(self, storyboard, certificate)
         return certificate, artifact_record
 
