@@ -437,7 +437,7 @@ class V057PreflightEvidenceReissueTests(
         }
         self.assertEqual(
             advertised,
-            {"handoff_recovery", "preflight_evidence_backfill"},
+            {"handoff_recovery", "preflight_evidence_backfill", "audit_intake_recovery"},
         )
         self.assertNotIn("phase", recovery["inputSchema"].get("required", []))
         self.assertNotEqual(phase.get("default"), "handoff_recovery")

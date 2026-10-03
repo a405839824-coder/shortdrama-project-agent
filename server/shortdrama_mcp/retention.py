@@ -52,6 +52,7 @@ class RetentionWorker:
         self.root = self.data / 'retention'
         self.stop_event = threading.Event()
         self.thread = None
+        self.next_run_epoch = None
         self.enabled = (external.settings.deployment_mode == 'cloud' and
                         os.environ.get('SHORTDRAMA_RETENTION_ENABLED', 'true').lower() == 'true')
 
@@ -61,13 +62,16 @@ class RetentionWorker:
         except (OSError, ValueError):
             value = {'status': 'not_run'}
         # No paths, identities, source contents or secrets in /health.
-        return {**{k: value[k] for k in ('status', 'last_run_epoch', 'next_run_epoch',
+        summary = {**{k: value[k] for k in ('status', 'last_run_epoch', 'next_run_epoch',
                   'deleted_files', 'deleted_bytes', 'skipped_files', 'errors',
                   'disk_free_bytes', 'disk_used_percent') if k in value},
                 'enabled': self.enabled, 'worker_alive': bool(self.thread and self.thread.is_alive()),
                 'interval_seconds': INTERVAL, 'archive_min_age_days': 7,
                 'archive_keep_latest': KEEP_ARCHIVES, 'export_grace_hours': 24,
                 'project_auto_delete': False}
+        if self.thread and self.thread.is_alive():
+            summary['next_run_epoch'] = self.next_run_epoch
+        return summary
 
     def _archive_candidates(self, now: float, report: dict, secret: bytes):
         directories = sorted(self.data.glob('.upgrade-*'))
@@ -179,7 +183,7 @@ class RetentionWorker:
                         report['failures'].append({'path': str(path), 'reason': str(exc)})
             usage = shutil.disk_usage(self.data)
             summary = {'status': 'error' if report['failures'] else ('warning' if usage.used / usage.total >= .85 else 'ok'),
-                       'last_run_epoch': now, 'next_run_epoch': now + INTERVAL,
+                       'last_run_epoch': now, 'next_run_epoch': time.time() + INTERVAL,
                        'deleted_files': len(report['deleted']),
                        'deleted_bytes': sum(item['bytes'] for item in report['deleted']),
                        'skipped_files': len(report['skipped']), 'errors': len(report['failures']),
@@ -210,7 +214,9 @@ class RetentionWorker:
                             'last_run_epoch': time.time(), 'next_run_epoch': time.time() + INTERVAL,
                             'errors': 1}))
                 delay = INTERVAL
+                self.next_run_epoch = time.time() + delay
         self.stop_event.clear()
+        self.next_run_epoch = time.time() + 300
         self.thread = threading.Thread(target=loop, name='verified-copy-retention', daemon=True)
         self.thread.start()
 

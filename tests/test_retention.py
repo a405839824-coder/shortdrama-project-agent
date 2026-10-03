@@ -136,6 +136,7 @@ class RetentionTests(unittest.TestCase):
         self.worker.start()
         self.assertIs(first, self.worker.thread)
         self.assertTrue(self.worker.status()['worker_alive'])
+        self.assertAlmostEqual(self.worker.status()['next_run_epoch'], time.time() + 300, delta=2)
         self.worker.stop()
         self.assertFalse(first.is_alive())
 
