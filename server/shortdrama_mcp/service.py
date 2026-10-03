@@ -24579,6 +24579,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                         ),
                         "created_at": utc_stamp(),
                     }
+        # The transaction is already durable. Later certificate/route checks
+        # reload current state; retaining this full ledger doubles their peak.
+        del hub, ledger
         audit_blocked = audit_result.get("status") == "blocked"
         if audit_blocked:
             report.setdefault("issues", []).append(

@@ -107,6 +107,26 @@ class StartupRestoreTests(unittest.TestCase):
         self.assertIsNone(self.run_restore())
         self.assertFalse(self.runtime.exists())
 
+    def test_storage_fix_transfer_is_fresh_and_version_bound(self):
+        self.run_restore()
+        old = restore._tree(self.transfer)
+        latest = dict(self.files)
+        latest['projects/namespace/SBP-test/ledger.json'] = b'audit completed after previous release'
+        (self.runtime / 'projects/namespace/SBP-test/ledger.json').write_bytes(latest['projects/namespace/SBP-test/ledger.json'])
+        self.transfer = self.data / restore.AUDIT_STORAGE_DIRECTORY
+        self.transfer.mkdir()
+        self.arm(files=latest)
+        self.manifest.update(contract=restore.AUDIT_STORAGE_CONTRACT, target_version=restore.AUDIT_STORAGE_VERSION)
+        self.sign()
+        args = dict(directory=restore.AUDIT_STORAGE_DIRECTORY, contract=restore.AUDIT_STORAGE_CONTRACT)
+        with self.assertRaisesRegex(ValueError, 'manifest_binding'):
+            restore._restore(self.data, self.runtime, version=restore.AUDIT_ENVIRONMENT_VERSION, **args)
+        receipt = restore._restore(self.data, self.runtime, version=restore.AUDIT_STORAGE_VERSION, **args)
+        self.assertEqual(receipt['target_version'], '0.5.62')
+        self.assertEqual(restore._tree(self.runtime), self.manifest['files'])
+        self.assertEqual(restore._tree(self.data / restore.DIRECTORY), old)
+        self.assertIsNone(restore._restore(self.data, self.runtime, version=restore.AUDIT_STORAGE_VERSION, **args))
+
     def test_no_marker_is_zero_write_and_restrictive_settings_only_apply_when_armed(self):
         (self.transfer / 'manifest.json').unlink()
         settings = SimpleNamespace(data_dir=self.data, deployment_mode='local')
