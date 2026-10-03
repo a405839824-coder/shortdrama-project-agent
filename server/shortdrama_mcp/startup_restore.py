@@ -31,6 +31,11 @@ def _hash(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _file_hash(path: Path) -> str:
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
 def _json_bytes(value) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
@@ -81,7 +86,7 @@ def _tree(root: Path) -> dict[str, str]:
             if path.is_symlink():
                 raise ValueError("startup_restore_runtime_symlink")
             if path.is_file():
-                result[path.relative_to(root).as_posix()] = _hash(path.read_bytes())
+                result[path.relative_to(root).as_posix()] = _file_hash(path)
     return result
 
 
@@ -115,7 +120,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         raise ValueError("startup_restore_protected_state_changed")
     archive_path = transfer / "runtime.tar.gz"
     if (archive_path.is_symlink() or not archive_path.is_file() or archive_path.stat().st_size > MAX_ARCHIVE_BYTES
-            or _hash(archive_path.read_bytes()) != manifest.get("archive_sha256")):
+            or _file_hash(archive_path) != manifest.get("archive_sha256")):
         raise ValueError("startup_restore_archive_hash")
     expected = manifest.get("files")
     if not isinstance(expected, dict) or not 1 <= len(expected) <= MAX_FILES or not any(n.endswith("/hub.json") for n in expected):
