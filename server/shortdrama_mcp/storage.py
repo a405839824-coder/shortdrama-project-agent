@@ -1842,13 +1842,16 @@ class ProjectStore:
             yield
 
     @staticmethod
-    def atomic_write_bytes(path: Path, data: bytes) -> None:
+    def atomic_write_bytes(path: Path, data: bytes | Iterator[bytes]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "wb") as handle:
-                handle.write(data)
+                if isinstance(data, (bytes, bytearray, memoryview)):
+                    handle.write(data)
+                else:
+                    handle.writelines(data)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, path)
@@ -1858,10 +1861,14 @@ class ProjectStore:
 
     @classmethod
     def atomic_write_json(cls, path: Path, value: Any) -> None:
-        cls.atomic_write_bytes(
-            path,
-            (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-        )
+        # Preserve exact stored bytes without retaining a complete Unicode
+        # document and its encoded copy alongside the live project ledger.
+        def chunks() -> Iterator[bytes]:
+            for part in json.JSONEncoder(ensure_ascii=False, indent=2).iterencode(value):
+                yield part.encode("utf-8")
+            yield b"\n"
+
+        cls.atomic_write_bytes(path, chunks())
 
     @staticmethod
     def read_json(path: Path) -> Any:
