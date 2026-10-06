@@ -79,7 +79,9 @@ class ObligationReadTests(unittest.TestCase):
         self.assertIsNone(current.data['next_call'])
         self.assertEqual(len(rows), 181 * 14)
         self.assertIn('scene_causality', definitions)
-        self.assertLessEqual(pages, 53)  # Additional scene-causality check per shot.
+        # Keep the 16k page budget and every literal reference. The mandatory
+        # six-field review on both sides of state/sound boundaries adds 3 pages.
+        self.assertLessEqual(pages, 56)
         self.assertEqual(len({r['obligation_id'] for r in rows}), len(rows))
         checks = []
         for row, expected in zip(rows, manifest['obligations']):

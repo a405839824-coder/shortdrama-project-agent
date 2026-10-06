@@ -5124,13 +5124,14 @@ class V051ServiceGuardTests(unittest.TestCase):
                         )
                     )
                 )
-                with self.assertRaisesRegex(ValueError, "unknown telemetry"):
-                    self.service.store.get_project_record(
-                        self.namespace,
-                        fixture["project_id"],
-                        kind="telemetry",
-                        record_id=str(certificates[0]["stage_trace_id"]),
-                    )
+                # Since 0.5.60 a certificate requires its signed trace first.
+                # Repair-route rollback keeps that evidence for exact recovery.
+                trace_before = self.service.store.get_project_record(
+                    self.namespace, fixture["project_id"], kind="telemetry",
+                    record_id=str(certificates[0]["stage_trace_id"]),
+                )
+                self.assertTrue(self.service.store.project_record_is_signed(trace_before))
+                self.assertEqual(trace_before['artifact_id'], fixture['artifact_id'])
 
                 _server, restarted = create_mcp(self.settings)
                 recovered = restarted.audit_storyboard(
@@ -5179,12 +5180,10 @@ class V051ServiceGuardTests(unittest.TestCase):
                     package["audit_certificate_id"],
                     certificates[0]["certificate_id"],
                 )
-                restarted.store.get_project_record(
-                    self.namespace,
-                    fixture["project_id"],
-                    kind="telemetry",
+                self.assertEqual(restarted.store.get_project_record(
+                    self.namespace, fixture["project_id"], kind="telemetry",
                     record_id=str(certificates[0]["stage_trace_id"]),
-                )
+                ), trace_before)
 
     def test_root_fail_hard_crash_waits_for_lease_then_completes_first_retry(self) -> None:
         fixture = self._unaudited_fixture("root-fail-consuming-recovery")
