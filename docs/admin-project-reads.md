@@ -46,6 +46,13 @@ The contract is `library-runtime-transfer-admin-read-20261006-v1`, target versio
 `0.5.62`. Bind `protected_fingerprints` for the existing registry, role database,
 keys and signed Library pointers. Never re-arm a previously consumed transfer.
 
+The live status on 2026-10-06 reported 5,381,214,008 bytes in runtime projects
+alone, above the older 4 GiB recovery ceiling. This transfer alone accepts up to
+8 GiB expanded; earlier transfer contracts retain their 4 GiB limit. The
+compressed archive remains capped at 2 GiB and 100,000 regular files. Before
+arming it, inventory projects plus exports and verify both ceilings and enough
+free destination space. Do not omit files or delete history to fit a ceiling.
+
 Only publish after this new transfer is verified and the old writer remains
 frozen. Startup checks the entire archive and protected identities, restores
 before listening, and consumes the marker once. Verify the restore receipt,
