@@ -137,6 +137,27 @@ class StartupRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'explicit_library_cloud_required'):
             restore.restore_release_runtime_if_requested(settings)
 
+    def test_admin_read_transfer_preserves_current_tree_without_replaying_old_release(self):
+        self.run_restore()
+        old_transfer = restore._tree(self.transfer)
+        latest = dict(self.files)
+        latest['projects/namespace/SBP-test/ledger.json'] = b'latest immutable audit history before permission fix'
+        self.transfer = self.data / restore.ADMIN_READ_DIRECTORY
+        self.transfer.mkdir()
+        self.arm(files=latest)
+        self.manifest.update(contract=restore.ADMIN_READ_CONTRACT,
+                             target_version=restore.ADMIN_READ_VERSION)
+        self.sign()
+        self.runtime.rename(self.root / 'old-runtime')
+        protected = restore.protected_fingerprints(self.data)
+        args = dict(directory=restore.ADMIN_READ_DIRECTORY, contract=restore.ADMIN_READ_CONTRACT)
+        receipt = restore._restore(self.data, self.runtime, version=restore.ADMIN_READ_VERSION, **args)
+        self.assertTrue(receipt['restored'])
+        self.assertEqual(restore._tree(self.runtime), self.manifest['files'])
+        self.assertEqual(restore.protected_fingerprints(self.data), protected)
+        self.assertEqual(restore._tree(self.data / restore.DIRECTORY), old_transfer)
+        self.assertIsNone(restore._restore(self.data, self.runtime, version=restore.ADMIN_READ_VERSION, **args))
+
     def test_modified_manifest_or_archive_rejected_without_published_files(self):
         self.manifest['files']['projects/fake/hub.json'] = '0' * 64
         (self.transfer / 'manifest.json').write_bytes(restore._json_bytes(self.manifest))
