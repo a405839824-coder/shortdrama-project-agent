@@ -7,6 +7,7 @@ only for existing consumers; no generated file may become a second authority.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import hashlib
 import json
@@ -273,6 +274,15 @@ def check_registry_definition(registry, reference_root=None):
         failures.append('historical rule baseline missing')
     else:
         baseline=json.loads(baseline_path.read_text(encoding='utf-8'))
+        definitions = baseline.get('conflict_semantic_definitions', {})
+        if set(definitions) != {row.get('conflict_id') for row in registry.get('conflicts', [])}:
+            failures.append('conflict baseline: missing or unexpected adjudication identity')
+        for row in registry.get('conflicts', []):
+            expected = definitions.get(row.get('conflict_id'), {})
+            if {key: row.get(key) for key in expected} != expected:
+                failures.append('conflict baseline: unreviewed decision/priority/exception change: ' + row['conflict_id'])
+        if registry.get('runtime', {}).get('global_priority') != baseline.get('global_priority'):
+            failures.append('conflict priority: changed order, duplicate or cyclic priority requires reviewed migration')
         current={row.get('rule_id') for row in registry.get('atomic_rules',[])}
         missing=set(baseline['required_current_atomic_ids'])-current
         if missing: failures.append('historical rule preservation: missing '+', '.join(sorted(missing)))
@@ -330,6 +340,21 @@ def check_registry_definition(registry, reference_root=None):
                 failures.append(f"{key}:{row.get(field)}: stale active version")
     error_ids = ids["errors"]
     module_ids = set(registry["module_ids"])
+    review = runtime.get('semantic_review_policy', {})
+    if (review.get('contract') != 'explicit-current-review-v1'
+            or review.get('unreviewed_status') != 'unknown'
+            or review.get('machine_failure_override_allowed') is not False
+            or review.get('semantic_truth_guaranteed') is not False
+            or not review.get('decision_policy')):
+        failures.append('semantic review: explicit decisions and unresolved/known-failure boundaries required')
+    required_review_fields = {'画面内容', '起始状态', '切镜/转场提示词', '音色', '心理音轨', '环境音效'}
+    for identity in ('state_continuity', 'sound_consistency'):
+        for key in ('current_fields', 'neighbor_fields'):
+            fields = review.get('adjacent_review', {}).get(identity, {}).get(key, [])
+            if (not isinstance(fields, list) or len(fields) != len(set(fields))
+                    or not required_review_fields.issubset(fields)
+                    or set(fields) - set(runtime['canonical_shot_fields'])):
+                failures.append('semantic review: missing/invalid actual boundary fields: ' + identity + '.' + key)
     gate_rows = runtime["gates"]["template_hard_gates"]
     gate_ids = _unique(gate_rows, "gate_id", "template gates", failures)
     if gate_ids != {f"THG-{index:02}" for index in range(1, 18)}:
@@ -438,9 +463,26 @@ def check_registry_definition(registry, reference_root=None):
         for module in row.get("must_call_modules", []):
             if module not in module_ids:
                 failures.append(f"{row['task_package_id']}: dangling module {module}")
+    implementations = {}
+    implementation_root = Path(__file__).resolve().parents[1]
     for row in registry["validators"]:
         if not row.get("applies_when") or not row.get("pass_condition") or not row.get("implementation"):
             failures.append(f"{row['validator_rule_id']}: missing applicability or implementation")
+        relative = row.get("implementation", "")
+        path = (implementation_root / relative).resolve()
+        if not relative or not path.is_relative_to(implementation_root) or path.suffix != '.py' or not path.is_file():
+            failures.append(f"{row['validator_rule_id']}: implementation file missing or outside skill")
+            continue
+        if path not in implementations:
+            try:
+                tree = ast.parse(path.read_text(encoding='utf-8'))
+                implementations[path] = {node.name for node in tree.body
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            except (OSError, SyntaxError) as error:
+                failures.append(f"{row['validator_rule_id']}: invalid implementation: {error}")
+                implementations[path] = set()
+        if row.get('handler') not in implementations[path]:
+            failures.append(f"{row['validator_rule_id']}: executable handler missing: {row.get('handler')}")
     deprecated = runtime["deprecated_rules"]
     _unique(deprecated, "deprecated", "deprecated rules", failures)
     for row in deprecated:
@@ -511,6 +553,12 @@ def validate_registry(reference_root=None):
             if path.is_file():
                 documents[filename] = path.read_text(encoding="utf-8")
         failures.extend(check_documentation(registry, documents))
+        # The packaged entry is executable guidance, not a second rule authority.
+        # Isolated reference fixtures need no invented sibling SKILL.md.
+        if root.resolve() == REFERENCE_ROOT.resolve():
+            entry = (root.parent / 'SKILL.md').read_text(encoding='utf-8')
+            if f"rule revision `{registry['plugin_version']}`" not in entry:
+                failures.append('SKILL.md: active rule revision differs from registry')
         return failures
     except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
         return [f"rule registry invalid: {type(exc).__name__}: {exc}"]

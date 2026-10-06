@@ -158,6 +158,26 @@ class StartupRestoreTests(unittest.TestCase):
         self.assertEqual(restore._tree(self.data / restore.DIRECTORY), old_transfer)
         self.assertIsNone(restore._restore(self.data, self.runtime, version=restore.ADMIN_READ_VERSION, **args))
 
+    def test_rule_execution_transfer_preserves_latest_state_and_cannot_replay(self):
+        self.run_restore()
+        old = restore._tree(self.transfer)
+        latest = dict(self.files)
+        latest['projects/namespace/SBP-test/ledger.json'] = b'latest independent audit retained'
+        (self.runtime / 'projects/namespace/SBP-test/ledger.json').write_bytes(latest['projects/namespace/SBP-test/ledger.json'])
+        self.transfer = self.data / restore.RULE_EXECUTION_DIRECTORY
+        self.transfer.mkdir()
+        self.arm(files=latest)
+        self.manifest.update(contract=restore.RULE_EXECUTION_CONTRACT, target_version=restore.RULE_EXECUTION_VERSION)
+        self.sign()
+        args = dict(directory=restore.RULE_EXECUTION_DIRECTORY, contract=restore.RULE_EXECUTION_CONTRACT)
+        with self.assertRaisesRegex(ValueError, 'manifest_binding'):
+            restore._restore(self.data, self.runtime, version=restore.AUDIT_STORAGE_VERSION, **args)
+        receipt = restore._restore(self.data, self.runtime, version=restore.RULE_EXECUTION_VERSION, **args)
+        self.assertEqual(receipt['existing_files_overwritten'], 0)
+        self.assertEqual(restore._tree(self.runtime), self.manifest['files'])
+        self.assertEqual(restore._tree(self.data / restore.DIRECTORY), old)
+        self.assertIsNone(restore._restore(self.data, self.runtime, version=restore.RULE_EXECUTION_VERSION, **args))
+
     def test_modified_manifest_or_archive_rejected_without_published_files(self):
         self.manifest['files']['projects/fake/hub.json'] = '0' * 64
         (self.transfer / 'manifest.json').write_bytes(restore._json_bytes(self.manifest))

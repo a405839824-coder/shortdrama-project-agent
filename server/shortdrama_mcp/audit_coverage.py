@@ -9,12 +9,14 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from functools import lru_cache
 from typing import Any
 
 from .canonical import canonical_sha256, stable_json_hash
 from .materializer import COMPACT_SHOT_FIELDS
 from .models import SemanticAuditCheckInput, SemanticAuditCoverageInput, SemanticAuditCoveragePageInput, ToolResponse
 from .r5_workbook import workbook_audit_scope
+from continuity_checks import speech_state_findings
 
 
 CONTRACT = "semantic-obligation-coverage-v1"
@@ -22,6 +24,22 @@ LEGACY_PREFIX = "audit-coverage-v1:"
 PAGE_PREFIX = "audit-coverage-page-v1:"
 MAX_ENVELOPE_BYTES = 8 * 1024 * 1024
 MAX_CHECK_OBSERVATIONS = SemanticAuditCheckInput.model_json_schema()['properties']['observations']['maxItems']
+NEIGHBOR_FIELDS = ("画面内容", "起始状态", "空间站位描述", "可见主体")
+
+
+@lru_cache(maxsize=1)
+def review_policy():
+    from validate_storyboard import load_runtime_rules
+    return load_runtime_rules()['semantic_review_policy']
+
+
+def review_fields(rule, fields, observed, adjacent):
+    policy = review_policy()['adjacent_review'].get(rule, {})
+    current = tuple(dict.fromkeys((*fields, *policy.get('current_fields', []))))
+    required = tuple(dict.fromkeys((*observed, *policy.get('current_fields', []))))
+    neighbors = tuple(dict.fromkeys((*(NEIGHBOR_FIELDS if adjacent else ()),
+                                     *policy.get('neighbor_fields', []))))
+    return current, required, neighbors, policy.get('neighbor_fields', [])
 SOURCE_TRANSPORT_RECOVERY = (
     "read_project_artifact(section='canonical_storyboard', unit='characters', offset=0, limit=2000, max_chars=64000) "
     "on this workbook and follow its pagination to inspect retained evidence; this read does not close the audit. "
@@ -234,11 +252,12 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
     rows = []
     for index, (sid, shot) in enumerate(zip(ids, shots)):
         for rule, layer, question, fields, observed, adjacent in RULES:
+            fields, observed, neighbor_fields, neighbor_observed = review_fields(rule, fields, observed, adjacent)
             refs = [f"field:{sid}.{field}" for field in fields]
             if adjacent:
                 refs.extend(f"field:{ids[n]}.{field}" for n in (index-1, index+1)
                             if 0 <= n < len(ids)
-                            for field in ("画面内容", "起始状态", "空间站位描述", "可见主体"))
+                            for field in neighbor_fields)
             dependencies = {ref: field_hashes[ref] for ref in refs}
             row = {
                 "obligation_id": f"{sid}/{rule}", "shot_id": sid, "rule_id": rule,
@@ -248,6 +267,13 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
                 "allowed_statuses": ["pass", "fail_current", "unknown"],
                 "applicability": "Required review; natural stillness, silent shots and prop-only frames are valid when supported, not omissions.",
             }
+            row["required_observation_refs"].extend(
+                f"field:{ids[n]}.{field}" for n in (index - 1, index + 1)
+                if 0 <= n < len(ids) for field in neighbor_observed)
+            if rule in {"state_continuity", "sound_consistency"}:
+                findings = speech_state_findings(shot)
+                if findings:
+                    row["machine_findings"] = findings
             if sid in saved_rows:
                 saved = saved_rows[sid]
                 selected = (set(saved["cells"]) if rule == "field_ownership" else
@@ -471,6 +497,8 @@ def validate_coverage(storyboard: dict[str, Any], submission: dict[str, Any],
                 or (check.get("status") == "unknown" and not allow_unresolved)
                 or (expected.get("missing_evidence") and check.get("status") == "pass")):
             raise ValueError("audit_coverage_unresolved: unknown/unjustified not_applicable cannot pass")
+        if expected.get("machine_findings") and check.get("status") == "pass":
+            raise ValueError("audit_coverage_machine_conflict: " + check["obligation_id"])
         observations = check.get("observations") or []
         observed = [r.get("reference") for r in observations]
         if len(observed) != len(set(observed)):
@@ -574,16 +602,19 @@ def verify_certificate_coverage(service: Any, storyboard: dict[str, Any], certif
 
 def _obligation_rule_definitions() -> dict[str, dict[str, Any]]:
     """Shared read view; hashes and full validation remain server-owned."""
-    return {
-        rule: {
+    definitions = {}
+    for rule, layer, question, fields, observed, adjacent in RULES:
+        fields, observed, neighbors, neighbor_observed = review_fields(rule, fields, observed, adjacent)
+        definitions[rule] = {
             "layer": layer, "question": question,
             "dependency_fields": list(fields),
             "required_observation_fields": list(observed),
-            "neighbor_dependency_fields": ["画面内容", "起始状态", "空间站位描述", "可见主体"] if adjacent else [],
+            "neighbor_dependency_fields": list(neighbors),
+            "neighbor_observation_fields": list(neighbor_observed),
             "allowed_statuses": ["pass", "fail_current", "unknown"],
+            "unreviewed_status": "unknown",
         }
-        for rule, layer, question, fields, observed, adjacent in RULES
-    }
+    return definitions
 
 
 def _compact_obligation(row: dict[str, Any], neighbor_ids: list[str], definition: dict[str, Any]) -> dict[str, Any]:
@@ -596,7 +627,7 @@ def _compact_obligation(row: dict[str, Any], neighbor_ids: list[str], definition
         result['rhythm_evidence'] = row['rhythm_evidence']
     if 'source_evidence' in row:
         result['source_evidence'] = row['source_evidence']
-    for key in ('saved_workbook_evidence', 'missing_evidence'):
+    for key in ('saved_workbook_evidence', 'missing_evidence', 'machine_findings'):
         if key in row:
             result[key] = row[key]
     dependencies = {f"field:{row['shot_id']}.{field}" for field in definition['dependency_fields']}
@@ -653,6 +684,7 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
     }
     if offset == 0:
         data.update({
+            "decision_policy": review_policy()['decision_policy'],
             "rule_definitions": definitions,
             "submission_schema": SemanticAuditCoverageInput.model_json_schema(),
             "page_submission_schema_reference": {

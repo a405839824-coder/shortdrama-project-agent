@@ -31,6 +31,9 @@ AUDIT_STORAGE_VERSION = "0.5.62"
 ADMIN_READ_DIRECTORY = ".upgrade-admin-read-20261006"
 ADMIN_READ_CONTRACT = "library-runtime-transfer-admin-read-20261006-v1"
 ADMIN_READ_VERSION = "0.5.62"
+RULE_EXECUTION_DIRECTORY = ".upgrade-rule-execution-0563"
+RULE_EXECUTION_CONTRACT = "library-runtime-transfer-rule-execution-0563-v1"
+RULE_EXECUTION_VERSION = "0.5.63"
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 # The current live project tree alone exceeds 5 GB. Only this fresh, signed
@@ -110,6 +113,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         (AUDIT_ENVIRONMENT_DIRECTORY, AUDIT_ENVIRONMENT_CONTRACT): AUDIT_ENVIRONMENT_VERSION,
         (AUDIT_STORAGE_DIRECTORY, AUDIT_STORAGE_CONTRACT): AUDIT_STORAGE_VERSION,
         (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT): ADMIN_READ_VERSION,
+        (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT): RULE_EXECUTION_VERSION,
     }.get((directory, contract))
     if target_version is None:
         raise ValueError('startup_restore_undeclared_transfer')
@@ -206,7 +210,8 @@ def restore_release_runtime_if_requested(settings) -> dict | None:
     pending = [(d, c) for d, c in ((DIRECTORY, CONTRACT), (MAINTENANCE_DIRECTORY, MAINTENANCE_CONTRACT),
                                  (AUDIT_ENVIRONMENT_DIRECTORY, AUDIT_ENVIRONMENT_CONTRACT),
                                  (AUDIT_STORAGE_DIRECTORY, AUDIT_STORAGE_CONTRACT),
-                                 (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT))
+                                 (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT),
+                                 (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT))
                if (settings.data_dir / d / 'manifest.json').exists()]
     if not pending:
         return None

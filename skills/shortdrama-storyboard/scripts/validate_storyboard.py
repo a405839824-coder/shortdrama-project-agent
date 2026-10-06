@@ -3412,6 +3412,7 @@ def _communication_candidates(obj, shots):
 
 
 def _shot_semantic_checks(shot):
+    from continuity_checks import speech_state_findings
     from field_content import voice_parts
     from voice_sequence import has_markers, split_voice_sequence
     checks = []
@@ -3445,6 +3446,11 @@ def _shot_semantic_checks(shot):
     checks.append(_semantic_check("music_semantic_scope", shot, status,
         "肯定、否定、未判定分别记录；否定句格式不合规范不能冒称主动配乐",
         fields={"生成限制": shot.get("生成限制")}, evidence={"occurrences": records}))
+    speech_faults = speech_state_findings(shot)
+    if speech_faults:
+        checks.append(_semantic_check("speech_state_consistency", shot, "fail",
+            "起态与无人物发声声明冲突", fields={"起始状态": shot.get("起始状态"), "音色": shot.get("音色")},
+            findings=speech_faults))
     return checks
 
 

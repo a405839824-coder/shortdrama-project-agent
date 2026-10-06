@@ -343,7 +343,7 @@
     "legacy_policy": "read_only_migration_to_compact_successor",
     "mother_template_column_count": 11,
     "output_contract": "R10-SPC-1",
-    "plugin_version": "0.5.60",
+    "plugin_version": "0.5.63",
     "production_audit_status": "PENDING_AUDIT",
     "required_per_shot_aspect_phrase": "9:16竖屏",
     "schema_version": "R10.1",
