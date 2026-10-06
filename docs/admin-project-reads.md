@@ -65,6 +65,20 @@ the final deployment prerequisite: after draining and freezing the old writer,
 recheck the exact complete tree and protected state before signing and arming.
 If anything has changed, do not arm that draft.
 
+`scripts/arm_admin_read_backup.py` can drain and freeze the live service without
+changing member identities. It installs the named SQLite trigger
+`admin_read_upgrade_gate_20261006`, blocking the mandatory `started` audit insert
+before any new tool executes, while allowing terminal events to finish. It holds
+the retention worker's lock and verifies the complete draft again before arming.
+Keep the process running. Without a `deployment-started` marker in the transfer
+directory, it disarms and reopens tools after 15 minutes. Write that marker only
+immediately before the authorized publication; after that, it never automatically
+reopens the old writer. The persistent trigger survives container replacement.
+After verifying the new container's signed receipt, full restored tree and
+protected fingerprints, explicitly remove only that exact maintenance trigger
+to reopen tools. Do not remove it on an unverified or failed restore. Railway
+volume-backed deployments cannot mount the old and new containers concurrently.
+
 Only publish after this new transfer is verified and the old writer remains
 frozen. Startup checks the entire archive and protected identities, restores
 before listening, and consumes the marker once. Verify the restore receipt,
