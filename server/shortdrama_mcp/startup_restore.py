@@ -39,6 +39,7 @@ MAX_EXPANDED_BYTES = 4 * 1024**3
 # The current live project tree alone exceeds 5 GB. Only this fresh, signed
 # transfer may use the larger ceiling; older release contracts keep 4 GiB.
 ADMIN_READ_MAX_EXPANDED_BYTES = 8 * 1024**3
+RULE_EXECUTION_MAX_EXPANDED_BYTES = 8 * 1024**3
 MAX_FILES = 100_000
 
 
@@ -117,9 +118,10 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
     }.get((directory, contract))
     if target_version is None:
         raise ValueError('startup_restore_undeclared_transfer')
-    expanded_limit = (ADMIN_READ_MAX_EXPANDED_BYTES
-                      if (directory, contract) == (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT)
-                      else MAX_EXPANDED_BYTES)
+    expanded_limit = {
+        (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT): ADMIN_READ_MAX_EXPANDED_BYTES,
+        (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT): RULE_EXECUTION_MAX_EXPANDED_BYTES,
+    }.get((directory, contract), MAX_EXPANDED_BYTES)
     transfer = data_dir / directory
     marker = transfer / "manifest.json"
     if not marker.exists():

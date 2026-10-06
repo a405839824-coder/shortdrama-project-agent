@@ -28,9 +28,11 @@ def speech_state_findings(shot):
     start = QUOTES.sub("", str(shot.get("起始状态") or ""))
     voice = str(shot.get("音色") or "").strip().rstrip("。.;；")
     # Recollection, anticipation and negation do not assert current speech.
-    if re.search(r"回忆|想起|梦中|回响|余音|录音|播放|幻听|仿佛|似乎|若|如果|并未|没有|不再|没在|没听|未听|不听|听完|听过", start):
+    if re.search(r"回忆|想起|梦中|回响|余音|录音|播放|幻听|仿佛|似乎|若|如果", start):
         return []
     current = re.search(r"(?:正在听|正听着|听着)[^。；，！？\n]{0,24}(?:训词|训话|说话|讲话|发言|叮嘱|嘱咐)", start)
+    if current and re.search(r"(?:并未|没有|不再|没在|未|没|不)\s*$", start[:current.start()]):
+        return []
     if current and voice in {"无人物发声", "无人发声", "无人物声音"}:
         return ["起态明确正在听人物发言，音色却声明无人物发声；须核对本镜实际声音或修正时点，不能用听训后替代听着。"]
     return []

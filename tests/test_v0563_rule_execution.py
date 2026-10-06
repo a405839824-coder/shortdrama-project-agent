@@ -1,6 +1,12 @@
 """Known missed boundary, rule mutations and legal near-misses; no quality-rate claim."""
 import copy
+from pathlib import Path
+import os
+import subprocess
+import sys
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/shortdrama-storyboard/scripts'))
 
 from shortdrama_mcp import audit_coverage
 from shortdrama_mcp.materializer import COMPACT_SHOT_FIELDS
@@ -22,6 +28,14 @@ def actual_boundary():
 
 
 class RuleExecutionTests(unittest.TestCase):
+    def test_server_imports_without_skill_directory_in_pythonpath(self):
+        root = Path(__file__).resolve().parents[1]
+        environment = {**os.environ, 'PYTHONPATH': str(root / 'server')}
+        result = subprocess.run([sys.executable, '-B', '-c',
+            'import shortdrama_mcp.audit_coverage; import shortdrama_mcp.app'],
+            cwd=root, env=environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_rule_mutations_rejected_and_baseline_still_valid(self):
         self.assertEqual(rule_registry.validate_registry(), [])
         original = rule_registry.load_registry()
@@ -58,10 +72,15 @@ class RuleExecutionTests(unittest.TestCase):
             ('江听着远处风声。', '无人物发声。'),
             ('江回忆起听着祖母训词的情形。', '无人物发声。'),
             ('江听着录音中的祖母训话。', '无人物发声。'),
+            ('江没有听着祖母训话。', '无人物发声。'),
+            ('江并未正在听祖母训话。', '无人物发声。'),
             (original['起始状态'], '祖母在画外继续训话，江不发声。'),
         ]:
             with self.subTest(start=start):
                 self.assertEqual(speech_state_findings({**original, '起始状态':start, '音色':voice}), [])
+
+        self.assertTrue(speech_state_findings({**original,
+            '起始状态':'江并未开口，听着祖母最后训词。'}))
 
     def test_uncertain_or_quoted_cut_never_becomes_terminal_fact(self):
         for text in ['如果说完切近景。', '对白写着“说完切江羞恼”。', '准备起身切近景。']:

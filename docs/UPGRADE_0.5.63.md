@@ -39,6 +39,10 @@ Deployment uses a fresh signed single-use `.upgrade-rule-execution-0563`
 transfer. It must preserve the current runtime project/export bytes and protected
 state before the new process begins accepting requests. Existing consumed
 transfer markers are not reused.
+The current complete tree exceeds 5 GB; this transfer has its own 8 GiB expanded
+ceiling, with the unchanged 2 GiB compressed ceiling. Older transfer limits stay
+unchanged. Preserve the administrator mutual-read feature and its verified
+dispatch-drain/retention-lock maintenance procedure from the current main branch.
 
 Software, deployment and real-manuscript acceptance remain separate. No full
 36–80 content PASS or user archive signoff is issued by this upgrade.

@@ -16,7 +16,7 @@ from .canonical import canonical_sha256, stable_json_hash
 from .materializer import COMPACT_SHOT_FIELDS
 from .models import SemanticAuditCheckInput, SemanticAuditCoverageInput, SemanticAuditCoveragePageInput, ToolResponse
 from .r5_workbook import workbook_audit_scope
-from continuity_checks import speech_state_findings
+from .continuity import speech_state_findings
 
 
 CONTRACT = "semantic-obligation-coverage-v1"

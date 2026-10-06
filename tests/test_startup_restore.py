@@ -229,6 +229,29 @@ class StartupRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'protected_state_changed'): self.run_restore()
         self.assertFalse(self.runtime.exists())
 
+    def test_rule_transfer_has_its_own_expanded_bound(self):
+        size = sum(map(len, self.files.values()))
+        with patch.object(restore, 'MAX_EXPANDED_BYTES', size - 1):
+            with self.assertRaisesRegex(ValueError, 'archive_size'):
+                self.run_restore()
+            self.transfer = self.data / restore.RULE_EXECUTION_DIRECTORY
+            self.transfer.mkdir()
+            self.arm()
+            self.manifest.update(contract=restore.RULE_EXECUTION_CONTRACT,
+                                 target_version=restore.RULE_EXECUTION_VERSION)
+            self.sign()
+            args = dict(directory=restore.RULE_EXECUTION_DIRECTORY,
+                        contract=restore.RULE_EXECUTION_CONTRACT,
+                        version=restore.RULE_EXECUTION_VERSION)
+            with patch.object(restore, 'RULE_EXECUTION_MAX_EXPANDED_BYTES', size - 1):
+                with self.assertRaisesRegex(ValueError, 'archive_size'):
+                    restore._restore(self.data, self.runtime, **args)
+                self.assertFalse(self.runtime.exists())
+            with patch.object(restore, 'RULE_EXECUTION_MAX_EXPANDED_BYTES', size):
+                receipt = restore._restore(self.data, self.runtime, **args)
+            self.assertTrue(receipt['restored'])
+            self.assertEqual(restore._tree(self.runtime), self.manifest['files'])
+
     def test_bad_paths_links_and_duplicates_rejected(self):
         for name in ('../outside', '/absolute', 'projects/a/../../outside', 'projects\\evil', 'projects/./x'):
             with self.subTest(name=name):
