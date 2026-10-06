@@ -167,6 +167,35 @@ class StartupRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'archive_hash'): self.run_restore()
         self.assertFalse(self.runtime.exists())
 
+    def test_admin_transfer_larger_tree_has_its_own_finite_limit(self):
+        size = sum(map(len, self.files.values()))
+        # Exercise both boundaries with small real archives, avoiding a multi-GB
+        # fixture while still checking atomic publication and complete bytes.
+        with patch.object(restore, 'MAX_EXPANDED_BYTES', size - 1):
+            with self.assertRaisesRegex(ValueError, 'archive_size'):
+                self.run_restore()
+            self.assertFalse(self.runtime.exists())
+            self.transfer = self.data / restore.ADMIN_READ_DIRECTORY
+            self.transfer.mkdir()
+            self.arm()
+            self.manifest.update(contract=restore.ADMIN_READ_CONTRACT,
+                                 target_version=restore.ADMIN_READ_VERSION)
+            self.sign()
+            args = dict(directory=restore.ADMIN_READ_DIRECTORY,
+                        contract=restore.ADMIN_READ_CONTRACT)
+            with patch.object(restore, 'ADMIN_READ_MAX_EXPANDED_BYTES', size - 1):
+                with self.assertRaisesRegex(ValueError, 'archive_size'):
+                    restore._restore(self.data, self.runtime, version=restore.ADMIN_READ_VERSION, **args)
+                self.assertFalse(self.runtime.exists())
+                self.assertTrue((self.transfer / 'manifest.json').exists())
+                self.assertFalse(list(self.root.glob('.shortdrama-restore-*')))
+            with patch.object(restore, 'ADMIN_READ_MAX_EXPANDED_BYTES', size):
+                receipt = restore._restore(self.data, self.runtime,
+                                           version=restore.ADMIN_READ_VERSION, **args)
+            self.assertTrue(receipt['restored'])
+            self.assertEqual(restore._tree(self.runtime), self.manifest['files'])
+            self.assertTrue((self.transfer / 'manifest.consumed.json').exists())
+
     def test_changed_key_roles_or_pointer_fail_before_restore(self):
         key = self.data / '.record_integrity_secret'; original = key.read_bytes()
         key.write_bytes(b'different synthetic key' * 3)
