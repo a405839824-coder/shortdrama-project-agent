@@ -8,3 +8,4 @@ assert _spec is not None and _spec.loader is not None
 _module = module_from_spec(_spec)
 _spec.loader.exec_module(_module)
 state_equal = _module.state_equal
+speech_state_findings = _module.speech_state_findings

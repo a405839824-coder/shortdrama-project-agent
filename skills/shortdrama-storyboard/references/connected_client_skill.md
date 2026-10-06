@@ -77,3 +77,16 @@ accuracy P/C only for fully reviewed shots; without complete first-draft evidenc
 the historical first-draft accuracy remains unknown. Software PASS is separate.
 Zero blinks and source-supported stillness are legal. Do not fill a motion quota,
 invent an age in a voice baseline, or rewrite old approved deliverables.
+
+## Explicit current review
+
+Read the live obligation `decision_policy`, `rule_definitions` and every page.
+Decide each obligation independently against the current bound fields; never
+expand a whole-rule default PASS or relabel an old judgement with a new hash.
+For state and sound boundaries, inspect both shots' picture, starting state,
+actual cut/transition, voice, inner speech and environment sound fields, including
+the required neighbor observations. Quote what the cells actually say; "listening"
+must not become "already listened" in the judgement. Resolve `machine_findings`
+against the actual content before claiming PASS. Missing review stays unknown,
+and coverage is not correctness. Legal stillness, silence and offscreen speech
+remain allowed. Use only the remote audit/repair workflow in this client.

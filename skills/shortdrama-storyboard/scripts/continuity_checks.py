@@ -22,6 +22,36 @@ def state_equal(left, right):
     return state_value(left) == state_value(right)
 
 
+def speech_state_findings(shot):
+    """Closed contradiction only; silence or listening alone is never a fault."""
+    from projection_semantics import QUOTES
+    start = QUOTES.sub("", str(shot.get("起始状态") or ""))
+    voice = str(shot.get("音色") or "").strip().rstrip("。.;；")
+    # Recollection, anticipation and negation do not assert current speech.
+    if re.search(r"回忆|想起|梦中|回响|余音|录音|播放|幻听|仿佛|似乎|若|如果", start):
+        return []
+    current = re.search(r"(?:正在听|正听着|听着)[^。；，！？\n]{0,24}(?:训词|训话|说话|讲话|发言|叮嘱|嘱咐)", start)
+    if current and re.search(r"(?:并未|没有|不再|没在|未|没|不)\s*$", start[:current.start()]):
+        return []
+    if current and voice in {"无人物发声", "无人发声", "无人物声音"}:
+        return ["起态明确正在听人物发言，音色却声明无人物发声；须核对本镜实际声音或修正时点，不能用听训后替代听着。"]
+    return []
+
+
+def terminal_excerpt(shot):
+    """Use explicit terminal text or an actual completed event at the cut."""
+    from projection_semantics import QUOTES
+    for field in ("画面内容", "切镜/转场提示词"):
+        value = QUOTES.sub(lambda m: " " * len(m.group()), str(shot.get(field) or ""))
+        markers = list(re.finditer(r"(?:^|[。；;\n】])\s*(?:镜末|末态|结束时|至镜尾)\s*[:：]\s*", value))
+        if markers:
+            return value[markers[-1].end():].strip(), field, markers[-1].end()
+        if field == "切镜/转场提示词":
+            cut = re.search(r"(?:^|[。；;\n])([^。；;\n]*(?:说完|讲完|落座|坐定|松手|放下|起身|停住|闭口|闭眼|睁眼))(?:后)?切", value)
+            if cut and not re.search(r"若|如果|未|没|不|或许|可能|准备|将要", cut[1]):
+                return cut[1].strip(), field, cut.start(1)
+    return "", None, None
+
 def audit_adjacent_text(project, shots):
     """Check every actual text boundary when no production state proof exists.
 
@@ -34,7 +64,7 @@ def audit_adjacent_text(project, shots):
     from visible_entities import project_entity_registry, resolve_visible_subjects
 
     fields = ("镜头编号", "场景连续性ID", "可见主体", "空间站位描述", "起始状态",
-              "画面内容", "环境动态", "切镜/转场提示词", "光影", "光源来源", "光源方向", "色温倾向")
+              "画面内容", "音色", "心理音轨", "环境音效", "环境动态", "切镜/转场提示词", "光影", "光源来源", "光源方向", "色温倾向")
     people, props = project_entity_registry(project)
     pairs, checks = [], []
     for left, right in zip(shots, shots[1:]):
@@ -46,11 +76,7 @@ def audit_adjacent_text(project, shots):
         resolutions = [resolve_visible_subjects(shot.get("可见主体"), people=people,
             non_people=props, evidence_texts=[shot.get(field) for field in fields]) for shot in (left, right)]
         names = list(dict.fromkeys(name for row in resolutions for name in row.people))
-        picture = str(left.get("画面内容") or "")
-        # Preserve offsets into the actual field while excluding quoted claims.
-        unquoted = QUOTES.sub(lambda match: " " * len(match.group()), picture)
-        endpoints = list(re.finditer(r"(?:^|[。；;\n】])\s*(?:镜末|末态|结束时|至镜尾)\s*[:：]\s*", unquoted))
-        endpoint = unquoted[endpoints[-1].end():].strip() if endpoints else ""
+        endpoint, endpoint_field, endpoint_offset = terminal_excerpt(left)
         start = str(right.get("起始状态") or "").strip()
         episodes = [re.match(r"^(EP\d+)-", sid) for sid in (left_id, right_id)]
         same_scene = bool(left.get("场景连续性ID") and left.get("场景连续性ID") == right.get("场景连续性ID")
@@ -70,11 +96,15 @@ def audit_adjacent_text(project, shots):
                 reason = "明示末态与次镜起态逐字相同，但文本一致不能证明状态可解析或完整连续；仍需独立核对"
             else:
                 reason = "已比较两侧明示状态但不能完整解析或证明等价；未命中冲突不等于通过"
+        speech_faults = speech_state_findings(right)
+        if speech_faults:
+            findings.extend(speech_faults)
+            status, reason = "fail", "后镜起态与本镜无人物发声声明存在明确冲突"
         result = {"pair_id": pair_id, "left_shot_id": left_id, "right_shot_id": right_id,
                   "continuity_status": status, "review_method": "explicit-adjacent-text-v1",
                   "reason": reason, "field_sha256": hashes, "actual_fields": actual,
                   "left_terminal_excerpt": endpoint, "right_initial_excerpt": start,
-                  "left_terminal_offset": endpoints[-1].end() if endpoints else None,
+                  "left_terminal_field": endpoint_field, "left_terminal_offset": endpoint_offset,
                   "findings": findings, "input_mapping_findings": [fault for row in resolutions for fault in row.faults]}
         pairs.append(result)
         checks.append({"check_id": "adjacent_text_continuity", "layer": "空间连续",

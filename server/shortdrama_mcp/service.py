@@ -4632,7 +4632,15 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                     "AUTHORITATIVE_ARTIFACT_MISSING: latest storyboard pointer cannot be resolved"
                 )
         else:
-            authoritative = storyboard_artifacts[0] if storyboard_artifacts else None
+            # Several audits can publish within one timestamp second. Artifact
+            # filenames contain random IDs, so that ordering cannot select the
+            # newest conclusion. Prefer the durable deliverable append order;
+            # all certificate/byte checks below still apply to the selected row.
+            storyboard_by_id = {row.get("artifact_id"): row for row in storyboard_artifacts}
+            authoritative = next((storyboard_by_id[row.get("deliverable_id")]
+                for row in reversed(hub.get("deliverables", []))
+                if row.get("deliverable_id") in storyboard_by_id),
+                storyboard_artifacts[0] if storyboard_artifacts else None)
         selected = authoritative
         authoritative_is_overlay = bool(
             isinstance(authoritative, dict)
@@ -20317,7 +20325,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 raise ValueError(f"repair_window_separation_required: repair reuses {label} window")
             if repair_actor and actor and repair_actor == actor:
                 raise ValueError(f"repair_window_separation_required: repair reuses {label} actor")
-            if repair_session and session and repair_session == session:
+            if (work_order.get("window_access_contract") != WINDOW_NEUTRAL_ACCESS_CONTRACT
+                    and repair_session and session and repair_session == session):
                 raise ValueError(f"repair_window_separation_required: repair reuses {label} session")
 
     def _full_repair_authorization(
