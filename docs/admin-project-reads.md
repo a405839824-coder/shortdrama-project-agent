@@ -53,6 +53,18 @@ compressed archive remains capped at 2 GiB and 100,000 regular files. Before
 arming it, inventory projects plus exports and verify both ceilings and enough
 free destination space. Do not omit files or delete history to fit a ceiling.
 
+`PYTHONPATH=server python scripts/prepare_admin_read_backup.py` can prepare an
+unarmed draft on the existing 0.5.62 server without a restart. It retains at
+least 256 MiB of free volume space, caps compressed output while writing, and
+checks every archived byte against a before/after source inventory and protected
+identity fingerprints. Any existing destination is refused. A failure removes
+only its own incomplete output. Success creates `runtime.tar.gz` and signed
+`manifest.draft.json`, with `old_writer_frozen=false`; it never writes the active
+`manifest.json`, stops a process, or deploys. This is a preparatory snapshot, not
+the final deployment prerequisite: after draining and freezing the old writer,
+recheck the exact complete tree and protected state before signing and arming.
+If anything has changed, do not arm that draft.
+
 Only publish after this new transfer is verified and the old writer remains
 frozen. Startup checks the entire archive and protected identities, restores
 before listening, and consumes the marker once. Verify the restore receipt,
