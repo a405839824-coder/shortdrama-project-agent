@@ -95,7 +95,14 @@ class AuditEnvironmentRecoveryTests(unittest.IsolatedAsyncioTestCase):
         _artifact, _args, result = await self.case.audit_external(self.project, order, 'synthetic-new')
         self.assertEqual(result['status'], 'fail_current')
         self.assertNotEqual(result['data']['certificate']['certificate_id'], self.cert['certificate_id'])
-        self.assertEqual(self.reuse()['latest_storyboard']['audit_evidence_state'], 'verified_independent_certificate')
+        # Timestamp ties must not select the old overlay by random artifact ID.
+        artifacts = self.store.list_artifacts(self.namespace, self.project)
+        old_overlay = self.audit['data']['audited_workbook']['artifact_id']
+        artifacts.sort(key=lambda row: row.get('artifact_id') != old_overlay)
+        with patch.object(self.store, 'list_artifacts', return_value=artifacts):
+            latest = self.reuse()['latest_storyboard']
+        self.assertEqual(latest['audit_evidence_state'], 'verified_independent_certificate')
+        self.assertEqual(latest['independent_audit_certificate_id'], result['data']['certificate']['certificate_id'])
         for path, raw in self.history.items():
             self.assertEqual(path.read_bytes(), raw, str(path))
 

@@ -24,6 +24,15 @@ This release closes reproduced rule-checking and audit-routing gaps.
 - Window-neutral repairs may share an authenticated transport session while
   retaining distinct work orders and server-issued execution identities.
   Legacy session separation and identity-reuse rejection remain enforced.
+- Latest-audit fallback follows durable deliverable registration order, so two
+  audits within one timestamp second cannot select an older conclusion by random
+  artifact ID. The selected certificate and artifact bytes are still verified.
+
+Pre-existing service-guard tests now model the 0.5.60 trace-before-certificate
+sequence: missing forged traces still reject without writes, certificate CAS
+failure cannot publish a repair route or overlay, and a trace-write failure
+recovers exactly one event and one certificate. The production ordering is not
+weakened to satisfy assertions written for the older sequence.
 
 The output template, protected dialogue, voice definitions, timing profiles,
 source files, permissions and historical artifacts are preserved. Existing

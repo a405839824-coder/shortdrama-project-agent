@@ -2835,7 +2835,10 @@ class V051ServiceGuardTests(unittest.TestCase):
                     if row.get("handoff_id") == successor_id
                 ]
                 self.assertEqual(len(events_before), 1)
-                self.assertEqual(len(certificates_before), 1)
+                # Since 0.5.60 the signed audit trace precedes the certificate:
+                # a trace failure is an event-only retry, not a missing trace
+                # beneath an already-issued certificate.
+                self.assertEqual(len(certificates_before), 0 if fault == "telemetry" else 1)
 
                 _server, restarted = create_mcp(self.settings)
                 recovered = restarted.audit_storyboard(
@@ -2870,8 +2873,7 @@ class V051ServiceGuardTests(unittest.TestCase):
                     ],
                     events_before,
                 )
-                self.assertEqual(
-                    [
+                certificates_after = [
                         row
                         for row in restarted.store.list_project_records_strict(
                             self.namespace,
@@ -2879,9 +2881,12 @@ class V051ServiceGuardTests(unittest.TestCase):
                             kind="certificates",
                         )
                         if row.get("handoff_id") == successor_id
-                    ],
-                    certificates_before,
-                )
+                    ]
+                if fault == "telemetry":
+                    self.assertEqual(len(certificates_after), 1)
+                    self.assertEqual(certificates_after[0]['event_id'], events_before[0]['event_id'])
+                else:
+                    self.assertEqual(certificates_after, certificates_before)
                 self.assertEqual(
                     next(
                         row
@@ -3834,7 +3839,20 @@ class V051ServiceGuardTests(unittest.TestCase):
                             request_session_id=fixture["audit_session"],
                         )
                 self.assertTrue(storage_rejected)
-                self.assertEqual(publication_tail(), before_publication)
+                after_publication = publication_tail()
+                previous_traces = before_publication.pop("telemetry")
+                current_traces = after_publication.pop("telemetry")
+                self.assertEqual(after_publication, before_publication)
+                # The verified audit event/trace must exist before signing its
+                # certificate. CAS rejection publishes no repair route/overlay;
+                # only that one signed trace may have been appended.
+                previous_ids = {row['trace_id'] for row in previous_traces}
+                self.assertEqual([row for row in current_traces if row['trace_id'] in previous_ids], previous_traces)
+                appended = [row for row in current_traces if row['trace_id'] not in previous_ids]
+                self.assertEqual(len(appended), 1)
+                self.assertTrue(self.service.store.project_record_is_signed(appended[0]))
+                self.assertEqual(appended[0]['operation'], 'audit_storyboard')
+                self.assertEqual(appended[0]['artifact_id'], fixture['artifact_id'])
 
     def test_completed_fail_replay_rejects_resigned_route_misbindings(self) -> None:
         for record_kind, field in (
@@ -5514,7 +5532,9 @@ class V051ServiceGuardTests(unittest.TestCase):
             hub_only["reaudit_route_trace_id"] = str(root["stage_trace_id"])
             hub["handoffs"].append(hub_only)
         before = self._authority_snapshot(project_id)
-        with self.assertRaisesRegex(ValueError, "reaudit_lineage_invalid"):
+        # The source-trace gate introduced in 0.5.60 rejects this forged route
+        # even before the full lineage verifier; both are zero-write failures.
+        with self.assertRaisesRegex(ValueError, "reaudit_lineage_invalid|unknown telemetry record_id: TRC-FORGED-ROUTE"):
             self.service.audit_storyboard(
                 self.namespace,
                 project_id=project_id,
