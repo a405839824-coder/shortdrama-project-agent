@@ -30,7 +30,7 @@ def strict_shot(shot_id: str, duration: float, cumulative: float) -> dict:
                 "口型与对白一致；邹氏晚半拍抬眼。"
                 f"【{duration - 0.4:.1f}—{duration:.1f}秒】江氏停稳，邹氏保持回望。"
             ),
-            "音色": "基础声线：江氏声线温和。\n言语行为：安抚。\n当前表达：温和，意在回应关切。\n发声方式：\n音量：轻声。\n语速与节奏：平稳。\n呼吸：稳定。\n停顿：句中短停。\n重音：‘放心’。\n尾音：收住。\n禁止语气：喊叫。",
+            "音色": "基础声线：年龄感未知，中音区，厚薄适中，明暗中性，常态温和。\n言语行为：安抚。\n当前表达：温和，意在回应关切。\n发声方式：\n音量：轻声。\n语速与节奏：平稳。\n呼吸：稳定。\n停顿：句中短停。\n重音：‘放心’。\n尾音：短收，末字轻收。\n禁止语气：喊叫、嘲讽。",
             "心理音轨": "无。",
             "环境音效": "近处衣料轻响，对白时底声避让。",
             "环境动态": "窗纸轻动。",
@@ -83,6 +83,18 @@ class StrictContractServerTests(unittest.TestCase):
             self.assertIn(f"{field}：{shot[field]}", row["光影"])
         for forbidden in ("【0.0—", "说道：", "请大嫂放心", "口型", "音量", "环境音效"):
             self.assertNotIn(forbidden, keyframe)
+
+    def test_incomplete_baseline_is_rejected_by_current_projection(self) -> None:
+        # Retain the old layout fixture's incomplete baseline as a negative case.
+        # assume_compact selects an input representation, not a historical rule set.
+        shot = strict_shot("EP08-001", 3.0, 3.0)
+        shot["音色"] = shot["音色"].replace(
+            "基础声线：年龄感未知，中音区，厚薄适中，明暗中性，常态温和。",
+            "基础声线：江氏声线温和。",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "基础声线.*缺少必要"):
+            compile_formal_merged_field(shot, assume_compact=True)
 
     def test_episode_local_cumulative_and_batch_total(self) -> None:
         storyboard = {
