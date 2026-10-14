@@ -289,7 +289,11 @@ def voice_content_findings(value, *, dialogue_rows=(), mask=None):
         for segment,rows in values:
             findings.extend(_findings_for_value("音色", segment, mask=mask,
                                                subfield=label, dialogue_rows=rows))
-            findings.extend(syntax.required_voice_clause_findings(label, segment, field_policy()))
+            # Registered legacy baselines are whole-value exceptions only.
+            # New baselines share registry clause groups with the validator;
+            # a good age prefix never licenses unknown text in another clause.
+            if label != "基础声线" or not preserved_voice_baseline(segment):
+                findings.extend(syntax.required_voice_clause_findings(label, segment, field_policy()))
         if label == "发声方式" and body:
             findings.append({"code": ERROR_CODE, "path": "音色.发声方式", "role": "unlabelled",
                              "excerpt": body, "offset": [0, len(body)],
@@ -331,7 +335,10 @@ def field_content_findings(shot, *, mask=None, dialogue_rows=()):
                              'message': str(exc), 'repair': '只在造型锚保留外观；空间关系由当前机位与场景事实生成，不改写素材ID或来源证据'})
     unique = {}
     for row in findings:
-        unique[(row["path"], row["role"], tuple(row["offset"]))] = row
+        # Several required components can be absent from the same value.
+        # Keep each diagnosis instead of overwriting it with the last group.
+        group = row["message"] if row["role"] == "missing_owned_clause_group" else None
+        unique[(row["path"], row["role"], tuple(row["offset"]), group)] = row
     return list(unique.values())
 
 

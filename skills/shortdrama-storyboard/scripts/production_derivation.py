@@ -102,6 +102,7 @@ def owned_content(obj):
             'chapter_intake': obj.get('chapter_intake'),
             'scene_state_ledger': evidence.get('scene_state_ledger'),
             'audio_timing': evidence.get('audio_workflow', {}).get('timing'),
+            'performance_evidence': evidence.get('performance_evidence'),
             'authoring_evidence': evidence.get('authoring_evidence')}
 
 
@@ -169,6 +170,8 @@ def attach_derivation(candidate, input_decisions, graph_bytes, *, production=Non
     compilation = source_compilation or _source_compile(input_decisions, graph_bytes)
     lowered = production or lower_production_decisions(input_decisions, source_compilation=compilation)
     compiled = compilation.to_dict()
+    from author_storyboard import _attach_performance_evidence
+    candidate = _attach_performance_evidence(candidate, input_decisions, lowered, compilation)
     result = finalize_generated_candidate(candidate)
     # The marker belongs to generated content; set it before binding that content.
     result['prevention_evidence'].setdefault('authoring_evidence', {})['production_binding_required'] = CONTRACT
@@ -195,15 +198,17 @@ def _replay_compilation(input_json, graph_text, compiler_key):
     internals are read-only; only the obligations returned to callers are copied.
     """
     from production_decisions import lower_production_decisions
-    from author_storyboard import _render_decisions
+    from author_storyboard import _render_decisions, _attach_performance_evidence
     raw = json.loads(input_json)
     compilation = _source_compile(raw, graph_text.encode('utf-8'))
     lowered = lower_production_decisions(raw, source_compilation=compilation)
-    rebuilt = finalize_generated_candidate(_render_decisions(lowered['typed_decisions']))
+    rebuilt = finalize_generated_candidate(_attach_performance_evidence(
+        _render_decisions(lowered['typed_decisions']), raw, lowered, compilation))
     rebuilt['prevention_evidence'].setdefault('authoring_evidence', {})['production_binding_required'] = CONTRACT
     compiled = compilation.to_dict()
     return {'content_sha256': digest(owned_content(rebuilt)),
             'source_compilation': compiled, 'action_trace': lowered['derivation'],
+            'performance_evidence': rebuilt['prevention_evidence'].get('performance_evidence'),
             'source_obligations': _obligations(rebuilt, compiled, lowered['derivation']),
             'production_prevention_verified': lowered['derivation'].get('production_prevention', {}).get('status') == 'pass'}
 
@@ -255,6 +260,7 @@ def inspect_derivation(candidate):
         if not response['faults']:
             response.update(valid=True, source_obligations=copy.deepcopy(expected), source_graph_sha256=payload['source_graph_sha256'],
                             derivation_sha256=payload['binding_sha256'],
+                            performance_evidence=copy.deepcopy(replay['performance_evidence']),
                             production_prevention_verified=replay['production_prevention_verified'])
     except Exception as exc:
         fault('recompile', f'{type(exc).__name__}: {exc}')

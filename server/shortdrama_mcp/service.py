@@ -4975,6 +4975,16 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "machine_diagnostics_are_generation_failure_rate": False,
                 "independent_audit_still_required": True,
             },
+            "production_grounding_improvement": {
+                "release": "0.5.65",
+                "voice_requirements": "single_registry_clause_grammar",
+                "performance_evidence_contract": "performance-evidence-v1",
+                "geometry_scope": "all_declared_actor_landmarks; unreplayed later states remain conditional",
+                "upstream_failure_diagnostics": "not_checked with dependency cause",
+                "historical_artifacts_rewritten": False,
+                "software_tests_are_content_accuracy": False,
+                "independent_audit_still_required": True,
+            },
             "finite_acceptance_control": {
                 "enabled": self.settings.acceptance_control_enabled,
                 "profile": "host_controlled" if self.settings.acceptance_control_enabled else "legacy_uncontrolled",

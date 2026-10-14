@@ -514,13 +514,8 @@ VOICE_DIMENSION_PATTERNS = {
     "重音位置": re.compile(r"重音|加重|强调|咬重"),
     "尾音变化": re.compile(r"尾音|上扬|下压|发虚|放柔|拉长|落下|收住"),
 }
-VOICE_BASE_REQUIREMENTS = {
-    "年龄感": re.compile(r"少年|青年|中年|老年|年长|年轻|成熟|年龄感|年纪|\d+岁|[一二三四五六七八九十]+岁"),
-    "音区": re.compile(r"音区|低音|中低音|中音|中高音|高音|偏低|偏高"),
-    "厚薄": re.compile(r"厚|薄|纤细|饱满|浑厚"),
-    "明暗": re.compile(r"明亮|清亮|低沉|暗沉|黯哑|沙哑|温润|冷冽|明暗"),
-    "长期稳定特征": re.compile(r"长期|稳定|一贯|常态|平时|惯常|固定|持续保持"),
-}
+# Baseline completeness uses field_content's registry-owned complete clauses.
+# A second keyword list here previously disagreed with its adult/child grammar.
 VOICE_ALLOWED_TAILS = ("上抬", "下压", "截断", "发虚", "落稳", "短收")
 GENERIC_NEUTRAL_VOICE_CLAUSES = (
     "声音中等清晰", "语速从容", "关键词加重", "尾音随句意收住",
@@ -700,13 +695,8 @@ def _voice_template_errors(
         if not parsed.get(label, "").strip():
             errors.append(f"{label}不能为空")
 
-    baseline = parsed.get("基础声线", "")
-    missing_baseline = [
-        name for name, pattern in VOICE_BASE_REQUIREMENTS.items()
-        if not preserved_voice_baseline(baseline) and not pattern.search(baseline)
-    ]
-    if missing_baseline:
-        errors.append("基础声线缺少：" + "、".join(missing_baseline))
+    # voice_content_findings below checks all five baseline components using
+    # exactly the same owned-clause grammar as direct field/export checks.
     current_expression = parsed.get("当前表达", "")
     if cjk_len(current_expression) > 80:
         errors.append("当前表达必须是一句短而可执行的话，不得写成长篇心理分析")
@@ -2901,6 +2891,7 @@ def _validate_preventive_gates(
     mode: str,
     rules: dict[str, Any],
     catalog: dict[str, dict[str, Any]],
+    production_binding: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     metrics: dict[str, Any] = {
@@ -3222,12 +3213,28 @@ def _validate_preventive_gates(
     chain_fields = policy.get("performance_chain_fields", [])
     chains = evidence.get("performance_chains")
     chain_by_shot = {str(row.get("shot_id")): row for row in chains if isinstance(row, dict)} if isinstance(chains, list) else {}
+    from performance_evidence import chain_relevant, inspect_performance_evidence
+    performance = inspect_performance_evidence(obj, production_binding or {})
+    derived_by_shot = {row['shot_id']: row for row in performance['shots']}
+    metrics['performance_evidence'] = {key: value for key, value in performance.items() if key != 'shots'}
+    if performance['present'] and not performance['verified']:
+        issues.append(_issue(catalog, "E-PERFORMANCE-001", "prevention_evidence.performance_evidence",
+                             "派生表演证据未通过真实输入、来源计划、动作与状态重放；不能替代原表演链门禁。"))
     for shot in shots:
         shot_id = str(shot.get("镜头编号"))
         dialogue = " ".join(line for _, line in extract_dialogues(shot.get("画面内容")))
         core = str(shot.get("功能类型", ""))
-        relevant = not is_none_value(dialogue) or _has_any(core, ["情绪", "关系", "冲突", "反应", "内心"])
+        relevant = chain_relevant(core, not is_none_value(dialogue))
         if not relevant:
+            continue
+        derived = derived_by_shot.get(shot_id)
+        if performance['verified'] and derived is not None:
+            unknown = [f"{actor['actor']}.{name}" for actor in derived['actors']
+                       for name in chain_fields if actor['fields'].get(name, {}).get('evidence_status')
+                       not in {'bound', 'not_applicable'}]
+            if unknown:
+                issues.append(_issue(catalog, "E-PERFORMANCE-001", f"performance_chain:{shot_id}",
+                    f"重放表演证据仍未知：{unknown}；补实际来源/状态依据，不要求新增七种动作。"))
             continue
         chain = chain_by_shot.get(shot_id)
         missing = _missing_fields(chain, chain_fields)
@@ -4190,6 +4197,7 @@ def validate_project(
         mode,
         rules,
         catalog,
+        production_binding=production_binding,
     )
     issues.extend(gate_issues)
     # Imported/older originals do not carry the production workflow profile.

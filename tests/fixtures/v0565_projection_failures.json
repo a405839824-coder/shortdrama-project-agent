@@ -1,0 +1,1577 @@
+{
+  "provenance": {
+    "description": "Frozen R2 excerpts, not corrected samples; full originals remain external and immutable.",
+    "A_decisions_sha256": "795a09d628f4fe74dd16c504ad6e9e6c92374b9d36c94b3649d9e3ec01085ba1",
+    "C_decisions_sha256": "99349e1e1a9bd225a217f0d0895e87386484d9af43e65ea88c155ae88bead83f"
+  },
+  "C": {
+    "initial_world": {
+      "scenes": {
+        "SC-RESCUE": {
+          "label": "府内湖边施救处",
+          "door_window_state": {},
+          "light": {
+            "period": "day",
+            "kind": "outdoor_daylight",
+            "name": "自然日光",
+            "state": "present",
+            "direction_xyz": [
+              1,
+              -1,
+              2
+            ],
+            "main_tone": "slightly_warm",
+            "shadow_tone": "slightly_cool",
+            "materials": [
+              "皮肤",
+              "衣料",
+              "地面"
+            ]
+          },
+          "barriers": []
+        },
+        "SC-YARD": {
+          "label": "韶光院院中",
+          "door_window_state": {},
+          "light": {
+            "period": "day",
+            "kind": "outdoor_daylight",
+            "name": "自然日光",
+            "state": "present",
+            "direction_xyz": [
+              1,
+              -1,
+              2
+            ],
+            "main_tone": "slightly_warm",
+            "shadow_tone": "slightly_cool",
+            "materials": [
+              "皮肤",
+              "衣料",
+              "地面"
+            ]
+          },
+          "barriers": []
+        }
+      },
+      "actors": {
+        "仆从": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            -0.65,
+            0,
+            0
+          ],
+          "body_yaw": 90,
+          "head_yaw": 90,
+          "eye_height": 0.9,
+          "eye_state": "natural_open",
+          "posture": "蹲姿",
+          "hands": {
+            "left": [
+              -0.18,
+              0.15,
+              0.6000000000000001
+            ],
+            "right": [
+              0.18,
+              0.15,
+              0.6000000000000001
+            ]
+          },
+          "gaze": {
+            "kind": "actor",
+            "id": "子平"
+          },
+          "reach_origin_xyz": [
+            -0.65,
+            0,
+            0.8
+          ],
+          "reach_m": 0.7,
+          "performance_state": {
+            "eyelid": "unknown",
+            "breath": "unknown"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "眉心紧蹙，嘴角绷住",
+            "claps": 0,
+            "kowtows": 0
+          }
+        },
+        "子平": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            0,
+            0,
+            0
+          ],
+          "body_yaw": 180,
+          "head_yaw": 90,
+          "eye_height": 0.28,
+          "eye_state": "natural_open",
+          "posture": "躺卧",
+          "hands": {
+            "left": [
+              -0.18,
+              0.15,
+              0.15
+            ],
+            "right": [
+              0.18,
+              0.15,
+              0.15
+            ]
+          },
+          "gaze": {
+            "kind": "actor",
+            "id": "苏清柳"
+          },
+          "reach_origin_xyz": [
+            0,
+            0,
+            0.18000000000000002
+          ],
+          "reach_m": 0.7,
+          "performance_state": {
+            "eyelid": "unknown",
+            "breath": "unknown"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "眉心微蹙，唇角下压",
+            "claps": 0,
+            "kowtows": 0
+          }
+        },
+        "苏清柳": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            0.65,
+            0,
+            0
+          ],
+          "body_yaw": 270,
+          "head_yaw": 270,
+          "eye_height": 0.9,
+          "eye_state": "natural_open",
+          "posture": "蹲姿",
+          "hands": {
+            "left": [
+              -0.18,
+              0.15,
+              0.6000000000000001
+            ],
+            "right": [
+              0.18,
+              0.15,
+              0.6000000000000001
+            ]
+          },
+          "gaze": {
+            "kind": "actor",
+            "id": "子平"
+          },
+          "reach_origin_xyz": [
+            0.65,
+            0,
+            0.8
+          ],
+          "reach_m": 0.7,
+          "performance_state": {
+            "eyelid": "unknown",
+            "breath": "unknown"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "眉心微蹙，唇角下压",
+            "claps": 0,
+            "kowtows": 0
+          }
+        },
+        "荣婶": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            1.6,
+            1.5,
+            0
+          ],
+          "body_yaw": 180,
+          "head_yaw": 109.653824,
+          "eye_height": 1.55,
+          "eye_state": "natural_open",
+          "posture": "站立",
+          "hands": {
+            "left": [
+              -0.18,
+              0.15,
+              1.25
+            ],
+            "right": [
+              0.18,
+              0.15,
+              1.25
+            ]
+          },
+          "gaze": {
+            "kind": "point",
+            "id": "随行众人画外区域"
+          },
+          "reach_origin_xyz": [
+            1.6,
+            1.5,
+            1.45
+          ],
+          "reach_m": 0.7,
+          "performance_state": {
+            "eyelid": "unknown",
+            "breath": "unknown"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "眉心紧蹙，嘴角绷住",
+            "claps": 0,
+            "kowtows": 0
+          }
+        }
+      },
+      "props": {},
+      "points": {
+        "救醒处": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            0,
+            0,
+            0
+          ],
+          "display_name": "救醒处"
+        },
+        "孩子面部": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            0,
+            0,
+            0.28
+          ],
+          "display_name": "孩子面部"
+        },
+        "拥抱处": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            0.4,
+            0,
+            0.8
+          ],
+          "display_name": "拥抱处"
+        },
+        "小径起点": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            0,
+            2,
+            0
+          ],
+          "display_name": "小径起点"
+        },
+        "命令处": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            1.6,
+            1.5,
+            1.45
+          ],
+          "display_name": "命令处"
+        },
+        "院中落脚处": {
+          "scene_id": "SC-YARD",
+          "position_xyz": [
+            0,
+            0,
+            0
+          ],
+          "display_name": "院中落脚处"
+        },
+        "院中取景点": {
+          "scene_id": "SC-YARD",
+          "position_xyz": [
+            0,
+            0,
+            1.1
+          ],
+          "display_name": "院中取景点"
+        },
+        "救治关系中心": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            0,
+            0,
+            0.55
+          ],
+          "display_name": "救治关系中心"
+        },
+        "随行众人画外区域": {
+          "scene_id": "SC-RESCUE",
+          "position_xyz": [
+            3,
+            1,
+            1.4
+          ],
+          "display_name": "随行众人画外区域"
+        }
+      }
+    },
+    "shots": [
+      {
+        "shot_id": "EP01-001",
+        "shot_uid": "C-FRESH-001",
+        "episode_id": "EP01",
+        "scene_id": "SC-RESCUE",
+        "continuity_id": "C-LAKE-01",
+        "ticks": [
+          0,
+          10,
+          20,
+          30
+        ],
+        "camera": {
+          "position_xyz": [
+            0,
+            -2.6,
+            1.25
+          ],
+          "target": "救治关系中心",
+          "hfov_deg": 34,
+          "vfov_deg": 55,
+          "frame": "medium"
+        },
+        "actions": [
+          {
+            "id": "ACT-RESCUE",
+            "kind": "source_step",
+            "source_use_id": "U-RESCUE",
+            "step_id": "ST-RESCUE",
+            "start": 0,
+            "end": 30,
+            "after": []
+          }
+        ],
+        "editorial": {
+          "功能类型": "救治未止",
+          "参考图锚定": "未附参考图；人物服装与面貌未作外部素材核实，使用本片段统一文字设定待独审",
+          "原文依据类型": "原文直述；机位、日光与场地落点为导演选择",
+          "原文支撑句": "救人的仆从继续施救",
+          "环境动态": {
+            "mode": "shared_world"
+          },
+          "环境音效": {
+            "mode": "none"
+          }
+        },
+        "source_unit_ids": [
+          "CU01"
+        ],
+        "transition": {
+          "relation": "opening",
+          "basis": "首次进入救治现场"
+        }
+      },
+      {
+        "shot_id": "EP01-002",
+        "shot_uid": "C-FRESH-002",
+        "episode_id": "EP01",
+        "scene_id": "SC-RESCUE",
+        "continuity_id": "C-LAKE-01",
+        "ticks": [
+          0,
+          10,
+          21,
+          32
+        ],
+        "camera": {
+          "position_xyz": [
+            1.6,
+            -0.5,
+            0.4
+          ],
+          "target": "孩子面部",
+          "hfov_deg": 18,
+          "vfov_deg": 16,
+          "frame": "face"
+        },
+        "actions": [
+          {
+            "id": "ACT-WATER",
+            "kind": "source_step",
+            "source_use_id": "U-WATER",
+            "step_id": "ST-WATER",
+            "start": 0,
+            "end": 12,
+            "after": [
+              "ACT-RESCUE"
+            ]
+          },
+          {
+            "id": "ACT-CRY",
+            "kind": "speak",
+            "source_use_id": "U-CRY",
+            "start": 12,
+            "end": 32,
+            "after": [
+              "ACT-WATER"
+            ],
+            "voice": {
+              "breath": "哭腔中自然换气，不添加多余哭词",
+              "prohibited_tones": [
+                "播报腔",
+                "夸张拖腔"
+              ],
+              "baseline": "年龄感儿童；高音区；厚薄偏薄；明暗偏明；长期声线清亮",
+              "speech_act": "哭喊",
+              "current_expression": "表面紧张、急切；意在请求关切",
+              "volume": "哭声较响",
+              "rhythm": "断续哭声间说出完整原词，不加速",
+              "pauses": "省略号处哭声自然衰减",
+              "emphasis": "“呜哇”起音明显后衰减",
+              "tail_direction": "发虚",
+              "tail_execution": "“哇”随哭声衰减"
+            }
+          }
+        ],
+        "editorial": {
+          "功能类型": "救醒哭出",
+          "参考图锚定": "未附参考图；人物服装与面貌未作外部素材核实，使用本片段统一文字设定待独审",
+          "原文依据类型": "原文直述；机位、日光与场地落点为导演选择",
+          "原文支撑句": "子平终于吐出水\n救人的仆从继续施救，子平终于吐出水，哭出了声。\n\n“呜哇……”",
+          "环境动态": {
+            "mode": "shared_world"
+          },
+          "环境音效": {
+            "mode": "none"
+          }
+        },
+        "source_unit_ids": [
+          "CU01",
+          "CU02"
+        ],
+        "transition": {
+          "relation": "continuous",
+          "basis": "同一施救现场连续时间"
+        }
+      }
+    ]
+  },
+  "A": {
+    "initial_world": {
+      "scenes": {
+        "XIANGYA": {
+          "label": "香雅院庭院与屋门",
+          "door_window_state": {
+            "屋门": "open"
+          },
+          "opening_labels": {
+            "屋门": "屋门"
+          },
+          "light": {
+            "period": "day",
+            "kind": "outdoor_daylight",
+            "name": "院中天光",
+            "state": "present",
+            "direction_xyz": [
+              1,
+              1,
+              2
+            ],
+            "main_tone": "neutral",
+            "shadow_tone": "slightly_cool",
+            "materials": [
+              "衣料",
+              "木纹",
+              "石面"
+            ]
+          },
+          "barriers": []
+        }
+      },
+      "actors": {
+        "仆妇甲": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            -3,
+            2,
+            0
+          ],
+          "body_yaw": 180,
+          "head_yaw": 124,
+          "eye_height": 1.6,
+          "eye_state": "natural_open",
+          "posture": "站立",
+          "hands": {
+            "left": [
+              -0.22,
+              0,
+              0.8
+            ],
+            "right": [
+              0.22,
+              0,
+              0.8
+            ]
+          },
+          "gaze": {
+            "kind": "point",
+            "id": "院中椅位"
+          },
+          "reach_origin_xyz": [
+            -3,
+            2,
+            1.1
+          ],
+          "reach_m": 0.8,
+          "performance_state": {
+            "eyelid": "relaxed",
+            "breath": "resting"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "眉眼舒展，唇线自然",
+            "claps": 0,
+            "kowtows": 0
+          }
+        },
+        "仆妇乙": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            -2.3,
+            2,
+            0
+          ],
+          "body_yaw": 180,
+          "head_yaw": 131,
+          "eye_height": 1.6,
+          "eye_state": "natural_open",
+          "posture": "站立",
+          "hands": {
+            "left": [
+              -0.22,
+              0,
+              0.8
+            ],
+            "right": [
+              0.22,
+              0,
+              0.8
+            ]
+          },
+          "gaze": {
+            "kind": "point",
+            "id": "院中椅位"
+          },
+          "reach_origin_xyz": [
+            -2.3,
+            2,
+            1.1
+          ],
+          "reach_m": 0.8,
+          "performance_state": {
+            "eyelid": "relaxed",
+            "breath": "resting"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "眉眼舒展，唇线自然",
+            "claps": 0,
+            "kowtows": 0
+          }
+        },
+        "男仆甲": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            2.3,
+            2,
+            0
+          ],
+          "body_yaw": 180,
+          "head_yaw": 229,
+          "eye_height": 1.6,
+          "eye_state": "natural_open",
+          "posture": "站立",
+          "hands": {
+            "left": [
+              -0.22,
+              0,
+              0.8
+            ],
+            "right": [
+              0.22,
+              0,
+              0.8
+            ]
+          },
+          "gaze": {
+            "kind": "point",
+            "id": "院中椅位"
+          },
+          "reach_origin_xyz": [
+            2.3,
+            2,
+            1.1
+          ],
+          "reach_m": 0.8,
+          "performance_state": {
+            "eyelid": "relaxed",
+            "breath": "resting"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "眉眼舒展，唇线自然",
+            "claps": 0,
+            "kowtows": 0
+          }
+        },
+        "男仆乙": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            3,
+            2,
+            0
+          ],
+          "body_yaw": 180,
+          "head_yaw": 236,
+          "eye_height": 1.6,
+          "eye_state": "natural_open",
+          "posture": "站立",
+          "hands": {
+            "left": [
+              -0.22,
+              0,
+              0.8
+            ],
+            "right": [
+              0.22,
+              0,
+              0.8
+            ]
+          },
+          "gaze": {
+            "kind": "point",
+            "id": "院中椅位"
+          },
+          "reach_origin_xyz": [
+            3,
+            2,
+            1.1
+          ],
+          "reach_m": 0.8,
+          "performance_state": {
+            "eyelid": "relaxed",
+            "breath": "resting"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "眉眼舒展，唇线自然",
+            "claps": 0,
+            "kowtows": 0
+          }
+        },
+        "苏清柳": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            0,
+            0,
+            0
+          ],
+          "body_yaw": 0,
+          "head_yaw": 300,
+          "eye_height": 1.15,
+          "eye_state": "natural_open",
+          "posture": "坐姿",
+          "hands": {
+            "left": [
+              -0.22,
+              0,
+              0.6
+            ],
+            "right": [
+              0.22,
+              0,
+              0.6
+            ]
+          },
+          "gaze": {
+            "kind": "actor",
+            "id": "荣婶儿"
+          },
+          "reach_origin_xyz": [
+            0,
+            0,
+            0.8
+          ],
+          "reach_m": 0.8,
+          "performance_state": {
+            "eyelid": "relaxed",
+            "breath": "resting"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "眉眼舒展，唇线自然",
+            "claps": 0,
+            "kowtows": 0
+          }
+        },
+        "荣婶儿": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            -0.8,
+            0.5,
+            0
+          ],
+          "body_yaw": 150,
+          "head_yaw": 122,
+          "eye_height": 1.6,
+          "eye_state": "natural_open",
+          "posture": "站立",
+          "hands": {
+            "left": [
+              -0.22,
+              0,
+              0.8
+            ],
+            "right": [
+              0.22,
+              0,
+              0.8
+            ]
+          },
+          "gaze": {
+            "kind": "actor",
+            "id": "苏清柳"
+          },
+          "reach_origin_xyz": [
+            -0.8,
+            0.5,
+            1.1
+          ],
+          "reach_m": 0.8,
+          "performance_state": {
+            "eyelid": "relaxed",
+            "breath": "resting"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "一侧眉梢抬起，唇角轻收",
+            "claps": 0,
+            "kowtows": 0
+          }
+        },
+        "邹氏": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            0,
+            3,
+            0
+          ],
+          "body_yaw": 180,
+          "head_yaw": 180,
+          "eye_height": 1.6,
+          "eye_state": "natural_open",
+          "posture": "站立",
+          "hands": {
+            "left": [
+              -0.22,
+              0,
+              0.8
+            ],
+            "right": [
+              0.22,
+              0,
+              0.8
+            ]
+          },
+          "gaze": {
+            "kind": "actor",
+            "id": "苏清柳"
+          },
+          "reach_origin_xyz": [
+            0,
+            3,
+            1.1
+          ],
+          "reach_m": 0.8,
+          "performance_state": {
+            "eyelid": "relaxed",
+            "breath": "resting"
+          },
+          "action_state": {
+            "contacts": {},
+            "wet_parts": [],
+            "clean_parts": [],
+            "hand_shapes": {
+              "left": "open",
+              "right": "open"
+            },
+            "expression": "眉峰压低，下颌收紧",
+            "claps": 0,
+            "kowtows": 0
+          }
+        }
+      },
+      "props": {
+        "木椅": {
+          "anchor": {
+            "point": "椅座"
+          },
+          "written_ref": null,
+          "display_name": "木椅",
+          "physical": {
+            "material": "wood",
+            "contents": "none",
+            "integrity": "intact"
+          }
+        },
+        "戒尺": {
+          "anchor": {
+            "point": "腰侧布套位"
+          },
+          "written_ref": null,
+          "display_name": "腰侧布套里的戒尺",
+          "physical": {
+            "material": "wood",
+            "contents": "none",
+            "integrity": "intact"
+          }
+        }
+      },
+      "points": {
+        "仆妇廊柱": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            -2.65,
+            2,
+            1.3
+          ],
+          "display_name": "仆妇廊柱"
+        },
+        "男仆廊柱": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            2.65,
+            2,
+            1.3
+          ],
+          "display_name": "男仆廊柱"
+        },
+        "院中椅位": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            0,
+            0,
+            0
+          ],
+          "display_name": "院中椅位"
+        },
+        "荣婶儿站位": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            -0.8,
+            0.5,
+            0
+          ],
+          "display_name": "荣婶儿站位"
+        },
+        "屋门落点": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            0,
+            3,
+            1.6
+          ],
+          "display_name": "屋门落点"
+        },
+        "屋门": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            0,
+            3,
+            0
+          ],
+          "display_name": "屋门"
+        },
+        "腰侧布套位": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            -0.8,
+            0.5,
+            0.9
+          ],
+          "display_name": "腰侧布套位"
+        },
+        "椅座": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            0,
+            0,
+            0.45
+          ],
+          "display_name": "椅座"
+        },
+        "苏清柳面部": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            0,
+            0,
+            1.15
+          ],
+          "display_name": "苏清柳面部"
+        },
+        "邹氏面部": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            0,
+            3,
+            1.6
+          ],
+          "display_name": "邹氏面部"
+        },
+        "对话中点": {
+          "scene_id": "XIANGYA",
+          "position_xyz": [
+            -0.4,
+            0.2,
+            1.2
+          ],
+          "display_name": "对话中点"
+        }
+      }
+    },
+    "shots": [
+      {
+        "shot_id": "EP01-006",
+        "shot_uid": "FRESH_A_SHOT_006",
+        "episode_id": "EP01",
+        "scene_id": "XIANGYA",
+        "continuity_id": "A_COURTYARD",
+        "ticks": [
+          0,
+          4,
+          8,
+          12
+        ],
+        "camera": {
+          "position_xyz": [
+            1,
+            1,
+            1.6
+          ],
+          "target": "邹氏面部",
+          "hfov_deg": 25,
+          "vfov_deg": 30,
+          "frame": "face"
+        },
+        "actions": [
+          {
+            "id": "A_STOP",
+            "kind": "speak",
+            "start": 0,
+            "end": 12,
+            "after": [],
+            "source_use_id": "U_F_STOP",
+            "voice": {
+              "baseline": "年龄感为中年，中低音区，厚薄偏厚，明暗偏暗，常态低沉。",
+              "speech_act": "质问。",
+              "current_expression": "冷淡而坚定，意在拒绝。",
+              "volume": "正常交谈。",
+              "rhythm": "短句自然说出。",
+              "breath": "气息平稳支撑本句。",
+              "pauses": "按本句标点自然停连。",
+              "emphasis": "“谁允许”。",
+              "tail_direction": "下压",
+              "tail_execution": "句号尾音下压截住。",
+              "prohibited_tones": [
+                "喊叫",
+                "哭腔"
+              ]
+            }
+          }
+        ],
+        "editorial": {
+          "功能类型": "对白推进",
+          "参考图锚定": "未附参考图；文字造型锚：古装人物与木构庭院，真实衣料和木纹。",
+          "原文依据类型": "原文直述",
+          "原文支撑句": "谁允许你走了。",
+          "环境动态": {
+            "mode": "shared_world"
+          },
+          "环境音效": {
+            "mode": "action_bound",
+            "cues": []
+          }
+        },
+        "source_unit_ids": [
+          "SOURCE_A"
+        ],
+        "transition": {
+          "relation": "continuous",
+          "basis": "邹氏正面一句截住离去意图；没有实际起身离开。"
+        }
+      },
+      {
+        "shot_id": "EP01-007",
+        "shot_uid": "FRESH_A_SHOT_007",
+        "episode_id": "EP01",
+        "scene_id": "XIANGYA",
+        "continuity_id": "A_COURTYARD",
+        "ticks": [
+          0,
+          4,
+          10,
+          16
+        ],
+        "camera": {
+          "position_xyz": [
+            1,
+            2,
+            1.25
+          ],
+          "target": "苏清柳面部",
+          "hfov_deg": 25,
+          "vfov_deg": 30,
+          "frame": "medium_close"
+        },
+        "actions": [
+          {
+            "id": "A_SMILE",
+            "kind": "source_step",
+            "source_use_id": "U_F_SMILE",
+            "step_id": "P_F_SMILE_1",
+            "start": 0,
+            "end": 4,
+            "after": []
+          },
+          {
+            "id": "A_LOOK_Z",
+            "kind": "source_step",
+            "source_use_id": "U_F_SMILE",
+            "step_id": "P_F_SMILE_2",
+            "start": 0,
+            "end": 4,
+            "after": []
+          },
+          {
+            "id": "A_QUERY",
+            "kind": "speak",
+            "start": 4,
+            "end": 16,
+            "after": [
+              "A_SMILE",
+              "A_LOOK_Z"
+            ],
+            "source_use_id": "U_F_QUERY",
+            "voice": {
+              "baseline": "年龄感为青年，中音区，厚薄适中，明暗偏明，常态清楚。",
+              "speech_act": "询问。",
+              "current_expression": "温和，意在确认。",
+              "volume": "正常交谈。",
+              "rhythm": "按语义自然连贯说出，逗号处轻分句。",
+              "breath": "气息平稳支撑本句。",
+              "pauses": "按本句标点自然停连。",
+              "emphasis": "“还有何事”。",
+              "tail_direction": "上抬",
+              "tail_execution": "问号末尾轻扬。",
+              "prohibited_tones": [
+                "喊叫",
+                "哭腔"
+              ]
+            }
+          }
+        ],
+        "editorial": {
+          "功能类型": "对白推进",
+          "参考图锚定": "未附参考图；文字造型锚：古装人物与木构庭院，真实衣料和木纹。",
+          "原文依据类型": "原文直述",
+          "原文支撑句": "苏清柳含笑瞧着邹氏，\n母亲，还有何事？",
+          "环境动态": {
+            "mode": "shared_world"
+          },
+          "环境音效": {
+            "mode": "action_bound",
+            "cues": []
+          }
+        },
+        "source_unit_ids": [
+          "SOURCE_A"
+        ],
+        "transition": {
+          "relation": "continuous",
+          "basis": "苏清柳露出浅笑，目光落在邹氏本人，询问何事。"
+        }
+      }
+    ],
+    "source_plan_shot": {
+      "shot_id": "EP01-007",
+      "purpose_fact_ids": [
+        "F_SMILE",
+        "F_QUERY"
+      ],
+      "required_action_ids": [
+        "A_SMILE",
+        "A_LOOK_Z",
+        "A_QUERY"
+      ],
+      "audio_action_ids": [
+        "A_QUERY"
+      ],
+      "source_use_ids": [
+        "U_F_SMILE",
+        "U_F_QUERY"
+      ],
+      "visible": [
+        {
+          "kind": "actor",
+          "subject": "苏清柳",
+          "start": 0,
+          "end": 16
+        }
+      ],
+      "design": {
+        "framing_reason": "苏清柳露出浅笑，目光落在邹氏本人，询问何事。",
+        "cut_reason": "苏清柳露出浅笑，目光落在邹氏本人，询问何事。",
+        "cut_anchor": {
+          "kind": "dialogue",
+          "shot_id": "EP01-006",
+          "action_id": "A_STOP",
+          "source_use_id": "U_F_STOP",
+          "char_offset": 7,
+          "tick": 12
+        },
+        "spatial_anchors": {
+          "苏清柳": "院中椅位"
+        },
+        "performance": [
+          {
+            "actor": "苏清柳",
+            "fact_ids": [
+              "F_SEATED",
+              "F_SMILE",
+              "F_QUERY"
+            ],
+            "stimulus": "苏清柳露出浅笑，目光落在邹氏本人，询问何事。",
+            "visible_choice": "007以后保持原文浅笑。",
+            "gesture_choice": "保留世界既有手部位置，无额外动作。",
+            "voice_choice": "按该句具体音色执行。"
+          }
+        ],
+        "duration_exception": null
+      }
+    },
+    "source_uses": [
+      {
+        "id": "U_F_W1",
+        "fact_ids": [
+          "F_W1"
+        ],
+        "mode": "physical_action",
+        "wording": "authored",
+        "actor": "仆妇甲",
+        "text": "仆妇甲在廊下候命。"
+      },
+      {
+        "id": "U_F_W2",
+        "fact_ids": [
+          "F_W2"
+        ],
+        "mode": "physical_action",
+        "wording": "authored",
+        "actor": "仆妇乙",
+        "text": "仆妇乙在廊下候命。"
+      },
+      {
+        "id": "U_F_M1",
+        "fact_ids": [
+          "F_M1"
+        ],
+        "mode": "physical_action",
+        "wording": "authored",
+        "actor": "男仆甲",
+        "text": "男仆甲在廊下候命。"
+      },
+      {
+        "id": "U_F_M2",
+        "fact_ids": [
+          "F_M2"
+        ],
+        "mode": "physical_action",
+        "wording": "authored",
+        "actor": "男仆乙",
+        "text": "男仆乙在廊下候命。"
+      },
+      {
+        "id": "U_F_SEATED",
+        "fact_ids": [
+          "F_SEATED"
+        ],
+        "mode": "physical_action",
+        "wording": "authored",
+        "actor": "苏清柳",
+        "text": "苏清柳坐在院中的椅子上等候。"
+      },
+      {
+        "id": "U_F_RONG",
+        "fact_ids": [
+          "F_RONG"
+        ],
+        "mode": "physical_action",
+        "wording": "authored",
+        "actor": "荣婶儿",
+        "text": "荣婶儿侍立一旁，戒尺仍收在腰侧布套里。"
+      },
+      {
+        "id": "U_F_Q0",
+        "fact_ids": [
+          "F_Q0",
+          "F_SEATED"
+        ],
+        "mode": "spoken",
+        "wording": "verbatim",
+        "actor": "荣婶儿",
+        "text": "夫人，还要等多久呀？"
+      },
+      {
+        "id": "U_F_LOOK",
+        "fact_ids": [
+          "F_LOOK",
+          "F_Q0",
+          "F_SEATED"
+        ],
+        "mode": "physical_action",
+        "wording": "authored",
+        "actor": "苏清柳",
+        "text": "苏清柳朝屋里看了一眼。"
+      },
+      {
+        "id": "U_F_S1",
+        "fact_ids": [
+          "F_S1",
+          "F_Q0",
+          "F_SEATED"
+        ],
+        "mode": "spoken",
+        "wording": "verbatim",
+        "actor": "苏清柳",
+        "text": "婆母既然没什么要说的，那儿媳便先回去了，"
+      },
+      {
+        "id": "U_F_S2",
+        "fact_ids": [
+          "F_S2",
+          "F_Q0",
+          "F_SEATED"
+        ],
+        "mode": "spoken",
+        "wording": "verbatim",
+        "actor": "苏清柳",
+        "text": "毕竟才刚掌管国公府，还有许多账册没看呢！"
+      },
+      {
+        "id": "U_F_STOP",
+        "fact_ids": [
+          "F_STOP",
+          "F_S1",
+          "F_Q0",
+          "F_SEATED",
+          "F_S2"
+        ],
+        "mode": "spoken",
+        "wording": "verbatim",
+        "actor": "邹氏",
+        "text": "谁允许你走了。"
+      },
+      {
+        "id": "U_F_SMILE",
+        "fact_ids": [
+          "F_SMILE",
+          "F_STOP",
+          "F_S1",
+          "F_Q0",
+          "F_SEATED",
+          "F_S2"
+        ],
+        "mode": "physical_action",
+        "wording": "authored",
+        "actor": "苏清柳",
+        "text": "苏清柳含笑瞧着邹氏。"
+      },
+      {
+        "id": "U_F_QUERY",
+        "fact_ids": [
+          "F_QUERY",
+          "F_STOP",
+          "F_S1",
+          "F_Q0",
+          "F_SEATED",
+          "F_S2"
+        ],
+        "mode": "spoken",
+        "wording": "verbatim",
+        "actor": "苏清柳",
+        "text": "母亲，还有何事？"
+      },
+      {
+        "id": "U_F_Z1",
+        "fact_ids": [
+          "F_Z1",
+          "F_QUERY",
+          "F_STOP",
+          "F_S1",
+          "F_Q0",
+          "F_SEATED",
+          "F_S2"
+        ],
+        "mode": "spoken",
+        "wording": "verbatim",
+        "actor": "邹氏",
+        "text": "没事我这个做长辈的，便不能叫你过来了？"
+      },
+      {
+        "id": "U_F_Z2",
+        "fact_ids": [
+          "F_Z2",
+          "F_QUERY",
+          "F_STOP",
+          "F_S1",
+          "F_Q0",
+          "F_SEATED",
+          "F_S2"
+        ],
+        "mode": "spoken",
+        "wording": "verbatim",
+        "actor": "邹氏",
+        "text": "你怎的不想想我为何叫你过来？"
+      },
+      {
+        "id": "U_F_ANSWER",
+        "fact_ids": [
+          "F_ANSWER",
+          "F_Z1",
+          "F_QUERY",
+          "F_STOP",
+          "F_S1",
+          "F_Q0",
+          "F_SEATED",
+          "F_S2",
+          "F_Z2"
+        ],
+        "mode": "spoken",
+        "wording": "verbatim",
+        "actor": "苏清柳",
+        "text": "儿媳实在不知。"
+      },
+      {
+        "id": "U_F_N1",
+        "fact_ids": [
+          "F_N1"
+        ],
+        "mode": "objective_narration",
+        "wording": "authored",
+        "actor": null,
+        "text": "苏清柳被叫来后一直等在院中，"
+      },
+      {
+        "id": "U_F_N2",
+        "fact_ids": [
+          "F_N2",
+          "F_N1"
+        ],
+        "mode": "objective_narration",
+        "wording": "authored",
+        "actor": null,
+        "text": "索性让人搬椅子坐下。"
+      }
+    ],
+    "action_plans": {
+      "contract": "source-action-plans-v1",
+      "initial_world_sha256": "f16d28d9268bb1172bfc0a6e5deda3238d4f60a78c84141033d8a1454cb79750",
+      "events": [
+        {
+          "source_use_id": "U_F_W1",
+          "steps": [
+            {
+              "step_id": "P_F_W1_1",
+              "kind": "hold",
+              "parameters": {},
+              "after": []
+            }
+          ]
+        },
+        {
+          "source_use_id": "U_F_W2",
+          "steps": [
+            {
+              "step_id": "P_F_W2_1",
+              "kind": "hold",
+              "parameters": {},
+              "after": []
+            }
+          ]
+        },
+        {
+          "source_use_id": "U_F_M1",
+          "steps": [
+            {
+              "step_id": "P_F_M1_1",
+              "kind": "hold",
+              "parameters": {},
+              "after": []
+            }
+          ]
+        },
+        {
+          "source_use_id": "U_F_M2",
+          "steps": [
+            {
+              "step_id": "P_F_M2_1",
+              "kind": "hold",
+              "parameters": {},
+              "after": []
+            }
+          ]
+        },
+        {
+          "source_use_id": "U_F_SEATED",
+          "steps": [
+            {
+              "step_id": "P_F_SEATED_1",
+              "kind": "hold",
+              "parameters": {},
+              "after": []
+            }
+          ]
+        },
+        {
+          "source_use_id": "U_F_RONG",
+          "steps": [
+            {
+              "step_id": "P_F_RONG_1",
+              "kind": "hold",
+              "parameters": {},
+              "after": []
+            }
+          ]
+        },
+        {
+          "source_use_id": "U_F_LOOK",
+          "steps": [
+            {
+              "step_id": "P_F_LOOK_1",
+              "kind": "look",
+              "parameters": {
+                "target": {
+                  "kind": "point",
+                  "id": "屋门落点"
+                },
+                "tracking": false,
+                "head_mode": "follow"
+              },
+              "after": []
+            }
+          ]
+        },
+        {
+          "source_use_id": "U_F_SMILE",
+          "steps": [
+            {
+              "step_id": "P_F_SMILE_1",
+              "kind": "expression",
+              "parameters": {
+                "to": "眉头舒开，唇角微扬"
+              },
+              "after": []
+            },
+            {
+              "step_id": "P_F_SMILE_2",
+              "kind": "look",
+              "parameters": {
+                "target": {
+                  "kind": "actor",
+                  "id": "邹氏"
+                },
+                "tracking": false,
+                "head_mode": "follow"
+              },
+              "after": []
+            }
+          ]
+        }
+      ]
+    },
+    "prior_gaze_action": {
+      "id": "A_LOOK",
+      "kind": "source_step",
+      "source_use_id": "U_F_LOOK",
+      "step_id": "P_F_LOOK_1",
+      "start": 0,
+      "end": 4,
+      "after": []
+    }
+  }
+}

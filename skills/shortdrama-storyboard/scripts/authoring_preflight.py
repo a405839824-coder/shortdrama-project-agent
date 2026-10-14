@@ -16,11 +16,17 @@ class CheckCollection:
         self.values: dict[str, Any] = {}
         self.timing_diagnostics: dict[str, Any] | None = None
 
+    def defer(self, name: str, *, reason: str, requires=(), blocked_by=()):
+        """Record an unavailable check without turning missing input into PASS."""
+        self.checks.append({'check': name, 'status': 'not_checked',
+                            'depends_on': list(requires), 'blocked_by': list(blocked_by),
+                            'reason': reason})
+
     def run(self, name: str, fn: Callable, *, requires=(), path='$'):
         missing = [key for key in requires if key not in self.values]
         if missing:
-            self.checks.append({'check': name, 'status': 'not_checked',
-                                'depends_on': list(requires), 'blocked_by': missing})
+            self.defer(name, requires=requires, blocked_by=missing,
+                       reason='prerequisite checks did not pass: ' + ', '.join(missing))
             return None
         try:
             value = fn()
@@ -35,7 +41,7 @@ class CheckCollection:
                     item = item.to_dict()
                 if not isinstance(item, dict):
                     item = {'path': path, 'message': str(item)}
-                record = {'path': item.get('path', path),
+                record = {**item, 'path': item.get('path', path),
                           'message': item.get('message', item.get('reason', str(item))),
                           'check': name}
                 normalized.append(record)
@@ -240,28 +246,57 @@ def inspect_production_editorial(decisions: Any, *, renderer=None) -> dict:
     source = prevention.get('source_decisions', {}) if isinstance(prevention, dict) else {}
     uses = source.get('uses', []) if isinstance(source, dict) else []
     use_map = {u.get('id'): u for u in uses if isinstance(u, dict) and isinstance(u.get('id'), str)} if isinstance(uses, list) else {}
+    # The first boundary is an authored ordering fact. It does not require a
+    # successful source compilation, camera projection or state simulation.
+    # Keep the compiler's initial-world contract visible even if a later stage
+    # is blocked by voice or source-plan failures.
+    if decisions['shots']:
+        first = decisions['shots'][0]
+        transition = first.get('transition') if isinstance(first, dict) else None
+        path = 'shots[0].transition'
+        c.run(path + '.shape', lambda: a._check(
+            isinstance(transition, dict) and set(transition) in (
+                {'relation', 'basis'}, {'relation', 'basis', 'bridge'}),
+            path, 'requires exactly relation and basis, with an optional bridge'), path=path)
+        if isinstance(transition, dict):
+            c.run(path + '.initial', lambda: a._check(
+                transition.get('relation') == 'initial', path + '.relation',
+                'first shot relation must be initial'), path=path + '.relation')
+            c.run(path + '.basis', lambda: a._check(
+                isinstance(transition.get('basis'), str) and bool(transition['basis'].strip()),
+                path + '.basis', 'explicit transition basis required'), path=path + '.basis')
+            c.run(path + '.bridge', lambda: a._check(
+                'bridge' not in transition, path + '.bridge',
+                'initial world cannot be replaced by a pre-first-shot bridge'), path=path + '.bridge')
     for i, row in enumerate(decisions['shots']):
         if not isinstance(row, dict):
             continue
+        actions = row.get('actions')
         path = f'shots[{i}].actions.voice'
-        def check(row=row, path=path):
-            from authoring_contract_blocks import voice_block
-            actions = row.get('actions')
-            a._check(isinstance(actions, list), f'shots[{i}].actions', 'requires actions list')
-            utterances = []
-            for action in actions:
-                if not isinstance(action, dict) or action.get('type', action.get('kind')) != 'speak':
-                    continue
-                use_id = action.get('source_use_id', action.get('use_id'))
-                use = use_map.get(use_id, {})
-                actor = action.get('actor', use.get('actor'))
-                text = use.get('text')
-                a._check(isinstance(actor, str) and isinstance(text, str) and bool(text), path,
-                         'speech formatting cannot be checked without actual actor and source-use text')
-                utterances.append((actor, text))
-                a._check(isinstance(action.get('voice'), dict), path, 'requires explicit voice settings')
+        c.run(path, lambda: a._check(isinstance(actions, list), f'shots[{i}].actions',
+                                    'requires actions list'), path=path)
+        if not isinstance(actions, list):
+            continue
+        # Inspect each declared speech independently. A malformed first voice
+        # must not hide another speaker's independently determinable failure.
+        for j, action in enumerate(actions):
+            if not isinstance(action, dict) or action.get('type', action.get('kind')) != 'speak':
+                continue
+            path = f'shots[{i}].actions[{j}].voice'
+            c.run(path + '.settings', lambda: a._check(isinstance(action.get('voice'), dict),
+                    path, 'requires explicit voice settings'), path=path)
+            use_id = action.get('source_use_id', action.get('use_id'))
+            use = use_map.get(use_id, {})
+            actor = action.get('actor', use.get('actor'))
+            text = use.get('text')
+            if not isinstance(actor, str) or not isinstance(text, str) or not text:
+                c.defer(path, reason='actual actor and source-use text are unavailable; source reference validation remains required',
+                        blocked_by=[f'source_use:{use_id}'])
+                continue
+            def check(action=action, actor=actor, text=text, path=path):
+                from authoring_contract_blocks import voice_block
                 rendered_voice = voice_block(mode='spoken', dialogue_rows=[(actor, text)], **action['voice'])
                 faults = a._voice_template_errors(rendered_voice, text, [(actor, text)])
                 a._check(not faults, path, '; '.join(faults))
-        c.run(path, check, path=path)
+            c.run(path, check, requires=(path + '.settings',), path=path)
     return c.report()

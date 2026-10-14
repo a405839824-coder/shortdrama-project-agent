@@ -15,12 +15,14 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 import threading
 import time
 
 from filelock import FileLock, Timeout
 
-from .startup_restore import _atomic, _json_bytes, _signature
+from .startup_restore import (_atomic, _json_bytes, _signature,
+                              AUDIT_GENERATION_GATE, PRODUCTION_GROUNDING_GATE)
 
 LOG = logging.getLogger(__name__)
 INTERVAL = 6 * 3600
@@ -143,6 +145,25 @@ class RetentionWorker:
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 report['skipped'].append({'path': str(path), 'reason': str(exc)})
 
+    def _release_maintenance_reason(self):
+        # The caller holds retention/run.lock, also held by release freeze and
+        # verification. A consumed restore marker does not mean dispatch was
+        # verified/reopened; keep the exact restored tree until its gate drops.
+        if any(self.data.glob('.upgrade-*/manifest.json')):
+            return 'pending_restore'
+        database = self.data / 'account_access.sqlite3'
+        if database.is_symlink():
+            return 'maintenance_gate_state_unreadable'
+        if not database.exists():
+            return None
+        try:
+            with contextlib.closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as db:
+                rows = db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name IN (?,?)",
+                                  (AUDIT_GENERATION_GATE, PRODUCTION_GROUNDING_GATE)).fetchall()
+            return 'release_verification_pending' if rows else None
+        except (OSError, sqlite3.Error):
+            return 'maintenance_gate_state_unreadable'
+
     def run_once(self, *, dry_run: bool = False, now: float | None = None) -> dict:
         now = time.time() if now is None else now
         self.root.mkdir(mode=0o700, exist_ok=True)
@@ -154,8 +175,12 @@ class RetentionWorker:
                       'dry_run': dry_run, 'deleted': [], 'candidates': [], 'skipped': [], 'failures': []}
             if self.external.runtime_root.is_symlink() or self.external.exports_dir.is_symlink():
                 raise ValueError('unsafe_runtime_root')
-            for candidates in (self._archive_candidates(now, report, secret),
-                               self._export_candidates(now, report, secret)):
+            maintenance = self._release_maintenance_reason()
+            if maintenance:
+                report['skipped'].append({'type': 'all_retention', 'reason': maintenance})
+            candidate_groups = () if maintenance else (self._archive_candidates(now, report, secret),
+                                                       self._export_candidates(now, report, secret))
+            for candidates in candidate_groups:
                 for path, sha, reason in candidates:
                     item = {'path': str(path), 'sha256': sha, 'bytes': path.stat().st_size, 'reason': reason}
                     report['candidates'].append(item)

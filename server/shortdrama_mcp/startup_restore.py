@@ -43,6 +43,16 @@ AUDIT_GENERATION_GATE_SQL = (
     "WHEN NEW.outcome='started' BEGIN "
     "SELECT RAISE(ABORT, 'audit_generation_upgrade_in_progress'); END"
 )
+PRODUCTION_GROUNDING_DIRECTORY = ".upgrade-production-grounding-0565"
+PRODUCTION_GROUNDING_CONTRACT = "library-runtime-transfer-production-grounding-0565-v1"
+PRODUCTION_GROUNDING_VERSION = "0.5.65"
+PRODUCTION_GROUNDING_GATE = "production_grounding_upgrade_gate_0565"
+PRODUCTION_GROUNDING_GATE_SQL = (
+    f"CREATE TRIGGER {PRODUCTION_GROUNDING_GATE} BEFORE INSERT ON access_audit "
+    "WHEN NEW.outcome='started' BEGIN "
+    "SELECT RAISE(ABORT, 'production_grounding_upgrade_in_progress'); END"
+)
+PRODUCTION_GROUNDING_MAX_EXPANDED_BYTES = 8 * 1024**3
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 # The current live project tree alone exceeds 5 GB. Only this fresh, signed
@@ -126,6 +136,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT): ADMIN_READ_VERSION,
         (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT): RULE_EXECUTION_VERSION,
         (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT): AUDIT_GENERATION_VERSION,
+        (PRODUCTION_GROUNDING_DIRECTORY, PRODUCTION_GROUNDING_CONTRACT): PRODUCTION_GROUNDING_VERSION,
     }.get((directory, contract))
     if target_version is None:
         raise ValueError('startup_restore_undeclared_transfer')
@@ -133,6 +144,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT): ADMIN_READ_MAX_EXPANDED_BYTES,
         (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT): RULE_EXECUTION_MAX_EXPANDED_BYTES,
         (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT): AUDIT_GENERATION_MAX_EXPANDED_BYTES,
+        (PRODUCTION_GROUNDING_DIRECTORY, PRODUCTION_GROUNDING_CONTRACT): PRODUCTION_GROUNDING_MAX_EXPANDED_BYTES,
     }.get((directory, contract), MAX_EXPANDED_BYTES)
     transfer = data_dir / directory
     marker = transfer / "manifest.json"
@@ -158,18 +170,23 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         raise ValueError("startup_restore_manifest_signature")
     if manifest.get("protected_fingerprints") != protected_fingerprints(data_dir):
         raise ValueError("startup_restore_protected_state_changed")
-    if contract == AUDIT_GENERATION_CONTRACT:
+    gate_contracts = {
+        AUDIT_GENERATION_CONTRACT: (AUDIT_GENERATION_GATE, AUDIT_GENERATION_GATE_SQL),
+        PRODUCTION_GROUNDING_CONTRACT: (PRODUCTION_GROUNDING_GATE, PRODUCTION_GROUNDING_GATE_SQL),
+    }
+    if contract in gate_contracts:
+        gate_name, gate_sql = gate_contracts[contract]
         # New release transfers must prove the persistent gate is still active;
         # a signed assertion alone must not reopen the replaced writer.
         database = data_dir / "account_access.sqlite3"
         with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
             gate = db.execute(
                 "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=? AND tbl_name='access_audit'",
-                (AUDIT_GENERATION_GATE,),
+                (gate_name,),
             ).fetchone()
         normalize = lambda sql: " ".join(sql.split()).rstrip(";")
-        if (manifest.get("maintenance_gate") != AUDIT_GENERATION_GATE or not gate
-                or normalize(gate[0]) != normalize(AUDIT_GENERATION_GATE_SQL)):
+        if (manifest.get("maintenance_gate") != gate_name or not gate
+                or normalize(gate[0]) != normalize(gate_sql)):
             raise ValueError("startup_restore_maintenance_gate_missing_or_changed")
     archive_path = transfer / "runtime.tar.gz"
     if (archive_path.is_symlink() or not archive_path.is_file() or archive_path.stat().st_size > MAX_ARCHIVE_BYTES
@@ -239,7 +256,8 @@ def restore_release_runtime_if_requested(settings) -> dict | None:
                                  (AUDIT_STORAGE_DIRECTORY, AUDIT_STORAGE_CONTRACT),
                                  (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT),
                                  (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT),
-                                 (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT))
+                                 (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT),
+                                 (PRODUCTION_GROUNDING_DIRECTORY, PRODUCTION_GROUNDING_CONTRACT))
                if (settings.data_dir / d / 'manifest.json').exists()]
     if not pending:
         return None

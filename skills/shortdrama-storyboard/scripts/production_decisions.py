@@ -21,6 +21,7 @@ from timing_model import (estimate_utterance, normalize_pauses, segment_pauses, 
 from production_environment import (METADATA_FIELDS, validate_editorial,
                                     render_environment, normalize_openings, opening_states, EnvironmentDecisionError)
 import production_actions as extended_actions
+import production_relations as relations
 
 CONTRACT = "production-decisions-v1"
 SCOPE = ("0.1-second declared landmark simulation; fixed perspective camera and known vertical barriers; "
@@ -158,6 +159,8 @@ def _rotated_origin(before, body_yaw):
 
 
 def _anchor(world, prop, seen=None):
+    special = relations.special_anchor(world, prop, seen)
+    if special is not None: return special
     anchor = prop["anchor"]
     if set(anchor)=={'prop','offset_xyz'}:
         seen=set() if seen is None else set(seen)
@@ -189,7 +192,9 @@ def _target(world, ref, path):
     _need(kind in {"actor", "prop", "point"}, path, "unknown target kind")
     registry = world[{"actor": "actors", "prop": "props", "point": "points"}[kind]]
     _need(identity in registry, path, "target identity does not exist")
-    if kind == "prop": return _anchor(world, registry[identity])
+    if kind == "prop":
+        _need(relations.prop_visible(world, identity), path, 'opaque container blocks the visual target')
+        return _anchor(world, registry[identity])
     row = registry[identity]
     return row["scene_id"], _eye(row) if kind == "actor" else row["position_xyz"]
 
@@ -234,10 +239,69 @@ def _camera(world, camera, scene, path):
 
 
 def _in_frame(world, scene, camera, position):
+    return _landmark_visibility(world, scene, camera, position)['model_visible']
+
+
+def _landmark_visibility(world, scene, camera, position):
+    """Finite declared points and known walls, never a mesh visibility claim."""
     v = _sub(position, camera["origin"]); depth = _dot(v, camera["forward"])
-    return (depth > EPS and abs(_dot(v, camera["right"]) / depth) <= camera["hx"] + EPS
-            and abs(_dot(v, camera["up"]) / depth) <= camera["vy"] + EPS
-            and not _blocked(world, scene, camera["origin"], position))
+    horizontal, vertical = _dot(v, camera['right']), _dot(v, camera['up'])
+    inside = (depth > EPS and abs(horizontal / depth) <= camera['hx'] + EPS
+              and abs(vertical / depth) <= camera['vy'] + EPS)
+    blocker = _blocked(world, scene, camera['origin'], position) if inside else None
+    return {'position_xyz': list(position), 'depth': depth,
+            'horizontal_degrees': math.degrees(math.atan2(horizontal, depth)),
+            'vertical_degrees': math.degrees(math.atan2(vertical, depth)),
+            'in_frustum': inside, 'known_blocker_id': blocker,
+            'model_visible': inside and blocker is None, 'mesh_occlusion': 'not_modelled'}
+
+
+def inspect_camera_landmarks(world, camera, scene, *, snapshot_basis):
+    """Inspect every world actor, including ground-only and offscreen actors.
+
+    ``world`` and ``camera`` are normalized compiler state, not another authored
+    endpoint. A reference snapshot does not establish a later shot's state.
+    """
+    actors = {}
+    for identity, actor in world['actors'].items():
+        if actor['scene_id'] != scene:
+            actors[identity] = {'status': 'other_scene', 'scene_id': actor['scene_id']}
+            continue
+        points = {'eye': _eye(actor), 'left_hand': _hand(actor, 'left'),
+                  'right_hand': _hand(actor, 'right'), 'ground': actor['position_xyz']}
+        landmarks = {key: _landmark_visibility(world, scene, camera, point) for key, point in points.items()}
+        front = _dot([math.sin(math.radians(actor['head_yaw'])), math.cos(math.radians(actor['head_yaw'])), 0],
+                     _unit(_sub(camera['origin'], points['eye']), 'camera/eye'))
+        visible = [key for key, value in landmarks.items() if value['model_visible']]
+        actors[identity] = {'status': 'landmarks_in_frame' if visible else 'no_landmarks_in_frame',
+                            'landmarks': landmarks, 'visible_landmarks': visible,
+                            'front_dot': front, 'eye_visible': landmarks['eye']['model_visible'] and front > .2}
+    return {'snapshot_basis': snapshot_basis, 'scope': 'declared points and registered opaque walls only',
+            'mesh_occlusion': 'not_modelled', 'actors': actors}
+
+
+def _check_frame(view, frame, path='camera.frame'):
+    if frame in {'medium_close', 'face', 'face_detail'}:
+        _need(any(v['eye_visible'] for v in view['actors'].values()) and
+              not any(v['feet'] for v in view['actors'].values()), path,
+              'face close-up requires a visible front-facing head and excludes foot landmarks (actor ground points); facial area still requires independent review')
+    if frame in {'hands', 'object'}:
+        _need(not any(v['head'] or v['feet'] for v in view['actors'].values()), path,
+              'declared close-up also contains head/feet landmarks')
+    if frame == 'object':
+        _need(not view['actors'], path, 'object-only frame contains actor landmarks')
+
+
+def _camera_observation(world, camera, row, *, snapshot_basis, path):
+    report = inspect_camera_landmarks(world, camera, row['scene_id'], snapshot_basis=snapshot_basis)
+    report.update(shot_id=row['shot_id'], frame=row['camera']['frame'], frame_findings=[])
+    try:
+        view = _view(world, camera, row['scene_id'])
+        _check_frame(view, row['camera']['frame'], path + '.frame')
+    except ProductionDecisionError as exc:
+        report['frame_findings'].append({'path': exc.path, 'message': exc.reason})
+    report['frame_status'] = 'conflict' if report['frame_findings'] else 'no_conflict_in_declared_point_model'
+    return report
 
 
 def _view(world, camera, scene):
@@ -253,6 +317,7 @@ def _view(world, camera, scene):
             actors[identity] = {"eye_visible": head_in_frame and front, "head": head_in_frame,
                                 "hands": hands, "feet": feet, "front": front}
     for identity, prop in world["props"].items():
+        if not relations.prop_visible(world, identity): continue
         ps, position = _anchor(world, prop)
         if ps == scene and _in_frame(world, scene, camera, position): props.append(identity)
     _need(len(actors) <= 3, "camera.visible_actors",
@@ -465,10 +530,12 @@ def _world(value, sources, *, check_source_refs=True):
         for hand in actor["hands"]: actor["hands"][hand] = _xyz(actor["hands"][hand], "actor.hands." + hand)
     occupied = set()
     for identity, prop in w["props"].items():
-        _name(identity, "prop.id"); _obj(prop, {"anchor", "written_ref"} | ({'physical'} if 'physical' in prop else set()) | ({'display_name'} if 'display_name' in prop else set()), "prop." + identity)
+        _name(identity, "prop.id"); _obj(prop, {"anchor", "written_ref"} | ({'physical'} if 'physical' in prop else set()) | ({'display_name'} if 'display_name' in prop else set()) | ({'container'} if 'container' in prop else set()), "prop." + identity)
         if 'display_name' in prop: _display_name(prop['display_name'], 'prop.display_name')
         anchor = prop["anchor"]
-        if isinstance(anchor, dict) and set(anchor) == {"point"}:
+        if relations.validate_anchor(w, identity, prop, occupied):
+            pass
+        elif isinstance(anchor, dict) and set(anchor) == {"point"}:
             _need(anchor["point"] in w["points"], "prop.anchor", "unknown anchor point")
         elif isinstance(anchor,dict) and set(anchor)=={'prop','offset_xyz'}:
             _need(isinstance(anchor['prop'],str) and anchor['prop'] in w['props'] and
@@ -536,6 +603,7 @@ def _state(world):
         props[identity] = {"scene_id": scene, "position_xyz": position, "anchor": prop["anchor"],
                            "written_ref": prop["written_ref"] or "无当前文字"}
         props[identity]['physical'] = copy.deepcopy(prop['physical'])
+        if 'container' in prop: props[identity]['container'] = copy.deepcopy(prop['container'])
         if "hand" in prop["anchor"]:
             held.append({"prop_id": identity, "holder": prop["anchor"]["actor"],
                          "state": ("左手" if prop["anchor"]["hand"] == "left" else "右手") + "持有"})
@@ -545,12 +613,14 @@ def _state(world):
                                    "眼态": {i: a["eye_state"] for i, a in world["actors"].items()} or "无人物",
                                    "表演状态": {i: a["performance_state"] for i, a in world["actors"].items()} or "无人物",
                                    "动作状态": {i: {**a['action_state'], 'contacts': a['action_state']['contacts'] or '无持续身体接触',
+                                       'body_support': a['action_state'].get('body_support') or '无持续双人抱持',
                                        'wet_parts': a['action_state']['wet_parts'] or '无水渍',
                                        'clean_parts': a['action_state']['clean_parts'] or '尚无擦拭动作'} for i,a in world['actors'].items()} or '无人物'},
                           "光源方向": {sid: s["light"] for sid, s in world["scenes"].items()}})
 
 
 def _free_hand(world, actor, hand, path):
+    relations.guard_free_hand(world, actor, hand, path)
     _need(hand in {"left", "right"}, path, "hand must be left or right")
     _need(not any(p["anchor"] == {"actor": actor, "hand": hand} for p in world["props"].values()), path, "hand is occupied")
     _need(hand not in world['actors'][actor]['action_state']['contacts'] and
@@ -597,6 +667,7 @@ def _prepare(world, action, sources, path, *, bridge=False):
         use = None
     if kind in {"narrate", "inner_voice"}: return {"use": use, "before_world_sha256": _hash(world)}
     a = world["actors"][action["actor"]]
+    relations.guard_action(world, action, path)
     if any(prop['anchor']=={'actor':action['actor'],'binding':'wrists'} for prop in world['props'].values()):
         _need(kind in {'hold','speak','look','eye_state','eyelid','breath','focus_adjust','blink','blink_restraint','expression','head_gesture'},
               path,'release actual wrist binding before body or hand movement')
@@ -621,7 +692,8 @@ def _prepare(world, action, sources, path, *, bridge=False):
     elif kind == "look":
         _need(type(action["tracking"]) is bool and action["head_mode"] in {"still", "follow"}, path, "explicit tracking and head_mode required")
         if action["target"] is not None:
-            _target(world, action["target"], path)
+            _, target_position = _target(world, action["target"], path)
+            info['same_gaze_position'] = bool(a['gaze'] and _distance(a['gaze']['position_xyz'], target_position) <= EPS)
             _need(a["eye_state"] == "natural_open", path, "look requires open eyes")
         else: _need(not action["tracking"] and action["head_mode"] == "still", path, "clear gaze cannot track or turn head")
     elif kind in {"point", "move_prop", "write"}:
@@ -663,6 +735,7 @@ def _prepare(world, action, sources, path, *, bridge=False):
     elif kind == "transfer":
         _need(action["prop"] in world["props"] and action["to_actor"] in world["actors"], path, "unknown transfer entity")
         anchor = world["props"][action["prop"]]["anchor"]
+        _need(set(anchor) == {'actor', 'hand'}, path, 'transfer requires actual hand-held prop')
         _need(anchor.get("actor") == action["actor"], path, "actor is not the real holder")
         _free_hand(world, action["to_actor"], action["to_hand"], path)
         other = world["actors"][action["to_actor"]]
@@ -743,7 +816,8 @@ def _apply(world, action, info, tick, path):
         a["reach_origin_xyz"] = _rotated_origin(info["before"], a["body_yaw"])
     elif kind == "look":
         a["gaze"] = None
-        held = info["before"]["gaze"] if action["target"] is not None and info["before"]["gaze"] and info["before"]["gaze"]["ref"] == action["target"] else None
+        held = info["before"]["gaze"] if action["target"] is not None and info["before"]["gaze"] and (
+            info["before"]["gaze"]["ref"] == action["target"] or info.get('same_gaze_position')) else None
         if action["target"] is not None and (action["tracking"] or end or held):
             if held and not action["tracking"]: pos = held["position_xyz"]
             else: _, pos = _target(world, action["target"], path)
@@ -769,6 +843,19 @@ def _apply(world, action, info, tick, path):
         if end: a["performance_state"].pop("blink_restraint", None)
         else: a["performance_state"]["blink_restraint"] = copy.deepcopy(info["restraint_binding"])
     if end: world["completed"].append(action["id"])
+
+
+def _look_motion(action, info, samples):
+    """Measure the actual path, including a turn that returns to its origin."""
+    states = [info['before']] + [samples[t]['world']['actors'][action['actor']]
+                                for t in range(action['start'], action['end'] + 1)]
+    rays = [(_unit(_sub(state['gaze']['position_xyz'], _eye(state)), 'look.gaze')
+             if state['gaze'] else None) for state in states]
+    return {'head_changed': any(abs(_delta(a['head_yaw'], b['head_yaw'])) > EPS for a, b in zip(states, states[1:])),
+            'gaze_direction_changed': (None if any(ray is None for ray in rays) else
+                any(any(abs(x-y) > EPS for x, y in zip(a, b)) for a, b in zip(rays, rays[1:]))),
+            'start_tick': action['start'], 'end_tick': action['end'],
+            'basis': 'action before-state and every simulated tick; target identity alone is not motion'}
 
 
 def _action_sentence(action, info, world, camera):
@@ -802,16 +889,24 @@ def _action_sentence(action, info, world, camera):
     if kind == "look" and action["target"] is not None:
         origin = _reference(world, before["gaze"]["ref"], camera) if before["gaze"] else None
         target = _reference(world, action["target"], camera)
-        if origin == target:
+        motion = info['motion_projection']
+        if motion['gaze_direction_changed'] is False:
             text = f"{actor}视线持续停在{target}。"
             verb = "停在"
+        elif origin == target:
+            text = f"{actor}视线持续对准{target}。"
+            verb = "注视"
         elif origin is not None:
             text = f"{actor}视线从{origin}移向{target}。"
             verb = "移向"
         else:
             text = f"{actor}将视线落到{target}。"; verb = "视线落到"
-        text += (f"{actor}头部保持不动。" if action["head_mode"] == "still" else
-                 f"{actor}头部随目标方向转动。{actor}眼球随头部角度调整继续对准{target}。")
+        if not motion['head_changed']:
+            text += f"{actor}头部保持不动。"
+        elif action['head_mode'] == 'follow':
+            text += f"{actor}头部随目标方向转动。{actor}眼球随头部角度调整继续对准{target}。"
+        # A concurrent turn owns its own head projection; a still-head look
+        # policy is neither evidence of stillness nor the cause of that turn.
         return verb, text
     hand = "左手" if action.get("hand") == "left" else "右手"
     display = _display_action(action, world, camera)
@@ -1035,6 +1130,41 @@ def _spatial_description(world, row, camera, view, sources):
     return ''.join(descriptions)
 
 
+def _cut_fields(world, row, previous, sources, view):
+    """Project a validated cut anchor; keep the plan's causal prose internal."""
+    plan = sources.get('production_plan')
+    if plan is None:
+        return transition_block(method='hard_cut')
+    design = next(s for s in plan['shots'] if s['shot_id'] == row['shot_id'])['design']
+    anchor = design['cut_anchor']
+    # The guard validates this same anchor against the actual adjacent action.
+    from production_plan import check_cut_anchor
+    _production_plan_call(check_cut_anchor, anchor, row, previous, sources['uses_by_id'], 'shot.design.cut_anchor')
+    subjects = list(view['actors']) + list(view['props'])
+    place = world['scenes'][row['scene_id']]['label'] if row['transition']['relation'] != 'continuous' else None
+    fields = transition_block(method='hard_cut', destination_place=place)
+    if subjects:
+        # The block accepts one plain identity. Validate each independently;
+        # a delimiter between real subjects is not part of any identity.
+        for subject in subjects: transition_block(method='hard_cut', destination_subject=subject)
+        fields['切镜/转场提示词'] = '硬切至' + (place + '的' if place else '') + '、'.join(subjects) + '。'
+    if anchor['kind'] in {'dialogue', 'event'}:
+        bound = row if anchor['shot_id'] == row['shot_id'] else previous
+        action = next(a for a in bound['actions'] if a['id'] == anchor['action_id'])
+        ending = anchor['tick'] == action['end']
+        if anchor['kind'] == 'dialogue':
+            use = sources['uses_by_id'][anchor['source_use_id']]
+            speaker = (use['actor'] if action['kind'] == 'speak' else
+                       (use['actor'] + '内心独白' if action['kind'] == 'inner_voice' else '叙述声'))
+            cue = speaker + ('本句话音收尾时' if ending else '本句开始时')
+        else:
+            # Do not infer an unmodelled outcome from a source label or a reason.
+            actor = action.get('actor') or sources['uses_by_id'].get(action.get('source_use_id'), {}).get('actor') or ''
+            cue = actor + ('本动作完成时' if ending else '本动作开始时')
+        fields['切镜/转场提示词'] = cue + '，' + fields['切镜/转场提示词']
+    return fields
+
+
 def _visible_parts(shown):
     parts = (["面部" if shown["front"] else "后侧头部"] if shown["head"] else [])
     parts += ["左手" if hand == "left" else "右手" for hand in shown["hands"]]
@@ -1067,7 +1197,7 @@ def _initial(world, view, sources, camera):
         names.append(f"{identity}（{'、'.join(parts)}）")
         place = _screen_place(_eye(actor) if shown['head'] else actor['position_xyz'], camera)
         rows.append(f"{identity}位于{place}，{actor['posture']}，身体朝{screen_direction(actor['body_yaw'], camera['forward'])}，头部朝{screen_direction(actor['head_yaw'], camera['forward'])}。")
-        rows.append(extended_actions.static_actor(actor, identity, face_visible=shown['eye_visible']))
+        rows.append(extended_actions.static_actor(actor, identity, face_visible=shown['eye_visible'], view=view))
         for hand in shown["hands"]:
             place = _screen_place(_hand(actor, hand), camera)
             rows.append(f"{identity}{'左手' if hand == 'left' else '右手'}位于{place}。")
@@ -1082,6 +1212,8 @@ def _initial(world, view, sources, camera):
         prop = world["props"][identity]; _, position = _anchor(world, prop)
         label = _reference(world, {"kind": "prop", "id": identity}, camera)
         rows.append(f"{label}位于{_screen_place(position, camera)}。")
+        relation_text = relations.static_prop(world, identity)
+        if relation_text: rows.append(relation_text)
         if prop['physical']['integrity']=='broken': rows.append(f'{label}已碎裂。')
         if 'worn' in prop['anchor']: rows.append(f"{label}穿戴在{prop['anchor']['actor']}{extended_actions.PART_TEXT[prop['anchor']['worn']]}。")
         if 'binding' in prop['anchor']: rows.append(f"{label}捆住{prop['anchor']['actor']}双腕。")
@@ -1127,13 +1259,7 @@ def _fields(world, row, cam, view, sources):
         relation_tokens.append("[[staging:" + token + "]]")
     from production_plan import shot_policy
     framing = shot_policy()['framing'][row['camera']['frame']]
-    if row["camera"]["frame"] in {"medium_close", "face", "face_detail"}:
-        _need(any(v["eye_visible"] for v in view["actors"].values()) and
-              not any(v["feet"] for v in view["actors"].values()), "camera.frame",
-              "face close-up requires a visible front-facing head and excludes foot landmarks; facial area still requires independent review")
-    if row["camera"]["frame"] in {"hands", "object"}:
-        _need(not any(v["head"] or v["feet"] for v in view["actors"].values()), "camera.frame", "declared close-up also contains head/feet landmarks")
-    if row["camera"]["frame"] == "object": _need(not view["actors"], "camera.frame", "object-only frame contains actor landmarks")
+    _check_frame(view, row['camera']['frame'])
     tilt = math.degrees(math.asin(cam["forward"][2]))
     fields = {**{key: row["editorial"][key] for key in METADATA_FIELDS}, "场景连续性ID": row["continuity_id"], "镜头类型": framing,
               "可见主体": visible, "空间站位描述": scene["label"] + "。" +
@@ -1228,11 +1354,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
         first_view = _view(world, cam, row["scene_id"])
         try:
             fields, staging = _fields(world, row, cam, first_view, sources)
-            if sources.get('production_plan') and row['transition']['relation'] != 'continuous':
-                # Project only place/visible identity into the editing field;
-                # the causal reasoning remains in the internal frozen plan.
-                fields.update(transition_block(method='hard_cut',
-                    destination_place=world['scenes'][row['scene_id']]['label']))
+            fields.update(_cut_fields(world, row, previous, sources, first_view))
         except ContractBlockError as exc:
             raise ProductionDecisionError(path + ".initial_contract_blocks", str(exc)) from exc
         visible_current_paper_refs = []
@@ -1324,7 +1446,9 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                 realization = use.get("spoken_realization") or {}
                 if realization.get("transform") == "reviewed_indirect_speech_v1":
                     reviewed_speech.append((realization, use["id"], elapsed + action["start"], elapsed + action["end"]))
-            info = prepared[action["id"]]; verb, sentence = _action_sentence(action, info, samples[action["start"]]["world"], cam)
+            info = prepared[action["id"]]
+            if action['kind'] == 'look': info['motion_projection'] = _look_motion(action, info, samples)
+            verb, sentence = _action_sentence(action, info, samples[action["start"]]["world"], cam)
             pieces = [(i, max(a, action["start"]), min(b, action["end"])) for i, (a, b) in enumerate(zip(ticks, ticks[1:]))
                       if max(a, action["start"]) < min(b, action["end"])]
             is_audio = action["kind"] in {"speak", "narrate", "inner_voice"}
@@ -1336,7 +1460,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
             partial_blink = False
             if action['kind'] in extended_actions.FIELDS:
                 shown=[extended_actions.visible(samples[t],action) for t in range(action['start'],action['end'])]
-                end_visible=extended_actions.visible(samples[action['end']],action) if action['kind']!='cross_passage' else True
+                end_visible=extended_actions.visible(samples[action['end']],action) if action['kind'] not in {'cross_passage', 'carry_actor_through_passage'} else True
                 if action['source_use_id'] is not None:
                     _need(all(shown) and end_visible,ap+'.visible','source action requires its actual action/contact landmarks in frame; use an appropriate camera or separate supported delivery')
                 pieces=[(i,lo,hi) for i,lo,hi in pieces if all(shown[t-action['start']] for t in range(lo,hi))]
@@ -1456,6 +1580,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                                    "rendered_sentences": rendered_sentences,
                                    "mouth_sync_intervals": [[a / 10, b / 10] for a, b in mouth_intervals],
                                    "speaking_gaze_check": gaze_check,
+                                   **({'motion_projection': info['motion_projection']} if 'motion_projection' in info else {}),
                                    "performance_binding": info.get("restraint_binding"),
                                    "phase_fragments": fragment_ids, "reads_after": action["after"], "projected_after": inherited,
                                    "projection_status": "audio" if is_audio else "hidden" if not pieces else "partial" if partial_blink else "visible",
@@ -1532,10 +1657,19 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
         records.append({"shot_id": sid, "initial_world_sha256": _hash(start_world), "final_world_sha256": _hash(world),
                         "start_state_sha256": start.sha256, "end_state_sha256": end.sha256,
                         "eye_visibility_ticks": visibility, "actions": action_records, "audio_alignments": audio_alignments, "camera": cam,
+                        "performance_eye_timeline": {
+                            "contract": "performance-eye-timeline-v1", "tick_hz": 10, "duration_ticks": ticks[-1],
+                            "actors": {identity: [{"tick": sample["tick"],
+                                "eye_visible": sample["view"]["actors"].get(identity, {}).get("eye_visible", False),
+                                "eye_state": sample["world"]["actors"][identity]["eye_state"],
+                                "gaze": copy.deepcopy(sample["world"]["actors"][identity]["gaze"])}
+                                for sample in samples] for identity in world["actors"]}},
                         "visible_current_paper_refs": sorted(set(visible_current_paper_refs)),
                         "environment_binding": environment_binding,
                         "current_written_deliveries": current_deliveries,
                         "physical_scene": row["scene_id"], "continuity_id": row["continuity_id"],
+                        "camera_landmarks": _camera_observation(start_world, cam, row,
+                            snapshot_basis='actual_start_from_state_chain', path=path + '.camera'),
                         **({'inter_shot_bridge': bridge_record} if bridge_record else {})})
         elapsed += ticks[-1]; previous = row
     if source_compilation is not None:
@@ -1564,7 +1698,7 @@ def inspect_production_decisions(payload: dict, *, source_compilation=None, sour
     A failed earlier action prevents simulation of dependent later states, not
     the independent structural checks of all later shots. This is not preflight.
     """
-    findings, checked, not_checked = [], [], []
+    findings, checked, not_checked, geometry_observations = [], [], [], []
 
     def check(path, function):
         try:
@@ -1604,7 +1738,19 @@ def inspect_production_decisions(payload: dict, *, source_compilation=None, sour
             continue
         check(path + ".editorial", lambda row=row, path=path: _editorial(row["editorial"], path + ".editorial"))
         if initial is not None and row["scene_id"] in initial["scenes"]:
-            check(path + ".camera", lambda row=row, path=path: _camera(initial, row["camera"], row["scene_id"], path + ".camera"))
+            if check(path + ".camera", lambda row=row, path=path: _camera(initial, row["camera"], row["scene_id"], path + ".camera")):
+                cam = _camera(initial, row['camera'], row['scene_id'], path + '.camera')
+                observation = _camera_observation(initial, cam, row,
+                    snapshot_basis='initial_world_frame_zero' if index == 0 else 'initial_world_reference_only', path=path + '.camera')
+                geometry_observations.append(observation)
+                if index == 0:
+                    findings.extend({**item, 'stage': path + '.camera.landmarks'} for item in observation['frame_findings'])
+                    if not observation['frame_findings']: checked.append(path + '.camera.landmarks')
+                else:
+                    # Unsupported earlier effects cannot be silently replaced
+                    # with a fresh initial-world state for a later shot.
+                    not_checked.append({'stage': path + '.camera.actual_start_geometry',
+                                        'reason': 'requires prior action replay; initial-world reference observation is conditional'})
         else:
             not_checked.append({"stage": path + ".camera", "reason": "physical scene unavailable"})
         if not isinstance(row["actions"], list):
@@ -1630,9 +1776,11 @@ def inspect_production_decisions(payload: dict, *, source_compilation=None, sour
             result = lower_production_decisions(payload, source_compilation=source_compilation)
             return {"findings": [], "checked": checked + ["state_effect_simulation_and_lowering"],
                     "not_checked": [{"stage": "full_preflight_and_independent_semantics", "reason": "outside this compiler"}],
+                    "geometry_observations": [shot['camera_landmarks'] for shot in result['derivation']['shots']],
                     "lowered": result}
         except ProductionDecisionError as exc:
             findings.append({"path": exc.path, "message": exc.reason, "stage": "state_effect_simulation",
                              **({'status': exc.status, 'code': 'E-PRODUCTION-PLAN-001'} if hasattr(exc, 'status') else {})})
             not_checked.append({"stage": "dependent_state_suffix_and_rendering", "reason": "blocked by " + exc.path})
-    return {"findings": findings, "checked": checked, "not_checked": not_checked}
+    return {"findings": findings, "checked": checked, "not_checked": not_checked,
+            "geometry_observations": geometry_observations}

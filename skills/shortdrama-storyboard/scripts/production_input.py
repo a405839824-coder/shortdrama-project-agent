@@ -76,7 +76,9 @@ class _Collection:
             rows.append(record)
             if record not in self.issues:
                 self.issues.append(record)
-        check = {"check": stage, "status": "not_checked" if reason else "fail" if rows else "pass",
+        # A dependency note cannot erase an observed failure. Only checks with
+        # no result of their own are deferred.
+        check = {"check": stage, "status": "fail" if rows else "not_checked" if reason else "pass",
                  **details}
         if rows:
             check["findings"] = rows
@@ -170,16 +172,46 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256, requ
                                       "message": f"{type(exc).__name__}: {exc}"})
     c.add("source_compilation", source_errors, semantic_status="pending_independent_review")
 
+    # Uncompiled plan bytes may expose missing declarations, but never prove a
+    # source binding. This shape-only diagnostic remains independent of the
+    # authoritative source compiler above.
+    from performance_evidence import inspect_performance_input
+    raw_plan = None
+    if isinstance(graph_bytes, bytes):
+        try:
+            graph_document = json.loads(graph_bytes)
+            raw_plan = graph_document.get('production_plan') if isinstance(graph_document, dict) else None
+        except (ValueError, UnicodeError):
+            pass  # The source compiler owns the actual parsing failure.
+    try:
+        performance = inspect_performance_input(raw, sources=compilation, raw_plan=raw_plan)
+        c.add('performance_input_declarations', performance['findings'],
+              reason='source plan or verified legacy applicability is unavailable' if performance['basis'] == 'unknown' else None,
+              basis=performance['basis'], semantic_status=performance['semantic_status'])
+        for index, reason in enumerate(performance['deferred_checks']):
+            c.add(f'performance_input_declarations.deferred[{index}]', reason=reason)
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        c.exception('performance_input_declarations', exc)
+
     if require_production_plan:
         from production_plan import CONTRACT as PLAN_CONTRACT
-        plan = compilation.to_dict().get('production_plan') if compilation is not None else None
-        c.add('frozen_production_plan', [] if plan is not None else [{
-            'code': 'E-PRODUCTION-PLAN-001', 'path': '$graph.production_plan',
-            'status': 'insufficient_evidence',
-            'message': 'new production requires a separately frozen ' + PLAN_CONTRACT +
-                       '; identity checks cannot substitute for source/knowledge/whole-shot planning'}])
+        if compilation is None:
+            c.add('frozen_production_plan',
+                  reason='source compilation failed; a validated frozen production plan is unavailable',
+                  depends_on=['source_compilation'], blocked_by=['source_compilation'],
+                  upstream_findings=[{'code': item['code'], 'path': item['path']}
+                                     for item in c.issues if item['stage'] == 'source_compilation'])
+        else:
+            plan = compilation.to_dict().get('production_plan')
+            c.add('frozen_production_plan', [] if plan is not None else [{
+                'code': 'E-PRODUCTION-PLAN-001', 'path': '$graph.production_plan',
+                'status': 'insufficient_evidence',
+                'message': 'new production requires a separately frozen ' + PLAN_CONTRACT +
+                           '; identity checks cannot substitute for source/knowledge/whole-shot planning'}],
+                  depends_on=['source_compilation'])
 
     lowered = None
+    geometry_observations = []
     try:
         inspected = inspect_production_decisions(
             raw, source_compilation=compilation,
@@ -191,6 +223,7 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256, requ
             c.add(item.get("stage", "production_lowering"), [item])
         for item in inspected.get("not_checked", []):
             c.add(item["stage"], reason=item["reason"])
+        geometry_observations = copy.deepcopy(inspected.get('geometry_observations', []))
         lowered = inspected.get("lowered")
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         c.exception("production_lowering", exc)
@@ -254,6 +287,7 @@ def _inspect_with_intermediates(raw, *, graph_bytes, expected_graph_sha256, requ
               "issues": c.issues, "findings": copy.deepcopy(c.issues),
               "not_checked": [row for row in c.checks if row["status"] == "not_checked"],
               "ready_for_canonical": ready, "canonical_created": False,
+              "geometry_observations": geometry_observations,
               "semantic_status": "pending_independent_review", "semantic_accuracy_percent": None,
               "commit_eligible": False, "schema_sha256": hashlib.sha256(schema_bytes).hexdigest()}
     return lowered, compilation, report

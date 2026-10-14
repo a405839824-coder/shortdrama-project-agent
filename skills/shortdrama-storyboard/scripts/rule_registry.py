@@ -183,6 +183,23 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
     migrations = registry.get('historical_rule_migrations', {})
     if not isinstance(migrations, dict):
         return False
+    if kind == 'critical_runtime_policies' and identity in {'field_content_policy', 'production_prevention_policy'}:
+        migration = migrations.get('production-grounding-0565', {})
+        hashes = migration.get(kind, {}).get(identity, {})
+        # The new policy supplements both previously reviewed transitions; it
+        # cannot silently replace their authorization or alter their history.
+        required_parents = {'existing-voice-0553': '3e3da74159518284ef3fd06277d6edc7b32effcee83ab6205500780941e53ae7', 'knowledge-events-0555': '618fead6b6b83deed574603fb17420b7820d61fb11d1be24ed76cf7a7a73cf10'}
+        parent_chain_valid = (migration.get('parent_migrations_sha256') == required_parents
+                              and all(registry_sha256(migrations.get(name)) == expected
+                                      for name, expected in required_parents.items()))
+        if (parent_chain_valid
+                and migration.get('basis') == 'user-authorized-upgrade-and-retest-2026-10-14'
+                and migration.get('introduced_in') == '0.5.65'
+                and migration.get('legacy_applies_to_current_generation') is False
+                and set(migration.get(kind, {})) == {'field_content_policy', 'production_prevention_policy'}
+                and hashes.get('baseline_sha256') == registry_sha256(previous)
+                and hashes.get('current_sha256') == registry_sha256(current)):
+            return True
     voice_reviewed = {
         'critical_runtime_policies': 'field_content_policy',
         'atomic_semantic_definitions': 'AR-R10-VOICE-001',

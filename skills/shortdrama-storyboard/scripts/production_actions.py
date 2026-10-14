@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import math
+import production_relations as relations
 
 FIELDS = {
     'posture': {'to', 'point', 'landmarks'},
@@ -36,6 +37,7 @@ FIELDS = {
     'set_opening': {'opening','to','hand'},
     'scene_light': {'scene_id', 'light'},
 }
+FIELDS.update(relations.FIELDS)
 CONTINUOUS = set(FIELDS)
 POSTURES = {'站立': (1.0, 2.2), '坐姿': (.6, 1.6), '蹲姿': (.3, 1.2),
             '跪姿': (.5, 1.4), '跪伏': (.05, .5), '躬身': (.5, 1.8), '躺卧': (.05, .8)}
@@ -56,7 +58,7 @@ PART_TEXT = {'face': '面颊', 'left_wrist': '左手腕', 'right_wrist': '右手
              'right_foot': '右脚背', 'head': '头部', 'torso': '外衣', 'left_hand': '左手', 'right_hand': '右手'}
 HAND_PARTS = {'left_hand', 'right_hand'}
 PUSH_ACTIONS = {'push_actor', 'push_actor_no_displacement'}
-SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'} | PUSH_ACTIONS
+SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'} | PUSH_ACTIONS | set(relations.FIELDS)
 BRIDGE_KINDS = {'move_actor', 'turn', 'look', 'posture', 'hand_move', 'eye_state', 'hand_shape',
                 'expression', 'cross_passage', 'scene_light'}
 
@@ -84,6 +86,7 @@ def defaults(world):
         actor.setdefault('action_state', {'contacts': {}, 'wet_parts': [], 'clean_parts': [],
                                         'hand_shapes': {'left': 'open', 'right': 'open'},
                                         'expression': '平静', 'claps': 0, 'kowtows': 0})
+        actor['action_state'].setdefault('body_support', None)
     for prop in world['props'].values():
         prop.setdefault('physical', {'material': 'unspecified', 'contents': 'none', 'integrity': 'intact'})
 
@@ -105,8 +108,9 @@ def validate_world(world):
                     'scene.passages', 'passage endpoints must share a physical doorway; no remote teleport')
     for actor in world['actors'].values():
         s = actor['action_state']
-        p._obj(s, {'contacts', 'wet_parts', 'clean_parts', 'hand_shapes', 'expression', 'claps', 'kowtows'}, 'actor.action_state')
+        p._obj(s, {'contacts', 'wet_parts', 'clean_parts', 'hand_shapes', 'expression', 'claps', 'kowtows', 'body_support'}, 'actor.action_state')
         p._need(s['contacts'] == {}, 'actor.action_state.contacts', 'initial contact needs an executed source action')
+        p._need(s['body_support'] is None, 'actor.action_state.body_support', 'initial body support needs an executed source action')
         for name in ('wet_parts', 'clean_parts'):
             p._need(isinstance(s[name], list) and all(isinstance(x,str) for x in s[name]) and len(s[name]) == len(set(s[name])) and set(s[name]) <= PARTS,
                     'actor.action_state.' + name, 'requires unique supported body parts')
@@ -123,10 +127,12 @@ def validate_world(world):
         p._need(s['contents'] in {'none', 'water', 'hot_water'} and s['integrity'] in {'intact', 'broken'},
                 'prop.physical', 'unsupported physical state')
         p._need(s['integrity'] == 'intact' or s['contents'] == 'none', 'prop.physical', 'broken vessel cannot retain water')
+    relations.validate_containers(world)
 
 
 def channels(action):
     a, k = action['actor'], action['kind']
+    if k in relations.FIELDS: return relations.channels(action)
     # Channels are calculated before preparation. Validate keys needed below
     # so malformed input fails closed as a domain error, never a raw TypeError.
     for key in FIELDS[k] - {'landmarks','helper_landmarks','light','contact','breaks','count'}:
@@ -182,6 +188,8 @@ def prepare(world, action, info, path, *, bridge=False):
     p._need(duration >= .2, path, 'action needs at least 0.2 seconds in the declared landmark model')
     if k in SOURCE_REQUIRED:
         p._need(action['source_use_id'] is not None, path, 'this plot action requires a frozen physical source use')
+    if k in relations.FIELDS:
+        return relations.prepare(world, action, info, path)
     if k in {'posture', 'fall', 'cross_passage'}:
         p._need(not a['action_state']['contacts'] and not _contacted(world, action['actor']), path, 'release actual body contact before relocating')
     if k in {'hand_move', 'hand_shape', 'pick_up', 'put_down', 'drop_prop', 'wear_prop', 'remove_worn', 'wipe', 'set_opening','dress_actor','undress_actor','release_binding'}:
@@ -446,6 +454,7 @@ def prepare(world, action, info, path, *, bridge=False):
 def effects(initial, action, tick):
     """A finite transition specification; caller cannot provide mutation paths."""
     p = _p(); k = action['kind']; who = action['actor']; a = initial['actors'][who]
+    if k in relations.FIELDS: return relations.effects(initial, action, tick)
     end = tick == action['end']; f = (tick-action['start'])/(action['end']-action['start'])
     result = {}; base = ('actors', who)
     def set_actor(key, value): result[base + (key,)] = copy.deepcopy(value)
@@ -595,6 +604,7 @@ def apply(world, action, info, tick):
 
 def sentence(action, info):
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
+    if k in relations.FIELDS: return relations.sentence(action, info)
     if k=='assist_stand':
         return '扶起',f"{a}{hand}持续扶住{action['target_actor']}{PART_TEXT[action['target_part']]}并扶起{action['target_actor']}，帮助其起身站稳。"
     if k=='push_actor':
@@ -643,8 +653,9 @@ def sentence(action, info):
     return '时空衔接',''
 
 
-def static_actor(actor, name, *, face_visible=True):
+def static_actor(actor, name, *, face_visible=True, view=None):
     state=actor['action_state']; rows=[]
+    rows.append(relations.static_actor(actor, name, view=view))
     for part in state['wet_parts']: rows.append(f'{name}{PART_TEXT[part]}留有水渍。')
     for hand,shape in state['hand_shapes'].items():
         if shape=='fist': rows.append(f"{name}{'左手' if hand=='left' else '右手'}握拳。")
@@ -660,6 +671,7 @@ def static_actor(actor, name, *, face_visible=True):
 def visible(sample, action):
     """Named landmarks required to project this action; no offscreen invention."""
     view=sample['view']; owner=view['actors'].get(action['actor'],{}); k=action['kind']
+    if k in relations.FIELDS: return relations.visible(sample, action)
     def part_visible(name, part):
         row=view['actors'].get(name,{})
         if part in {'head','face'}:return bool(row.get('head'))
@@ -691,6 +703,7 @@ def visible(sample, action):
 
 def check_contacts(world, path):
     p=_p()
+    relations.check_relations(world, path)
     for owner,actor in world['actors'].items():
         for hand,shape in actor['action_state']['hand_shapes'].items():
             contact = actor['action_state']['contacts'].get(hand)
@@ -719,6 +732,7 @@ def check_contacts(world, path):
 def fragment_sentence(action, info, lo, hi):
     """Do not announce landing, release or contact before its actual end."""
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
+    if k in relations.FIELDS: return relations.sentence(action, info, complete=hi == action['end'])
     if k in PUSH_ACTIONS:
         contact, release = _push_ticks(action)
         target = action['target_actor']

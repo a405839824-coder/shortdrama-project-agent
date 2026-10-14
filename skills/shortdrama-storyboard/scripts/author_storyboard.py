@@ -419,6 +419,20 @@ def _lower_production_input(decisions, graph_bytes, graph_sha256, require_produc
         require_production_plan=require_production_plan)
 
 
+def _attach_performance_evidence(candidate, production_input, production, source_compilation):
+    """Project the actual production evidence; never alter original decisions.
+
+    Both initial compilation and production_derivation replay use this path.
+    Legacy performance_chains stay untouched, including an authored empty list.
+    """
+    from performance_evidence import FIELD, derive_performance_evidence
+    derived = derive_performance_evidence(production_input, production, source_compilation)
+    if derived is not None:
+        candidate = copy.deepcopy(candidate)
+        candidate['prevention_evidence'][FIELD] = derived
+    return candidate
+
+
 def record_attempt(input_path: Path, attempts_root: Path, *, attempt_id: str | None = None,
                    source_graph_path: Path | None = None, source_graph_sha256: str | None = None,
                    require_production_plan: bool = False) -> dict[str, Any]:

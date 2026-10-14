@@ -192,7 +192,7 @@ def _protected_props(plans, sources, world):
     pending=list(result)
     while pending:
         anchor=world['props'].get(pending.pop(),{}).get('anchor',{})
-        parent=anchor.get('prop')
+        parent=anchor.get('prop', anchor.get('container'))
         if isinstance(parent,str) and parent not in result:
             result.add(parent);pending.append(parent)
     return result
@@ -296,7 +296,7 @@ def _target(world, ref):
         actor = world["actors"][ref["id"]]
         return [*actor["position_xyz"][:2], actor["position_xyz"][2] + actor["eye_height"]]
     anchor = world["props"][ref["id"]]["anchor"]
-    if any(k in anchor for k in ('free','worn','binding','prop')):
+    if any(k in anchor for k in ('free','worn','binding','prop','container','mount')):
         from production_decisions import _anchor
         return _anchor(world, world['props'][ref['id']])[1]
     return (world["points"][anchor["point"]]["position_xyz"] if "point" in anchor
@@ -420,7 +420,13 @@ class SourceActionExecution:
             actual["prop_anchor"] = copy.deepcopy(_get(world, keys))
         elif kind == "look":
             target = action["target"]
-            held = before["gaze"] if target is not None and before["gaze"] and before["gaze"]["ref"] == target else None
+            from production_decisions import EPS
+            # Rebinding another identity at the same actual aim point does not
+            # create an intervening no-gaze state. Compare the independently
+            # recorded start world, never a producer-supplied motion flag.
+            held = before["gaze"] if target is not None and before["gaze"] and (
+                before["gaze"]["ref"] == target or
+                math.dist(before["gaze"]["position_xyz"], _target(original, target)) <= EPS) else None
             gaze = None
             if target is not None and (action["tracking"] or end or held):
                 position = held["position_xyz"] if held and not action["tracking"] else _target(before_apply, target)

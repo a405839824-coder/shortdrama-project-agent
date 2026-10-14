@@ -45,7 +45,12 @@
     "kowtow",
     "head_gesture",
     "set_opening",
-    "fall"
+    "fall",
+    "embrace",
+    "lift_actor",
+    "carry_actor",
+    "carry_actor_through_passage",
+    "release_embrace"
   ],
   "uses_shape": {
     "required": [

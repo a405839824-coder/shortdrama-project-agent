@@ -11,7 +11,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -27,7 +27,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -43,7 +43,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -59,7 +59,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -75,7 +75,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -91,7 +91,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -107,7 +107,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "R10.1 compact母版直接执行单镜；额外包装会复制语义并增加生成耗时。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -123,7 +123,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -139,7 +139,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -155,7 +155,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -171,7 +171,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -187,7 +187,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -203,7 +203,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -219,7 +219,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": true,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -235,7 +235,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -251,7 +251,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -267,7 +267,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -283,7 +283,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "同一语义只写一次，既避免版本分叉，也直接减少模型重复生成。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -299,7 +299,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -315,7 +315,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -331,7 +331,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -347,7 +347,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -363,7 +363,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -379,7 +379,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "按R10全局优先级、最新明确用户规则与可执行性进行唯一裁决。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -397,7 +397,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "重复问题说明上游台账、状态、拆镜或单镜执行设计失效，继续补丁会扩大副作用。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -413,7 +413,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "单镜执行阶段混入BGM会干扰对白、环境声和后期可控性。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -429,7 +429,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "完整读取是生成门禁，不等于必须把整章塞进一次模型输入；分块不能演变为边读边生成。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -446,7 +446,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "机械限制为一个动作会制造碎片化，而多核心阶段会造成信息过载。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -462,7 +462,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "低剧情等级不等于无电影功能，自动删除会造成时空不清、情绪断层或伏笔丢失。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -479,7 +479,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "通用负面词若直接禁止所有额外角色，会把街道、市场、酒楼等公共空间生成成不合剧情的空场。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -498,7 +498,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "可选或自然阶段无法稳定核验单镜闭合，旧表头会继续扩散，元数据画幅无法保证空白上下文单镜执行，生产预填审计结论又会造成假PASS。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   },
@@ -515,7 +515,7 @@
     ],
     "output_status_if_violated": "fail_current",
     "reason": "把‘最幸福的一刻、如梦似幻’或室外侧逆雾光整段复制进普通室内，会产生不可证明叙事、背景泛白、全屋烟雾和门窗被擅自打开。",
-    "rule_revision": "0.5.64",
+    "rule_revision": "0.5.65",
     "user_authorization_required": false,
     "version": "V16.3-148-R10-StableRuntime"
   }

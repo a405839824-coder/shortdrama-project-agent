@@ -247,6 +247,66 @@ class StartupRestoreTests(unittest.TestCase):
                 patch.object(restore, 'AUDIT_GENERATION_MAX_EXPANDED_BYTES', size):
             self.assertTrue(restore._restore(self.data, self.runtime, **args)['restored'])
 
+    def arm_production_grounding(self):
+        self.transfer = self.data / restore.PRODUCTION_GROUNDING_DIRECTORY
+        self.transfer.mkdir()
+        self.arm()
+        self.manifest.update(contract=restore.PRODUCTION_GROUNDING_CONTRACT,
+                             target_version=restore.PRODUCTION_GROUNDING_VERSION,
+                             maintenance_gate=restore.PRODUCTION_GROUNDING_GATE)
+        self.sign()
+        with closing(sqlite3.connect(self.data / 'account_access.sqlite3')) as db, db:
+            db.execute('CREATE TABLE access_audit (outcome TEXT)')
+            db.execute(restore.PRODUCTION_GROUNDING_GATE_SQL)
+        return dict(directory=restore.PRODUCTION_GROUNDING_DIRECTORY,
+                    contract=restore.PRODUCTION_GROUNDING_CONTRACT,
+                    version=restore.PRODUCTION_GROUNDING_VERSION)
+
+    def test_v0565_preserves_latest_state_and_never_replays_consumed_history(self):
+        self.run_restore()
+        old_transfer = restore._tree(self.transfer)
+        self.files['projects/namespace/SBP-test/ledger.json'] = b'latest audit before 0.5.65'
+        args = self.arm_production_grounding()
+        self.runtime.rename(self.root / 'old-runtime')
+        wrong = {**args, 'version': '0.5.64'}
+        with self.assertRaisesRegex(ValueError, 'manifest_binding'):
+            restore._restore(self.data, self.runtime, **wrong)
+        self.assertFalse(self.runtime.exists())
+        receipt = restore._restore(self.data, self.runtime, **args)
+        self.assertTrue(receipt['restored'])
+        self.assertEqual(restore._tree(self.runtime), self.manifest['files'])
+        self.assertEqual(restore._tree(self.data / restore.DIRECTORY), old_transfer)
+        ledger = self.runtime / 'projects/namespace/SBP-test/ledger.json'
+        ledger.write_bytes(b'post-upgrade new audit')
+        self.assertIsNone(restore._restore(self.data, self.runtime, **args))
+        self.assertEqual(ledger.read_bytes(), b'post-upgrade new audit')
+        import shutil
+        shutil.rmtree(self.runtime)
+        self.assertIsNone(restore._restore(self.data, self.runtime, **args))
+        self.assertFalse(self.runtime.exists())
+        self.sign()
+        with self.assertRaisesRegex(ValueError, 'already_consumed'):
+            restore._restore(self.data, self.runtime, **args)
+
+    def test_v0565_requires_actual_gate_and_has_own_size_limit(self):
+        args = self.arm_production_grounding()
+        with closing(sqlite3.connect(self.data / 'account_access.sqlite3')) as db, db:
+            db.execute(f'DROP TRIGGER {restore.PRODUCTION_GROUNDING_GATE}')
+        with self.assertRaisesRegex(ValueError, 'maintenance_gate'):
+            restore._restore(self.data, self.runtime, **args)
+        self.assertFalse(self.runtime.exists())
+        with closing(sqlite3.connect(self.data / 'account_access.sqlite3')) as db, db:
+            db.execute(restore.PRODUCTION_GROUNDING_GATE_SQL)
+        size = sum(map(len, self.files.values()))
+        with patch.object(restore, 'PRODUCTION_GROUNDING_MAX_EXPANDED_BYTES', size - 1):
+            with self.assertRaisesRegex(ValueError, 'archive_size'):
+                restore._restore(self.data, self.runtime, **args)
+        self.assertFalse(self.runtime.exists())
+        self.assertTrue((self.transfer / 'manifest.json').is_file())
+        with patch.object(restore, 'MAX_EXPANDED_BYTES', 1), \
+                patch.object(restore, 'PRODUCTION_GROUNDING_MAX_EXPANDED_BYTES', size):
+            self.assertTrue(restore._restore(self.data, self.runtime, **args)['restored'])
+
     def test_admin_transfer_larger_tree_has_its_own_finite_limit(self):
         size = sum(map(len, self.files.values()))
         # Exercise both boundaries with small real archives, avoiding a multi-GB
