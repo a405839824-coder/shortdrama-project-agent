@@ -1,12 +1,13 @@
 """One configurable, evidence-labelled speech and event timeline.
 
-All seconds are planning estimates unless a matching reviewed profile is used.
-The candidate profile is not a vendor limit or a measured audiovisual result.
+All utterance seconds here are planning estimates. A matching reviewed speech
+profile is still not a measurement of this candidate's actual audio track.
 No original dialogue is rewritten or copied into the returned evidence.
 """
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 from pathlib import Path
 import re
@@ -53,7 +54,11 @@ def _profile(rules, profile_id=None):
         raise ValueError("ASR参考样本只能作为未标定的平均语速候选，不能冒充实测")
     if profile.get("rate_basis") == "articulation" or profile.get("evidence_status") == "measured":
         proof = profile.get("evidence", {})
-        if profile.get("evidence_status") != "measured" or not all(proof.get(key) for key in ("sample_sha256", "alignment_verified", "reviewed", "model_version", "voice")):
+        sample = proof.get("sample_sha256")
+        if (profile.get("evidence_status") != "measured"
+                or not isinstance(sample, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", sample)
+                or proof.get("alignment_verified") is not True or proof.get("reviewed") is not True
+                or not all(proof.get(key) for key in ("model_version", "voice"))):
             raise ValueError("实测或净发声配置缺已核对的音频对齐证据")
     return profile
 
@@ -315,12 +320,34 @@ def _closed_speaker(body, speaker):
     return False
 
 
+def planning_summary(faults, advisories, spans):
+    """Explain a pre-generation timing check without certifying rendered media."""
+    capacities = [row for row in faults if row.get("timing_evidence_kind") == "text_capacity_estimate"]
+    overlaps = [row for row in faults if row.get("timing_evidence_kind") in
+                {"declared_schedule_overlap", "estimated_schedule_overlap"}]
+    return {"contract": "timing-planning-summary-v1",
+            "status": "blocked" if faults else "planning_checks_completed",
+            "blocking_fault_count": len(faults), "capacity_budget_fault_count": len(capacities),
+            "declared_overlap_count": sum(row["timing_evidence_kind"] == "declared_schedule_overlap" for row in overlaps),
+            "estimated_overlap_count": sum(row["timing_evidence_kind"] == "estimated_schedule_overlap" for row in overlaps),
+            "other_timing_fault_count": len(faults) - len(capacities) - len(overlaps),
+            "slower_delivery_advisory_count": sum(row.get("kind") == "provisional_capacity_risk" for row in advisories),
+            "declared_speech_span_count": sum(row.get("schedule_basis") == "declared_plan" for row in spans),
+            "estimated_speech_span_count": sum(row.get("schedule_basis") == "text_estimate" for row in spans),
+            "actual_audio_verified": False, "actual_audio_measurement_status": "not_provided",
+            "actual_render_status": "not_tested", "grant_approval": False,
+            "measurement_requirement": "须取得本稿对应的真实音轨，绑定完整原句、说话人、源镜/字符范围、音轨哈希及实际起止时间后独立核验；语速样本和自报标签不能代替。",
+            "repair_policy": "保留原句和正确内容，重排阶段或依原句拆镜；不得擅自提高语速或超过当前镜长合同凑通过。"}
+
+
 def validate_timing(project, shots, rules=None):
     rules = _rules(rules)
-    faults, advisories, metrics, spans = [], [], {"contract": "shot-timing-v1", "profiles": [], "utterances": [], "speech_calibration_status": "not_measured"}, []
+    faults, advisories, metrics, spans = [], [], {"contract": "shot-timing-v1", "profiles": [], "utterances": [], "speech_calibration_status": "not_measured",
+                                               "actual_audio_measurement_status": "not_provided", "actual_audio_verified": False}, []
 
-    def fault(message, shot_id=None, location="timing", code="E-TIMELINE-001"):
-        row = {"code": code, "message": message, "location": location}
+    def fault(message, shot_id=None, location="timing", code="E-TIMELINE-001", *, basis="timing_structure", **details):
+        row = {"code": code, "message": message, "location": location,
+               "timing_evidence_kind": basis, "actual_audio_verified": False, **details}
         if shot_id:
             row["shot_id"] = shot_id
             row["location"] = f"shots[{shot_id}].timing"
@@ -378,6 +405,8 @@ def validate_timing(project, shots, rules=None):
         try:
             if not isinstance(item, dict):
                 raise ValueError("发言事件必须是对象")
+            if set(item) - {"id", "kind", "speaker", "source", "profile_id", "selection_evidence", "segments", "pauses"}:
+                raise ValueError("发言计时不接受未登记字段或自报音轨实测；本稿音轨须绑定原句、说话人、来源及音轨证据另行核验")
             identity, kind, source = item.get("id"), item.get("kind"), item.get("source")
             if not identity or identity in ids or not isinstance(source, dict):
                 raise ValueError("发言身份重复或缺源文引用")
@@ -398,7 +427,6 @@ def validate_timing(project, shots, rules=None):
             if strict and target and profile.get("target_model") not in (None, "unmatched", target):
                 raise ValueError("发言配置与当前目标模型不匹配")
             if profile.get("evidence_status") == "measured":
-                import hashlib
                 actual_voice_hash = hashlib.sha256(str(shot_map[sid].get("音色") or "").encode("utf-8")).hexdigest()
                 if profile.get("voice_spec_sha256") != actual_voice_hash:
                     raise ValueError("实测语速配置未绑定当前实际音色规格，不能借用其他声线的实测值")
@@ -412,6 +440,8 @@ def validate_timing(project, shots, rules=None):
             full_estimate = estimate_utterance(row["text"], profile, item.get("pauses", []))
             cursor, previous_end = 0, None
             for segment in segments:
+                if not isinstance(segment, dict) or set(segment) - {"shot_id", "start", "end", "char_range"}:
+                    raise ValueError("发言时间片段只接受已登记的源镜、起止和字符范围，不接受自报音轨实测")
                 segment_sid = segment.get("shot_id")
                 start, end = _number(segment.get("start")), _number(segment.get("end"))
                 bounds = segment.get("char_range")
@@ -441,7 +471,6 @@ def validate_timing(project, shots, rules=None):
                         kind=kind, speaker=row["speaker"], text=row["text"], uses=source_uses(project),
                         voice=_continuation_voice(shot_map[segment_sid]))
                 if segment_sid != sid and profile.get("evidence_status") == "measured":
-                    import hashlib
                     actual_voice_hash = hashlib.sha256(str(shot_map[segment_sid].get("音色") or "").encode("utf-8")).hexdigest()
                     if profile.get("voice_spec_sha256") != actual_voice_hash:
                         raise ValueError("承接镜实测语速配置未绑定当前实际音色规格")
@@ -451,7 +480,8 @@ def validate_timing(project, shots, rules=None):
                 pauses = segment_pauses(row["text"], item.get("pauses", []), *bounds)
                 estimate = estimate_utterance(row["text"][bounds[0]:bounds[1]], profile, pauses)
                 if estimate["seconds"] > end - start + EPS:
-                    fault(f"按配置{profile['id']}预算需{estimate['seconds']:.3f}s，片段仅{end-start:.3f}s；这是文本预算不足，非音视频实测结论", segment_sid, code="E-DIALOGUE-003" if kind == "dialogue" else "E-PSYCH-001")
+                    fault(f"按配置{profile['id']}预算需{estimate['seconds']:.3f}s，片段仅{end-start:.3f}s；这是文本预算不足，非音视频实测结论", segment_sid, code="E-DIALOGUE-003" if kind == "dialogue" else "E-PSYCH-001",
+                          basis="text_capacity_estimate", utterance_ids=[identity], required_seconds=estimate["seconds"], available_seconds=end-start)
                 risk = _reference_advisory(estimate, end - start, shot_id=segment_sid, utterance_id=identity)
                 if risk:
                     advisories.append(risk)
@@ -459,6 +489,9 @@ def validate_timing(project, shots, rules=None):
                               "start": start, "end": end, "global_start": global_start, "global_end": global_end,
                               "char_range": bounds, "profile_id": profile["id"], "planned_seconds": estimate["seconds"],
                               "reference_seconds": estimate.get("reference_seconds"),
+                              "schedule_basis": "declared_plan", "actual_audio_verified": False,
+                              "source_shot_id": sid, "source_text_sha256": hashlib.sha256(row["text"].encode("utf-8")).hexdigest(),
+                              "profile_evidence_status": profile.get("evidence_status"),
                               "selection_evidence": item.get("selection_evidence"),
                               "selection_semantic_status": "pending_independent_review" if profile.get("applicability") else None})
                 if full_estimate['extra_pause_seconds'] > 0:
@@ -481,7 +514,6 @@ def validate_timing(project, shots, rules=None):
             continue
         sid, kind, ordinal = key
         if default.get("evidence_status") == "measured":
-            import hashlib
             voice_hash = hashlib.sha256(str(shot_map[sid].get("音色") or "").encode("utf-8")).hexdigest()
             if default.get("voice_spec_sha256") != voice_hash:
                 fault("默认实测语速配置未绑定当前实际音色规格，不能借用其他声线的实测值", sid, code="E-DIALOGUE-004")
@@ -490,12 +522,16 @@ def validate_timing(project, shots, rules=None):
         estimate = estimate_utterance(row["text"], default)
         end = start + estimate["seconds"]
         if end > phase["end"] + EPS:
-            fault(f"{kind}按配置{default['id']}预算需{estimate['seconds']:.3f}s，所在阶段剩余{max(0,phase['end']-start):.3f}s；须重排实际阶段或依原句拆镜", sid, code="E-DIALOGUE-003" if kind == "dialogue" else "E-PSYCH-001")
+            fault(f"{kind}按配置{default['id']}预算需{estimate['seconds']:.3f}s，所在阶段剩余{max(0,phase['end']-start):.3f}s；这是文本估算，须重排实际阶段或依原句拆镜", sid, code="E-DIALOGUE-003" if kind == "dialogue" else "E-PSYCH-001",
+                  basis="text_capacity_estimate", utterance_ids=[f"{sid}:{kind}:{ordinal}"], required_seconds=estimate["seconds"], available_seconds=max(0, phase["end"]-start))
         occupied[(sid, kind, phase["start"])] = end
         identity = f"{sid}:{kind}:{ordinal}"
         spans.append({"id": identity, "utterance_id": identity, "shot_id": sid, "speaker": row["speaker"], "kind": kind,
                       "start": start, "end": end, "global_start": bases[sid] + start, "global_end": bases[sid] + end,
                       "char_range": [0, len(row["text"])], "profile_id": default["id"], "planned_seconds": estimate["seconds"],
+                      "schedule_basis": "text_estimate", "actual_audio_verified": False,
+                      "source_shot_id": sid, "source_text_sha256": hashlib.sha256(row["text"].encode("utf-8")).hexdigest(),
+                      "profile_evidence_status": default.get("evidence_status"),
                       "phase_end": phase["end"], "phase_body": phase["body"]})
         if estimate["mixed_reading_requires_review"]:
             advisories.append({"kind": "reading_review", "shot_id": sid, "message": "数字或英文暂按发音单位近似，需核对实际读法；原句不改写"})
@@ -530,10 +566,16 @@ def validate_timing(project, shots, rules=None):
     for index, left in enumerate(spans):
         for right in spans[index + 1:]:
             if left["id"] != right["id"] and max(left["global_start"], right["global_start"]) < min(left["global_end"], right["global_end"]) - EPS:
-                fault("两段发声实际重叠；须安排可听辨的不重叠时段，不能用重叠规避完整发声容量", right["shot_id"])
+                declared = left.get("schedule_basis") == right.get("schedule_basis") == "declared_plan"
+                fault(("已填写的两段发声计划时段重叠" if declared else "按文本预算推算的两段发声时段重叠")
+                      + "；尚非实际音轨测量，须安排可听辨的不重叠时段，不能用重叠规避完整发声容量", right["shot_id"],
+                      basis="declared_schedule_overlap" if declared else "estimated_schedule_overlap",
+                      utterance_ids=[left["id"], right["id"]],
+                      overlap_seconds=min(left["global_end"], right["global_end"]) - max(left["global_start"], right["global_start"]))
     from timing_events import validate_events
     event_result = validate_events(project, list(shot_map.values()), spans)
-    faults.extend(event_result["faults"])
+    faults.extend({**row, "timing_evidence_kind": "declared_event_dependency", "actual_audio_verified": False}
+                  for row in event_result["faults"])
     advisories.extend(event_result["advisories"])
     for profile in selected.values():
         metrics["profiles"].append({key: profile.get(key) for key in ("id", "units_per_second", "rate_basis", "evidence_status")})
@@ -542,6 +584,7 @@ def validate_timing(project, shots, rules=None):
     metrics["utterances"] = [{key: value for key, value in row.items() if key not in {"phase_body", "speaker"}} for row in spans]
     metrics["timeline_seconds"] = elapsed
     metrics["events"] = event_result.get("events", [])
+    metrics["planning_summary"] = planning_summary(faults, advisories, spans)
     return {"faults": faults, "advisories": advisories, "metrics": metrics}
 
 

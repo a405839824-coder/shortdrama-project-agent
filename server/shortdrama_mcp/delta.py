@@ -819,4 +819,6 @@ def merge_storyboard_delta(
             "merge_total": round((time.perf_counter_ns() - merge_started_ns) / 1_000_000, 3),
         },
     }
+    from .repair_dependencies import repair_dependency_plan
+    manifest["dependency_plan"] = repair_dependency_plan(migrated_base, merged)
     return merged, manifest

@@ -158,7 +158,7 @@
       "approval_policy": "explicit_execute",
       "group": "审计闭环",
       "operation": "storyboard_repair",
-      "output": "仅在审计失败且授权后消费最新完成失败血缘的一次性修复包，生成新artifact/canonical与新鲜file/source_version/handoff/trace绑定，完整回归并返回原审计窗口；旧包和同字节翻绿失败关闭",
+      "output": "仅在审计失败且授权后消费最新完成失败血缘的一次性修复包，生成新artifact/canonical与新鲜file/source_version/handoff/trace绑定；按真实diff给出联动复核计划，完整机器回归与八层独审返回原audit authority；计划不等于通过，旧包和同字节翻绿失败关闭",
       "status": "supported"
     },
     {
@@ -223,7 +223,7 @@
       "approval_policy": "read_only",
       "group": "项目管理",
       "operation": "statistics",
-      "output": "镜头、时长、对白、问题、闭环率、残留率和副作用统计",
+      "output": "镜头、时长、对白及五类证据问题统计；逐次观察与同文件版本问题分开、每项比例含分母；缺复核证据的误报率、复发率及真实首稿内容错误率保持未知",
       "status": "supported"
     },
     {
@@ -231,7 +231,7 @@
       "condition": "production窗口、已锁定工单与候选canonical",
       "group": "分镜生产",
       "operation": "storyboard_draft_preflight",
-      "output": "scene/episode/full草稿门禁、唯一问题镜质量指标、失败学习事件；零artifact/版本/XLSX/handoff副作用",
+      "output": "scene/episode/full草稿门禁、原始候选和实际来源运行指纹、失败学习记录及timing_diagnostics；实际音轨未验证不冒充实测，零artifact/版本/XLSX/handoff副作用",
       "status": "supported"
     },
     {
@@ -270,7 +270,7 @@
       "approval_policy": "read_only",
       "group": "系统改进",
       "operation": "issue_query",
-      "output": "精确问题清单、跨批次pattern聚合与主动防错画像",
+      "output": "精确问题清单、跨批次pattern与主动防错画像；附只读evidence_metrics分类和同文件版本聚合，保留历史event引用，不改审计门禁",
       "status": "supported"
     },
     {
@@ -343,7 +343,7 @@
     "legacy_policy": "read_only_migration_to_compact_successor",
     "mother_template_column_count": 11,
     "output_contract": "R10-SPC-1",
-    "plugin_version": "0.5.63",
+    "plugin_version": "0.5.64",
     "production_audit_status": "PENDING_AUDIT",
     "required_per_shot_aspect_phrase": "9:16竖屏",
     "schema_version": "R10.1",
@@ -776,5 +776,66 @@
     "graph_location": "source_graph.dialogue_realizations[] = exact data.dialogue_realization returned by independent review",
     "limits": "Only exact reviewed source-grounded indirect speech; unchanged original dialogue; latest fail/unknown blocks; server verifies signed source/version/authority on each use. Not full-draft acceptance or 98% evidence."
   },
-  "preflight_quality_scope": "Machine diagnostics expose only reported-defect ratios; first-draft correctness and usability are null without independent content coverage. Draft admission is not audit completion or delivery."
+  "preflight_quality_scope": "Machine diagnostics expose only reported-defect ratios; first-draft correctness and usability are null without independent content coverage. Draft admission is not audit completion or delivery.",
+  "audit_reporting_policy": {
+    "contract": "evidence-separated-issue-reporting-v1",
+    "query_result": "query_project_issues.data.evidence_metrics",
+    "diagnostic_result": "read_project_artifact(section='diagnose_storyboard').data.issue_classification",
+    "categories": [
+      {
+        "id": "confirmed_content",
+        "label": "已复核的内容问题"
+      },
+      {
+        "id": "content_candidate",
+        "label": "内容风险待复核"
+      },
+      {
+        "id": "format",
+        "label": "文字与格式规范"
+      },
+      {
+        "id": "missing_evidence",
+        "label": "资料或判断依据待补"
+      },
+      {
+        "id": "suspected_false_positive",
+        "label": "疑似误报待复核"
+      }
+    ],
+    "instructions": [
+      "分类视图只解释证据与计数，不更改原始问题、审计结论、阻断门禁或历史记录；机器告警不是已确认语义错误。",
+      "已复核内容须绑定独立审计事件及逐项来源、定位和证据；疑似误报仍需复核，资料待补不得折算为通过。",
+      "同时显示historical_observation_count、unique_file_version_problem_count、repeat_observation_count和file_version_evidence_gap_count；每个比例明确分子、分母及定义，不称生图或视频失败率。",
+      "同文件版本位置与问题依据按真实指纹聚合，保留每次event引用；缺文件指纹不凭文件名跨事件合并，版本和来源等资料缺失按文件版本单列。",
+      "新发现不等于修改引入；必须有修复前后差异和依赖证据才能归因。缺独立复核样本时误报率、复发率、真实首稿内容错误率和生成失败率为null，不以0替代。",
+      "首次服务端观察、首次送审、首次交付与真实模型首稿分别报告；未提交聊天稿和内部修订不可见，不由最早文件名或版本号推定真实首稿。"
+    ],
+    "mutates_audit_decisions": false,
+    "reported_share_is_generation_failure_rate": false
+  },
+  "input_interpretation_policy": {
+    "contract": "bounded-input-interpretation-v1",
+    "normalizer": "scripts/bounded_normalization.py:normalize_project_literals",
+    "scope": "new_unbound_candidate_before_binding_only",
+    "historical_artifacts": "read_only",
+    "bound_candidate_change": "requires_dependency_rebuild_not_resigning",
+    "output_music_phrase": "禁止额外配乐",
+    "instructions": [
+      "仅对已登记的一阶明确否定配乐、整值无对白写法、绑定实际唯一发言的重音引号进行有界规范化；保留原始输入与逐项before/after记录。",
+      "不加额外配乐、禁止BGM、无背景音乐、不得使用配乐等已支持输入统一为禁止额外配乐；条件例外、双重否定、肯定配乐及矛盾不得被规范化掩盖。",
+      "禁止约束中的眨眼字样不是动作指令；仅在已支持的否定范围内排除动作误判，独立肯定动作、连续过程和不明确句子继续检查。",
+      "肩线等身体局部必须绑定已明确识别的拥有者；未能绑定仍为unknown，不能当作额外人物强加眨眼、眼神或反应。",
+      "核对实际正文、依赖与语义，已表达的错峰动作和真实分层声源不因缺固定关键词再次要求补写；空标签、被否定声源或泛化套话不能代替依据。",
+      "受保护原文对白、事实、动作、来源图和审计证明不属于格式规范化范围；不得删句、补造证据或重写历史来消除报警。"
+    ],
+    "open_ended_semantics_guaranteed": false
+  },
+  "timing_measurement_boundary": {
+    "planning_summary": "timing-planning-summary-v1",
+    "actual_audio_verified": false,
+    "actual_audio_measurement_status": "not_provided",
+    "actual_render_status": "not_tested",
+    "instructions": "Declared schedule overlap, estimated schedule overlap and text-capacity estimates are separate evidence kinds. Bound sample profiles do not verify this manuscript audio. Keep all original timing gates; never accelerate protected dialogue or insert unsupported overlap to obtain PASS."
+  }
 }

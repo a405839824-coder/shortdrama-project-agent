@@ -187,6 +187,66 @@ class StartupRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'archive_hash'): self.run_restore()
         self.assertFalse(self.runtime.exists())
 
+    def arm_audit_generation(self):
+        self.transfer = self.data / restore.AUDIT_GENERATION_DIRECTORY
+        self.transfer.mkdir()
+        self.arm()
+        self.manifest.update(contract=restore.AUDIT_GENERATION_CONTRACT,
+                             target_version=restore.AUDIT_GENERATION_VERSION,
+                             maintenance_gate=restore.AUDIT_GENERATION_GATE)
+        self.sign()
+        with closing(sqlite3.connect(self.data / 'account_access.sqlite3')) as db, db:
+            db.execute('CREATE TABLE access_audit (outcome TEXT)')
+            db.execute(restore.AUDIT_GENERATION_GATE_SQL)
+        return dict(directory=restore.AUDIT_GENERATION_DIRECTORY,
+                    contract=restore.AUDIT_GENERATION_CONTRACT,
+                    version=restore.AUDIT_GENERATION_VERSION)
+
+    def test_v0564_preserves_latest_state_and_never_replays_consumed_history(self):
+        self.run_restore()
+        old_transfer = restore._tree(self.transfer)
+        self.files['projects/namespace/SBP-test/ledger.json'] = b'latest audit before 0.5.64'
+        args = self.arm_audit_generation()
+        self.runtime.rename(self.root / 'old-runtime')
+        wrong = {**args, 'version': '0.5.63'}
+        with self.assertRaisesRegex(ValueError, 'manifest_binding'):
+            restore._restore(self.data, self.runtime, **wrong)
+        self.assertFalse(self.runtime.exists())
+        receipt = restore._restore(self.data, self.runtime, **args)
+        self.assertTrue(receipt['restored'])
+        self.assertEqual(restore._tree(self.runtime), self.manifest['files'])
+        self.assertEqual(restore._tree(self.data / restore.DIRECTORY), old_transfer)
+        ledger = self.runtime / 'projects/namespace/SBP-test/ledger.json'
+        ledger.write_bytes(b'post-upgrade new audit')
+        self.assertIsNone(restore._restore(self.data, self.runtime, **args))
+        self.assertEqual(ledger.read_bytes(), b'post-upgrade new audit')
+        import shutil
+        shutil.rmtree(self.runtime)
+        self.assertIsNone(restore._restore(self.data, self.runtime, **args))
+        self.assertFalse(self.runtime.exists())
+        self.sign()
+        with self.assertRaisesRegex(ValueError, 'already_consumed'):
+            restore._restore(self.data, self.runtime, **args)
+
+    def test_v0564_requires_actual_gate_and_has_own_size_limit(self):
+        args = self.arm_audit_generation()
+        with closing(sqlite3.connect(self.data / 'account_access.sqlite3')) as db, db:
+            db.execute(f'DROP TRIGGER {restore.AUDIT_GENERATION_GATE}')
+        with self.assertRaisesRegex(ValueError, 'maintenance_gate'):
+            restore._restore(self.data, self.runtime, **args)
+        self.assertFalse(self.runtime.exists())
+        with closing(sqlite3.connect(self.data / 'account_access.sqlite3')) as db, db:
+            db.execute(restore.AUDIT_GENERATION_GATE_SQL)
+        size = sum(map(len, self.files.values()))
+        with patch.object(restore, 'AUDIT_GENERATION_MAX_EXPANDED_BYTES', size - 1):
+            with self.assertRaisesRegex(ValueError, 'archive_size'):
+                restore._restore(self.data, self.runtime, **args)
+        self.assertFalse(self.runtime.exists())
+        self.assertTrue((self.transfer / 'manifest.json').is_file())
+        with patch.object(restore, 'MAX_EXPANDED_BYTES', 1), \
+                patch.object(restore, 'AUDIT_GENERATION_MAX_EXPANDED_BYTES', size):
+            self.assertTrue(restore._restore(self.data, self.runtime, **args)['restored'])
+
     def test_admin_transfer_larger_tree_has_its_own_finite_limit(self):
         size = sum(map(len, self.files.values()))
         # Exercise both boundaries with small real archives, avoiding a multi-GB

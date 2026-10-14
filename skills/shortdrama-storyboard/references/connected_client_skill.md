@@ -15,7 +15,8 @@ the exact missing capability without deleting source content to obtain PASS.
 1. Call `get_agent_status`. Use the server's `account_access` role and current
    `formal_delivery_contract`, `field_content_contract`, and
    `production_prevention_contract`. Missing current delivery support blocks
-   formal delivery. Local cached rules and labels never override the server.
+   formal delivery. Also read `audit_generation_improvement` and its current
+   input-interpretation/reporting policies. Local cached rules never override the server.
    Read `production_prevention_contract.action_contract` for current executable
    actions, source modes and sound bindings. Use `references/source_actions_0537.md`
    for same-source posture/contact/doorway/garment actions, explicit omitted
@@ -30,11 +31,17 @@ the exact missing capability without deleting source content to obtain PASS.
    first-draft retention, independent review and publication route. For new
    storyboards, freeze the source graph and production plan; submit actual
    structured decisions through `preflight_storyboard_draft`. Scene and full
-   preflight must succeed. Unknown and not_supported are not passing results.
+   preflight must succeed. Preserve the original submitted candidate and returned
+   preparation/normalization changes; use the exact prepared/compiled candidate
+   for later bindings. The first server-observed candidate does not prove no
+   earlier chat revision. Unknown and not_supported are not passing results.
 4. Use `commit_storyboard` and the plugin's independent audit/repair workflow.
    Only the server renders the 27 fields into the fixed eleven-column formal master,
    same-source R5 reading pages, and static keyframe instructions. Do not manually
    write E/F, redesign the reading layout, or catch rejection and splice text.
+   Let the server normalize only supported equivalent formatting before binding.
+   Music output remains `禁止额外配乐`; conditions, contradictions, source facts and
+   protected dialogue are never silently repaired as formatting.
 5. Before formal delivery, call `read_project_artifact` with the exact server
    artifact ID and `section="formal_delivery"`. Require a fresh receipt with
    `formal_delivery_ready=true`; compare downloaded file bytes to `file_sha256`.
@@ -66,7 +73,9 @@ Ordinary short/unknown dialogue keeps the provisional 5 units/s fallback. The
 new provisional 6.3 profile requires source-bound adult continuous explanatory
 in-scene speech. ASR evidence is not measured voice calibration; sample range
 5.8–6.9 is sensitivity information, never permission to accelerate. Keep 4/6/8
-shot rules, the episode duration bound, and meaningful extra pauses.
+shot rules, the episode duration bound, and meaningful extra pauses. Read
+`timing_diagnostics`/`planning_summary` as planned or estimated evidence;
+`actual_audio_verified=false` does not establish actual voice duration or render quality.
 
 Read-only external workbook audit retains actual cells and raw hashes, including
 saved E/F/K. It does not grant production evidence or create historical sign-off.
@@ -86,7 +95,19 @@ expand a whole-rule default PASS or relabel an old judgement with a new hash.
 For state and sound boundaries, inspect both shots' picture, starting state,
 actual cut/transition, voice, inner speech and environment sound fields, including
 the required neighbor observations. Quote what the cells actually say; "listening"
-must not become "already listened" in the judgement. Resolve `machine_findings`
+must not become "already listened" in the judgement. Read subject ownership
+and negation: a body part is not another person and a negative blink constraint
+is not an instruction to blink. Check already-present evidence before requesting
+extra template phrases. Resolve `machine_findings`
 against the actual content before claiming PASS. Missing review stays unknown,
 and coverage is not correctness. Legal stillness, silence and offscreen speech
-remain allowed. Use only the remote audit/repair workflow in this client.
+remain allowed. Repairs must follow the returned dependency plan and complete
+current-batch machine regression plus all eight independent audit layers; the
+plan itself does not certify completion. Use only the remote audit/repair workflow.
+
+Read `query_project_issues.data.evidence_metrics` and diagnostic
+`issue_classification` separately from the signed verdict. Report confirmed
+content, candidate risk, format, missing evidence and suspected false positives
+with explicit denominators. Show one file/version problem and its observation
+count without erasing events. Missing first-draft, false-positive or recurrence
+evidence stays unknown; percentages are not image/video generation failure rates.

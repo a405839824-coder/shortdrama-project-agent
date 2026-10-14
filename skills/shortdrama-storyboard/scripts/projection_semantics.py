@@ -10,7 +10,7 @@ import re
 
 QUOTES = re.compile(r'“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|"[^"\n]*"')
 MUSIC = re.compile(r'BGM|背景音乐|额外配乐|配乐|音乐', re.I)
-NEGATIVE = re.compile(r'^(?:禁止|不要|不得|不使用|不生成|没有|不加|无)(?:任何)?')
+NEGATIVE = re.compile(r'^(?:(?:此镜|本镜头|本镜)\s*)?(?:禁止|不要|不得|不使用|不生成|没有|不加|无)(?:任何)?')
 UNCERTAIN = re.compile(r'是否|可能|酌情|视情况|待定|考虑|不一定|如果|倘若|假如|若')
 # Cancelling a ban grants no proof that music actually exists. Cancelling
 # absence, or requiring its opposite, does assert its presence. Keep these
@@ -24,10 +24,68 @@ ASSERTION = re.compile(ACTION.pattern + r'|清澈|清晰|明亮|柔和|洁净|�
 BOUNDARY = re.compile(r'([；;。！？!?，,\n]+|但是|然而|不过|而且|并且|随后|然后|而后|接着|同时|但|却|且|又|[并而](?=' + ACTION.pattern + r'))')
 ENUM = re.compile(r'(?:以及|或者|[、与和及或])')
 MUSIC_ITEM = re.compile(r'(?:任何)?(?:让)?(?:加入|播放|配上|使用|生成|插入|铺设|搭配|切入)?\s*(?:BGM|背景音乐|额外配乐|配乐|音乐)(?:响起|播放|进入|渐入|切入|铺开|持续|开始)?', re.I)
+MUSIC_NEGATIVE_PREDICATE = re.compile(
+    r'(?:BGM|背景音乐|额外配乐|配乐|音乐)\s*'
+    r'(?:禁止|不得|不要|不应|不能|不会|不)(?:出现|响起|播放|加入|使用|生成)', re.I)
+
+
+def _complete_negative_music_clause(clause):
+    """Prove a complete first-order ban, not merely a nearby negative word.
+
+    Bare coordinated objects share the operator. A second operator, relative
+    exception or predicate is not a noun atom and must not inherit that scope.
+    This intentionally leaves unsupported prose unresolved for explicit review.
+    """
+    body = clause.strip()
+    if MUSIC_NEGATIVE_PREDICATE.fullmatch(body):
+        return True
+    prefix = NEGATIVE.match(body)
+    if prefix is None:
+        return False
+    items = ENUM.split(body[prefix.end():])
+    if not items or any(not item.strip() for item in items):
+        return False
+    for item in items:
+        item = item.strip()
+        if MUSIC.search(item):
+            if not MUSIC_ITEM.fullmatch(item):
+                return False
+        elif (not re.fullmatch(r'[\w\u3400-\u9fff· -]+', item)
+              or re.search(r'不|未|无|禁止|不得|不要|要求|允许|取消|撤销|除|之外|以外|'
+                           r'仅|只|的|之后|以后|停止|保持|执行|若|如果', item)
+              or ASSERTION.search(item)):
+            return False
+    return True
 
 
 def _masked_quotes(text):
     return QUOTES.sub(lambda m: ' ' * len(m.group()), text)
+
+
+def mask_static_eye_exclusions(value):
+    """Mask only explicit excluded still states, keeping every other action.
+
+    A negated half-blink freeze frame is not an eyelid animation. Conditional
+    or cancelled prohibitions do not establish this exception. Same-length
+    masking preserves evidence offsets and does not alter stored prose.
+    """
+    text = str(value or '')
+    pattern = re.compile(
+        r'(?:避开|避免|排除|不处于|不是|不生成|不定格[于在]|禁止定格[于在])'
+        r'(?:半眨眼?|半闭眼|闭眼)(?:瞬间|状态|中途|截帧)?')
+    result = list(text)
+    for clause in re.finditer(r'[^，,。；;\n]+', text):
+        body = clause.group()
+        if re.search(r'如果|倘若|假如|若|是否|可能|不一定', body):
+            continue
+        for match in pattern.finditer(body):
+            lead = body[:match.start()]
+            if re.search(r'(?:并非|不是|不能|不可|不得|没有|无需|无须|不必|取消|撤销|未|不)'
+                         r'(?:再|继续|执行|要求|采用|需要|去|要|来|予以|进行|\s)*$', lead):
+                continue
+            start, end = clause.start() + match.start(), clause.start() + match.end()
+            result[start:end] = ' ' * (end - start)
+    return ''.join(result)
 
 
 def music_directives(value):
@@ -68,7 +126,7 @@ def music_directives(value):
             elif REQUIRED_PRESENCE.search(body):
                 status = 'affirmative'
             elif scoped:
-                status = 'negative'
+                status = 'negative' if _complete_negative_music_clause(body) else 'unknown'
             elif ACTION.search(body):
                 status = 'affirmative'
             else:
@@ -98,6 +156,10 @@ def strip_negative_music(value):
             continue
         prefix = NEGATIVE.match(clause.strip())
         if not prefix:
+            if MUSIC_NEGATIVE_PREDICATE.fullmatch(clause.strip()):
+                parts[index] = ''
+                removed.add(index)
+                mentioned = True
             continue
         items = ENUM.split(clause.strip()[prefix.end():])
         kept = [item for item in items if not MUSIC_ITEM.fullmatch(item.strip())]

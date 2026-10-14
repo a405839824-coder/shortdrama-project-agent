@@ -529,8 +529,8 @@ def main() -> int:
             "actual_faults": faults,
         })
     run_code_test(
-        "SPC-BGM-LITERAL-IN-EXECUTION-FIELD",
-        lambda obj: obj["shots"][0].__setitem__("生成限制", "9:16竖屏；禁止BGM、字幕与水印。"),
+        "SPC-BGM-AFFIRMATIVE-IN-EXECUTION-FIELD",
+        lambda obj: obj["shots"][0].__setitem__("生成限制", "9:16竖屏；加入BGM；禁止字幕与水印。"),
         "E-AUDIO-STAGE-001",
         "THG-AUDIO",
     )

@@ -12,6 +12,8 @@ import re
 from collections import Counter
 from typing import Any, Callable
 
+from .repair_dependencies import repair_dependency_plan
+
 QUALITY_CONTRACT = "storyboard-quality-v2"
 # Existing warning-level E-* diagnostics still describe contract/content faults.
 # Never erase lighting discontinuity or missing performance merely for being WARN.
@@ -429,5 +431,6 @@ def repair_diff(before, after):
             "changed_paths": paths, "changed_path_count": len(paths),
             "content_changed": bool(paths), "proof_source": "server_computed",
             "changed_shot_uids": changed, "affected_scene_ids": scenes,
+            "dependency_plan": repair_dependency_plan(before, after),
             "full_candidate_regression_required": True,
             "semantic_closure": "requires_independent_audit"}

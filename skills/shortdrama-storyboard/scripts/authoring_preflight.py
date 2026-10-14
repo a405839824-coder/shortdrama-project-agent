@@ -14,6 +14,7 @@ class CheckCollection:
         self.checks: list[dict] = []
         self.findings: list[dict] = []
         self.values: dict[str, Any] = {}
+        self.timing_diagnostics: dict[str, Any] | None = None
 
     def run(self, name: str, fn: Callable, *, requires=(), path='$'):
         missing = [key for key in requires if key not in self.values]
@@ -52,6 +53,9 @@ class CheckCollection:
         return {'contract': 'authoring-check-coverage-v1', 'checks': self.checks,
                 'findings': self.findings,
                 'not_checked': [x for x in self.checks if x['status'] == 'not_checked'],
+                'timing_diagnostics': copy.deepcopy(self.timing_diagnostics) if self.timing_diagnostics is not None else {
+                    'status': 'not_checked', 'reason': '计时检查前置条件尚未满足，不能当作零问题通过',
+                    'actual_audio_verified': False, 'grant_approval': False},
                 'semantic_audit': 'not_performed', 'commit_eligible': False}
 
 
@@ -206,7 +210,11 @@ def inspect_typed_decisions(decisions: Any, *, renderer=None) -> dict:
                  'events belong to shot decisions; conflicting copies are refused')
         workflow['timing']['events'] = events
         project.update(shots=shots, total_duration=total / 10)
-        faults = validate_timing(project, shots)['faults']
+        timing_result = validate_timing(project, shots)
+        c.timing_diagnostics = {'summary': timing_result['metrics']['planning_summary'],
+                                'metrics': timing_result['metrics'], 'advisories': timing_result['advisories'],
+                                'faults': timing_result['faults']}
+        faults = timing_result['faults']
         if faults:
             raise a.RejectedDecisions([{'path': f"timing:{fault.get('shot_id', '')}",
                                        'message': fault['message']} for fault in faults])

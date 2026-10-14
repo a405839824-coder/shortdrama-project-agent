@@ -29,7 +29,9 @@ from lighting_checks import affirmative_matches, lighting_context_faults, scene_
 from dialogue_occurrences import align_storyboard_dialogue
 from voice_sequence import (VOICE_TEMPLATE_LABELS, LEGACY_DIALOGUE_TAG_RE, extract_dialogues)
 from projection_semantics import (field_sha256, labelled_sections, tail_binding_faults,
-                                  explicit_state_conflicts, environment_phase_findings)
+                                  explicit_state_conflicts, environment_phase_findings,
+                                  mask_static_eye_exclusions)
+from bounded_normalization import normalize_music_prohibition
 from source_content_limits import (
     AFFORDANCE as SOURCE_LIMIT_AFFORDANCE,
     ENTAILMENT as SOURCE_LIMIT_ENTAILMENT,
@@ -543,7 +545,8 @@ PUBLIC_ROLE_RE = re.compile(
 )
 PUBLIC_ACTION_RE = re.compile(
     r"行走|穿行|挑选|交谈|驻足|避让|叫卖|吆喝|搬运|装卸|推车|赶车|牵马|端菜|收拾|"
-    r"排队|巡逻|查验|上香|进出|开门|收摊|交易|付钱|张望|擦肩|落座|饮茶|吃饭|挑担|招呼"
+    r"排队|巡逻|查验|上香|进出|开门|收摊|交易|付钱|张望|擦肩|落座|饮茶|吃饭|挑担|招呼|"
+    r"(?:分先后|先后|陆续|错时)[^，,。；;\n]{0,18}(?:经过|走过|通过|散行)"
 )
 PUBLIC_VISUAL_LAYER_PATTERNS = {
     "near": re.compile(r"前景|近处|身侧|画面左侧|画面右侧"),
@@ -551,13 +554,13 @@ PUBLIC_VISUAL_LAYER_PATTERNS = {
     "far": re.compile(r"远景|远处|背景|后景|街口|巷口|城门方向"),
 }
 PUBLIC_AUDIO_LAYER_PATTERNS = {
-    "near": re.compile(r"近处|脚边|身侧|贴近|前景"),
+    "near": re.compile(r"近处|近层|近景|脚边|身侧|贴近|前景"),
     "mid": re.compile(r"中层|中景|街面|周围|身后"),
-    "far": re.compile(r"远处|远景|画外|街口|巷口|城门方向|门外"),
+    "far": re.compile(r"远处|远层|远景|画外|街口|巷口|城门方向|门外"),
 }
 PUBLIC_AUDIO_FAMILY_PATTERNS = {
     "movement": re.compile(r"脚步|鞋底|踩水|踩雪|衣料|衣摆|木屐|马蹄|车轮|车辙|轿杆|推车|担子|扁担"),
-    "crowd": re.compile(r"人声底噪|低声交谈|交谈声|含混人声|人群低语|模糊人声|远处人声|客声|食客低语"),
+    "crowd": re.compile(r"人声底噪|低声交谈|交谈声|含混人声|人群低语|模糊人声|远处人声|客声|食客低语|无可辨词(?:的)?人声底"),
     "commerce": re.compile(r"叫卖|吆喝|铜钱|算盘|货物|瓷碗|碗筷|杯盏|盘碟|柜台|案板|秤砣"),
     "weather_nature": re.compile(r"风声|雨声|雨滴|滴水|溅水|踏雪|雪地|浪声|水声|橹声|钟声|鸟鸣|虫鸣|檐铃|门轴|木门"),
     "work": re.compile(r"搬运|装卸|锤打|切菜|炉火|油锅|劈柴|扫地"),
@@ -1314,7 +1317,14 @@ def _keyframe_eye_process_hits(value: Any) -> list[str]:
         r"眼睑[^，,。；;\n]{0,14}(?:松紧|变化|开合)|"
         r"眨眼|半眨(?:眼)?"
     )
+    eye_state = r'(?:闭眼|合眼|睁眼|闭上(?:双眼|眼睛)|睁开(?:双眼|眼睛))'
+    eye_sequence = re.compile(
+        r'(?:先|从|由)?' + eye_state + r'[^。；;\n]{0,12}'
+        r'(?:再|然后|随后|接着|又|到|至|转为|变为)' + eye_state)
     hits = []
+    # Temporal links cross commas; splitting them first loses the sequence.
+    for match in affirmative_matches(eye_sequence, text):
+        hits.append('eye_process=' + match.group())
     if re.search(r"(?:视频|动态画面)中(?:的)?[^。；;\n]*按画面内容(?:所列时点)?执行", text):
         hits.append("unprojected_video_policy")
     if any(phrase in text for phrase in (
@@ -1324,8 +1334,7 @@ def _keyframe_eye_process_hits(value: Any) -> list[str]:
     for clause in re.split(r"[，,。；;\n]", text):
         # A still can require open eyes and explicitly exclude a half blink.
         # Such exclusion is not a command to animate eyelids.
-        if re.search(r"(?:避开|避免|不处于|不是|排除)(?:半眨眼?|闭眼)(?:瞬间|状态|中途|截帧)?", clause):
-            clause = re.sub(r"(?:避开|避免|不处于|不是|排除)(?:半眨眼?|闭眼)(?:瞬间|状态|中途|截帧)?", "", clause)
+        clause = mask_static_eye_exclusions(clause)
         if motion.search(clause):
             hits.append("eye_process=" + clause)
     return sorted(set(hits))
@@ -2346,7 +2355,35 @@ def _as_number(value: Any, default: float = 0.0) -> float:
 
 
 def _matched_pattern_names(text: str, patterns: dict[str, re.Pattern[str]]) -> set[str]:
-    return {name for name, pattern in patterns.items() if pattern.search(text)}
+    return {name for name, pattern in patterns.items() if affirmative_matches(pattern, text)}
+
+
+def _public_audio_layers(text: str) -> set[str]:
+    """A distance label needs an audible source in its own clause.
+
+    Merely listing 近层/中层/远层 or explicitly absent sounds supplies no
+    evidence. This is a bounded text check, not a listening/quality verdict.
+    """
+    layers = set()
+    for clause in _public_audible_clauses(text):
+        if not _matched_pattern_names(clause, PUBLIC_AUDIO_FAMILY_PATTERNS):
+            continue
+        layers.update(_matched_pattern_names(clause, PUBLIC_AUDIO_LAYER_PATTERNS))
+    return layers
+
+
+def _public_audible_clauses(text: str) -> list[str]:
+    absent = re.compile(r'(?:已|已经|完全)?(?:停止|消失|消音|静音|停歇)|'
+                        r'(?:没有|无)(?:任何)?(?:声音|声响)|听不(?:见|到)|不可(?:听见|听到|闻)')
+    clauses = re.split(r'[，,。；;\n]|但是|然而|但|却|随后|然后', text)
+    # A shared final absence predicate applies to the entire coordinated list.
+    # Unsupported mixed clauses remain conservative rather than supplying proof.
+    return [clause for clause in clauses if not affirmative_matches(absent, clause)]
+
+
+def _public_audio_families(text: str) -> set[str]:
+    return {name for clause in _public_audible_clauses(text)
+            for name in _matched_pattern_names(clause, PUBLIC_AUDIO_FAMILY_PATTERNS)}
 
 
 def _public_density_class(text: str) -> str | None:
@@ -2406,7 +2443,11 @@ def _validate_public_scene_ecology(
 
         density_ok = bool(PUBLIC_DENSITY_RE.search(visual_text))
         role_ok = bool(PUBLIC_ROLE_RE.search(visual_text))
-        action_ok = bool(PUBLIC_ACTION_RE.search(visual_text))
+        # “无剧情任务的行人” negates a narrative role, not their walking.
+        # Mask this bounded noun modifier only; “行人不经过” stays negative.
+        action_text = re.sub(r'无(?:剧情|主线)(?:任务|作用)(?:的)?',
+                             lambda m: ' ' * len(m.group()), visual_text)
+        action_ok = bool(affirmative_matches(PUBLIC_ACTION_RE, action_text))
         visual_layers = _matched_pattern_names(visual_text, PUBLIC_VISUAL_LAYER_PATTERNS)
         wide = bool(PUBLIC_WIDE_RE.search(f"{shot.get('镜头类型', '')} {shot.get('功能类型', '')}"))
         required_visual_layers = 2 if wide else 1
@@ -2443,8 +2484,8 @@ def _validate_public_scene_ecology(
             metrics["public_scene_visual_pass_count"] += 1
 
         audio_text = str(shot.get("环境音效", ""))
-        audio_families = _matched_pattern_names(audio_text, PUBLIC_AUDIO_FAMILY_PATTERNS)
-        audio_layers = _matched_pattern_names(audio_text, PUBLIC_AUDIO_LAYER_PATTERNS)
+        audio_families = _public_audio_families(audio_text)
+        audio_layers = _public_audio_layers(audio_text)
         required_audio_count = 3 if wide else 2
         dialogues = extract_dialogues(shot.get("画面内容"))
         audio_missing = []
@@ -3696,33 +3737,35 @@ def validate_project(
             ))
         for field in EXECUTION_SHOT_FIELDS:
             field_text = str(shot.get(field, ""))
-            bgm_match = BGM_TOKEN_RE.search(field_text)
+            # Accept explicitly equivalent bans on intake; projection emits
+            # the fixed literal. Never erase affirmative/unknown music scope.
+            normalized_music = normalize_music_prohibition(field_text) if field == '生成限制' else field_text
+            bgm_match = BGM_TOKEN_RE.search(normalized_music)
             active_music = _active_music_directive(field_text)
-            if bgm_match or active_music:
-                evidence = (
-                    f"单镜执行字段禁止出现BGM字面量，命中字段={field!r}"
-                    if bgm_match
-                    else f"单镜执行字段禁止主动配乐指令：{active_music!r}"
-                )
+            unknown_music = [row for row in music_directives(field_text) if row['status'] == 'unknown']
+            if active_music:
                 issues.append(_issue(
                     catalog,
                     "E-AUDIO-STAGE-001",
                     f"{location}.{field}",
-                    evidence,
-                    repair="改写为‘禁止额外配乐’，音乐Cue仅在画面锁定后独立处理。",
+                    f"单镜执行字段禁止主动配乐指令：{active_music!r}",
+                    repair="核实并移除本镜主动配乐决定；音乐Cue仅在画面锁定后独立处理，不能只改文字掩盖矛盾。",
                     template_gate_id="THG-AUDIO",
                 ))
-            elif (
-                field == "生成限制"
-                and MUSIC_TERM_RE.search(field_text)
-                and "禁止额外配乐" not in field_text
-            ):
+            elif unknown_music:
                 issues.append(_issue(
                     catalog,
                     "E-AUDIO-STAGE-001",
                     f"{location}.{field}",
-                    "单镜负面音乐限制必须统一逐字写为‘禁止额外配乐’。",
-                    repair="把禁止/不得/无BGM或背景音乐等写法统一为‘禁止额外配乐’。",
+                    "音乐限制含义或否定范围不明确，须核验：" + repr(unknown_music[0]['text']),
+                    repair="确认本镜音乐意图；明确禁止的等义写法可规范为‘禁止额外配乐’，不得把条件、矛盾或肯定指令自动改成禁止。",
+                    template_gate_id="THG-AUDIO",
+                ))
+            elif bgm_match:
+                issues.append(_issue(
+                    catalog, "E-AUDIO-STAGE-001", f"{location}.{field}",
+                    f"单镜执行字段禁止出现BGM字面量，命中字段={field!r}",
+                    repair="把已明确禁止的音乐约束归入生成限制并统一输出‘禁止额外配乐’。",
                     template_gate_id="THG-AUDIO",
                 ))
         transition_faults = _transition_duplicate_faults(shot.get("切镜/转场提示词"))
@@ -4093,6 +4136,9 @@ def validate_project(
         if fault.get("shot_id"):
             timing_issue["shot_ids"] = [fault["shot_id"]]
         timing_issue["check_family"] = "timing"
+        for evidence_key in ('timing_evidence_kind', 'actual_audio_verified', 'utterance_ids', 'overlap_seconds'):
+            if evidence_key in fault:
+                timing_issue[evidence_key] = fault[evidence_key]
         if timing_context is not None:
             timing_issue["timing_scope_decidable"] = bool(
                 fault.get("shot_id") in local_timing_ids

@@ -34,12 +34,22 @@ ADMIN_READ_VERSION = "0.5.62"
 RULE_EXECUTION_DIRECTORY = ".upgrade-rule-execution-0563"
 RULE_EXECUTION_CONTRACT = "library-runtime-transfer-rule-execution-0563-v1"
 RULE_EXECUTION_VERSION = "0.5.63"
+AUDIT_GENERATION_DIRECTORY = ".upgrade-audit-generation-0564"
+AUDIT_GENERATION_CONTRACT = "library-runtime-transfer-audit-generation-0564-v1"
+AUDIT_GENERATION_VERSION = "0.5.64"
+AUDIT_GENERATION_GATE = "audit_generation_upgrade_gate_0564"
+AUDIT_GENERATION_GATE_SQL = (
+    f"CREATE TRIGGER {AUDIT_GENERATION_GATE} BEFORE INSERT ON access_audit "
+    "WHEN NEW.outcome='started' BEGIN "
+    "SELECT RAISE(ABORT, 'audit_generation_upgrade_in_progress'); END"
+)
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 # The current live project tree alone exceeds 5 GB. Only this fresh, signed
 # transfer may use the larger ceiling; older release contracts keep 4 GiB.
 ADMIN_READ_MAX_EXPANDED_BYTES = 8 * 1024**3
 RULE_EXECUTION_MAX_EXPANDED_BYTES = 8 * 1024**3
+AUDIT_GENERATION_MAX_EXPANDED_BYTES = 8 * 1024**3
 MAX_FILES = 100_000
 
 
@@ -115,12 +125,14 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         (AUDIT_STORAGE_DIRECTORY, AUDIT_STORAGE_CONTRACT): AUDIT_STORAGE_VERSION,
         (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT): ADMIN_READ_VERSION,
         (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT): RULE_EXECUTION_VERSION,
+        (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT): AUDIT_GENERATION_VERSION,
     }.get((directory, contract))
     if target_version is None:
         raise ValueError('startup_restore_undeclared_transfer')
     expanded_limit = {
         (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT): ADMIN_READ_MAX_EXPANDED_BYTES,
         (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT): RULE_EXECUTION_MAX_EXPANDED_BYTES,
+        (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT): AUDIT_GENERATION_MAX_EXPANDED_BYTES,
     }.get((directory, contract), MAX_EXPANDED_BYTES)
     transfer = data_dir / directory
     marker = transfer / "manifest.json"
@@ -146,6 +158,19 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         raise ValueError("startup_restore_manifest_signature")
     if manifest.get("protected_fingerprints") != protected_fingerprints(data_dir):
         raise ValueError("startup_restore_protected_state_changed")
+    if contract == AUDIT_GENERATION_CONTRACT:
+        # New release transfers must prove the persistent gate is still active;
+        # a signed assertion alone must not reopen the replaced writer.
+        database = data_dir / "account_access.sqlite3"
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+            gate = db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=? AND tbl_name='access_audit'",
+                (AUDIT_GENERATION_GATE,),
+            ).fetchone()
+        normalize = lambda sql: " ".join(sql.split()).rstrip(";")
+        if (manifest.get("maintenance_gate") != AUDIT_GENERATION_GATE or not gate
+                or normalize(gate[0]) != normalize(AUDIT_GENERATION_GATE_SQL)):
+            raise ValueError("startup_restore_maintenance_gate_missing_or_changed")
     archive_path = transfer / "runtime.tar.gz"
     if (archive_path.is_symlink() or not archive_path.is_file() or archive_path.stat().st_size > MAX_ARCHIVE_BYTES
             or _file_hash(archive_path) != manifest.get("archive_sha256")):
@@ -213,7 +238,8 @@ def restore_release_runtime_if_requested(settings) -> dict | None:
                                  (AUDIT_ENVIRONMENT_DIRECTORY, AUDIT_ENVIRONMENT_CONTRACT),
                                  (AUDIT_STORAGE_DIRECTORY, AUDIT_STORAGE_CONTRACT),
                                  (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT),
-                                 (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT))
+                                 (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT),
+                                 (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT))
                if (settings.data_dir / d / 'manifest.json').exists()]
     if not pending:
         return None
