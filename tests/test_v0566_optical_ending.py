@@ -54,7 +54,8 @@ class OpticalEndingTests(unittest.TestCase):
         self.assertEqual(end['physical']['integrity'],'broken')
         self.assertEqual(end['surface']['glow'],'none')
         rows=_render_decisions(result['typed_decisions'])['shots']
-        self.assertIn('2.0秒',rows[0]['环境音效'])
+        self.assertIn('2.0—3.0秒',rows[0]['环境音效'])
+        self.assertEqual(rows[0]['环境音效'].count('碎裂与镜片落地'),1)
         self.assertIn('碎片散落',rows[1]['起始状态'])
         self.assertNotIn('镜面平整',rows[1]['起始状态'])
         self.assertEqual(result['typed_decisions']['shots'][0]['end_state'],result['typed_decisions']['shots'][1]['start_state'])

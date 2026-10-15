@@ -9355,7 +9355,7 @@
           "回声不添加字词",
           "不遮盖原词",
           "并在本句发言窗口结束时收住",
-          "\\d+(?:\\.\\d+)?秒：[\\w\\u3400-\\u9fff·]{1,24}碎裂与镜片落地的声音"
+          "\\d+(?:\\.\\d+)?(?:—\\d+(?:\\.\\d+)?)?秒：[\\w\\u3400-\\u9fff·]{1,24}碎裂与镜片落地的声音"
         ],
         "光影": [
           "镜面局部效果范围之外空气清澈",
@@ -13050,7 +13050,7 @@
       "critical_runtime_policies": {
         "field_content_policy": {
           "baseline_sha256": "f467af3cb150e1870f73536a0d74f94475d9c13a6c6959bc90e6a00db93bd6b9",
-          "current_sha256": "2a2dd4e5ef440ede2ee58f54cf0b7e99a8f5ead90df9543f8bcdcc1875bb6b9f"
+          "current_sha256": "577e5804216ef41b1abc9d6d4190056c0af9ac8c3c7674775915bfa3611edc27"
         }
       }
     }

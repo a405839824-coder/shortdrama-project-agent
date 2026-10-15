@@ -191,6 +191,8 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
         volume = "轻声" if cue["volume"] == "soft" else "正常音量"
         text = (''.join(f'{tick/10:.1f}秒：{event}，{volume}。' for tick in contact_ticks) if contact_ticks is not None else
                 f"{action['start'] / 10:.1f}—{action['end'] / 10:.1f}秒：{event}，{volume}。")
+        if cue['sound'] == 'mirror_break':
+            text = f'{contact_ticks[0]/10:.1f}—{contact_ticks[-1]/10:.1f}秒：{event}，{volume}。'
         lines.append(text)
         if cue['sound'] == 'scene_echo':
             lines.append('回声不添加字词，不遮盖原词，并在本句发言窗口结束时收住。')
