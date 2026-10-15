@@ -1245,6 +1245,8 @@ def _initial(world, view, sources, camera):
         relation_text = relations.static_prop(world, identity)
         if relation_text: rows.append(relation_text)
         if prop['physical']['integrity']=='broken': rows.append(f'{label}已碎裂。')
+        if 'hand' in prop['anchor']:
+            rows.append(f"{label}在{prop['anchor']['actor']}{'左手' if prop['anchor']['hand']=='left' else '右手'}中。")
         if 'worn' in prop['anchor']: rows.append(f"{label}穿戴在{prop['anchor']['actor']}{extended_actions.PART_TEXT[prop['anchor']['worn']]}。")
         if 'binding' in prop['anchor']: rows.append(f"{label}捆住{prop['anchor']['actor']}双腕。")
         if 'prop' in prop['anchor']: rows.append(f"{label}承放在{_reference(world, {'kind': 'prop', 'id': prop['anchor']['prop']}, camera)}上。")
