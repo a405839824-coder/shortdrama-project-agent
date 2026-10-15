@@ -22,6 +22,11 @@ and canonical hash. Full production gates, exact scene preflight, independent
 audit and delivery receipts remain mandatory. Small candidates keep their
 existing representation. No historical candidate or artifact is rewritten.
 
+Look actions now project head/eye motion from each actual phase interval.
+A head alignment at a phase boundary no longer also emits a held-head clause;
+stationary phases before/after tracking retain their actual stillness. Synthetic
+controls exercise both cases without changing world actions, dialogue or timing.
+
 The 0.5.67 startup transfer uses a new immutable directory, signed manifest and
 SQLite dispatch gate. It reuses the established backup/arming implementation in
 a dedicated operator process configured only for this release. A verified

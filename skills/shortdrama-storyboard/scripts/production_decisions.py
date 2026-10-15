@@ -1481,6 +1481,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
             samples.append({"tick": tick, "view": view, "world": copy.deepcopy(world)})
         phases = [{"start": a / 10, "end": b / 10, "text": ""} for a, b in zip(ticks, ticks[1:])]
         events, action_records, dialogue_rows = [], [], []
+        projected_head_motion = set()
         psychological_text = ""; voice_entries = []
         audio_alignments = []
         for action, ap, _ in sorted(intervals, key=lambda x: (x[0]["start"], x[0]["id"])):
@@ -1543,6 +1544,15 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     rendered_event_ids.add(fragment_id)
                 fragment_ids.append(fragment_id)
                 fragment = sentence
+                if action['kind'] == 'look':
+                    # A long look may hold before/after real tracking. Project
+                    # this interval, including its actual boundary transition.
+                    phase_info = {**info, 'before': (info['before'] if lo == action['start']
+                        else samples[lo]['world']['actors'][action['actor']])}
+                    phase_info['motion_projection'] = _look_motion({**action, 'start': lo, 'end': hi}, phase_info, samples)
+                    verb, fragment = _action_sentence(action, phase_info, samples[lo]['world'], cam)
+                    if phase_info['motion_projection']['head_changed']:
+                        projected_head_motion.add((phase_index, action['actor']))
                 if is_audio:
                     if part_index:
                         fragment = ''
@@ -1568,7 +1578,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     verb, fragment = extended_actions.fragment_sentence(_display_action(action, samples[lo]["world"], cam), info, lo, hi)
                 elif len(pieces) > 1 and action['kind'] != 'hold' and verb not in {'停在', '保持', '焦点调整'}:
                     prefix = "开始" if part_index == 0 else "继续"
-                    fragment = str(action["actor"]) + prefix + sentence[len(action["actor"]):]
+                    fragment = str(action["actor"]) + prefix + fragment[len(action["actor"]):]
                 phase_hold = (action['kind'] == 'look' and verb in {'停在', '保持'}
                               and (lo, hi) == (ticks[phase_index], ticks[phase_index + 1]))
                 if not is_audio and action["kind"] != "blink" and not phase_hold:
@@ -1665,7 +1675,9 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                         gaze_text = f"{identity}视线持续停在{target}。"
                         if gaze_text not in phases[i]['text']: phases[i]['text'] += gaze_text
                         head_text = f"{identity}头部保持不动。"
-                        if all(state["head_yaw"] == states[0]["head_yaw"] for state in states) and head_text not in phases[i]['text']:
+                        if ((i, identity) not in projected_head_motion
+                                and all(state["head_yaw"] == states[0]["head_yaw"] for state in states)
+                                and head_text not in phases[i]['text']):
                             phases[i]["text"] += head_text
                         if not any(lo >= b or hi > b for lo, hi in windows):
                             phases[i]["text"] += f"{identity}最终视线停在{target}。"

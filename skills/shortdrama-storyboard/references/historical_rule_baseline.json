@@ -4958,7 +4958,7 @@
   },
   "counterexample_files": {
     "skills/shortdrama-storyboard/scripts/test_episode_rules.py": "5aa3ea4bcfe0dff65aeb524d4b70b6b38fc6a454f96076fc9bf1bd75e228f09d",
-    "tests/test_v0535_production_contract.py": "c64f35c90c3ca41f09594588b068661611c9050a61c90c3f7ef54f0ba0f1e02d"
+    "tests/test_v0535_production_contract.py": "d872782dcbd1d35a3acbc4acaa5c09512e93713965cabc760e4cac9a891c7be7"
   },
   "critical_runtime_policies": {
     "field_content_policy": {
@@ -6887,6 +6887,40 @@
         "strict counterexample-file SHA enforcement and independent semantic review"
       ],
       "acceptance_scope": "Synthetic software controls only; no real first-draft percentage, formal sign-off or deployment claim."
+    },
+    {
+      "id": "fixture-signed-candidate-0567-v1",
+      "baseline_commit": "f2c54498622c48cae4cae54388a87d9f7e2ea32c",
+      "reason": "User-authorized capability repair returns signed references for large compiled candidates. The full pipeline fixture now reads the exact committed canonical before semantic inspection; it still submits the actual returned candidate and passes every production, audit and receipt gate.",
+      "files": {
+        "tests/test_v0535_production_contract.py": {
+          "baseline_sha256": "c64f35c90c3ca41f09594588b068661611c9050a61c90c3f7ef54f0ba0f1e02d",
+          "current_sha256": "d872782dcbd1d35a3acbc4acaa5c09512e93713965cabc760e4cac9a891c7be7",
+          "change": "Read the current bound saved canonical after successful commit, supporting both inline and signed-reference transport. No assertion removed or relaxed.",
+          "preserved_test_ids": [
+            "CurrentMcpContractTests.test_full_current_episode_scene_full_commit_and_signed_review",
+            "CurrentMcpContractTests.test_legacy_parameter_envelope_mints_only_equally_authorized_grants",
+            "CurrentMcpContractTests.test_rejected_actual_request_can_be_corrected_without_erasing_first_attempt",
+            "ProductionContractTests.test_actual_speech_gaze_direct_and_unknown_cannot_pass_by_relabel",
+            "ProductionContractTests.test_combining_event_sets_cannot_count_an_existing_delivery_twice",
+            "ProductionContractTests.test_complete_episode_compiler_validator_and_projection_agree",
+            "ProductionContractTests.test_current_written_delivery_uses_actual_initial_visibility",
+            "ProductionContractTests.test_declared_hook_clock_cannot_move_actual_delivery",
+            "ProductionContractTests.test_delivery_identity_and_source_are_both_required",
+            "ProductionContractTests.test_fixture_cut_uses_actual_boundary_and_refuses_to_invent_one",
+            "ProductionContractTests.test_hold_prose_and_clock_keep_real_world_effects",
+            "ProductionContractTests.test_registered_physical_aliases_do_not_license_unrelated_sentences",
+            "ProductionContractTests.test_whole_clause_ownership_rejects_clean_prefix_with_unrelated_tail"
+          ]
+        }
+      },
+      "preserved": [
+        "all source facts, dialogue, shots and duration in the synthetic fixture",
+        "all production, audit, source and delivery assertions",
+        "counterexample hash enforcement",
+        "historical baseline entries and migrations"
+      ],
+      "acceptance_scope": "Synthetic software integration only; no real-story audit or delivery approval."
     }
   ],
   "conflict_semantic_definitions": {
