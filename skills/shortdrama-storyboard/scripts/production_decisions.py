@@ -1306,7 +1306,9 @@ def _fields(world, row, cam, view, sources):
               "生成限制": "9:16竖屏；禁止额外配乐。" + eye_limits + blocks["generation_limits_append"],
               **blocks["lighting_fields"], **transition_block(method="hard_cut")}
     staging = {"contract": "initial-staging-text-v1", "geometry": {"contract": "staging-geometry-v1", "camera": cam["origin"][:2],
-                "camera_target": cam["target"][:2], "actors": geometry_actors}, "target_label": row["camera"]["target"], "bindings": bindings}
+                "camera_target": cam["target"][:2], "actors": geometry_actors},
+               "target_label": _display_name(world['points'][row['camera']['target']].get('display_name', row['camera']['target']), 'camera.target_label'),
+               "bindings": bindings}
     return fields, staging
 
 
