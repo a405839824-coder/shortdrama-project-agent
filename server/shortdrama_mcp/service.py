@@ -1976,6 +1976,34 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 return copy.deepcopy(matching[-1])
         return None
 
+    def _script_partition_occurrences(self, namespace, project_id, candidate,
+                                      source_text, occurrences, source_id, source_sha, hub):
+        """Use a completed, source-bound whole-play partition, never an ad-hoc slice."""
+        binding=(candidate.get('source_lock') or {}).get('episode_partition')
+        if binding is None:return occurrences,None
+        if (not isinstance(binding,dict) or set(binding)!={'artifact_id','sha256'}
+                or not isinstance(binding['artifact_id'],str)
+                or not isinstance(binding['sha256'],str)):
+            raise ValueError('source_partition_binding_invalid')
+        record,path=self.store.get_artifact(namespace,project_id,binding['artifact_id'])
+        raw=path.read_bytes()
+        if (record.get('artifact_type')!='episode_plan'
+                or record.get('source_artifact_id')!=source_id
+                or record.get('fingerprint')!=binding['sha256']
+                or sha256_bytes(raw)!=binding['sha256']):
+            raise ValueError('source_partition_artifact_identity')
+        work_order=_find_work_order(hub,record.get('work_order_id'))
+        if work_order.get('operation')!='episode_plan' or work_order.get('status') not in {'passed','awaiting_signoff','archived'}:
+            raise ValueError('source_partition_plan_not_validated')
+        episode=(candidate.get('prevention_evidence') or {}).get('episode_contract') or {}
+        episode_ids=[row.get('episode_id') for row in episode.get('episodes',[]) if isinstance(row,dict)]
+        actual_ids=list(dict.fromkeys(str(row.get('镜头编号','')).split('-',1)[0] for row in candidate.get('shots',[])))
+        if episode_ids!=actual_ids:raise ValueError('source_partition_episode_shots_mismatch')
+        from .screenplay_scope import select_partition
+        selected,scope=select_partition(json.loads(raw),source_text,occurrences,episode_ids,source_id,source_sha)
+        scope.update(artifact_id=record['artifact_id'],artifact_sha256=binding['sha256'],work_order_id=work_order['work_order_id'])
+        return selected,scope
+
     def _source_dialogue_authority_manifest(
         self,
         namespace: str,
@@ -2219,6 +2247,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             label="source_role",
         )
         extraction_sha = ""
+        source_partition = None
         occurrences: list[Any] = []
         try:
             extracted, source_record, _path = self._load_extracted_or_payload(
@@ -2243,6 +2272,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             occurrences = parse_source_dialogue_authority(
                 source_text, source_role=source_role
             )
+            if (source_lock or {}).get('episode_partition') is not None:
+                if source_role!='script':raise ValueError('source_partition_requires_script')
+                occurrences,source_partition=self._script_partition_occurrences(
+                    namespace,project_id,candidate,source_text,occurrences,
+                    source_artifact_id,source_fingerprint,active_hub)
         except (OSError, TypeError, ValueError, SourceDialogueAuthorityError) as exc:
             # SourceDialogueAuthorityError is a ValueError subclass; spelling
             # it out documents that parser ambiguity is an expected gate, not
@@ -2359,6 +2393,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             "claim_validation_error": claim_error,
             "occurrences": [row.as_dict() for row in occurrences],
             "dialogue_fragment_coverage": fragment_coverage,
+            "source_partition": source_partition,
         }
         manifest["manifest_sha256"] = sha256_bytes(_stable_json_bytes(manifest))
         return manifest, issues
@@ -11678,6 +11713,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         authority_session_fingerprint = authority_binding.get(
             "session_fingerprint"
         )
+        from .preflight_payload import unpack as unpack_preflight_candidate
+        storyboard=unpack_preflight_candidate(self,namespace,project_id,work_order_id,storyboard)
         workbook_migration = self._validated_workbook_migration(
             namespace, project_id, work_order, request_session_id
         )
@@ -12294,6 +12331,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             self.store.load_ledger(namespace, project_id)
         )
         status = DRAFT_PREFLIGHT_PASS if not issues else DRAFT_PREFLIGHT_FAIL
+        from .preflight_payload import pack as pack_preflight_candidate
+        response_candidate=pack_preflight_candidate(self,namespace,project_id,work_order_id,preflight_id,candidate)
         return ToolResponse(
             status=status,
             summary=(
@@ -12310,12 +12349,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             trace_id=preflight_id,
             data={
                 **({"authoring_attempt": authoring_attempt,
-                    "compiled_storyboard": copy.deepcopy(candidate)} if authoring_attempt is not None else {}),
-                "prepared_storyboard": copy.deepcopy(candidate) if preparation_error is None else None,
+                    "compiled_storyboard": response_candidate} if authoring_attempt is not None else {}),
+                "prepared_storyboard": response_candidate if preparation_error is None else None,
                 "preparation_changes": copy.deepcopy(preparation_changes),
                 "rejected_preparation_changes": copy.deepcopy(rejected_preparation_changes),
                 "production_binding": copy.deepcopy(production_binding),
-                "submission_guidance": "提交prepared_storyboard原样匹配本次候选哈希；提交入口不会重新归一。预检通过不代表独立审计通过。",
+                "submission_guidance": "原样提交prepared_storyboard；大候选返回服务端签名引用，正式入口取回同一候选并保留所有门禁。预检通过不代表独立审计通过。",
                 "field_content_validation": {
                     "contract": "storyboard-field-content-v1",
                     "input_route": "recorded_production_decisions" if authoring_attempt is not None else "canonical_compatibility",
@@ -21450,6 +21489,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         self._assert_work_order_session(
             namespace, work_order_snapshot, request_session_id
         )
+        from .preflight_payload import CONTRACT as PREFLIGHT_REFERENCE, unpack as unpack_preflight_candidate
+        if isinstance(storyboard,dict) and storyboard.get('contract')==PREFLIGHT_REFERENCE:
+            if storyboard.get('draft_preflight_id')!=draft_preflight_id:
+                raise ValueError('preflight_candidate_reference_commit_id')
+            storyboard=unpack_preflight_candidate(self,namespace,project_id,work_order_id,storyboard)
         workbook_migration = self._validated_workbook_migration(
             namespace, project_id, work_order_snapshot, request_session_id
         )

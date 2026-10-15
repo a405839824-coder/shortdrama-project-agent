@@ -343,7 +343,7 @@
     "legacy_policy": "read_only_migration_to_compact_successor",
     "mother_template_column_count": 11,
     "output_contract": "R10-SPC-1",
-    "plugin_version": "0.5.66",
+    "plugin_version": "0.5.67",
     "production_audit_status": "PENDING_AUDIT",
     "required_per_shot_aspect_phrase": "9:16竖屏",
     "schema_version": "R10.1",
@@ -351,8 +351,8 @@
     "semantic_audit_contract_version": "semantic-audit-v9-server-owned-obligation-coverage",
     "single_execution_master": "正式分镜母版E列及同镜K列光影",
     "source_dialogue_authority": "server_registered_source_payload_sha_hub_authority_entry_and_artifact_metadata_role_cross_binding",
-    "source_dialogue_grammar_version": "source-dialogue-closed-grammar-v6.3",
-    "source_dialogue_parser_version": "source-dialogue-authority-v6",
+    "source_dialogue_grammar_version": "source-dialogue-closed-grammar-v7.0",
+    "source_dialogue_parser_version": "source-dialogue-authority-v7",
     "t2i_lighting_contract": "static_observable_single_frame_semantics_plus_scene_grounded_light_source_direction_effect_indoor_clarity_outdoor_atmosphere_split_and_four_field_audit_evidence_v2",
     "template_hard_gates": "THG-01..THG-17",
     "voice_template_contract": "fixed_voice_template_v1_in_音色_with_all_dialogue_shots_field_evidence_in_audio_audit_layer",
@@ -373,7 +373,9 @@
     "formal_master_lighting": false,
     "lighting_column": "K:光影",
     "formal_visible_subject_label": false,
-    "lighting_projection": "四项内部数据投影至K列和GPT；E列不含光影段落"
+    "lighting_projection": "四项内部数据投影至K列和GPT；E列不含光影段落",
+    "script_episode_partition": "validated_episode_plan_artifact_exact_source_hash_whole_act_partition_full_body_coverage",
+    "large_preflight_transport": "compiled-candidate-reference-v1_signed_exact_candidate_same_work_order"
   },
   "content_storage_architecture": {
     "historical_byte_policy": "preserve_every_record_byte_in_library_snapshot_including_the_eleven_handoff_chains",

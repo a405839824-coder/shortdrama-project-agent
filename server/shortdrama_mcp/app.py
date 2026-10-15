@@ -1053,7 +1053,7 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             "在正式提交前对scene、episode或full候选执行与提交一致的compact和R10-SPC-1门禁。"
             "storyboard接受compact候选，或production-authoring-request-v1封套（decisions、"
             "source_graph_artifact_id、source_graph_sha256）；后者冻结生产决定与已登记来源图，"
-            "编译后以data.compiled_storyboard返回同一正式预检候选。编译失败单独记录且不虚构镜头正确率。"
+            "编译后以data.compiled_storyboard返回同一正式预检候选；大候选返回compiled-candidate-reference-v1签名引用，原样用于后续预检和提交。编译失败单独记录且不虚构镜头正确率。"
             "两种输入都执行storyboard-field-content-v1：机位不接受演员动作或声音，音色子项不得互串；"
             "母版/GPT及R5阅读页从同源字段生成，错列返回实际字段路径与片段，不能静默清洗。"
             "统计已报告问题的唯一镜头占比、已知复发和系统性重复；机器预检不证明完整语义覆盖，"

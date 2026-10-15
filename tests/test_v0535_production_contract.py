@@ -211,6 +211,10 @@ class CurrentMcpContractTests(unittest.TestCase):
         committed=f.mcp('commit_storyboard',{'project_id':f.project,'work_order_id':f.order,'storyboard':obj,
             'draft_preflight_id':full['trace_id'],'file_name':'合成整集链路验证.xlsx'})
         artifact=committed['artifact_id']
+        # Inspect the exact saved canonical after committing either inline
+        # bytes or the signed large-candidate reference returned by preflight.
+        obj,_=f.service._storyboard_from_artifact(f.namespace,f.project,artifact,
+            persist_recovered_canonical=False,require_bound_projection=True)
         submission=semantic_audit_for_artifact(f.service,f.fixture.settings,f.project,artifact)
         proof=inspect_derivation(obj)
         layer=next(x for x in submission['layers'] if x['layer']=='源文对白')
