@@ -139,7 +139,7 @@ DETAIL_PATTERNS = {
     "hands": re.compile(r"手|指|拳|掌|袖口"),
     "body": re.compile(r"肩|颈|身体|上身|胸口|背部|姿态|前倾|后仰|蜷缩|僵住"),
     "gaze": re.compile(r"视线|看向|注视|凝视|低垂|移开|锁定|闪躲|游移"),
-    "breath": re.compile(r"呼吸|气息|吸气|吞咽"),
+    "breath": re.compile(r"呼吸|气息|吸气|呼气|叹气|吞咽"),
     "head": re.compile(r"低头|抬头|侧头|头部|歪头|后仰"),
 }
 INVISIBLE_SHOT_TERMS = ["书页", "书上内容", "POV书", "第一视角看书", "手部特写", "背影", "远景"]

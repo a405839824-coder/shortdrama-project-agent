@@ -5,10 +5,14 @@ import unittest
 from test_v0566_surface_voice import fixture
 from test_v0565_performance_evidence import build
 from production_derivation import inspect_derivation
-from validate_storyboard import validate_project, _validate_adapted_dialogue_audit
+from validate_storyboard import validate_project, _validate_adapted_dialogue_audit, detail_categories
 
 
 class VoiceEvidenceTests(unittest.TestCase):
+    def test_actual_breath_phases_are_recognized_as_breath_details(self):
+        for phrase in ('甲自然吸气。', '甲自然呼气。', '甲轻轻叹气。'):
+            self.assertIn('breath', detail_categories(phrase))
+
     def test_unbodied_voice_has_source_and_audio_but_no_invented_body(self):
         data, graph, texts = fixture()
         canonical, _, _ = build(data, json.dumps(graph, ensure_ascii=False).encode(), texts)
