@@ -93,7 +93,7 @@ def speaker_scene(world, action):
 
 def local_effects(world, scene_id, prop_ids=None):
     from production_decisions import _anchor
-    return {name: copy.deepcopy(prop['surface']) for name, prop in world['props'].items()
+    return {name: copy.deepcopy(prop['surface']) for name, prop in world.get('props', {}).items()
             if 'surface' in prop and (prop_ids is None or name in prop_ids)
             and _anchor(world, prop)[0] == scene_id}
 
@@ -123,7 +123,7 @@ def environment(initial_world, final_world, scene_id, actions, display_names, vi
         if value['pattern'] != 'still' or value['glow'] == 'flicker' or value['mist'] != 'none' or value.get('particles','none') != 'none':
             lines.append('本镜开始时' + surface_text(display_names.get(name, name), value,
                 broken=initial_world['props'][name]['physical']['integrity']=='broken'))
-    for name, prop in initial_world['props'].items():
+    for name, prop in initial_world.get('props', {}).items():
         if 'foliage' in prop and (visible_props is None or name in visible_props):
             from production_decisions import _anchor
             if _anchor(initial_world,prop)[0] == scene_id:
