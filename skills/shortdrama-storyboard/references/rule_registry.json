@@ -9350,7 +9350,11 @@
           "对白清晰",
           "纸张和指腹接触的轻响",
           "对白时底声避让",
-          "\\d+(?:\\.\\d+)?—\\d+(?:\\.\\d+)?秒：[\\w\\u3400-\\u9fff·]{1,12}轻轻叹气的声音"
+          "\\d+(?:\\.\\d+)?—\\d+(?:\\.\\d+)?秒：[\\w\\u3400-\\u9fff·]{1,12}轻轻叹气的声音",
+          "\\d+(?:\\.\\d+)?—\\d+(?:\\.\\d+)?秒：[\\w\\u3400-\\u9fff·]{1,12}原声的细微短回声",
+          "回声不添加字词",
+          "不遮盖原词",
+          "并在本句发言窗口结束时收住"
         ],
         "光影": [
           "镜面局部效果范围之外空气清澈",
@@ -13038,14 +13042,14 @@
       "authorization_work_order": "WO-e9ae4347264b438a",
       "introduced_in": "0.5.66",
       "legacy_applies_to_current_generation": false,
-      "reason": "Four bounded local-surface lighting clauses and one action-bound sigh sound clause; source, field ownership, knowledge, timing and independent review requirements remain unchanged.",
+      "reason": "Bounded local-surface lighting, source-bound sigh and prop-voice short echo clauses; existing source, field ownership, knowledge, timing and independent review requirements remain unchanged.",
       "parent_migrations_sha256": {
         "production-grounding-0565": "848f42f647097b0d98178861f3bff3299750852454a7cc2018ec98747e626a07"
       },
       "critical_runtime_policies": {
         "field_content_policy": {
           "baseline_sha256": "f467af3cb150e1870f73536a0d74f94475d9c13a6c6959bc90e6a00db93bd6b9",
-          "current_sha256": "4ce6883f0074dc5f1f608fddf6271ba00cfa7a76fe78c50a02776ab57b8d1844"
+          "current_sha256": "aedeef2910ab8ca056ea11ca25d452035790c0e64e3aee77b649a37cfb1369c0"
         }
       }
     }

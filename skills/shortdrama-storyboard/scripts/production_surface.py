@@ -59,7 +59,8 @@ def sentence(action, info, name):
 def validate_emitter(world, action, scene_id, path):
     from production_decisions import _need, _obj, _anchor
     emitter = action.get('emitter')
-    _obj(emitter, {'prop', 'mode'}, path + '.emitter')
+    _obj(emitter, {'prop', 'mode'} | ({'effect'} if isinstance(emitter, dict) and 'effect' in emitter else set()), path + '.emitter')
+    _need(emitter.get('effect', 'dry') in {'dry', 'short_echo'}, path, 'unsupported scene voice effect')
     _need(emitter['mode'] == 'disembodied', path, 'only explicit disembodied scene emission is supported')
     _need(action['actor'] not in world['actors'], path,
           'a bodily speaker cannot be relabelled as disembodied to bypass mouth/gaze checks')

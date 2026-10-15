@@ -21,6 +21,7 @@ SOUND_KINDS = {
     "kowtow_contact": {"kowtow"},
     "cloth": {"wipe", "wear_prop", "remove_worn", "dress_actor", "undress_actor"},
     "sigh": {"breath"},
+    "scene_echo": {"speak"},
 }
 
 
@@ -135,6 +136,9 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
     sound = editorial["环境音效"]
     cues = sound.get("cues", [])
     lookup = {action["id"]: action for action in actions}
+    expected_echo = {a['id'] for a in actions if a['kind'] == 'speak' and a.get('emitter', {}).get('effect') == 'short_echo'}
+    _need(expected_echo == {c['action_id'] for c in cues if c['sound'] == 'scene_echo'},
+          'editorial.环境音效', 'each declared short echo needs exactly its actual scene_echo cue')
     lines, bindings = [], []
     for index, cue in enumerate(cues):
         cp = f"editorial.环境音效.cues[{index}]"
@@ -145,7 +149,8 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
               "sound requires that actual action to complete once")
         actor = action["actor"]
         action_world = (action_start_worlds or {}).get(action['id'], initial_world)
-        _need(action_world["actors"][actor]["scene_id"] == scene_id, cp,
+        from production_surface import speaker_scene
+        _need((speaker_scene(action_world, action) if action['kind'] == 'speak' else action_world["actors"][actor]["scene_id"]) == scene_id, cp,
               "sound action belongs to another scene")
         prop_name = (display_names or {}).get(action.get('prop'), action.get('prop'))
         contact_ticks = None
@@ -167,6 +172,9 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
         elif cue['sound']=='sigh':
             _need(action['phase']=='sigh', cp, 'sigh sound requires an actual sigh phase')
             event=f"{actor}轻轻叹气的声音"
+        elif cue['sound']=='scene_echo':
+            _need(action.get('emitter', {}).get('effect') == 'short_echo', cp, 'scene echo requires an explicit prop-bound short echo')
+            event=f"{actor}原声的细微短回声"
         elif cue["sound"] == "prop_contact":
             event = f"{actor}移动{prop_name}时的物件接触声"
         elif cue["sound"] == "writing":
@@ -179,6 +187,8 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
         text = (''.join(f'{tick/10:.1f}秒：{event}，{volume}。' for tick in contact_ticks) if contact_ticks is not None else
                 f"{action['start'] / 10:.1f}—{action['end'] / 10:.1f}秒：{event}，{volume}。")
         lines.append(text)
+        if cue['sound'] == 'scene_echo':
+            lines.append('回声不添加字词，不遮盖原词，并在本句发言窗口结束时收住。')
         bindings.append({"action_id": action["id"], "kind": action["kind"], "actor": actor,
                          "start_tick": action["start"], "end_tick": action["end"],
                          "sound": cue["sound"], "volume": cue["volume"], "rendered_text": text,

@@ -82,6 +82,27 @@ def lower(data, graph, texts):
 
 
 class SurfaceVoiceTests(unittest.TestCase):
+    def test_scene_echo_is_bound_to_one_actual_prop_voice_and_clock(self):
+        data, graph, texts = fixture()
+        data['shots'][0]['actions'][1]['emitter']['effect'] = 'short_echo'
+        data['shots'][0]['editorial']['环境音效'] = {'mode':'action_bound','cues':[
+            {'action_id':'voice','sound':'scene_echo','volume':'soft'}]}
+        replan(data, graph, texts)
+        result = lower(data, graph, texts)
+        shot = _render_decisions(result['typed_decisions'])['shots'][0]
+        self.assertIn('1.0—3.0秒：古镜残音原声的细微短回声', shot['环境音效'])
+        self.assertIn('不添加字词', shot['环境音效'])
+        self.assertIn('古镜残音说道：“明日再议。”', shot['画面内容'])
+        data['shots'][0]['actions'][1]['emitter']['effect'] = 'dry'
+        replan(data, graph, texts)
+        with self.assertRaisesRegex(ProductionDecisionError,'actual scene_echo cue'):
+            lower(data, graph, texts)
+        data['shots'][0]['actions'][1]['emitter']['effect'] = 'short_echo'
+        data['shots'][0]['editorial']['环境音效'] = {'mode':'none'}
+        replan(data, graph, texts)
+        with self.assertRaisesRegex(ProductionDecisionError,'actual scene_echo cue'):
+            lower(data, graph, texts)
+
     def test_real_source_action_voice_receipt_and_static_continuation(self):
         planned = lower(*fixture())
         self.assertEqual(planned['derivation']['production_prevention']['status'], 'pass')

@@ -85,3 +85,5 @@ body part, an absent garment, or an occupied hand is rejected. These gestures
 retain source-plan, contact, visibility, timing and semantic-review gates.
 
 A source-bound `breath` step may select `phase: sigh`; the explicit `sigh` sound cue binds only that phase and clock. It cannot overlap speech or be substituted with generic exhalation. Hand-state first-frame text follows actual hand visibility while retaining the full underlying contact state.
+
+A disembodied `speak.emitter` may declare `effect: short_echo` (default `dry`). The `scene_echo` environmental cue requires that actual same-scene utterance and uses its exact interval; it adds no words or extra duration and ends inside the declared utterance window. This is a sound-design binding, not measured acoustics.
