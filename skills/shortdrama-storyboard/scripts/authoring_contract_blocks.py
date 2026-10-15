@@ -75,7 +75,7 @@ def voice_block(*, mode: str, dialogue_rows: list[tuple[str, str]],
     # inventing intent, changing a word, or replacing the registered voice.
     from projection_semantics import QUOTES, tail_binding_faults
     if not QUOTES.search(tail_execution) and len(dialogue_rows) == 1:
-        ending = dialogue_rows[0][1].rstrip("。！？!?；;，, .…～~“”\"‘’「」『』")
+        ending = dialogue_rows[0][1].rstrip("。！？!?；;，,、 .…～~“”\"‘’「」『』")
         if ending:
             tail_execution = "末字“" + ending[-1] + "”；" + tail_execution
     tail_faults = tail_binding_faults(tail_execution, dialogue_rows)
