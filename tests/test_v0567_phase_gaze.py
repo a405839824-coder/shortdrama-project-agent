@@ -1,9 +1,22 @@
 """Actual per-phase tracking must not inherit motion from another phase."""
 import unittest
 import test_v0565_production_projection_dependencies as controls
+import test_v0566_optical_ending as optical_controls
 
 
 class PhaseGazeTests(unittest.TestCase):
+    def test_final_gaze_is_explicitly_before_phantom_disappears(self):
+        data=optical_controls.mirror()
+        actor=data['initial_world']['actors']['甲']
+        actor['optical']={'opacity':.4,'extent_m':.4,'glimmer':True}
+        actor['gaze']={'kind':'prop','id':'古镜'}
+        source=optical_controls.sourced(data,'phantom_fade',{'to':0,'glimmer':True},
+            text='甲逐渐消散。',start=0,end=40)
+        result=controls.p.lower_production_decisions(data,source_compilation=source)
+        phases=result['typed_decisions']['shots'][0]['phases']
+        self.assertIn('消散前，甲最终视线停在',phases[-1]['text'])
+        self.assertEqual(result['derivation']['final_world']['actors']['甲']['optical']['opacity'],0)
+
     def test_initial_head_alignment_is_not_also_declared_still(self):
         data=controls.look_control()
         data['initial_world']['actors']['甲']['head_yaw']=20

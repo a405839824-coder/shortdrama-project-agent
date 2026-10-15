@@ -1680,7 +1680,9 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                                 and head_text not in phases[i]['text']):
                             phases[i]["text"] += head_text
                         if not any(lo >= b or hi > b for lo, hi in windows):
-                            phases[i]["text"] += f"{identity}最终视线停在{target}。"
+                            before_fade = (samples[b]['world']['actors'][identity]
+                                           .get('optical', {}).get('opacity') == 0)
+                            phases[i]["text"] += ("消散前，" if before_fade else "") + f"{identity}最终视线停在{target}。"
             if not phases[i]["text"]:
                 sample = samples[a]
                 phases[i]['text'] = ''.join(f"{name}保持{sample['world']['actors'][name]['posture']}。"
