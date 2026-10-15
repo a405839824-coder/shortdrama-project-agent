@@ -58,12 +58,14 @@ def model_production_contract():
             'action_contract':{'reference':'references/source_actions_0537.md',
                 'parameters':{k:sorted(v) for k,v in sorted(ACTION_FIELDS.items())},
                 'optional_parameters': {'speak': {
+                    'emitter': '{prop,mode:disembodied}; source-bound spoken identity absent from bodily actors; actual same-scene intact prop; no mouth, gaze or body; heard reports only after the actual speech completes',
                     'timing': '{profile_id,selection_evidence}; registered source-bound selection only',
                     'pauses': '[{id,offset,seconds,extra?}]; offset indexes this source use including punctuation, 0 before first character, len(text) after last; normal pauses included in utterance-average; unique extra pauses once; same-ID or same-position conflicts rejected; semantic support pending independent review'}},
                 'physical_relations': production_actions.relations.contract(),
                 'expression_poses': production_actions.EXPRESSION_POSES,
                 'source_modes':sorted(MODES),'postures':sorted(production_actions.POSTURES),
-                'frozen_source_required':sorted(production_actions.SOURCE_REQUIRED),
+                'frozen_source_required':sorted(production_actions.SOURCE_REQUIRED | {'surface_effect'}),
+                'surface_effect': 'source_step only; source actor is a registered prop with surface:{pattern:still|ripple,glow:none|faint|flicker,mist:none|local_white,extent_m:(0,1]}; parameters:{to:surface}; extent cannot change; old state at exact start, new local state during interval and after completion; remains visible throughout; no particle/light-transport claim or implicit sound',
                 'bridge_kinds':sorted(production_actions.BRIDGE_KINDS),
                 'sound_kinds':{k:sorted(v) for k,v in SOUND_KINDS.items()},
                 'push_actor':'source_step only; empty open hand contacts target torso before passive displacement to registered point; both standing, level ground, lateral or away, 0<distance<=0.6m within reach; contact and displacement visible; no invented fall or injury',
@@ -584,9 +586,10 @@ class ProductionPlanGuard:
                     need(a['kind'] == 'speak', p + '.knowledge', 'heard acquisition must bind an actual spoken event')
                     for sample in prior_samples[a['start']:a['end']]:
                         listener = sample['world']['actors'][acquisition['actor']]
-                        speaker = sample['world']['actors'][a['actor']]
-                        need(listener['scene_id'] == speaker['scene_id'] and acquisition['actor'] != a['actor'], p + '.knowledge', 'listener has no actual same-scene disclosure')
-                        need(not sample['world']['scenes'][speaker['scene_id']]['barriers'], p + '.knowledge',
+                        from production_surface import speaker_scene
+                        emission_scene = speaker_scene(sample['world'], a)
+                        need(listener['scene_id'] == emission_scene and acquisition['actor'] != a['actor'], p + '.knowledge', 'listener has no actual same-scene disclosure')
+                        need(not sample['world']['scenes'][emission_scene]['barriers'], p + '.knowledge',
                              'hearing across declared barriers is not modelled', 'not_supported')
                 elif acquisition['mode']=='source_report':
                     need(a['kind']=='narrate' and actual_use['actor'] is None, p+'.knowledge','source report must be delivered by actual objective narration')

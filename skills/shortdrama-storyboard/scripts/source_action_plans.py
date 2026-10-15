@@ -180,6 +180,8 @@ def migrate_source_actions(payload: dict, source_compilation) -> dict:
 def _protected_props(plans, sources, world):
     """Only declared source objects, never names guessed from narrative prose."""
     result = {paper["carrier_id"] for paper in sources["written_objects_by_id"].values()}
+    result.update(sources['uses_by_id'][uid]['actor'] for (uid, _), step in plans.items()
+                  if step['kind'] == 'surface_effect')
     for step in plans.values():
         parameters = step["parameters"]
         for key in ("prop", "tool"):
@@ -367,8 +369,9 @@ class SourceActionExecution:
             return
         aid, kind, actor_id = action["id"], action["kind"], action["actor"]
         _need(aid in self._starts, path, "source effect has no actual start")
-        original, current = self._starts[aid], world["actors"][actor_id]
-        before = original["actors"][actor_id]
+        original = self._starts[aid]
+        current = world['actors'].get(actor_id)
+        before = original['actors'].get(actor_id)
         end = tick == action["end"]
         fraction = (tick - action["start"]) / (action["end"] - action["start"])
         base = ("actors", actor_id)
@@ -380,7 +383,12 @@ class SourceActionExecution:
             expected[key], actual[key] = value, copy.deepcopy(_get(world, keys))
 
         from production_actions import FIELDS as EXTENDED_FIELDS, effects as extended_effects
-        if kind in EXTENDED_FIELDS:
+        if kind == 'surface_effect':
+            keys = ('props', actor_id, 'surface')
+            owned.append(keys)
+            expected['surface'] = copy.deepcopy(original['props'][actor_id]['surface'] if tick == action['start'] else action['to'])
+            actual['surface'] = copy.deepcopy(_get(world, keys))
+        elif kind in EXTENDED_FIELDS:
             for keys, value in extended_effects(original, action, tick).items():
                 owned.append(keys)
                 label = '/'.join(keys)

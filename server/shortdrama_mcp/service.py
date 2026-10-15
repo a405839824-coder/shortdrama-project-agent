@@ -4976,7 +4976,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "independent_audit_still_required": True,
             },
             "production_grounding_improvement": {
-                "release": "0.5.65",
+                "release": "0.5.66",
                 "voice_requirements": "single_registry_clause_grammar",
                 "performance_evidence_contract": "performance-evidence-v1",
                 "geometry_scope": "all_declared_actor_landmarks; unreplayed later states remain conditional",

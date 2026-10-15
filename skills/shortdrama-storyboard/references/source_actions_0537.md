@@ -54,3 +54,32 @@
 assist_stand 仅由来源动作计划执行。参数为 target_actor,hand,target_part,point,landmarks,helper_point,helper_landmarks，actor 是施扶者。动作开始前必须已经真实 support 住对方的一只手或腕；抓握不能冒充扶持，腕绳须先解除，两人没有其他接触约束且视线已清除。施扶者从站/坐/蹲姿，被扶者从躺/坐/蹲/跪姿，按同一时轴到站姿；地标格式与 posture 相同，最少0.8秒，近距离起身不能代替走路。支撑手逐样本跟随被扶手，全程检查可及距离和遮挡，之后仍须真实 release_support 才能松开。该动作不能放入时空省略桥接。
 
 这些是有限地标模型的输入能力，不是表演实测、人体动力学或源文语义通过证明。
+# 0.5.66 source-bound mirror effects and scene voices
+
+`surface_effect` is a frozen `source_step`: its source subject is an existing
+prop with `surface={pattern:still|ripple,glow:none|faint|flicker,mist:none|local_white,extent_m}`.
+The sole parameter `to` has the same schema and the same radius, in `(0,1]`
+metres. The intact prop must remain visible throughout the event and at its
+result. The exact start frame keeps the previous state; subsequent samples
+carry the new bounded state until another sourced action changes it. Static
+keyframes describe only current texture/light/mist, never replay a future
+change. Local mist never authorizes whole-room fog, a new figure, sound, or
+invented lighting on actors. This finite state is not a fluid or optical solver.
+
+`speak` may explicitly carry `emitter={prop:<registered prop>,mode:disembodied}`.
+The source speaker remains unchanged and must not also be a bodily actor.
+The intact prop must belong to the shot's actual scene. Dialogue is timed and
+voiced through the normal eleven-label contract, with no generated body, mouth,
+lip sync, or visual gaze. Other characters may receive a report only after the
+actual speech finishes in the same unobstructed scene; hearing does not prove
+its proposition true. This is scene speech, not narration or inner speech.
+
+Additional finite sourced gestures preserve actions that cannot be replaced by
+generic holding: `stroke_prop={prop,hand,to}` follows two distinct contact
+landmarks within 0.15 m of an intact optical prop; `hand_tremor={hand}` models
+a free hand's small transient motion over 0.4–3 seconds. `contact_actor`
+supports explicit left/right upper-arm support and own `lap_cloth` using
+`grasp_cloth`/`release_grasp_cloth`, requiring seated posture and exactly one
+intact cloth garment worn on the torso. The cloth stays worn. Grasping another
+body part, an absent garment, or an occupied hand is rejected. These gestures
+retain source-plan, contact, visibility, timing and semantic-review gates.
