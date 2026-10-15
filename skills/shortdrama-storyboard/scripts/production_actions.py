@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import math
 import production_relations as relations
+import production_optical as optical
 
 FIELDS = {
     'posture': {'to', 'point', 'landmarks'},
@@ -40,6 +41,7 @@ FIELDS = {
     'scene_light': {'scene_id', 'light'},
 }
 FIELDS.update(relations.FIELDS)
+FIELDS.update(optical.FIELDS)
 CONTINUOUS = set(FIELDS)
 POSTURES = {'站立': (1.0, 2.2), '坐姿': (.6, 1.6), '蹲姿': (.3, 1.2),
             '跪姿': (.5, 1.4), '跪伏': (.05, .5), '躬身': (.5, 1.8), '躺卧': (.05, .8)}
@@ -63,7 +65,7 @@ HAND_PARTS = {'left_hand', 'right_hand'}
 PART_TEXT.update(left_upper_arm='左上臂', right_upper_arm='右上臂', lap_cloth='膝上衣角')
 PUSH_ACTIONS = {'push_actor', 'push_actor_no_displacement'}
 SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'} | PUSH_ACTIONS | set(relations.FIELDS)
-SOURCE_REQUIRED |= {'stroke_prop', 'hand_tremor'}
+SOURCE_REQUIRED |= {'stroke_prop', 'hand_tremor'} | set(optical.FIELDS)
 BRIDGE_KINDS = {'move_actor', 'turn', 'look', 'posture', 'hand_move', 'eye_state', 'hand_shape',
                 'expression', 'cross_passage', 'scene_light'}
 
@@ -142,6 +144,7 @@ def validate_world(world):
 def channels(action):
     a, k = action['actor'], action['kind']
     if k in relations.FIELDS: return relations.channels(action)
+    if k == 'phantom_fade': return {(a, 'optical')}
     # Channels are calculated before preparation. Validate keys needed below
     # so malformed input fails closed as a domain error, never a raw TypeError.
     for key in FIELDS[k] - {'landmarks','helper_landmarks','light','contact','breaks','count'}:
@@ -199,6 +202,7 @@ def prepare(world, action, info, path, *, bridge=False):
         p._need(action['source_use_id'] is not None, path, 'this plot action requires a frozen physical source use')
     if k in relations.FIELDS:
         return relations.prepare(world, action, info, path)
+    if k in optical.FIELDS: return optical.prepare(world, action, info, path, bridge=bridge)
     if k in {'posture', 'fall', 'cross_passage'}:
         p._need(not a['action_state']['contacts'] and not _contacted(world, action['actor']), path, 'release actual body contact before relocating')
     if k in {'hand_move', 'hand_shape', 'pick_up', 'put_down', 'drop_prop', 'wear_prop', 'remove_worn', 'wipe', 'set_opening','dress_actor','undress_actor','release_binding'}:
@@ -489,6 +493,7 @@ def effects(initial, action, tick):
     """A finite transition specification; caller cannot provide mutation paths."""
     p = _p(); k = action['kind']; who = action['actor']; a = initial['actors'][who]
     if k in relations.FIELDS: return relations.effects(initial, action, tick)
+    if k in optical.FIELDS: return optical.effects(initial, action, tick)
     end = tick == action['end']; f = (tick-action['start'])/(action['end']-action['start'])
     result = {}; base = ('actors', who)
     def set_actor(key, value): result[base + (key,)] = copy.deepcopy(value)
@@ -651,6 +656,7 @@ def apply(world, action, info, tick):
 def sentence(action, info):
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
     if k in relations.FIELDS: return relations.sentence(action, info)
+    if k in optical.FIELDS: return optical.sentence(action, info)
     if k=='assist_stand':
         return '扶起',f"{a}{hand}持续扶住{action['target_actor']}{PART_TEXT[action['target_part']]}并扶起{action['target_actor']}，帮助其起身站稳。"
     if k=='push_actor':
@@ -705,7 +711,7 @@ def sentence(action, info):
 
 
 def static_actor(actor, name, *, face_visible=True, view=None):
-    state=actor['action_state']; rows=[]
+    state=actor['action_state']; rows=[optical.static_actor(actor, name)]
     visible_hands = None if view is None else view.get('actors', {}).get(name, {}).get('hands', [])
     rows.append(relations.static_actor(actor, name, view=view))
     for part in state['wet_parts']: rows.append(f'{name}{PART_TEXT[part]}留有水渍。')
@@ -726,6 +732,7 @@ def visible(sample, action):
     """Named landmarks required to project this action; no offscreen invention."""
     view=sample['view']; owner=view['actors'].get(action['actor'],{}); k=action['kind']
     if k in relations.FIELDS: return relations.visible(sample, action)
+    if k in optical.FIELDS: return optical.visible(sample, action)
     def part_visible(name, part):
         row=view['actors'].get(name,{})
         if part in {'head','face'}:return bool(row.get('head'))
@@ -789,6 +796,7 @@ def fragment_sentence(action, info, lo, hi):
     """Do not announce landing, release or contact before its actual end."""
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
     if k in relations.FIELDS: return relations.sentence(action, info, complete=hi == action['end'])
+    if k in optical.FIELDS: return optical.sentence(action, info, lo, hi)
     if k in PUSH_ACTIONS:
         contact, release = _push_ticks(action)
         target = action['target_actor']

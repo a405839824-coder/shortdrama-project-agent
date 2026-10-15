@@ -22,6 +22,7 @@ SOUND_KINDS = {
     "cloth": {"wipe", "wear_prop", "remove_worn", "dress_actor", "undress_actor"},
     "sigh": {"breath"},
     "scene_echo": {"speak"},
+    "mirror_break": {"shatter_surface"},
 }
 
 
@@ -154,7 +155,11 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
               "sound action belongs to another scene")
         prop_name = (display_names or {}).get(action.get('prop'), action.get('prop'))
         contact_ticks = None
-        if cue['sound']=='drop_impact':
+        if cue['sound']=='mirror_break':
+            _need(final_world['props'][action['prop']]['physical']['integrity']=='broken',cp,'mirror break sound requires actual broken result')
+            event=f'{prop_name}碎裂与镜片落地的声音'
+            contact_ticks=[(action['start']+action['end'])/2,action['end']]
+        elif cue['sound']=='drop_impact':
             physical=final_world['props'][action['prop']]['physical']
             event=f"{prop_name}{'落下碎裂' if physical['integrity']=='broken' else '落下接触落点'}的声音"
             contact_ticks=[action['end']]

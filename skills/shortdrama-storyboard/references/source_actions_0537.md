@@ -57,7 +57,7 @@ assist_stand 仅由来源动作计划执行。参数为 target_actor,hand,target
 # 0.5.66 source-bound mirror effects and scene voices
 
 `surface_effect` is a frozen `source_step`: its source subject is an existing
-prop with `surface={pattern:still|ripple,glow:none|faint|flicker,mist:none|local_white,extent_m}`.
+prop with `surface={pattern:still|ripple|surge,glow:none|faint|flicker,mist:none|local_white|local_white_surge,extent_m,particles?:none|local_glimmer}`.
 The sole parameter `to` has the same schema and the same radius, in `(0,1]`
 metres. The intact prop must remain visible throughout the event and at its
 result. The exact start frame keeps the previous state; subsequent samples
@@ -87,3 +87,9 @@ retain source-plan, contact, visibility, timing and semantic-review gates.
 A source-bound `breath` step may select `phase: sigh`; the explicit `sigh` sound cue binds only that phase and clock. It cannot overlap speech or be substituted with generic exhalation. Hand-state first-frame text follows actual hand visibility while retaining the full underlying contact state.
 
 A disembodied `speak.emitter` may declare `effect: short_echo` (default `dry`). The `scene_echo` environmental cue requires that actual same-scene utterance and uses its exact interval; it adds no words or extra duration and ends inside the declared utterance window. This is a sound-design binding, not measured acoustics.
+
+`shatter_surface={prop,hand,to}` requires an intact optical prop and actual free hand within reach, with a registered floor landing inside its local envelope. The strike happens at the interval midpoint and fragments reach the floor at the end. `mirror_break` binds sound to these actual times. No physical injury is inferred.
+
+`phantom_fade={to:<opacity>,glimmer:<boolean>}` requires actor.optical={opacity,extent_m,glimmer}. Opacity only decreases, persists across cuts, and zero removes the visible body and its local glimmer. A bodily actor cannot be silently relabelled or resurrected. Both actions require frozen source steps and observed effect checks; neither is an independent semantic certificate.
+
+An explicitly registered prop may carry foliage={motion:breeze_petals,extent_m:(0,2]}. Its frozen initial state presents static flowers and airborne petals; environmental motion is limited to this visible prop. It cannot create a storm, whole-scene fog, speech, or extra plot events.
