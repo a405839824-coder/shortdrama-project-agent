@@ -7,6 +7,15 @@ from timing_model import DIALOGUE
 from performance_checks import DIALOGUE_RE
 
 class NestedDialogueTests(unittest.TestCase):
+    def test_quoted_clause_tail_binds_actual_last_spoken_character(self):
+        from authoring_contract_blocks import voice_block
+        from test_v0527_production_decisions import voice_spec
+        from projection_semantics import tail_binding_faults
+        line='如今你仅凭一句“我是真身”，'
+        result=voice_block(mode='spoken',dialogue_rows=[('甲',line)],**{**voice_spec(),'emphasis':'“真身”。'})
+        self.assertIn('末字“身”',result)
+        self.assertEqual(tail_binding_faults('末字“身”', [('甲',line)]),[])
+        self.assertTrue(tail_binding_faults('末字“我”', [('甲',line)]))
     def test_all_consumers_preserve_nested_quote_and_later_utterance(self):
         source='他称她为“故人”，却不曾见过我。'
         picture='甲说道：“'+source+'”；乙说道：“我听到了。”'
