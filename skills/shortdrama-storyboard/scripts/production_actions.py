@@ -9,11 +9,16 @@ from __future__ import annotations
 import copy
 import math
 import production_relations as relations
+import production_optical as optical
 
 FIELDS = {
     'posture': {'to', 'point', 'landmarks'},
     'fall': {'point','landmarks'},
     'hand_move': {'hand', 'to'},
+    'stroke_prop': {'prop', 'hand', 'to'},
+    'hand_tremor': {'hand'},
+    'body_shudder': set(),
+    'straighten': {'rise_m'},
     'eye_state': {'to'},
     'hand_shape': {'hand', 'to'},
     'expression': {'to'},
@@ -38,6 +43,7 @@ FIELDS = {
     'scene_light': {'scene_id', 'light'},
 }
 FIELDS.update(relations.FIELDS)
+FIELDS.update(optical.FIELDS)
 CONTINUOUS = set(FIELDS)
 POSTURES = {'站立': (1.0, 2.2), '坐姿': (.6, 1.6), '蹲姿': (.3, 1.2),
             '跪姿': (.5, 1.4), '跪伏': (.05, .5), '躬身': (.5, 1.8), '躺卧': (.05, .8)}
@@ -54,11 +60,14 @@ EXPRESSION_POSES = (
 )
 EXPRESSIONS.update(EXPRESSION_POSES)
 PARTS = {'face', 'left_wrist', 'right_wrist', 'left_foot', 'right_foot', 'head', 'torso', 'left_hand', 'right_hand'}
+PARTS |= {'left_upper_arm', 'right_upper_arm'}
 PART_TEXT = {'face': '面颊', 'left_wrist': '左手腕', 'right_wrist': '右手腕', 'left_foot': '左脚背',
              'right_foot': '右脚背', 'head': '头部', 'torso': '外衣', 'left_hand': '左手', 'right_hand': '右手'}
 HAND_PARTS = {'left_hand', 'right_hand'}
+PART_TEXT.update(left_upper_arm='左上臂', right_upper_arm='右上臂', lap_cloth='膝上衣角')
 PUSH_ACTIONS = {'push_actor', 'push_actor_no_displacement'}
 SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'} | PUSH_ACTIONS | set(relations.FIELDS)
+SOURCE_REQUIRED |= {'stroke_prop', 'hand_tremor', 'body_shudder', 'straighten'} | set(optical.FIELDS)
 BRIDGE_KINDS = {'move_actor', 'turn', 'look', 'posture', 'hand_move', 'eye_state', 'hand_shape',
                 'expression', 'cross_passage', 'scene_light'}
 
@@ -70,6 +79,10 @@ def _p():
 
 def body_point(actor, part):
     p = _p()
+    if part.endswith('upper_arm') or part == 'lap_cloth':
+        x, y, z = ((-.23 if part.startswith('left') else .23), .03, actor['eye_height'] - .38) if part != 'lap_cloth' else (.18, .30, actor['eye_height'] * .55)
+        angle = math.radians(actor['body_yaw'])
+        return p._add(actor['position_xyz'], [x*math.cos(angle)+y*math.sin(angle), -x*math.sin(angle)+y*math.cos(angle), z])
     if part in {'left_wrist', 'right_wrist', 'left_hand', 'right_hand'}:
         return p._hand(actor, part.split('_')[0])
     if part in {'head', 'face'}:
@@ -133,6 +146,8 @@ def validate_world(world):
 def channels(action):
     a, k = action['actor'], action['kind']
     if k in relations.FIELDS: return relations.channels(action)
+    if k == 'phantom_fade': return {(a, 'optical')}
+    if k in {'body_shudder','straighten'}: return {(a, 'body'), (a, 'position')}
     # Channels are calculated before preparation. Validate keys needed below
     # so malformed input fails closed as a domain error, never a raw TypeError.
     for key in FIELDS[k] - {'landmarks','helper_landmarks','light','contact','breaks','count'}:
@@ -190,6 +205,11 @@ def prepare(world, action, info, path, *, bridge=False):
         p._need(action['source_use_id'] is not None, path, 'this plot action requires a frozen physical source use')
     if k in relations.FIELDS:
         return relations.prepare(world, action, info, path)
+    if k in optical.FIELDS: return optical.prepare(world, action, info, path, bridge=bridge)
+    if k in {'body_shudder','straighten'}:
+        p._need(not bridge and a['posture']=='站立' and not a['action_state']['contacts'] and not _contacted(world, action['actor']),path,'shudder requires free standing body')
+        if k=='straighten':p._need(0 < p._num(action['rise_m'],path) <= .08,path,'straightening rise must be positive and at most eight centimetres')
+        return info
     if k in {'posture', 'fall', 'cross_passage'}:
         p._need(not a['action_state']['contacts'] and not _contacted(world, action['actor']), path, 'release actual body contact before relocating')
     if k in {'hand_move', 'hand_shape', 'pick_up', 'put_down', 'drop_prop', 'wear_prop', 'remove_worn', 'wipe', 'set_opening','dress_actor','undress_actor','release_binding'}:
@@ -310,6 +330,23 @@ def prepare(world, action, info, path, *, bridge=False):
             p._xyz(xyz, path)
             p._need(p._distance(xyz,offset) <= a['reach_m'] + .2, path, 'pose hand exceeds declared reach')
         info['destination'] = list(point['position_xyz'])
+    elif k == 'hand_tremor':
+        p._free_hand(world, action['actor'], action['hand'], path)
+        p._need(.4 <= duration <= 3, path, 'finger tremor needs a bounded 0.4 to 3 second interval')
+    elif k == 'stroke_prop':
+        p._free_hand(world, action['actor'], action['hand'], path)
+        prop = world['props'].get(action['prop'])
+        p._need(prop is not None and 'surface' in prop and prop['physical']['integrity'] == 'intact', path,
+                'stroke requires an actual intact optical prop')
+        scene, center = p._anchor(world, prop)
+        target_scene, xyz = p._target(world, {'kind': 'point', 'id': action['to']}, path)
+        p._need(scene == target_scene == a['scene_id'] and duration >= .4, path, 'stroke must occur in the same scene')
+        p._need(p._distance(p._hand(a, action['hand']), center) <= .15 and
+                p._distance(xyz, center) <= .15 and .02 <= p._distance(p._hand(a, action['hand']), xyz) <= .2,
+                path, 'stroke requires contact at two distinct bounded surface landmarks')
+        p._need(not p._blocked(world, scene, p._hand(a, action['hand']), xyz), path, 'barrier blocks surface stroke')
+        p._reach(world, action['actor'], scene, xyz, path)
+        info['destination'] = xyz
     elif k == 'hand_move':
         scene, xyz = p._target(world, {'kind': 'point', 'id': action['to']}, path)
         p._reach(world, action['actor'], scene, xyz, path)
@@ -390,10 +427,18 @@ def prepare(world, action, info, path, *, bridge=False):
             p._need(prop['physical']['material'] == 'cloth' and action['part'] in {'face', 'left_hand', 'right_hand'}, path, 'wipe requires held cloth and supported body part')
             p._need(p._distance(p._hand(a, action['hand']), body_point(a, action['part'])) <= .2, path, 'cloth has not reached actual body part')
     elif k == 'contact_actor':
-        p._need(action['hand'] in {'left', 'right'} and action['target_part'] in PARTS, path, 'unknown contact hand/body part')
+        p._need(action['hand'] in {'left', 'right'} and action['target_part'] in PARTS | {'lap_cloth'}, path, 'unknown contact hand/body part')
         target = world['actors'].get(action['target_actor'])
-        p._need(target and action['target_actor'] != action['actor'] and target['scene_id'] == a['scene_id'], path, 'requires another same-scene actor')
-        p._need(action['mode'] in {'grasp', 'release_grasp', 'support', 'release_support', 'slap'}, path, 'unsupported contact mode')
+        cloth = action['mode'] in {'grasp_cloth', 'release_grasp_cloth'}
+        p._need(target and target['scene_id'] == a['scene_id'] and
+                (action['target_actor'] == action['actor'] if cloth else action['target_actor'] != action['actor']),
+                path, 'requires own clothing or another same-scene actor')
+        p._need(action['mode'] in {'grasp', 'release_grasp', 'support', 'release_support', 'slap', 'grasp_cloth', 'release_grasp_cloth'}, path, 'unsupported contact mode')
+        p._need((action['target_part'] == 'lap_cloth') == cloth, path, 'lap cloth requires its explicit grasp mode')
+        if cloth:
+            p._need(a['posture'] == '坐姿' and sum(prop['anchor'] == {'actor': action['actor'], 'worn': 'torso'} and
+                prop['physical'] == {'material': 'cloth', 'contents': 'none', 'integrity': 'intact'} for prop in world['props'].values()) == 1,
+                path, 'lap cloth grasp requires one actual intact worn garment and seated posture')
         current = a['action_state']['contacts'].get(action['hand'])
         if action['mode'].startswith('release_'):
             p._need(current == {'actor': action['target_actor'], 'part': action['target_part'], 'mode': action['mode'][8:]}, path, 'release does not match an actual contact')
@@ -455,6 +500,12 @@ def effects(initial, action, tick):
     """A finite transition specification; caller cannot provide mutation paths."""
     p = _p(); k = action['kind']; who = action['actor']; a = initial['actors'][who]
     if k in relations.FIELDS: return relations.effects(initial, action, tick)
+    if k in optical.FIELDS: return optical.effects(initial, action, tick)
+    if k in {'body_shudder','straighten'}:
+        f=(tick-action['start'])/(action['end']-action['start'])
+        dz=action['rise_m']*f if k=='straighten' else 0 if tick in {action['start'],action['end']} else .015*math.sin(2*math.pi*f)
+        return {('actors',who,'eye_height'):a['eye_height']+dz,
+                ('actors',who,'reach_origin_xyz'):p._add(a['reach_origin_xyz'],[0,0,dz])}
     end = tick == action['end']; f = (tick-action['start'])/(action['end']-action['start'])
     result = {}; base = ('actors', who)
     def set_actor(key, value): result[base + (key,)] = copy.deepcopy(value)
@@ -512,6 +563,16 @@ def effects(initial, action, tick):
         p._set_hand(changed, action['hand'], p._lerp(p._hand(a, action['hand']), dest, f))
         result[base+('hands',action['hand'])] = changed['hands'][action['hand']]
     elif k == 'eye_state': set_actor('eye_state', action['to'] if end else a['eye_state'])
+    elif k == 'hand_tremor':
+        # A 3 mm local tremor; no held object, injury or supernatural force.
+        offset = list(a['hands'][action['hand']])
+        offset[0] += .003 * math.sin(6 * math.pi * f) if not end else 0
+        result[base+('hands',action['hand'])] = offset
+    elif k == 'stroke_prop':
+        changed = copy.deepcopy(a)
+        xyz = initial['points'][action['to']]['position_xyz']
+        p._set_hand(changed, action['hand'], p._lerp(p._hand(a, action['hand']), xyz, f))
+        result[base+('hands',action['hand'])] = changed['hands'][action['hand']]
     elif k == 'hand_shape':
         result[base+('action_state','hand_shapes',action['hand'])] = action['to'] if end else a['action_state']['hand_shapes'][action['hand']]
     elif k == 'expression': state('expression', action['to'] if end else a['action_state']['expression'])
@@ -558,6 +619,8 @@ def effects(initial, action, tick):
         if action['target_part'] in HAND_PARTS and action['mode'] in {'grasp', 'release_grasp'}:
             shape = ('grip' if action['mode'] == 'grasp' else 'open') if end else a['action_state']['hand_shapes'][action['hand']]
             result[base+('action_state','hand_shapes',action['hand'])] = shape
+        if action['mode'] in {'grasp_cloth', 'release_grasp_cloth'}:
+            result[base+('action_state','hand_shapes',action['hand'])] = ('grip' if action['mode'] == 'grasp_cloth' else 'open') if end else a['action_state']['hand_shapes'][action['hand']]
     elif k == 'clap':
         wave=(1-math.cos(2*math.pi*action['count']*f))/2
         mid=[(x+y)/2 for x,y in zip(a['hands']['left'],a['hands']['right'])]
@@ -605,6 +668,9 @@ def apply(world, action, info, tick):
 def sentence(action, info):
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
     if k in relations.FIELDS: return relations.sentence(action, info)
+    if k in optical.FIELDS: return optical.sentence(action, info)
+    if k=='body_shudder':return '一震',f'{a}身躯短促一震，随即重新稳住，双脚保持原位。'
+    if k=='straighten':return '挺直',f'{a}挺直脊背，双脚保持原位。'
     if k=='assist_stand':
         return '扶起',f"{a}{hand}持续扶住{action['target_actor']}{PART_TEXT[action['target_part']]}并扶起{action['target_actor']}，帮助其起身站稳。"
     if k=='push_actor':
@@ -616,6 +682,8 @@ def sentence(action, info):
         return verb, f"{a}{verb}，落在{action['point']}。"
     if k=='fall':return '跌倒',f"{a}跌倒在{action['point']}。"
     if k=='hand_move': return '移至',f"{a}{hand}移至{action['to']}。"
+    if k=='hand_tremor': return '微颤', f'{a}{hand}指尖微颤。'
+    if k=='stroke_prop': return '轻拂', f"{a}{hand}指尖贴着{action['prop']}镜面轻拂，停在{action['to']}。"
     if k=='eye_state': return ('闭上双眼',f'{a}闭上双眼。') if action['to']=='closed' else ('睁开双眼',f'{a}睁开双眼。')
     if k=='hand_shape': return ('握紧拳头',f'{a}{hand}握紧拳头。') if action['to']=='fist' else ('展开',f'{a}{hand}展开。')
     if k=='expression':
@@ -636,6 +704,9 @@ def sentence(action, info):
     if k=='release_binding':return '解开',f"{a}{hand}解开{action['target_actor']}双腕上的{action['prop']}，将{action['prop']}拿在手中。"
     if k=='wipe': return '擦拭',f"{a}以{hand}所持{action['prop']}擦拭自己的{PART_TEXT[action['part']]}。"
     if k=='contact_actor':
+        if action['mode'] in {'grasp_cloth', 'release_grasp_cloth'}:
+            verb = '攥紧' if action['mode'] == 'grasp_cloth' else '松开'
+            return verb, f'{a}{hand}指尖{verb}自己膝上的衣角，衣物仍穿在身上。'
         verb={'grasp':'抓住','release_grasp':'松开','support':'扶住','release_support':'松开','slap':'扇向'}[action['mode']]
         if action['target_part'] in HAND_PARTS and action['mode'] in {'grasp', 'release_grasp'}:
             verb = '握住' if action['mode'] == 'grasp' else '松开'
@@ -654,13 +725,16 @@ def sentence(action, info):
 
 
 def static_actor(actor, name, *, face_visible=True, view=None):
-    state=actor['action_state']; rows=[]
+    state=actor['action_state']; rows=[optical.static_actor(actor, name)]
+    visible_hands = None if view is None else view.get('actors', {}).get(name, {}).get('hands', [])
     rows.append(relations.static_actor(actor, name, view=view))
     for part in state['wet_parts']: rows.append(f'{name}{PART_TEXT[part]}留有水渍。')
     for hand,shape in state['hand_shapes'].items():
+        if visible_hands is not None and hand not in visible_hands: continue
         if shape=='fist': rows.append(f"{name}{'左手' if hand=='left' else '右手'}握拳。")
     for hand,c in state['contacts'].items():
-        verb = {'grasp':'抓住','support':'扶住','push':'推抵'}[c['mode']]
+        if visible_hands is not None and hand not in visible_hands: continue
+        verb = {'grasp':'抓住','support':'扶住','push':'推抵','grasp_cloth':'攥住'}[c['mode']]
         if c['mode'] == 'grasp' and c['part'] in HAND_PARTS: verb = '手指收拢握住'
         rows.append(f"{name}{'左手' if hand=='left' else '右手'}仍{verb}{c['actor']}{PART_TEXT[c['part']]}。")
     if face_visible and state['expression'] != '平静':
@@ -672,11 +746,14 @@ def visible(sample, action):
     """Named landmarks required to project this action; no offscreen invention."""
     view=sample['view']; owner=view['actors'].get(action['actor'],{}); k=action['kind']
     if k in relations.FIELDS: return relations.visible(sample, action)
+    if k in optical.FIELDS: return optical.visible(sample, action)
+    if k in {'body_shudder','straighten'}:return bool(owner.get('head') and owner.get('hands'))
     def part_visible(name, part):
         row=view['actors'].get(name,{})
         if part in {'head','face'}:return bool(row.get('head'))
         if part.endswith(('hand','wrist')):return part.split('_')[0] in row.get('hands',[])
         if part.endswith('foot'):return bool(row.get('feet'))
+        if part.endswith('upper_arm') or part == 'lap_cloth': return bool(row.get('head') and row.get('hands'))
         return bool(row)
     if k in {'eye_state','expression'}:return bool(owner.get('eye_visible'))
     if k in {'head_gesture','kowtow'}:return bool(owner.get('head'))
@@ -707,7 +784,8 @@ def check_contacts(world, path):
     for owner,actor in world['actors'].items():
         for hand,shape in actor['action_state']['hand_shapes'].items():
             contact = actor['action_state']['contacts'].get(hand)
-            hand_grasp = contact is not None and contact['mode'] == 'grasp' and contact['part'] in HAND_PARTS
+            hand_grasp = contact is not None and ((contact['mode'] == 'grasp' and contact['part'] in HAND_PARTS) or
+                                                  (contact['mode'] == 'grasp_cloth' and contact['part'] == 'lap_cloth' and contact['actor'] == owner))
             p._need((shape == 'grip') == hand_grasp, path, 'gripping fingers require the actual matching hand grasp')
         for hand,contact in actor['action_state']['contacts'].items():
             target=world['actors'][contact['actor']]
@@ -733,6 +811,7 @@ def fragment_sentence(action, info, lo, hi):
     """Do not announce landing, release or contact before its actual end."""
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
     if k in relations.FIELDS: return relations.sentence(action, info, complete=hi == action['end'])
+    if k in optical.FIELDS: return optical.sentence(action, info, lo, hi)
     if k in PUSH_ACTIONS:
         contact, release = _push_ticks(action)
         target = action['target_actor']

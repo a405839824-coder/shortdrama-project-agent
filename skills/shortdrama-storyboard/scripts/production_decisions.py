@@ -22,6 +22,7 @@ from production_environment import (METADATA_FIELDS, validate_editorial,
                                     render_environment, normalize_openings, opening_states, EnvironmentDecisionError)
 import production_actions as extended_actions
 import production_relations as relations
+import production_surface as surface
 
 CONTRACT = "production-decisions-v1"
 SCOPE = ("0.1-second declared landmark simulation; fixed perspective camera and known vertical barriers; "
@@ -38,15 +39,17 @@ ACTION_FIELDS = {
     "blink_restraint": {"reason", "utterance_id", "char_range"},
 }
 ACTION_FIELDS.update(extended_actions.FIELDS)
+ACTION_FIELDS[surface.KIND] = surface.FIELDS
 CONTINUOUS = {"hold", "move_actor", "move_prop", "turn", "look", "point", "eyelid", "breath", "focus_adjust", "blink_restraint"}
 CONTINUOUS |= extended_actions.CONTINUOUS
+CONTINUOUS.add(surface.KIND)
 EYE_ACTIONS = {"blink", "eyelid", "focus_adjust", "blink_restraint"}
 RESTRAINT_REASONS = {"emphasis": "重音", "decisive_tail": "决定性尾音", "high_pressure": "高压", "shock": "震惊", "recognition": "认出", "vigilance": "警觉"}
 EPS = 1e-8
 
 
 def _action_keys(kind, action=None):
-    optional = {"timing", "pauses"} & set(action) if kind == "speak" and isinstance(action, dict) else set()
+    optional = {"timing", "pauses", "emitter"} & set(action) if kind == "speak" and isinstance(action, dict) else set()
     return (COMMON - {"actor"} if kind in {"speak", "narrate", "inner_voice"} else COMMON) | ACTION_FIELDS[kind] | optional
 
 
@@ -307,7 +310,7 @@ def _camera_observation(world, camera, row, *, snapshot_basis, path):
 def _view(world, camera, scene):
     actors, props = {}, []
     for identity, actor in world["actors"].items():
-        if actor["scene_id"] != scene: continue
+        if actor["scene_id"] != scene or actor.get('optical', {}).get('opacity', 1) == 0: continue
         eye = _eye(actor); hands = [h for h in ("left", "right") if _in_frame(world, scene, camera, _hand(actor, h))]
         head_in_frame = _in_frame(world, scene, camera, eye)
         front = _dot([math.sin(math.radians(actor["head_yaw"])), math.cos(math.radians(actor["head_yaw"])), 0],
@@ -496,7 +499,8 @@ def _world(value, sources, *, check_source_refs=True):
         _need(isinstance(scene["barriers"], list), "scene.barriers", "requires explicit array; [] declares no known barriers")
         seen = set()
         for wall in scene["barriers"]:
-            _obj(wall, {"id", "a", "b", "height_m"}, "scene.barrier")
+            _obj(wall, {"id", "a", "b", "height_m"} | ({'acoustic'} if 'acoustic' in wall else set()), "scene.barrier")
+            _need(wall.get('acoustic','blocked') in {'blocked','open_screen'}, 'scene.barrier.acoustic', 'unsupported acoustic declaration')
             _name(wall["id"], "wall.id"); _need(wall["id"] not in seen, "wall.id", "duplicate wall")
             seen.add(wall["id"])
             wall["a"] = _xyz(wall["a"], "wall.a"); wall["b"] = _xyz(wall["b"], "wall.b")
@@ -511,7 +515,8 @@ def _world(value, sources, *, check_source_refs=True):
     for identity, actor in w["actors"].items():
         _name(identity, "actor.id")
         keys = {"scene_id", "position_xyz", "body_yaw", "head_yaw", "eye_height", "eye_state", "posture", "hands", "gaze", "reach_m", "reach_origin_xyz"}
-        _obj(actor, keys | ({"performance_state"} if "performance_state" in actor else set()) | ({'action_state'} if 'action_state' in actor else set()), "actor." + identity)
+        _obj(actor, keys | ({"performance_state"} if "performance_state" in actor else set()) | ({'action_state'} if 'action_state' in actor else set()) | ({'optical'} if 'optical' in actor else set()), "actor." + identity)
+        if 'optical' in actor: extended_actions.optical.validate_actor(actor['optical'], 'actor.'+identity+'.optical')
         performance = actor.setdefault("performance_state", {"eyelid": "unknown", "breath": "unknown"})
         _obj(performance, {"eyelid", "breath"}, "actor.performance_state")
         _need(performance["eyelid"] in {"unknown", "relaxed", "slightly_tense"} and performance["breath"] in {"unknown", "resting", "inhale", "exhale"},
@@ -530,7 +535,9 @@ def _world(value, sources, *, check_source_refs=True):
         for hand in actor["hands"]: actor["hands"][hand] = _xyz(actor["hands"][hand], "actor.hands." + hand)
     occupied = set()
     for identity, prop in w["props"].items():
-        _name(identity, "prop.id"); _obj(prop, {"anchor", "written_ref"} | ({'physical'} if 'physical' in prop else set()) | ({'display_name'} if 'display_name' in prop else set()) | ({'container'} if 'container' in prop else set()), "prop." + identity)
+        _name(identity, "prop.id"); _obj(prop, {"anchor", "written_ref"} | ({'physical'} if 'physical' in prop else set()) | ({'display_name'} if 'display_name' in prop else set()) | ({'container'} if 'container' in prop else set()) | ({'surface'} if 'surface' in prop else set()) | ({'foliage'} if 'foliage' in prop else set()), "prop." + identity)
+        if 'foliage' in prop: surface.validate_foliage(prop['foliage'], 'prop.' + identity + '.foliage')
+        if 'surface' in prop: surface.validate_surface(prop['surface'], 'prop.' + identity + '.surface')
         if 'display_name' in prop: _display_name(prop['display_name'], 'prop.display_name')
         anchor = prop["anchor"]
         if relations.validate_anchor(w, identity, prop, occupied):
@@ -581,7 +588,7 @@ def _state(world):
     for identity, actor in world["actors"].items():
         positions[identity] = {"scene_id": actor["scene_id"], "position_xyz": actor["position_xyz"], "posture": actor["posture"]}
         facing[identity] = {"body_yaw": actor["body_yaw"], "head_yaw": actor["head_yaw"], "hands": actor["hands"],
-                            "reach_origin_xyz": actor["reach_origin_xyz"]}
+                            "reach_origin_xyz": actor["reach_origin_xyz"], **({"optical":copy.deepcopy(actor["optical"])} if "optical" in actor else {})}
         if actor["gaze"] is None:
             gaze[identity] = {"kind": "point", "status": "unresolved", "name": identity + "无当前注视", "reason": "明确没有当前视觉注视"}
         else:
@@ -603,6 +610,8 @@ def _state(world):
         props[identity] = {"scene_id": scene, "position_xyz": position, "anchor": prop["anchor"],
                            "written_ref": prop["written_ref"] or "无当前文字"}
         props[identity]['physical'] = copy.deepcopy(prop['physical'])
+        if 'surface' in prop: props[identity]['surface'] = copy.deepcopy(prop['surface'])
+        if 'foliage' in prop: props[identity]['foliage'] = copy.deepcopy(prop['foliage'])
         if 'container' in prop: props[identity]['container'] = copy.deepcopy(prop['container'])
         if "hand" in prop["anchor"]:
             held.append({"prop_id": identity, "holder": prop["anchor"]["actor"],
@@ -637,6 +646,7 @@ def _reach(world, actor_id, target_scene, destination, path):
 
 def _channels(action):
     actor, kind = action["actor"], action["kind"]
+    if kind == surface.KIND: return {('prop', actor)}
     if kind in extended_actions.FIELDS: return extended_actions.channels(action)
     if kind == "move_actor": return {(actor, "body"), (actor, "position"), (actor, "left"), (actor, "right")}
     if kind == "turn": return {(actor, "body"), (actor, "head"), (actor, "left"), (actor, "right")}
@@ -644,7 +654,8 @@ def _channels(action):
     if kind in {"blink", "blink_restraint"}: return {(actor, "eyelid_closure")}
     if kind == "eyelid": return {(actor, "eyelid_tension")}
     if kind == "focus_adjust": return {(actor, "focus")}
-    if kind == "breath": return {(actor, "breath")} | ({(actor, "voice")} if action["phase"] == "inhale" else set())
+    if kind == "breath":
+        return {(actor, "breath")} | ({(actor, "voice")} if action["phase"] in {"inhale", "sigh"} else set()) | ({("audio_bus", "primary")} if action["phase"] == "sigh" else set())
     if kind == "inner_voice": return {("audio_bus", "primary")}
     if kind in {"speak", "narrate"}: return {(actor, "voice"), ("audio_bus", "primary")}
     if kind == "hold": return {(actor, "position"), (actor, "body"), (actor, "left"), (actor, "right")}
@@ -666,6 +677,9 @@ def _prepare(world, action, sources, path, *, bridge=False):
         _need(kind not in {"speak", "narrate", "inner_voice", "write"}, path + ".source_use_id", "actual audio/writing requires compiled source use")
         use = None
     if kind in {"narrate", "inner_voice"}: return {"use": use, "before_world_sha256": _hash(world)}
+    if kind == surface.KIND: return surface.prepare(world, action, path, bridge=bridge)
+    if kind == 'speak' and 'emitter' in action:
+        return {'use': use, 'emitter': copy.deepcopy(action['emitter']), 'before_world_sha256': _hash(world)}
     a = world["actors"][action["actor"]]
     relations.guard_action(world, action, path)
     if any(prop['anchor']=={'actor':action['actor'],'binding':'wrists'} for prop in world['props'].values()):
@@ -748,7 +762,7 @@ def _prepare(world, action, sources, path, *, bridge=False):
         _need(action["to"] in {"relaxed", "slightly_tense"}, path + ".to", "explicit eyelid effect required")
         _need(a["performance_state"]["eyelid"] != action["to"], path, "eyelid effect has no change")
     elif kind == "breath":
-        _need(action["phase"] in {"inhale", "exhale"}, path + ".phase", "explicit breath phase required")
+        _need(action["phase"] in {"inhale", "exhale", "sigh"}, path + ".phase", "explicit breath phase required")
     elif kind == "focus_adjust":
         _need(a["eye_state"] == "natural_open" and a["gaze"] is not None, path, "focus adjustment requires open eyes and a resolved current target")
         _check_gazes(world, path + ".focus_target")
@@ -805,7 +819,9 @@ def _apply(world, action, info, tick, path):
     a = world["actors"].get(action["actor"])
     fraction = (tick - action["start"]) / (action["end"] - action["start"])
     end = tick == action["end"]
-    if kind in extended_actions.FIELDS:
+    if kind == surface.KIND:
+        surface.apply(world, action, info, tick)
+    elif kind in extended_actions.FIELDS:
         extended_actions.apply(world, action, info, tick)
     elif kind == "move_actor":
         a["position_xyz"] = _lerp(info["before"]["position_xyz"], info["destination"], fraction)
@@ -858,17 +874,23 @@ def _look_motion(action, info, samples):
             'basis': 'action before-state and every simulated tick; target identity alone is not motion'}
 
 
-def _action_sentence(action, info, world, camera):
+def _action_sentence(action, info, world, camera, visible_hands=None):
     actor, kind = action["actor"], action["kind"]
+    if kind == surface.KIND:
+        return surface.sentence(action, info, _reference(world, {'kind': 'prop', 'id': actor}, camera))
     if kind in extended_actions.FIELDS: return extended_actions.sentence(_display_action(action, world, camera), info)
     before = info.get("before", {})
     if kind == 'hold':
-        return '保持', (f"{actor}保持{before['posture']}，身体朝{screen_direction(before['body_yaw'], camera['forward'])}。"
-                        f"{actor}左手停在{_screen_place(_hand(before, 'left'), camera)}，右手停在{_screen_place(_hand(before, 'right'), camera)}。")
+        text = f"{actor}保持{before['posture']}，身体朝{screen_direction(before['body_yaw'], camera['forward'])}。"
+        for hand in ('left','right'):
+            if visible_hands is None or hand in visible_hands:
+                text += f"{actor}{'左手' if hand=='left' else '右手'}停在{_screen_place(_hand(before, hand), camera)}。"
+        return '保持', text
     if kind == "eyelid":
         verb = "放松" if action["to"] == "relaxed" else "轻收"
         return verb, f"{actor}上眼睑{verb}。"
     if kind == "breath":
+        if action["phase"] == "sigh": return "叹气", f"{actor}轻轻叹气。"
         verb = "吸气" if action["phase"] == "inhale" else "呼气"
         return verb, f"{actor}自然{verb}。"
     if kind == "focus_adjust":
@@ -895,7 +917,7 @@ def _action_sentence(action, info, world, camera):
             verb = "停在"
         elif origin == target:
             text = f"{actor}视线持续对准{target}。"
-            verb = "注视"
+            verb = "对准"
         elif origin is not None:
             text = f"{actor}视线从{origin}移向{target}。"
             verb = "移向"
@@ -918,7 +940,10 @@ def _action_sentence(action, info, world, camera):
              "write": ("书写", f"{hand}在{_reference(world, {'kind': 'prop', 'id': info['paper']['carrier_id']}, camera) if info.get('paper') else ''}书写"),
              "look": ("注视", "保持无当前注视" if action.get("target") is None else
                       ("持续跟随注视" if action.get("tracking") else "将视线落到") + (action.get("target") or {}).get("id", ""))}
-    if kind == "speak": return None, f'{actor}说道：“{info["use"]["text"]}”'
+    if kind == "speak":
+        origin = (f"声音从{_reference(world, {'kind': 'prop', 'id': action['emitter']['prop']}, camera)}传来；"
+                  if 'emitter' in action else '')
+        return None, origin + f'{actor}说道：“{info["use"]["text"]}”'
     if kind in {"narrate", "inner_voice"}: return None, ""  # Audible source belongs to 心理音轨, without lip sync.
     verb, content = verbs[kind]
     if kind == "look": verb = "保持" if action["target"] is None else "注视" if action["tracking"] else "视线落到"
@@ -1212,9 +1237,16 @@ def _initial(world, view, sources, camera):
         prop = world["props"][identity]; _, position = _anchor(world, prop)
         label = _reference(world, {"kind": "prop", "id": identity}, camera)
         rows.append(f"{label}位于{_screen_place(position, camera)}。")
+        if 'foliage' in prop: rows.append(f'{label}花枝上有盛放桃花，花枝周围空中有零星花瓣。')
+        if 'surface' in prop and prop['physical']['integrity']=='intact': rows.append(surface.surface_text(label, prop['surface'], static=True))
+        if 'surface' in prop and prop['physical']['integrity']=='broken':
+            rows.append(f'{label}碎片散落在局部地面，散布半径不超过{prop["surface"]["extent_m"]:g}米。')
+            if prop['surface'].get('particles')=='local_glimmer': rows.append('碎片周围有细微光点。')
         relation_text = relations.static_prop(world, identity)
         if relation_text: rows.append(relation_text)
         if prop['physical']['integrity']=='broken': rows.append(f'{label}已碎裂。')
+        if 'hand' in prop['anchor']:
+            rows.append(f"{label}在{prop['anchor']['actor']}{'左手' if prop['anchor']['hand']=='left' else '右手'}中。")
         if 'worn' in prop['anchor']: rows.append(f"{label}穿戴在{prop['anchor']['actor']}{extended_actions.PART_TEXT[prop['anchor']['worn']]}。")
         if 'binding' in prop['anchor']: rows.append(f"{label}捆住{prop['anchor']['actor']}双腕。")
         if 'prop' in prop['anchor']: rows.append(f"{label}承放在{_reference(world, {'kind': 'prop', 'id': prop['anchor']['prop']}, camera)}上。")
@@ -1239,6 +1271,10 @@ def _fields(world, row, cam, view, sources):
                                      screen_side="正前" if abs(screen) <= EPS else "左" if screen < 0 else "右",
                                      receiving_surfaces=receivers, weak_reflector=None, main_tone=light["main_tone"],
                                      shadow_tone=light["shadow_tone"], materials=light["materials"], air="clear", exposure="normal")
+    local_effects = surface.local_effects(world, row['scene_id'], view['props'])
+    future_mist = any(a['kind'] == surface.KIND and a['to']['mist'] != 'none' for a in row.get('actions', []))
+    blocks = surface.lighting(blocks, local_effects, {name: _reference(world, {'kind': 'prop', 'id': name}, cam) for name in local_effects},
+                              allow_mist=future_mist)
     geometry_actors = []
     for identity, shown in view["actors"].items():
         actor = world["actors"][identity]
@@ -1272,7 +1308,9 @@ def _fields(world, row, cam, view, sources):
               "生成限制": "9:16竖屏；禁止额外配乐。" + eye_limits + blocks["generation_limits_append"],
               **blocks["lighting_fields"], **transition_block(method="hard_cut")}
     staging = {"contract": "initial-staging-text-v1", "geometry": {"contract": "staging-geometry-v1", "camera": cam["origin"][:2],
-                "camera_target": cam["target"][:2], "actors": geometry_actors}, "target_label": row["camera"]["target"], "bindings": bindings}
+                "camera_target": cam["target"][:2], "actors": geometry_actors},
+               "target_label": _display_name(world['points'][row['camera']['target']].get('display_name', row['camera']['target']), 'camera.target_label'),
+               "bindings": bindings}
     return fields, staging
 
 
@@ -1398,7 +1436,12 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
             else: _name(action["actor"], ap + ".actor")
             _need(action["id"] not in used_events and action["id"] not in local_ids, ap, "duplicate stable event identity")
             local_ids.add(action["id"])
-            if action["kind"] != "narrate":
+            if action['kind'] == surface.KIND:
+                _need(action['actor'] in world['props'], ap, 'unknown optical prop')
+                _need(_anchor(world, world['props'][action['actor']])[0] == row['scene_id'], ap, 'optical prop belongs to another physical scene')
+            elif action['kind'] == 'speak' and 'emitter' in action:
+                surface.validate_emitter(world, action, row['scene_id'], ap)
+            elif action["kind"] != "narrate":
                 _need(action["actor"] in world["actors"], ap, "unknown action actor")
                 _need(world["actors"][action["actor"]]["scene_id"] == row["scene_id"], ap, "offscene physical action is not modelled in this shot")
             lo, hi = _tick(action["start"], ap), _tick(action["end"], ap)
@@ -1448,7 +1491,9 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     reviewed_speech.append((realization, use["id"], elapsed + action["start"], elapsed + action["end"]))
             info = prepared[action["id"]]
             if action['kind'] == 'look': info['motion_projection'] = _look_motion(action, info, samples)
-            verb, sentence = _action_sentence(action, info, samples[action["start"]]["world"], cam)
+            hands = set.intersection(*(set(s['view']['actors'].get(action['actor'], {}).get('hands', []))
+                                       for s in samples[action['start']:action['end']+1])) if action['kind']=='hold' else None
+            verb, sentence = _action_sentence(action, info, samples[action["start"]]["world"], cam, hands)
             pieces = [(i, max(a, action["start"]), min(b, action["end"])) for i, (a, b) in enumerate(zip(ticks, ticks[1:]))
                       if max(a, action["start"]) < min(b, action["end"])]
             is_audio = action["kind"] in {"speak", "narrate", "inner_voice"}
@@ -1458,7 +1503,10 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
             world_pieces = list(pieces)
             inherited = list(dict.fromkeys(item for dependency in action["after"] for item in projection_dependencies[dependency]))
             partial_blink = False
-            if action['kind'] in extended_actions.FIELDS:
+            if action['kind'] == surface.KIND:
+                _need(all(action['actor'] in samples[t]['view']['props'] for t in range(action['start'], action['end'] + 1)),
+                      ap + '.visible', 'source surface effect must remain in frame through its actual result')
+            elif action['kind'] in extended_actions.FIELDS:
                 shown=[extended_actions.visible(samples[t],action) for t in range(action['start'],action['end'])]
                 end_visible=extended_actions.visible(samples[action['end']],action) if action['kind'] not in {'cross_passage', 'carry_actor_through_passage'} else True
                 if action['source_use_id'] is not None:
@@ -1481,10 +1529,10 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                 pieces = [(i, max(lo, left), min(hi, right)) for i, lo, hi in pieces for left, right in visible_intervals
                           if max(lo, left) < min(hi, right)]
             mouth_intervals = (_visible_intervals(samples, action["actor"], action["start"], action["end"])
-                               if action["kind"] == "speak" else [])
+                               if action["kind"] == "speak" and 'emitter' not in action else [])
             gaze_check = (_speaking_gaze(samples, action, cam, ap + '.gaze_camera',
                                         required=sources.get('production_plan') is not None)
-                          if action['kind'] == 'speak' else None)
+                          if action['kind'] == 'speak' and 'emitter' not in action else None)
             if action["source_use_id"] is not None and pieces: consumed_uses.add(action["source_use_id"])
             if action["kind"] == "write": consumed_papers.add(action["paper_ref"])
             fragment_ids = []; rendered_sentences = []
@@ -1505,7 +1553,8 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                             if left < right:
                                 fragment += f"{action['actor']}口部入画时口型与对白一致。"
                         if not mouth_intervals and part_index == 0:
-                            fragment += f"{action['actor']}口部不入画。"
+                            fragment += (f"{action['actor']}为场内无实体声源，无人物形体、嘴部或口型。" if 'emitter' in action
+                                         else f"{action['actor']}口部不入画。")
                 elif action["kind"] == "blink":
                     # Keep the clock and actual actor in the same consumer
                     # clause; a comma before the actor loses this binding.
@@ -1571,11 +1620,13 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                                              'pause_semantic_status': 'pending_independent_review'} if pauses else {})})
             projection_dependencies[action["id"]] = [action["id"]] if is_audio else fragment_ids[-1:] or inherited
             world_events.append({"id": action["id"], "shot_id": sid, "actor": action["actor"], "kind": action["kind"],
+                                 **({'emitter': copy.deepcopy(action['emitter'])} if 'emitter' in action else {}),
                                  "start": action["start"] / 10, "end": action["end"] / 10, "after": action["after"],
                                  "effect_occurrences": world["completed"].count(action["id"]), "visible_projection_ids": fragment_ids if not is_audio else [],
                                  "audio_id": action["id"] if is_audio else None,
                                  "projected_after": inherited, "projection_terminal_dependencies": projection_dependencies[action["id"]]})
             action_records.append({"id": action["id"], "kind": action["kind"], "before_sha256": info["before_world_sha256"],
+                                   **({'emitter': copy.deepcopy(action['emitter'])} if 'emitter' in action else {}),
                                    "after_sha256": _hash(samples[action["end"]]["world"]), "world_action_description": sentence,
                                    "rendered_sentences": rendered_sentences,
                                    "mouth_sync_intervals": [[a / 10, b / 10] for a, b in mouth_intervals],
@@ -1630,9 +1681,9 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
             environment_fields, environment_binding = render_environment(
                 row["editorial"], initial_world=start_world, final_world=world,
                 scene_id=row["scene_id"], actions=actions,
+                visible_props=set().union(*(set(s['view']['props']) for s in samples)),
                 action_start_worlds={a['id']: samples[a['start']]['world'] for a in actions},
-                display_names={a['prop']: _reference(samples[a['start']]['world'], {'kind': 'prop', 'id': a['prop']}, cam)
-                               for a in actions if 'prop' in a})
+                display_names={name: _reference(start_world, {'kind': 'prop', 'id': name}, cam) for name in start_world['props']})
         except EnvironmentDecisionError as exc:
             raise ProductionDecisionError(path + "." + exc.path, exc.reason) from exc
         fields.update(environment_fields)

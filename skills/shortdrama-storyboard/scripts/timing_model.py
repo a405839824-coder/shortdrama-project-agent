@@ -14,7 +14,7 @@ import re
 
 EPS = 1e-9
 PHASE = re.compile(r"(?:【)?(?P<start>\d+(?:\.\d+)?)\s*(?:秒|s)?\s*[-—–~至]\s*(?P<end>\d+(?:\.\d+)?)\s*(?:秒|s)(?:】)?")
-DIALOGUE = re.compile(r'(?:^|[；;。！？!?，,、】])\s*(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})说道[：:]?\s*[“"](?P<line>[^”"\n]+)[”"]')
+from voice_sequence import INTEGRATED_DIALOGUE_RE as DIALOGUE
 LEGACY = re.compile(r'【(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})】\s*[“"]?(?P<line>[^【\n｜|；;”"]+)[”"]?')
 QUOTED = re.compile(r'[“"]([^”"\n]+)[”"]')
 PSYCH_REFERENCE = re.compile(r"^心理音轨引用[：:]\s*([A-Za-z0-9_-]+)(?=[；;。\s]|$)")

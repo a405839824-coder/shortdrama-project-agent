@@ -183,6 +183,23 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
     migrations = registry.get('historical_rule_migrations', {})
     if not isinstance(migrations, dict):
         return False
+    if kind == 'critical_runtime_policies' and identity == 'field_content_policy':
+        migration = migrations.get('surface-voice-0566', {})
+        parent = '848f42f647097b0d98178861f3bff3299750852454a7cc2018ec98747e626a07'
+        expected = {'baseline_sha256': 'f467af3cb150e1870f73536a0d74f94475d9c13a6c6959bc90e6a00db93bd6b9',
+                    'current_sha256': '577e5804216ef41b1abc9d6d4190056c0af9ac8c3c7674775915bfa3611edc27'}
+        if (migration.get('basis') == 'user-authorized-capability-completion-2026-10-16'
+                and migration.get('authorization_work_order') == 'WO-e9ae4347264b438a'
+                and migration.get('introduced_in') == '0.5.66'
+                and migration.get('legacy_applies_to_current_generation') is False
+                and migration.get('parent_migrations_sha256') == {'production-grounding-0565': parent}
+                and registry_sha256(migrations.get('production-grounding-0565')) == parent
+                and all(registry_sha256(migrations.get(name)) == expected_hash for name, expected_hash in
+                        migrations.get('production-grounding-0565', {}).get('parent_migrations_sha256', {}).items())
+                and migration.get(kind) == {identity: expected}
+                and registry_sha256(previous) == expected['baseline_sha256']
+                and registry_sha256(current) == expected['current_sha256']):
+            return True
     if kind == 'critical_runtime_policies' and identity in {'field_content_policy', 'production_prevention_policy'}:
         migration = migrations.get('production-grounding-0565', {})
         hashes = migration.get(kind, {}).get(identity, {})

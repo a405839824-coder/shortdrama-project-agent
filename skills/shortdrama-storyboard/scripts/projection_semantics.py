@@ -213,7 +213,7 @@ def tail_binding_faults(value, dialogue_rows):
     quotes = [m.group()[1:-1] for m in QUOTES.finditer(text)]
     if not quotes:
         return ['尾音未绑定本句实际末字或末词；通用收尾方向不能代替本句执行定位']
-    endings = [line.rstrip('。！？!?；;，, .…～~') for _, line in dialogue_rows]
+    endings = [line.rstrip('。！？!?；;，,、 .…～~“”"‘’「」『』') for _, line in dialogue_rows]
     return [f'尾音“{fragment}”不是当前发言的实际句末' for fragment in quotes
             if not fragment or not any(line.endswith(fragment) for line in endings)]
 

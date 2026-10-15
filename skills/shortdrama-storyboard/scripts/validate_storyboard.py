@@ -139,7 +139,7 @@ DETAIL_PATTERNS = {
     "hands": re.compile(r"手|指|拳|掌|袖口"),
     "body": re.compile(r"肩|颈|身体|上身|胸口|背部|姿态|前倾|后仰|蜷缩|僵住"),
     "gaze": re.compile(r"视线|看向|注视|凝视|低垂|移开|锁定|闪躲|游移"),
-    "breath": re.compile(r"呼吸|气息|吸气|吞咽"),
+    "breath": re.compile(r"呼吸|气息|吸气|呼气|叹气|吞咽"),
     "head": re.compile(r"低头|抬头|侧头|头部|歪头|后仰"),
 }
 INVISIBLE_SHOT_TERMS = ["书页", "书上内容", "POV书", "第一视角看书", "手部特写", "背影", "远景"]
@@ -1957,7 +1957,7 @@ def _validate_adapted_dialogue_audit(
     obj: dict[str, Any],
     shots: list[dict[str, Any]],
     catalog: dict[str, dict[str, Any]],
-    *, production_verified: bool = False,
+    *, production_verified: bool = False, communication_bindings=(),
 ) -> list[dict[str, Any]]:
     """Validate the source-fact dialogue conversion ledger (THG-16).
 
@@ -1982,6 +1982,19 @@ def _validate_adapted_dialogue_audit(
     if not enabled and not isinstance(audit, dict):
         issues = []
         for candidate in _communication_candidates(obj, shots):
+            # Exact source-support bindings, actual spoken output and heard
+            # receipts are recomputed by production replay. They establish a
+            # mapping, never the truth/entailment of the author's source fact.
+            source_lines = [line for line in candidate['source_text'].splitlines()
+                            if NARRATIVE_SPEECH_ACT_RE.search(NEGATED_SPEECH_ACT_RE.sub('', oral_communication_candidate_text(line)))]
+            if production_verified and source_lines and all(any(
+                    b['source_text'] == line and (b['shot_id'] in candidate['target_shots'] or any(
+                        r.get('source_id') == b['source_id'] and r.get('source_text') == line
+                        and b['shot_id'] in r.get('target_shots', [])
+                        and set(candidate['target_shots']) & set(r.get('target_shots', []))
+                        for r in evidence.get('source_ledger', []) if isinstance(r, dict)))
+                    for b in communication_bindings) for line in source_lines):
+                continue
             if production_verified and candidate.get("direct_wording_matches") and candidate.get("source_use_ids"):
                 continue  # Replayed spoken source use and actual words; no invented adaptation.
             issue = _issue(catalog, "E-ADAPTED-DIALOGUE-001", "source_communication",
@@ -4088,7 +4101,8 @@ def validate_project(
             if missing_punct:
                 issues.append(_issue(catalog, "E-PUNCT-004", f"{location}.音色", f"对白标点语气未说明：{missing_punct}"))
             if strict_contract:
-                visible_speakers = [name for name, _ in dialogue_rows if dialogue_mouth_visible(name, shot)]
+                unbodied = production_binding.get('disembodied_speakers', {}).get(str(shot.get('镜头编号')), []) if production_binding.get('valid') else []
+                visible_speakers = [name for name, _ in dialogue_rows if name not in unbodied and dialogue_mouth_visible(name, shot)]
                 if visible_speakers and "口型与对白一致" not in image_content:
                     issues.append(_issue(catalog, "E-VOICE-001", f"{location}.画面内容", "R10-SPC-1可见对白未写“口型与对白一致”。"))
                 # Current production replays the same speaking-eye geometry
@@ -4163,6 +4177,7 @@ def validate_project(
         normalized_shots,
         catalog,
         production_verified=planned_performance,
+        communication_bindings=production_binding.get('source_communication', ()) if production_binding.get('valid') else (),
     ))
 
     for scene_id, items in scene_groups.items():

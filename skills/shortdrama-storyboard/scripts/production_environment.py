@@ -20,6 +20,9 @@ SOUND_KINDS = {
     "handclaps": {"clap"},
     "kowtow_contact": {"kowtow"},
     "cloth": {"wipe", "wear_prop", "remove_worn", "dress_actor", "undress_actor"},
+    "sigh": {"breath"},
+    "scene_echo": {"speak"},
+    "mirror_break": {"shatter_surface"},
 }
 
 
@@ -114,7 +117,7 @@ def validate_editorial(value, path="editorial"):
         _need(cue["volume"] in ("soft", "normal"), cp, "volume must be soft or normal")
 
 
-def render_environment(editorial, *, initial_world, final_world, scene_id, actions, action_start_worlds=None, display_names=None):
+def render_environment(editorial, *, initial_world, final_world, scene_id, actions, action_start_worlds=None, display_names=None, visible_props=None):
     """Render only after simulation; derive cue actor, object and clock once.
 
     This compiler's light model declares clear air and a fixed
@@ -128,10 +131,15 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
     _need(light["state"] in states, "environment.light.state", "unsupported shared light state")
     # This grammar models no independent wind/rain/flame/background action.
     # Air appearance and the registered opening/light state have other owners.
-    dynamics = "无环境动态。"
+    from production_surface import environment as surface_environment
+    dynamics, surfaces = surface_environment(initial_world, final_world, scene_id, actions, display_names or {}, visible_props)
+    dynamics = dynamics or "无环境动态。"
     sound = editorial["环境音效"]
     cues = sound.get("cues", [])
     lookup = {action["id"]: action for action in actions}
+    expected_echo = {a['id'] for a in actions if a['kind'] == 'speak' and a.get('emitter', {}).get('effect') == 'short_echo'}
+    _need(expected_echo == {c['action_id'] for c in cues if c['sound'] == 'scene_echo'},
+          'editorial.环境音效', 'each declared short echo needs exactly its actual scene_echo cue')
     lines, bindings = [], []
     for index, cue in enumerate(cues):
         cp = f"editorial.环境音效.cues[{index}]"
@@ -142,11 +150,16 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
               "sound requires that actual action to complete once")
         actor = action["actor"]
         action_world = (action_start_worlds or {}).get(action['id'], initial_world)
-        _need(action_world["actors"][actor]["scene_id"] == scene_id, cp,
+        from production_surface import speaker_scene
+        _need((speaker_scene(action_world, action) if action['kind'] == 'speak' else action_world["actors"][actor]["scene_id"]) == scene_id, cp,
               "sound action belongs to another scene")
         prop_name = (display_names or {}).get(action.get('prop'), action.get('prop'))
         contact_ticks = None
-        if cue['sound']=='drop_impact':
+        if cue['sound']=='mirror_break':
+            _need(final_world['props'][action['prop']]['physical']['integrity']=='broken',cp,'mirror break sound requires actual broken result')
+            event=f'{prop_name}碎裂与镜片落地的声音'
+            contact_ticks=[(action['start']+action['end'])/2,action['end']]
+        elif cue['sound']=='drop_impact':
             physical=final_world['props'][action['prop']]['physical']
             event=f"{prop_name}{'落下碎裂' if physical['integrity']=='broken' else '落下接触落点'}的声音"
             contact_ticks=[action['end']]
@@ -161,6 +174,12 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
             contact_ticks=[round(t) for t in contact_ticks]
         elif cue['sound']=='cloth':
             event=f"{actor}使用{prop_name}时的衣料摩擦声"
+        elif cue['sound']=='sigh':
+            _need(action['phase']=='sigh', cp, 'sigh sound requires an actual sigh phase')
+            event=f"{actor}轻轻叹气的声音"
+        elif cue['sound']=='scene_echo':
+            _need(action.get('emitter', {}).get('effect') == 'short_echo', cp, 'scene echo requires an explicit prop-bound short echo')
+            event=f"{actor}原声的细微短回声"
         elif cue["sound"] == "prop_contact":
             event = f"{actor}移动{prop_name}时的物件接触声"
         elif cue["sound"] == "writing":
@@ -172,12 +191,17 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
         volume = "轻声" if cue["volume"] == "soft" else "正常音量"
         text = (''.join(f'{tick/10:.1f}秒：{event}，{volume}。' for tick in contact_ticks) if contact_ticks is not None else
                 f"{action['start'] / 10:.1f}—{action['end'] / 10:.1f}秒：{event}，{volume}。")
+        if cue['sound'] == 'mirror_break':
+            text = f'{contact_ticks[0]/10:.1f}—{contact_ticks[-1]/10:.1f}秒：{event}，{volume}。'
         lines.append(text)
+        if cue['sound'] == 'scene_echo':
+            lines.append('回声不添加字词，不遮盖原词，并在本句发言窗口结束时收住。')
         bindings.append({"action_id": action["id"], "kind": action["kind"], "actor": actor,
                          "start_tick": action["start"], "end_tick": action["end"],
                          "sound": cue["sound"], "volume": cue["volume"], "rendered_text": text,
                          **({'contact_ticks':contact_ticks} if contact_ticks is not None else {})})
     fields = {"环境动态": dynamics, "环境音效": "".join(lines) or "无额外环境音效。"}
     return fields, {"contract": "production-environment-v1", "physical_scene": scene_id,
-                    "air": "clear", "light": copy.deepcopy(light), "sound_bindings": bindings,
+                    "air": "localized_surface_effect" if any(v['mist'] != 'none' for phase in ('initial', 'final') for v in surfaces[phase].values()) else "clear",
+                    "surface_binding": surfaces, "light": copy.deepcopy(light), "sound_bindings": bindings,
                     "fields": copy.deepcopy(fields), "semantic_status": "pending_independent_review"}

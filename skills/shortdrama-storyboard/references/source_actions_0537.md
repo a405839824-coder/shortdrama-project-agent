@@ -54,3 +54,46 @@
 assist_stand 仅由来源动作计划执行。参数为 target_actor,hand,target_part,point,landmarks,helper_point,helper_landmarks，actor 是施扶者。动作开始前必须已经真实 support 住对方的一只手或腕；抓握不能冒充扶持，腕绳须先解除，两人没有其他接触约束且视线已清除。施扶者从站/坐/蹲姿，被扶者从躺/坐/蹲/跪姿，按同一时轴到站姿；地标格式与 posture 相同，最少0.8秒，近距离起身不能代替走路。支撑手逐样本跟随被扶手，全程检查可及距离和遮挡，之后仍须真实 release_support 才能松开。该动作不能放入时空省略桥接。
 
 这些是有限地标模型的输入能力，不是表演实测、人体动力学或源文语义通过证明。
+# 0.5.66 source-bound mirror effects and scene voices
+
+`surface_effect` is a frozen `source_step`: its source subject is an existing
+prop with `surface={pattern:still|ripple|surge,glow:none|faint|flicker,mist:none|local_white|local_white_surge,extent_m,particles?:none|local_glimmer}`.
+The sole parameter `to` has the same schema and the same radius, in `(0,1]`
+metres. The intact prop must remain visible throughout the event and at its
+result. The exact start frame keeps the previous state; subsequent samples
+carry the new bounded state until another sourced action changes it. Static
+keyframes describe only current texture/light/mist, never replay a future
+change. Local mist never authorizes whole-room fog, a new figure, sound, or
+invented lighting on actors. This finite state is not a fluid or optical solver.
+
+`speak` may explicitly carry `emitter={prop:<registered prop>,mode:disembodied}`.
+The source speaker remains unchanged and must not also be a bodily actor.
+The intact prop must belong to the shot's actual scene. Dialogue is timed and
+voiced through the normal eleven-label contract, with no generated body, mouth,
+lip sync, or visual gaze. Other characters may receive a report only after the
+actual speech finishes in the same unobstructed scene; hearing does not prove
+its proposition true. This is scene speech, not narration or inner speech.
+
+Additional finite sourced gestures preserve actions that cannot be replaced by
+generic holding: `stroke_prop={prop,hand,to}` follows two distinct contact
+landmarks within 0.15 m of an intact optical prop; `hand_tremor={hand}` models
+a free hand's small transient motion over 0.4–3 seconds. `contact_actor`
+supports explicit left/right upper-arm support and own `lap_cloth` using
+`grasp_cloth`/`release_grasp_cloth`, requiring seated posture and exactly one
+intact cloth garment worn on the torso. The cloth stays worn. Grasping another
+body part, an absent garment, or an occupied hand is rejected. These gestures
+retain source-plan, contact, visibility, timing and semantic-review gates.
+
+A source-bound `breath` step may select `phase: sigh`; the explicit `sigh` sound cue binds only that phase and clock. It cannot overlap speech or be substituted with generic exhalation. Hand-state first-frame text follows actual hand visibility while retaining the full underlying contact state.
+
+A disembodied `speak.emitter` may declare `effect: short_echo` (default `dry`). The `scene_echo` environmental cue requires that actual same-scene utterance and uses its exact interval; it adds no words or extra duration and ends inside the declared utterance window. This is a sound-design binding, not measured acoustics.
+
+`shatter_surface={prop,hand,to}` requires an intact optical prop and actual free hand within reach, with a registered floor landing inside its local envelope. The strike happens at the interval midpoint and fragments reach the floor at the end. `mirror_break` binds sound to these actual times. No physical injury is inferred.
+
+`phantom_fade={to:<opacity>,glimmer:<boolean>}` requires actor.optical={opacity,extent_m,glimmer}. Opacity only decreases, persists across cuts, and zero removes the visible body and its local glimmer. A bodily actor cannot be silently relabelled or resurrected. Both actions require frozen source steps and observed effect checks; neither is an independent semantic certificate.
+
+An explicitly registered prop may carry foliage={motion:breeze_petals,extent_m:(0,2]}. Its frozen initial state presents static flowers and airborne petals; environmental motion is limited to this visible prop. It cannot create a storm, whole-scene fog, speech, or extra plot events.
+
+`body_shudder={}` models one short sourced standing-body startle with unchanged feet and returned landmarks. `straighten={rise_m}` models sourced straightening in place, with a positive eye/torso rise up to 0.08 m. Neither authorizes a posture change, injury or teleportation.
+
+A visual barrier may explicitly declare acoustic=open_screen for nearby same-scene speech through an open freestanding screen. Its visual occlusion and movement collision remain active. Other barriers retain blocked/unsupported hearing; the screen declaration, source entailment and received words still require independent review. This is a bounded audibility decision, not an acoustic solver.

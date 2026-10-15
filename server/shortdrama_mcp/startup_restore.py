@@ -53,6 +53,16 @@ PRODUCTION_GROUNDING_GATE_SQL = (
     "SELECT RAISE(ABORT, 'production_grounding_upgrade_in_progress'); END"
 )
 PRODUCTION_GROUNDING_MAX_EXPANDED_BYTES = 8 * 1024**3
+SURFACE_VOICE_DIRECTORY = ".upgrade-surface-voice-0566"
+SURFACE_VOICE_CONTRACT = "library-runtime-transfer-surface-voice-0566-v1"
+SURFACE_VOICE_VERSION = "0.5.66"
+SURFACE_VOICE_GATE = "surface_voice_upgrade_gate_0566"
+SURFACE_VOICE_GATE_SQL = (
+    f"CREATE TRIGGER {SURFACE_VOICE_GATE} BEFORE INSERT ON access_audit "
+    "WHEN NEW.outcome='started' BEGIN "
+    "SELECT RAISE(ABORT, 'surface_voice_upgrade_in_progress'); END"
+)
+SURFACE_VOICE_MAX_EXPANDED_BYTES = 8 * 1024**3
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 # The current live project tree alone exceeds 5 GB. Only this fresh, signed
@@ -137,6 +147,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT): RULE_EXECUTION_VERSION,
         (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT): AUDIT_GENERATION_VERSION,
         (PRODUCTION_GROUNDING_DIRECTORY, PRODUCTION_GROUNDING_CONTRACT): PRODUCTION_GROUNDING_VERSION,
+        (SURFACE_VOICE_DIRECTORY, SURFACE_VOICE_CONTRACT): SURFACE_VOICE_VERSION,
     }.get((directory, contract))
     if target_version is None:
         raise ValueError('startup_restore_undeclared_transfer')
@@ -145,6 +156,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT): RULE_EXECUTION_MAX_EXPANDED_BYTES,
         (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT): AUDIT_GENERATION_MAX_EXPANDED_BYTES,
         (PRODUCTION_GROUNDING_DIRECTORY, PRODUCTION_GROUNDING_CONTRACT): PRODUCTION_GROUNDING_MAX_EXPANDED_BYTES,
+        (SURFACE_VOICE_DIRECTORY, SURFACE_VOICE_CONTRACT): SURFACE_VOICE_MAX_EXPANDED_BYTES,
     }.get((directory, contract), MAX_EXPANDED_BYTES)
     transfer = data_dir / directory
     marker = transfer / "manifest.json"
@@ -173,6 +185,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
     gate_contracts = {
         AUDIT_GENERATION_CONTRACT: (AUDIT_GENERATION_GATE, AUDIT_GENERATION_GATE_SQL),
         PRODUCTION_GROUNDING_CONTRACT: (PRODUCTION_GROUNDING_GATE, PRODUCTION_GROUNDING_GATE_SQL),
+        SURFACE_VOICE_CONTRACT: (SURFACE_VOICE_GATE, SURFACE_VOICE_GATE_SQL),
     }
     if contract in gate_contracts:
         gate_name, gate_sql = gate_contracts[contract]
@@ -257,7 +270,8 @@ def restore_release_runtime_if_requested(settings) -> dict | None:
                                  (ADMIN_READ_DIRECTORY, ADMIN_READ_CONTRACT),
                                  (RULE_EXECUTION_DIRECTORY, RULE_EXECUTION_CONTRACT),
                                  (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT),
-                                 (PRODUCTION_GROUNDING_DIRECTORY, PRODUCTION_GROUNDING_CONTRACT))
+                                 (PRODUCTION_GROUNDING_DIRECTORY, PRODUCTION_GROUNDING_CONTRACT),
+                                 (SURFACE_VOICE_DIRECTORY, SURFACE_VOICE_CONTRACT))
                if (settings.data_dir / d / 'manifest.json').exists()]
     if not pending:
         return None
