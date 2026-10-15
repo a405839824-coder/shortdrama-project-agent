@@ -13,6 +13,37 @@ from test_v0537_source_actions import sourced, next_shot
 
 
 class SourceGestureTests(unittest.TestCase):
+    def test_sigh_keeps_the_source_word_sound_and_excludes_overlapping_speech(self):
+        data = production_fixture()
+        source = sourced(data, 'breath', {'phase':'sigh'}, text='甲轻轻叹气。')
+        data['shots'][0]['editorial']['环境音效'] = {'mode':'action_bound','cues':[
+            {'action_id':'event1','sound':'sigh','volume':'soft'}]}
+        result = p.lower_production_decisions(data, source_compilation=source)
+        shot = _render_decisions(result['typed_decisions'])['shots'][0]
+        self.assertIn('甲轻轻叹气', shot['画面内容'])
+        self.assertIn('1.0—3.0秒：甲轻轻叹气的声音', shot['环境音效'])
+        self.assertEqual(result['derivation']['final_world']['actors']['甲']['performance_state']['breath'], 'resting')
+        self.assertIn(('甲','voice'), p._channels(action('breath', phase='sigh')))
+        self.assertIn(('audio_bus','primary'), p._channels(action('breath', phase='sigh')))
+        source = sourced(data, 'breath', {'phase':'exhale'}, text='甲呼气。')
+        with self.assertRaisesRegex(p.ProductionDecisionError, 'sigh sound requires'):
+            p.lower_production_decisions(data, source_compilation=source)
+
+    def test_hidden_hand_contact_remains_in_state_but_not_first_frame_picture(self):
+        import production_actions as actions
+        actor = production_fixture()['initial_world']['actors']['甲']
+        actions.defaults({'actors':{'甲':actor},'props':{}})
+        actor['action_state']['hand_shapes']['left'] = 'fist'
+        actor['action_state']['contacts']['right'] = {'actor':'乙','part':'left_upper_arm','mode':'support'}
+        state = copy.deepcopy(actor)
+        hidden = actions.static_actor(actor, '甲', view={'actors':{'甲':{'hands':[]}}})
+        self.assertNotIn('握拳', hidden)
+        self.assertNotIn('扶住', hidden)
+        shown = actions.static_actor(actor, '甲', view={'actors':{'甲':{'hands':['left','right']}}})
+        self.assertIn('左手握拳', shown)
+        self.assertIn('右手仍扶住乙左上臂', shown)
+        self.assertEqual(actor, state)
+
     def test_tremor_keeps_free_hand_and_returns_to_its_actual_position(self):
         data = production_fixture()
         source = sourced(data, 'hand_tremor', {'hand': 'right'}, text='甲右手指尖微颤。')

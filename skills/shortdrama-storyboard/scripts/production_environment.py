@@ -20,6 +20,7 @@ SOUND_KINDS = {
     "handclaps": {"clap"},
     "kowtow_contact": {"kowtow"},
     "cloth": {"wipe", "wear_prop", "remove_worn", "dress_actor", "undress_actor"},
+    "sigh": {"breath"},
 }
 
 
@@ -163,6 +164,9 @@ def render_environment(editorial, *, initial_world, final_world, scene_id, actio
             contact_ticks=[round(t) for t in contact_ticks]
         elif cue['sound']=='cloth':
             event=f"{actor}使用{prop_name}时的衣料摩擦声"
+        elif cue['sound']=='sigh':
+            _need(action['phase']=='sigh', cp, 'sigh sound requires an actual sigh phase')
+            event=f"{actor}轻轻叹气的声音"
         elif cue["sound"] == "prop_contact":
             event = f"{actor}移动{prop_name}时的物件接触声"
         elif cue["sound"] == "writing":

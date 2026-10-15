@@ -83,3 +83,5 @@ supports explicit left/right upper-arm support and own `lap_cloth` using
 intact cloth garment worn on the torso. The cloth stays worn. Grasping another
 body part, an absent garment, or an occupied hand is rejected. These gestures
 retain source-plan, contact, visibility, timing and semantic-review gates.
+
+A source-bound `breath` step may select `phase: sigh`; the explicit `sigh` sound cue binds only that phase and clock. It cannot overlap speech or be substituted with generic exhalation. Hand-state first-frame text follows actual hand visibility while retaining the full underlying contact state.

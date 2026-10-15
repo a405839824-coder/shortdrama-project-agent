@@ -187,7 +187,7 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
         migration = migrations.get('surface-voice-0566', {})
         parent = '848f42f647097b0d98178861f3bff3299750852454a7cc2018ec98747e626a07'
         expected = {'baseline_sha256': 'f467af3cb150e1870f73536a0d74f94475d9c13a6c6959bc90e6a00db93bd6b9',
-                    'current_sha256': 'b2b1f5e29f139c23040c00dbeb95195309baf288e07b9c899c2e9fb5a5f9616c'}
+                    'current_sha256': '4ce6883f0074dc5f1f608fddf6271ba00cfa7a76fe78c50a02776ab57b8d1844'}
         if (migration.get('basis') == 'user-authorized-capability-completion-2026-10-16'
                 and migration.get('authorization_work_order') == 'WO-e9ae4347264b438a'
                 and migration.get('introduced_in') == '0.5.66'

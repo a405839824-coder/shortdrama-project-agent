@@ -706,11 +706,14 @@ def sentence(action, info):
 
 def static_actor(actor, name, *, face_visible=True, view=None):
     state=actor['action_state']; rows=[]
+    visible_hands = None if view is None else view.get('actors', {}).get(name, {}).get('hands', [])
     rows.append(relations.static_actor(actor, name, view=view))
     for part in state['wet_parts']: rows.append(f'{name}{PART_TEXT[part]}留有水渍。')
     for hand,shape in state['hand_shapes'].items():
+        if visible_hands is not None and hand not in visible_hands: continue
         if shape=='fist': rows.append(f"{name}{'左手' if hand=='left' else '右手'}握拳。")
     for hand,c in state['contacts'].items():
+        if visible_hands is not None and hand not in visible_hands: continue
         verb = {'grasp':'抓住','support':'扶住','push':'推抵','grasp_cloth':'攥住'}[c['mode']]
         if c['mode'] == 'grasp' and c['part'] in HAND_PARTS: verb = '手指收拢握住'
         rows.append(f"{name}{'左手' if hand=='left' else '右手'}仍{verb}{c['actor']}{PART_TEXT[c['part']]}。")

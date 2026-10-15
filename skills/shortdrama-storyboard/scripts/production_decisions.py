@@ -650,7 +650,8 @@ def _channels(action):
     if kind in {"blink", "blink_restraint"}: return {(actor, "eyelid_closure")}
     if kind == "eyelid": return {(actor, "eyelid_tension")}
     if kind == "focus_adjust": return {(actor, "focus")}
-    if kind == "breath": return {(actor, "breath")} | ({(actor, "voice")} if action["phase"] == "inhale" else set())
+    if kind == "breath":
+        return {(actor, "breath")} | ({(actor, "voice")} if action["phase"] in {"inhale", "sigh"} else set()) | ({("audio_bus", "primary")} if action["phase"] == "sigh" else set())
     if kind == "inner_voice": return {("audio_bus", "primary")}
     if kind in {"speak", "narrate"}: return {(actor, "voice"), ("audio_bus", "primary")}
     if kind == "hold": return {(actor, "position"), (actor, "body"), (actor, "left"), (actor, "right")}
@@ -757,7 +758,7 @@ def _prepare(world, action, sources, path, *, bridge=False):
         _need(action["to"] in {"relaxed", "slightly_tense"}, path + ".to", "explicit eyelid effect required")
         _need(a["performance_state"]["eyelid"] != action["to"], path, "eyelid effect has no change")
     elif kind == "breath":
-        _need(action["phase"] in {"inhale", "exhale"}, path + ".phase", "explicit breath phase required")
+        _need(action["phase"] in {"inhale", "exhale", "sigh"}, path + ".phase", "explicit breath phase required")
     elif kind == "focus_adjust":
         _need(a["eye_state"] == "natural_open" and a["gaze"] is not None, path, "focus adjustment requires open eyes and a resolved current target")
         _check_gazes(world, path + ".focus_target")
@@ -882,6 +883,7 @@ def _action_sentence(action, info, world, camera):
         verb = "放松" if action["to"] == "relaxed" else "轻收"
         return verb, f"{actor}上眼睑{verb}。"
     if kind == "breath":
+        if action["phase"] == "sigh": return "叹气", f"{actor}轻轻叹气。"
         verb = "吸气" if action["phase"] == "inhale" else "呼气"
         return verb, f"{actor}自然{verb}。"
     if kind == "focus_adjust":

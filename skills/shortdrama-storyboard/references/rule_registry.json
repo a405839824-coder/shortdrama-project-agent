@@ -9349,7 +9349,8 @@
           "街上无人声",
           "对白清晰",
           "纸张和指腹接触的轻响",
-          "对白时底声避让"
+          "对白时底声避让",
+          "\\d+(?:\\.\\d+)?—\\d+(?:\\.\\d+)?秒：[\\w\\u3400-\\u9fff·]{1,12}轻轻叹气的声音"
         ],
         "光影": [
           "镜面局部效果范围之外空气清澈",
@@ -13037,14 +13038,14 @@
       "authorization_work_order": "WO-e9ae4347264b438a",
       "introduced_in": "0.5.66",
       "legacy_applies_to_current_generation": false,
-      "reason": "Four bounded local-surface lighting clauses from the shared optical state; source, field ownership, knowledge, timing and independent review requirements remain unchanged.",
+      "reason": "Four bounded local-surface lighting clauses and one action-bound sigh sound clause; source, field ownership, knowledge, timing and independent review requirements remain unchanged.",
       "parent_migrations_sha256": {
         "production-grounding-0565": "848f42f647097b0d98178861f3bff3299750852454a7cc2018ec98747e626a07"
       },
       "critical_runtime_policies": {
         "field_content_policy": {
           "baseline_sha256": "f467af3cb150e1870f73536a0d74f94475d9c13a6c6959bc90e6a00db93bd6b9",
-          "current_sha256": "b2b1f5e29f139c23040c00dbeb95195309baf288e07b9c899c2e9fb5a5f9616c"
+          "current_sha256": "4ce6883f0074dc5f1f608fddf6271ba00cfa7a76fe78c50a02776ab57b8d1844"
         }
       }
     }
