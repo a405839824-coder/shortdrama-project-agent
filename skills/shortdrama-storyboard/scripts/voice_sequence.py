@@ -8,8 +8,15 @@ VOICE_TEMPLATE_LABELS = (
 LEGACY_DIALOGUE_TAG_RE = re.compile(
     r"【(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})】\s*[“\"]?(?P<line>[^【\n｜|；;”\"]+)[”\"]?"
 )
+# Keep quoted words inside actual speech. Four explicit nested levels cover the
+# supported manuscript syntax without treating the first inner closing quote
+# as the utterance end. Unbalanced/deeper input is not silently truncated.
+_QUOTED_BODY = r'[^“”"\n]'
+for _ in range(4):
+    _QUOTED_BODY = r'(?:[^“”"\n]|“' + _QUOTED_BODY + r'*”)'
 INTEGRATED_DIALOGUE_RE = re.compile(
-    r"(?:^|[；;。！？!?，,、】])\s*(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})说道[：:]?\s*[“\"](?P<line>[^”\"\n]+)[”\"]"
+    r'(?:^|[；;。！？!?，,、】])\s*(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})说道[：:]?\s*[“"](?P<line>'
+    + _QUOTED_BODY + r'+)[”"]'
 )
 MARKER = re.compile(r'〔([1-9][0-9]*):([^〔〕\r\n]+)〕')
 

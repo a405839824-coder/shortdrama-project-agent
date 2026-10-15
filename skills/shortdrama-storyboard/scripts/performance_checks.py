@@ -17,7 +17,7 @@ from visible_entities import resolve_visible_subjects, visible_subject_tokens as
 
 STAGE_RE = re.compile(r"【(?P<start>\d+\.\d)—(?P<end>\d+\.\d)秒】(?P<body>.*?)(?=【\d+\.\d—\d+\.\d秒】|\Z)", re.S)
 QUOTE_RE = re.compile(r'“([^”\n]+)”|‘([^’\n]+)’|"([^"\n]+)"|「([^」\n]+)」|『([^』\n]+)』')
-DIALOGUE_RE = re.compile(r'(?:^|[；;。！？!?，,、】])\s*(?P<speaker>[\u3400-\u9fffA-Za-z·]{1,12})说道[：:]?\s*[“"](?P<line>[^”"\n]+)[”"]')
+from voice_sequence import INTEGRATED_DIALOGUE_RE as DIALOGUE_RE
 FACE_SCALE_RE = re.compile(r"大特写|特写|近景|中近景|胸部以上|腰部以上")
 FACE_RE = re.compile(r"面部|眼睛|眼神|眼睑|眼球|眼眸|双眼|侧脸|人物反应")
 HIDDEN_RE = re.compile(r"(?:面部|眼睛|双眼|眼部)(?:(?:和|与)(?:面部|眼睛|双眼|眼部))?(?:全程|始终|均|都)?(?:不可见|不入画|不在画面|被遮挡|完全遮挡)|(?:仅|只)(?:露出|拍到|可见)?(?:背影|侧背|后脑|双手|手部|胸腹衣襟)|背向机位|(?:全程|始终)(?:背影|背对镜头)")
