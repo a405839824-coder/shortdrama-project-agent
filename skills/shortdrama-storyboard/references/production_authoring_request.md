@@ -69,3 +69,25 @@ source-decision obligations still require the existing independent audit. The
 bridge does not fill missing evidence, certify semantic accuracy, or publish.
 The local `author_storyboard.py --input ... --source-graph ...` entry remains
 available. Tool registration alone does not prove the code is deployed remotely.
+
+For candidates above 256 KiB, `compiled_storyboard` and `prepared_storyboard`
+contain `compiled-candidate-reference-v1`, the exact signed `draft_preflight_id`
+and `canonical_sha256`. Pass that object unchanged. Scene/full preflight resolves
+the same private candidate under the same project and work order. Commit also
+requires the matching full preflight ID and all existing gates. A reference is
+neither a formal artifact nor an independent-audit approval.
+
+Explicitly titled `纯台词剧本` documents with a cast roster and numbered acts
+support multi-line turns, bracketed staging and silent ellipsis beats. Ordinary
+unlabelled prose keeps the closed parser. For per-episode work on such a complete
+play, save `script-episode-partition-v1` as an `episode_plan` JSON artifact under
+an episode-plan work order, then complete its required validation. Its exact
+fields are `contract`, `source_artifact_id`, `source_sha256`, and `episodes`.
+Each episode has `episode_id` and a one-based inclusive `paragraph_range` over
+nonempty source paragraphs. The complete partition must cover every body
+paragraph once, starting/ending on whole-act boundaries; title and cast remain
+shared metadata. Bind the saved plan at `project.source_lock.episode_partition`
+as `{artifact_id, sha256}` and supply `project.protected_dialogue` as the exact
+source-derived speaker/text occurrences for the selected episodes. Selection
+does not change original occurrence identities or permit invented source roles.
+The server rejects unvalidated, partial, overlapping, tampered or stale plans.

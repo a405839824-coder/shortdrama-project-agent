@@ -17,7 +17,7 @@ import re
 from typing import Any, Iterable
 
 
-SOURCE_DIALOGUE_PARSER_VERSION = "source-dialogue-authority-v6"
+SOURCE_DIALOGUE_PARSER_VERSION = "source-dialogue-authority-v7"
 SOURCE_DIALOGUE_OCCURRENCE_CONTRACT = "source-dialogue-occurrence-ranges-v1"
 
 
@@ -448,7 +448,7 @@ _SPEECH_MORPHOLOGY_PATTERN = (
 _SPEECH_MORPHOLOGY_RE = re.compile(_SPEECH_MORPHOLOGY_PATTERN)
 SOURCE_SPEECH_LEXICON_VERSION = "source-speech-predicate-v1"
 SOURCE_ACTION_LEXICON_VERSION = "source-narrative-action-v1"
-SOURCE_DIALOGUE_GRAMMAR_VERSION = "source-dialogue-closed-grammar-v6.3"
+SOURCE_DIALOGUE_GRAMMAR_VERSION = "source-dialogue-closed-grammar-v7.0"
 
 
 SOURCE_SPEECH_LEXICON_SHA256 = hashlib.sha256(
@@ -627,8 +627,11 @@ def source_dialogue_grammar_manifest(
             ("clear_narrative_read_tail", _CLEAR_NARRATIVE_READ_TAIL_RE),
         )
     }
+    from .screenplay_scope import CONTRACT as PLAY_CONTRACT, ACT as PLAY_ACT, ROLE as PLAY_ROLE
     manifest: dict[str, Any] = {
         "parser_version": SOURCE_DIALOGUE_PARSER_VERSION,
+        "pure_dialogue_play": {"contract":PLAY_CONTRACT,"act":_regex_contract(PLAY_ACT),
+                               "role":_regex_contract(PLAY_ROLE),"authority":"source_title_cast_and_act_blocks_only"},
         "structural_grammar_version": (
             SOURCE_DIALOGUE_GRAMMAR_VERSION
             if structural_grammar_version is None
@@ -1716,6 +1719,11 @@ def parse_source_dialogue_authority(
             "source_dialogue_authority_ambiguous: HTML quote entities must be "
             "decoded by the authoritative extraction layer before parsing"
         )
+    if normalized_role == 'script':
+        from .screenplay_scope import parse_pure_play
+        profile_rows = parse_pure_play(source_text)
+        if profile_rows is not None:
+            return _bind_source_occurrences(profile_rows, source_text, normalized_role)
     rows: list[DialogueOccurrence] = []
     consumed: list[tuple[int, int]] = []
     known_speakers = (
@@ -2267,6 +2275,10 @@ def parse_source_dialogue_authority(
                 )
         line_offset += len(raw_line)
 
+    return _bind_source_occurrences(rows, source_text, normalized_role)
+
+
+def _bind_source_occurrences(rows, source_text, normalized_role):
     rows.sort(key=lambda row: (row.char_offset, row.line_number, row.kind))
     # This identity is derived only after the closed source parser completes.
     # Include the complete normalized source, not merely the audible text: two

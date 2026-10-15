@@ -87,8 +87,8 @@ def _expected_script_occurrence(
 
 
 class SourceDialogueParserV6Tests(unittest.TestCase):
-    def test_parser_version_is_v6(self) -> None:
-        self.assertEqual(SOURCE_DIALOGUE_PARSER_VERSION, "source-dialogue-authority-v6")
+    def test_parser_version_is_v7(self) -> None:
+        self.assertEqual(SOURCE_DIALOGUE_PARSER_VERSION, "source-dialogue-authority-v7")
 
     def test_grammar_fingerprint_binds_every_classification_component(self) -> None:
         base = source_dialogue_grammar_fingerprint()
