@@ -17,6 +17,7 @@ FIELDS = {
     'hand_move': {'hand', 'to'},
     'stroke_prop': {'prop', 'hand', 'to'},
     'hand_tremor': {'hand'},
+    'body_shudder': set(),
     'eye_state': {'to'},
     'hand_shape': {'hand', 'to'},
     'expression': {'to'},
@@ -65,7 +66,7 @@ HAND_PARTS = {'left_hand', 'right_hand'}
 PART_TEXT.update(left_upper_arm='左上臂', right_upper_arm='右上臂', lap_cloth='膝上衣角')
 PUSH_ACTIONS = {'push_actor', 'push_actor_no_displacement'}
 SOURCE_REQUIRED = {'drop_prop', 'contact_actor', 'clap', 'kowtow', 'wipe', 'wear_prop', 'remove_worn', 'set_opening','fall','dress_actor','undress_actor','release_binding','assist_stand'} | PUSH_ACTIONS | set(relations.FIELDS)
-SOURCE_REQUIRED |= {'stroke_prop', 'hand_tremor'} | set(optical.FIELDS)
+SOURCE_REQUIRED |= {'stroke_prop', 'hand_tremor', 'body_shudder'} | set(optical.FIELDS)
 BRIDGE_KINDS = {'move_actor', 'turn', 'look', 'posture', 'hand_move', 'eye_state', 'hand_shape',
                 'expression', 'cross_passage', 'scene_light'}
 
@@ -145,6 +146,7 @@ def channels(action):
     a, k = action['actor'], action['kind']
     if k in relations.FIELDS: return relations.channels(action)
     if k == 'phantom_fade': return {(a, 'optical')}
+    if k == 'body_shudder': return {(a, 'body'), (a, 'position')}
     # Channels are calculated before preparation. Validate keys needed below
     # so malformed input fails closed as a domain error, never a raw TypeError.
     for key in FIELDS[k] - {'landmarks','helper_landmarks','light','contact','breaks','count'}:
@@ -203,6 +205,9 @@ def prepare(world, action, info, path, *, bridge=False):
     if k in relations.FIELDS:
         return relations.prepare(world, action, info, path)
     if k in optical.FIELDS: return optical.prepare(world, action, info, path, bridge=bridge)
+    if k == 'body_shudder':
+        p._need(not bridge and a['posture']=='站立' and not a['action_state']['contacts'] and not _contacted(world, action['actor']),path,'shudder requires free standing body')
+        return info
     if k in {'posture', 'fall', 'cross_passage'}:
         p._need(not a['action_state']['contacts'] and not _contacted(world, action['actor']), path, 'release actual body contact before relocating')
     if k in {'hand_move', 'hand_shape', 'pick_up', 'put_down', 'drop_prop', 'wear_prop', 'remove_worn', 'wipe', 'set_opening','dress_actor','undress_actor','release_binding'}:
@@ -494,6 +499,11 @@ def effects(initial, action, tick):
     p = _p(); k = action['kind']; who = action['actor']; a = initial['actors'][who]
     if k in relations.FIELDS: return relations.effects(initial, action, tick)
     if k in optical.FIELDS: return optical.effects(initial, action, tick)
+    if k == 'body_shudder':
+        f=(tick-action['start'])/(action['end']-action['start'])
+        dz=0 if tick in {action['start'],action['end']} else .015*math.sin(2*math.pi*f)
+        return {('actors',who,'eye_height'):a['eye_height']+dz,
+                ('actors',who,'reach_origin_xyz'):p._add(a['reach_origin_xyz'],[0,0,dz])}
     end = tick == action['end']; f = (tick-action['start'])/(action['end']-action['start'])
     result = {}; base = ('actors', who)
     def set_actor(key, value): result[base + (key,)] = copy.deepcopy(value)
@@ -657,6 +667,7 @@ def sentence(action, info):
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
     if k in relations.FIELDS: return relations.sentence(action, info)
     if k in optical.FIELDS: return optical.sentence(action, info)
+    if k=='body_shudder':return '一震',f'{a}身躯短促一震，随即重新稳住，双脚保持原位。'
     if k=='assist_stand':
         return '扶起',f"{a}{hand}持续扶住{action['target_actor']}{PART_TEXT[action['target_part']]}并扶起{action['target_actor']}，帮助其起身站稳。"
     if k=='push_actor':
@@ -733,6 +744,7 @@ def visible(sample, action):
     view=sample['view']; owner=view['actors'].get(action['actor'],{}); k=action['kind']
     if k in relations.FIELDS: return relations.visible(sample, action)
     if k in optical.FIELDS: return optical.visible(sample, action)
+    if k=='body_shudder':return bool(owner.get('head') and owner.get('hands'))
     def part_visible(name, part):
         row=view['actors'].get(name,{})
         if part in {'head','face'}:return bool(row.get('head'))

@@ -26,6 +26,13 @@ def mirror():
 
 
 class OpticalEndingTests(unittest.TestCase):
+    def test_sourced_shudder_returns_to_unchanged_foot_and_body_landmarks(self):
+        d=mirror();src=sourced(d,'body_shudder',{},text='甲闻言身躯一震。')
+        result=p.lower_production_decisions(d,source_compilation=src)
+        end=result['derivation']['final_world']['actors']['甲'];start=d['initial_world']['actors']['甲']
+        for key in ['position_xyz','eye_height','reach_origin_xyz']:self.assertEqual(end[key],start[key])
+        self.assertIn('身躯短促一震',_render_decisions(result['typed_decisions'])['shots'][0]['画面内容'])
+
     def test_shatter_is_source_bound_contact_then_ground_fragments(self):
         d=mirror(); src=sourced(d,'shatter_surface',{'prop':'古镜','hand':'right','to':'镜下地面'},text='甲抬手击碎古镜，镜片四散落地。')
         d['shots'][0]['editorial']['环境音效']={'mode':'action_bound','cues':[{'action_id':'event1','sound':'mirror_break','volume':'normal'}]}
