@@ -258,10 +258,36 @@ def inspect_derivation(candidate):
         expected = replay['source_obligations']
         if expected != payload['source_obligations']: fault('source_obligations', 'source obligations do not bind actual consumed fields')
         if not response['faults']:
+            trace = replay['action_trace']
+            unbodied = {}
+            communication = []
+            source_uses = {o['use_id']: o['binding']['actual_source_use'] for o in expected}
+            plan = json.loads(payload['source_graph_json']).get('production_plan') or {}
+            receipts = plan.get('knowledge', {}).get('acquisitions', [])
+            for record in trace['shots']:
+                for action in record['actions']:
+                    use = source_uses.get(action.get('source_use_id'), {})
+                    actor = use.get('actor')
+                    if action.get('emitter', {}).get('mode') == 'disembodied':
+                        unbodied.setdefault(record['shot_id'], []).append(actor)
+                    if action['kind'] != 'speak' or not use or use.get('mode') != 'spoken':
+                        continue
+                    heard = [r for r in receipts if r['action_id'] == action['id'] and r['mode'] == 'heard'
+                             and r['actor'] != actor and set(use['fact_ids']).issubset(r['fact_ids'])]
+                    if not heard:
+                        continue
+                    for constraint in use['source_constraints']:
+                        if constraint['channel'] != 'oral':
+                            continue
+                        for support in constraint['supports']:
+                            communication.append({'source_id': support['source_id'], 'source_text': support['text'],
+                                'use_id': use['id'], 'shot_id': record['shot_id'], 'speaker': actor,
+                                'text': use['text'], 'receipt_ids': [r['id'] for r in heard]})
             response.update(valid=True, source_obligations=copy.deepcopy(expected), source_graph_sha256=payload['source_graph_sha256'],
                             derivation_sha256=payload['binding_sha256'],
                             performance_evidence=copy.deepcopy(replay['performance_evidence']),
-                            production_prevention_verified=replay['production_prevention_verified'])
+                            production_prevention_verified=replay['production_prevention_verified'],
+                            disembodied_speakers=unbodied, source_communication=communication)
     except Exception as exc:
         fault('recompile', f'{type(exc).__name__}: {exc}')
     return response

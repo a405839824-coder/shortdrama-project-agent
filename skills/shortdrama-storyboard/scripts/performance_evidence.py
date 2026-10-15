@@ -276,6 +276,20 @@ pose is evidence without requiring a blink, inhale, gesture or gaze shift.
             if gaze_coverage['status'] == 'not_applicable':
                 fields['gaze_path']['evidence_status'] = 'not_applicable'
                 fields['gaze_path']['reason'] = gaze_coverage['reason'] + '; underlying gaze retained, not asserted visible'
+            # A validated prop emitter has no body to perform these fields.
+            # Keep its real voice events and source/knowledge evidence; text
+            # claiming an unseen speaker alone never grants this applicability.
+            unbodied = (actor not in payload['initial_world']['actors'] and bool(actor_events)
+                and all(e['event']['kind'] == 'speak'
+                        and e['event'].get('emitter', {}).get('mode') == 'disembodied'
+                        and e['projection'].get('emitter') == e['event']['emitter']
+                        for e in actor_events))
+            if unbodied:
+                fields['listen_or_observe_reaction']['evidence_status'] = 'bound' if facts and explicit else 'unknown'
+                for name in ('gaze_path', 'micro_expression', 'ecological_action', 'body_or_breath', 'end_state'):
+                    fields[name].update(evidence_status='not_applicable',
+                        reason='replayed source-bound disembodied prop voice; no bodily actor',
+                        emitter_events=copy.deepcopy(actor_events))
             actor_rows.append({'actor': actor, 'fact_ids': facts, 'authored_design': copy.deepcopy(declared),
                                'start_state': start, 'end_state': end, 'events': actor_events, 'fields': fields})
         rows.append({'shot_id': sid, 'applicability': 'actor_performance' if actor_rows else 'no_modelled_actor_or_speaker',
