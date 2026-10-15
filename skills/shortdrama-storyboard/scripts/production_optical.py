@@ -75,7 +75,7 @@ def sentence(action, info, lo=None, hi=None):
     impact = action['start'] + (action['end']-action['start'])/2
     hand = '左手' if action['hand']=='left' else '右手'
     if hi is not None and hi <= impact:
-        return '挥向', f"{a}抬起{hand}，用力挥向{action['prop']}。"
+        return '挥向', f"{a}抬起{hand}并用力挥向{action['prop']}。"
     if lo is not None and lo >= impact:
         return '停在', f"{a}{hand}停在挥击末端；{action['prop']}镜片四散下落至{action['to']}，范围限于原镜周围。"
     return '挥向', f"{a}抬起{hand}用力挥向{action['prop']}，触及镜面时古镜碎裂，镜片四散落到{action['to']}。"

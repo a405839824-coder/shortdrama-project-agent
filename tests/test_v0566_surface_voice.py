@@ -82,6 +82,16 @@ def lower(data, graph, texts):
 
 
 class SurfaceVoiceTests(unittest.TestCase):
+    def test_declared_open_screen_preserves_visual_barrier_but_allows_nearby_hearing(self):
+        data, graph, texts=fixture()
+        wall={'id':'屏风','a':[3,0,0],'b':[3,1,0],'height_m':1.8}
+        data['initial_world']['scenes']['ROOM']['barriers']=[wall]
+        replan(data,graph,texts)
+        with self.assertRaisesRegex(ProductionDecisionError,'hearing across declared barriers'):lower(data,graph,texts)
+        wall['acoustic']='open_screen';replan(data,graph,texts)
+        result=lower(data,graph,texts)
+        self.assertEqual(result['derivation']['final_world']['scenes']['ROOM']['barriers'],[wall])
+        self.assertEqual(result['derivation']['production_prevention']['semantic_status'],'pending_independent_review')
     def test_scene_echo_is_bound_to_one_actual_prop_voice_and_clock(self):
         data, graph, texts = fixture()
         data['shots'][0]['actions'][1]['emitter']['effect'] = 'short_echo'

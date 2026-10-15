@@ -590,8 +590,15 @@ class ProductionPlanGuard:
                         from production_surface import speaker_scene
                         emission_scene = speaker_scene(sample['world'], a)
                         need(listener['scene_id'] == emission_scene and acquisition['actor'] != a['actor'], p + '.knowledge', 'listener has no actual same-scene disclosure')
-                        need(not sample['world']['scenes'][emission_scene]['barriers'], p + '.knowledge',
+                        barriers = sample['world']['scenes'][emission_scene]['barriers']
+                        need(not barriers or all(w.get('acoustic')=='open_screen' for w in barriers), p + '.knowledge',
                              'hearing across declared barriers is not modelled', 'not_supported')
+                        if barriers:
+                            from production_decisions import _anchor, _distance
+                            origin = (_anchor(sample['world'],sample['world']['props'][a['emitter']['prop']])[1]
+                                      if 'emitter' in a else sample['world']['actors'][a['actor']]['position_xyz'])
+                            need(_distance(origin, listener['position_xyz']) <= 6, p+'.knowledge',
+                                 'open-screen hearing requires a same-scene nearby listener')
                 elif acquisition['mode']=='source_report':
                     need(a['kind']=='narrate' and actual_use['actor'] is None, p+'.knowledge','source report must be delivered by actual objective narration')
                     reports=[f for f in actual_use['source_constraints'] if f['id'] in acquisition['evidence_fact_ids'] and f['channel']=='report']

@@ -26,6 +26,17 @@ def mirror():
 
 
 class OpticalEndingTests(unittest.TestCase):
+    def test_straightening_standing_back_is_bounded_and_does_not_move_feet(self):
+        d=mirror();src=sourced(d,'straighten',{'rise_m':.05},text='甲挺直脊背。')
+        result=p.lower_production_decisions(d,source_compilation=src)
+        end=result['derivation']['final_world']['actors']['甲'];start=d['initial_world']['actors']['甲']
+        self.assertEqual(end['position_xyz'],start['position_xyz'])
+        self.assertEqual(end['posture'],'站立')
+        self.assertAlmostEqual(end['eye_height'],start['eye_height']+.05)
+        self.assertIn('挺直脊背',_render_decisions(result['typed_decisions'])['shots'][0]['画面内容'])
+        src=sourced(d,'straighten',{'rise_m':.3})
+        with self.assertRaisesRegex(p.ProductionDecisionError,'eight centimetres'):p.lower_production_decisions(d,source_compilation=src)
+
     def test_sourced_shudder_returns_to_unchanged_foot_and_body_landmarks(self):
         d=mirror();src=sourced(d,'body_shudder',{},text='甲闻言身躯一震。')
         result=p.lower_production_decisions(d,source_compilation=src)
@@ -48,6 +59,8 @@ class OpticalEndingTests(unittest.TestCase):
         self.assertNotIn('镜面平整',rows[1]['起始状态'])
         self.assertEqual(result['typed_decisions']['shots'][0]['end_state'],result['typed_decisions']['shots'][1]['start_state'])
         self.assertFalse(result['derivation']['source_action_execution']['source_entailment_proved'])
+        d=mirror();src=sourced(d,'shatter_surface',{'prop':'古镜','hand':'right','to':'镜下地面'},text='甲抬手击碎古镜。',start=0,end=40)
+        self.assertIn('抬起右手并用力挥向',_render_decisions(p.lower_production_decisions(d,source_compilation=src)['typed_decisions'])['shots'][0]['画面内容'])
 
     def test_shatter_cannot_be_null_source_remote_or_extra_mutation(self):
         d=mirror(); d['shots'][0]['actions']=[action('shatter_surface',prop='古镜',hand='right',to='镜下地面')]

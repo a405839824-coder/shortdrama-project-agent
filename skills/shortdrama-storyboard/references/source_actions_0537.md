@@ -93,3 +93,7 @@ A disembodied `speak.emitter` may declare `effect: short_echo` (default `dry`). 
 `phantom_fade={to:<opacity>,glimmer:<boolean>}` requires actor.optical={opacity,extent_m,glimmer}. Opacity only decreases, persists across cuts, and zero removes the visible body and its local glimmer. A bodily actor cannot be silently relabelled or resurrected. Both actions require frozen source steps and observed effect checks; neither is an independent semantic certificate.
 
 An explicitly registered prop may carry foliage={motion:breeze_petals,extent_m:(0,2]}. Its frozen initial state presents static flowers and airborne petals; environmental motion is limited to this visible prop. It cannot create a storm, whole-scene fog, speech, or extra plot events.
+
+`body_shudder={}` models one short sourced standing-body startle with unchanged feet and returned landmarks. `straighten={rise_m}` models sourced straightening in place, with a positive eye/torso rise up to 0.08 m. Neither authorizes a posture change, injury or teleportation.
+
+A visual barrier may explicitly declare acoustic=open_screen for nearby same-scene speech through an open freestanding screen. Its visual occlusion and movement collision remain active. Other barriers retain blocked/unsupported hearing; the screen declaration, source entailment and received words still require independent review. This is a bounded audibility decision, not an acoustic solver.

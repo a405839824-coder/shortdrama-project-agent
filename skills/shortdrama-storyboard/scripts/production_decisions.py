@@ -499,7 +499,8 @@ def _world(value, sources, *, check_source_refs=True):
         _need(isinstance(scene["barriers"], list), "scene.barriers", "requires explicit array; [] declares no known barriers")
         seen = set()
         for wall in scene["barriers"]:
-            _obj(wall, {"id", "a", "b", "height_m"}, "scene.barrier")
+            _obj(wall, {"id", "a", "b", "height_m"} | ({'acoustic'} if 'acoustic' in wall else set()), "scene.barrier")
+            _need(wall.get('acoustic','blocked') in {'blocked','open_screen'}, 'scene.barrier.acoustic', 'unsupported acoustic declaration')
             _name(wall["id"], "wall.id"); _need(wall["id"] not in seen, "wall.id", "duplicate wall")
             seen.add(wall["id"])
             wall["a"] = _xyz(wall["a"], "wall.a"); wall["b"] = _xyz(wall["b"], "wall.b")
@@ -916,7 +917,7 @@ def _action_sentence(action, info, world, camera, visible_hands=None):
             verb = "停在"
         elif origin == target:
             text = f"{actor}视线持续对准{target}。"
-            verb = "注视"
+            verb = "对准"
         elif origin is not None:
             text = f"{actor}视线从{origin}移向{target}。"
             verb = "移向"
