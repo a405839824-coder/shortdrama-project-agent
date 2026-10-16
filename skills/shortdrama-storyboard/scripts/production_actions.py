@@ -39,6 +39,7 @@ FIELDS = {
     'clap': {'count'},
     'kowtow': {'count'},
     'head_gesture': {'direction', 'count'},
+    'head_tilt': {'to_degrees'},
     'set_opening': {'opening','to','hand'},
     'scene_light': {'scene_id', 'light'},
 }
@@ -121,7 +122,11 @@ def validate_world(world):
                     'scene.passages', 'passage endpoints must share a physical doorway; no remote teleport')
     for actor in world['actors'].values():
         s = actor['action_state']
-        p._obj(s, {'contacts', 'wet_parts', 'clean_parts', 'hand_shapes', 'expression', 'claps', 'kowtows', 'body_support'}, 'actor.action_state')
+        p._obj(s, {'contacts', 'wet_parts', 'clean_parts', 'hand_shapes', 'expression', 'claps', 'kowtows', 'body_support'} |
+               ({'head_pitch_degrees'} if 'head_pitch_degrees' in s else set()), 'actor.action_state')
+        if 'head_pitch_degrees' in s:
+            p._need(-30 <= p._num(s['head_pitch_degrees'], 'actor.head_pitch_degrees') <= 30,
+                    'actor.head_pitch_degrees', 'supported head pitch is -30 to 30 degrees')
         p._need(s['contacts'] == {}, 'actor.action_state.contacts', 'initial contact needs an executed source action')
         p._need(s['body_support'] is None, 'actor.action_state.body_support', 'initial body support needs an executed source action')
         for name in ('wet_parts', 'clean_parts'):
@@ -150,7 +155,7 @@ def channels(action):
     if k in {'body_shudder','straighten'}: return {(a, 'body'), (a, 'position')}
     # Channels are calculated before preparation. Validate keys needed below
     # so malformed input fails closed as a domain error, never a raw TypeError.
-    for key in FIELDS[k] - {'landmarks','helper_landmarks','light','contact','breaks','count'}:
+    for key in FIELDS[k] - {'landmarks','helper_landmarks','light','contact','breaks','count','to_degrees'}:
         _p()._need(isinstance(action[key],str), 'action.'+key, 'requires named action parameter')
     if k == 'assist_stand':
         return {(who,part) for who in (a,action['target_actor'])
@@ -165,6 +170,7 @@ def channels(action):
     if k == 'eye_state': return {(a, 'eyelid_closure'), (a, 'gaze')}
     if k == 'expression': return {(a, 'expression')}
     if k == 'head_gesture': return {(a, 'head'), (a, 'gaze')}
+    if k == 'head_tilt': return {(a, 'head')}
     if k == 'clap': return {(a, 'left'), (a, 'right')}
     result = {(a, action['hand'])}
     if k == 'contact_actor' and action['target_part'] in HAND_PARTS and action['mode'] in {'grasp', 'release_grasp'}:
@@ -460,6 +466,11 @@ def prepare(world, action, info, path, *, bridge=False):
                     p._need(a['action_state']['hand_shapes'][action['hand']] == 'open' and
                             target['action_state']['hand_shapes'][target_hand] == 'open', path,
                             'hand grasp requires both hands open before contact')
+    elif k == 'head_tilt':
+        pitch = p._num(action['to_degrees'], path + '.to_degrees')
+        p._need(-30 <= pitch <= 30 and abs(pitch-a['action_state'].get('head_pitch_degrees', 0)) > p.EPS,
+                path, 'head tilt requires an actual change within -30 to 30 degrees')
+        p._need(duration >= .3, path, 'head tilt requires at least 0.3 seconds')
     elif k in {'clap', 'kowtow', 'head_gesture'}:
         p._need(type(action['count']) is int and 1 <= action['count'] <= 10, path, 'requires exact bounded repetition count')
         p._need(duration >= action['count'] * (.6 if k == 'kowtow' else .4), path, 'declared repetitions cannot fit action interval')
@@ -630,6 +641,9 @@ def effects(initial, action, tick):
         wave=(1-math.cos(2*math.pi*action['count']*f))/2
         set_actor('eye_height',a['eye_height']+(.08-a['eye_height'])*wave)
         state('kowtows',a['action_state']['kowtows']+(action['count'] if end else 0))
+    elif k == 'head_tilt':
+        initial_pitch = a['action_state'].get('head_pitch_degrees', 0)
+        state('head_pitch_degrees', initial_pitch + (action['to_degrees']-initial_pitch)*f)
     elif k == 'head_gesture':
         wave=math.sin(2*math.pi*action['count']*f)
         if action['direction']=='shake': set_actor('head_yaw',(a['head_yaw']+12*wave)%360)
@@ -669,6 +683,10 @@ def sentence(action, info):
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
     if k in relations.FIELDS: return relations.sentence(action, info)
     if k in optical.FIELDS: return optical.sentence(action, info)
+    if k == 'head_tilt':
+        verb = '低头' if action['to_degrees'] < info['before']['action_state'].get('head_pitch_degrees', 0) else '抬头'
+        end_pose = '头部回正' if action['to_degrees'] == 0 else '头部微低' if action['to_degrees'] < 0 else '头部微仰'
+        return verb, f'{a}{verb}至{end_pose}，身体保持原有朝向。'
     if k=='body_shudder':return '一震',f'{a}身躯短促一震，随即重新稳住，双脚保持原位。'
     if k=='straighten':return '挺直',f'{a}挺直脊背，双脚保持原位。'
     if k=='assist_stand':
@@ -726,6 +744,9 @@ def sentence(action, info):
 
 def static_actor(actor, name, *, face_visible=True, view=None):
     state=actor['action_state']; rows=[optical.static_actor(actor, name)]
+    pitch = state.get('head_pitch_degrees', 0)
+    if pitch and (view is None or view.get('actors', {}).get(name, {}).get('head')):
+        rows.append(f"{name}{'头部微低' if pitch < 0 else '头部微仰'}。")
     visible_hands = None if view is None else view.get('actors', {}).get(name, {}).get('hands', [])
     rows.append(relations.static_actor(actor, name, view=view))
     for part in state['wet_parts']: rows.append(f'{name}{PART_TEXT[part]}留有水渍。')
@@ -756,7 +777,7 @@ def visible(sample, action):
         if part.endswith('upper_arm') or part == 'lap_cloth': return bool(row.get('head') and row.get('hands'))
         return bool(row)
     if k in {'eye_state','expression'}:return bool(owner.get('eye_visible'))
-    if k in {'head_gesture','kowtow'}:return bool(owner.get('head'))
+    if k in {'head_gesture','head_tilt','kowtow'}:return bool(owner.get('head'))
     if k=='clap':return set(owner.get('hands',[]))=={'left','right'}
     if k=='contact_actor':return action['hand'] in owner.get('hands',[]) and part_visible(action['target_actor'],action['target_part'])
     if k in PUSH_ACTIONS:
@@ -812,6 +833,26 @@ def fragment_sentence(action, info, lo, hi):
     a=action['actor']; k=action['kind']; hand='左手' if action.get('hand')=='left' else '右手'
     if k in relations.FIELDS: return relations.sentence(action, info, complete=hi == action['end'])
     if k in optical.FIELDS: return optical.sentence(action, info, lo, hi)
+    if k == 'head_gesture':
+        verb = '点头' if action['direction'] == 'nod' else '摇头'
+        if lo == action['start'] and hi == action['end']: return sentence(action, info)
+        if lo == action['start']: return verb, f"{a}开始{verb}，本次连续动作共{action['count']}次。"
+        if hi == action['end']: return verb, f'{a}完成这一次连续{verb}过程，头部恢复原有姿态。'
+        return verb, f'{a}延续同一{verb}过程。'
+    if k == 'body_shudder':
+        if lo == action['start'] and hi == action['end']: return sentence(action, info)
+        if lo == action['start']: return '一震', f'{a}身躯短促一震，双脚保持原位。'
+        if hi == action['end']: return '稳住', f'{a}震后重新稳住，双脚保持原位。'
+        return '稳住', f'{a}震后逐渐稳住，双脚保持原位。'
+    if k == 'stroke_prop':
+        if lo == action['start'] and hi == action['end']: return sentence(action, info)
+        if hi == action['end']:
+            return '停在', f"{a}{hand}指尖完成本次沿镜面轻拂，停在{action['to']}。"
+        verb = '开始' if lo == action['start'] else '继续'
+        return '轻拂', f"{a}{hand}指尖贴着{action['prop']}镜面{verb}沿同一路径轻拂。"
+    if k == 'head_tilt' and hi < action['end']:
+        verb, _ = sentence(action, info)
+        return verb, f"{a}{'开始' if lo == action['start'] else '继续'}{verb}，身体保持原有朝向。"
     if k in PUSH_ACTIONS:
         contact, release = _push_ticks(action)
         target = action['target_actor']
