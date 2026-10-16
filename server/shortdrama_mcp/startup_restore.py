@@ -73,6 +73,16 @@ SCRIPT_SCOPE_GATE_SQL = (
     "SELECT RAISE(ABORT, 'script_scope_upgrade_in_progress'); END"
 )
 SCRIPT_SCOPE_MAX_EXPANDED_BYTES = 8 * 1024**3
+GESTURE_REPAIR_DIRECTORY = ".upgrade-gesture-repair-0568"
+GESTURE_REPAIR_CONTRACT = "library-runtime-transfer-gesture-repair-0568-v1"
+GESTURE_REPAIR_VERSION = "0.5.68"
+GESTURE_REPAIR_GATE = "gesture_repair_upgrade_gate_0568"
+GESTURE_REPAIR_GATE_SQL = (
+    f"CREATE TRIGGER {GESTURE_REPAIR_GATE} BEFORE INSERT ON access_audit "
+    "WHEN NEW.outcome='started' BEGIN "
+    "SELECT RAISE(ABORT, 'gesture_repair_upgrade_in_progress'); END"
+)
+GESTURE_REPAIR_MAX_EXPANDED_BYTES = 8 * 1024**3
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 MAX_EXPANDED_BYTES = 4 * 1024**3
 # The current live project tree alone exceeds 5 GB. Only this fresh, signed
@@ -159,6 +169,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         (PRODUCTION_GROUNDING_DIRECTORY, PRODUCTION_GROUNDING_CONTRACT): PRODUCTION_GROUNDING_VERSION,
         (SURFACE_VOICE_DIRECTORY, SURFACE_VOICE_CONTRACT): SURFACE_VOICE_VERSION,
         (SCRIPT_SCOPE_DIRECTORY, SCRIPT_SCOPE_CONTRACT): SCRIPT_SCOPE_VERSION,
+        (GESTURE_REPAIR_DIRECTORY, GESTURE_REPAIR_CONTRACT): GESTURE_REPAIR_VERSION,
     }.get((directory, contract))
     if target_version is None:
         raise ValueError('startup_restore_undeclared_transfer')
@@ -169,6 +180,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         (PRODUCTION_GROUNDING_DIRECTORY, PRODUCTION_GROUNDING_CONTRACT): PRODUCTION_GROUNDING_MAX_EXPANDED_BYTES,
         (SURFACE_VOICE_DIRECTORY, SURFACE_VOICE_CONTRACT): SURFACE_VOICE_MAX_EXPANDED_BYTES,
         (SCRIPT_SCOPE_DIRECTORY, SCRIPT_SCOPE_CONTRACT): SCRIPT_SCOPE_MAX_EXPANDED_BYTES,
+        (GESTURE_REPAIR_DIRECTORY, GESTURE_REPAIR_CONTRACT): GESTURE_REPAIR_MAX_EXPANDED_BYTES,
     }.get((directory, contract), MAX_EXPANDED_BYTES)
     transfer = data_dir / directory
     marker = transfer / "manifest.json"
@@ -199,6 +211,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         PRODUCTION_GROUNDING_CONTRACT: (PRODUCTION_GROUNDING_GATE, PRODUCTION_GROUNDING_GATE_SQL),
         SURFACE_VOICE_CONTRACT: (SURFACE_VOICE_GATE, SURFACE_VOICE_GATE_SQL),
         SCRIPT_SCOPE_CONTRACT: (SCRIPT_SCOPE_GATE, SCRIPT_SCOPE_GATE_SQL),
+        GESTURE_REPAIR_CONTRACT: (GESTURE_REPAIR_GATE, GESTURE_REPAIR_GATE_SQL),
     }
     if contract in gate_contracts:
         gate_name, gate_sql = gate_contracts[contract]
@@ -285,7 +298,8 @@ def restore_release_runtime_if_requested(settings) -> dict | None:
                                  (AUDIT_GENERATION_DIRECTORY, AUDIT_GENERATION_CONTRACT),
                                  (PRODUCTION_GROUNDING_DIRECTORY, PRODUCTION_GROUNDING_CONTRACT),
                                  (SURFACE_VOICE_DIRECTORY, SURFACE_VOICE_CONTRACT),
-                                 (SCRIPT_SCOPE_DIRECTORY, SCRIPT_SCOPE_CONTRACT))
+                                 (SCRIPT_SCOPE_DIRECTORY, SCRIPT_SCOPE_CONTRACT),
+                                 (GESTURE_REPAIR_DIRECTORY, GESTURE_REPAIR_CONTRACT))
                if (settings.data_dir / d / 'manifest.json').exists()]
     if not pending:
         return None

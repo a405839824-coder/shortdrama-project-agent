@@ -126,6 +126,25 @@ The action schema expresses these explicit performance intentions but does not s
 
 For a future writing plan that is only narrated, use `narrate` with an objective-narration source use. Do not declare a current paper or execute `write`. A compiled write use that is never actually written is unconsumed and fails the global consumption check. A current paper's exact complete text is rendered from the source compilation; handwritten action/field copies are not accepted.
 
+## Pitch and phase transitions
+
+`head_tilt` accepts `to_degrees` in [-30,30], positive upward. It requires an
+actual pitch change and at least 0.3 seconds, owns the head channel, and leaves
+root/body/eye landmark positions unchanged. Pitch is carried in the existing
+action state and changes the head-facing normal used by the camera model. It
+does not invent a gaze target; a separately timed `look` with `head_mode` set to
+`still` can name the gaze. Same-channel head actions cannot overlap. Optional
+initial `action_state.head_pitch_degrees` is explicit; absence means neutral.
+Only actual nonzero visible pitch adds a static head-pose clause. Source action
+plans and independent review still determine whether the movement is warranted.
+
+One counted head gesture, stroke or shudder crossing macro phases remains one
+event. Its projected text distinguishes ongoing action from completion. A
+visible head turn required to reveal the eyes is retained while hidden eyes
+receive no invented eye-motion description. Ground-relative spatial staging
+and visible screen location are distinct calculations; the latter uses the
+same visible head/root landmark as the first-frame description.
+
 ## Output and integration
 
 `lower_production_decisions(payload, source_compilation=compiled)` returns fresh `typed_decisions` for the existing v2 renderer and `derivation`. Derivation contains actual input hash, per-shot initial/final world hashes, seven-field endpoint hashes, camera values, eye visibility ticks, original-to-fragment event IDs, actual `rendered_sentences`, separate world action descriptions, consumed source IDs and predicted audio alignments. Each shot's `visible_current_paper_refs` lists only compiled paper IDs on props actually visible in that shot's first view; world presence alone is not evidence of visible paper. `world_events` preserves full action intervals, world dependencies, actual completed-effect counts and their projected dependency/visibility traces. Hashes prove identity, not entailment. No result signs an independent audit or claims release eligibility.

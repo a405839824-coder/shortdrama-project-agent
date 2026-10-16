@@ -259,6 +259,12 @@ def _landmark_visibility(world, scene, camera, position):
             'model_visible': inside and blocker is None, 'mesh_occlusion': 'not_modelled'}
 
 
+def _head_forward(actor):
+    yaw = math.radians(actor['head_yaw'])
+    pitch = math.radians(actor.get('action_state', {}).get('head_pitch_degrees', 0))
+    return [math.sin(yaw)*math.cos(pitch), math.cos(yaw)*math.cos(pitch), math.sin(pitch)]
+
+
 def inspect_camera_landmarks(world, camera, scene, *, snapshot_basis):
     """Inspect every world actor, including ground-only and offscreen actors.
 
@@ -273,7 +279,7 @@ def inspect_camera_landmarks(world, camera, scene, *, snapshot_basis):
         points = {'eye': _eye(actor), 'left_hand': _hand(actor, 'left'),
                   'right_hand': _hand(actor, 'right'), 'ground': actor['position_xyz']}
         landmarks = {key: _landmark_visibility(world, scene, camera, point) for key, point in points.items()}
-        front = _dot([math.sin(math.radians(actor['head_yaw'])), math.cos(math.radians(actor['head_yaw'])), 0],
+        front = _dot(_head_forward(actor),
                      _unit(_sub(camera['origin'], points['eye']), 'camera/eye'))
         visible = [key for key, value in landmarks.items() if value['model_visible']]
         actors[identity] = {'status': 'landmarks_in_frame' if visible else 'no_landmarks_in_frame',
@@ -313,7 +319,7 @@ def _view(world, camera, scene):
         if actor["scene_id"] != scene or actor.get('optical', {}).get('opacity', 1) == 0: continue
         eye = _eye(actor); hands = [h for h in ("left", "right") if _in_frame(world, scene, camera, _hand(actor, h))]
         head_in_frame = _in_frame(world, scene, camera, eye)
-        front = _dot([math.sin(math.radians(actor["head_yaw"])), math.cos(math.radians(actor["head_yaw"])), 0],
+        front = _dot(_head_forward(actor),
                      _unit(_sub(camera["origin"], eye), "camera/eye")) > 0.2
         feet = _in_frame(world, scene, camera, actor["position_xyz"])
         if head_in_frame or hands or feet:
@@ -867,7 +873,9 @@ def _look_motion(action, info, samples):
                                 for t in range(action['start'], action['end'] + 1)]
     rays = [(_unit(_sub(state['gaze']['position_xyz'], _eye(state)), 'look.gaze')
              if state['gaze'] else None) for state in states]
-    return {'head_changed': any(abs(_delta(a['head_yaw'], b['head_yaw'])) > EPS for a, b in zip(states, states[1:])),
+    return {'head_changed': any(abs(_delta(a['head_yaw'], b['head_yaw'])) > EPS or
+                               abs(a['action_state'].get('head_pitch_degrees', 0)-b['action_state'].get('head_pitch_degrees', 0)) > EPS
+                               for a, b in zip(states, states[1:])),
             'gaze_direction_changed': (None if any(ray is None for ray in rays) else
                 any(any(abs(x-y) > EPS for x, y in zip(a, b)) for a, b in zip(rays, rays[1:]))),
             'start_tick': action['start'], 'end_tick': action['end'],
@@ -912,6 +920,8 @@ def _action_sentence(action, info, world, camera, visible_hands=None):
         origin = _reference(world, before["gaze"]["ref"], camera) if before["gaze"] else None
         target = _reference(world, action["target"], camera)
         motion = info['motion_projection']
+        if info.get('head_only'):
+            return ('转头', f'{actor}转头朝向{target}所在方向。') if motion['head_changed'] else ('保持', f'{actor}保持当前头部朝向。')
         if motion['gaze_direction_changed'] is False:
             text = f"{actor}视线持续停在{target}。"
             verb = "停在"
@@ -1151,7 +1161,8 @@ def _spatial_description(world, row, camera, view, sources):
         relative = '画面' + ''.join(sides) + '侧' if sides else '近旁'
         reference_label = _reference(world, {'kind': 'point', 'id': anchor}, camera)
         label = name if name in world['actors'] else _reference(world, {'kind': 'prop', 'id': name}, camera)
-        descriptions.append(f"{label}位于{_screen_place(position, camera)}；相对{reference_label}，处于{relative}。")
+        visible_position = (_eye(world['actors'][name]) if name in world['actors'] and view['actors'][name].get('head', False) else position)
+        descriptions.append(f"{label}位于{_screen_place(visible_position, camera)}；相对{reference_label}，处于{relative}。")
     return ''.join(descriptions)
 
 
@@ -1523,6 +1534,21 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                 partial_blink = visible_intervals != [(action["start"], action["end"])]
                 pieces = [(i, max(lo, left), min(hi, right)) for i, lo, hi in pieces for left, right in visible_intervals
                           if max(lo, left) < min(hi, right)]
+                # A visible back/side of the head can rotate before its eyes
+                # become visible. Eye filtering must not erase that turn.
+                if (action['kind'] == 'look' and action['source_use_id'] is None and info['motion_projection']['head_changed']
+                        and any(samples[t]['view']['actors'].get(action['actor'], {}).get('eye_visible')
+                                for t in range(action['start'], action['end'] + 1))):
+                    hidden_head = []
+                    for i, left, right in world_pieces:
+                        lo = None
+                        for t in range(left, right + 1):
+                            view = samples[t]['view']['actors'].get(action['actor'], {})
+                            visible = t < right and view.get('head') and not view.get('eye_visible')
+                            if visible and lo is None: lo = t
+                            if not visible and lo is not None:
+                                hidden_head.append((i, lo, t)); lo = None
+                    pieces = sorted(pieces + hidden_head)
             elif action["kind"] == "breath":
                 # A world breath is retained offscreen; do not create visible
                 # body performance where no actor landmark is in the frame.
@@ -1550,6 +1576,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     phase_info = {**info, 'before': (info['before'] if lo == action['start']
                         else samples[lo]['world']['actors'][action['actor']])}
                     phase_info['motion_projection'] = _look_motion({**action, 'start': lo, 'end': hi}, phase_info, samples)
+                    phase_info['head_only'] = not any(samples[t]['view']['actors'].get(action['actor'], {}).get('eye_visible') for t in range(lo, hi))
                     verb, fragment = _action_sentence(action, phase_info, samples[lo]['world'], cam)
                     if phase_info['motion_projection']['head_changed']:
                         projected_head_motion.add((phase_index, action['actor']))
@@ -1576,6 +1603,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                     if partial_blink: verb = "眨眼"
                 elif action['kind'] in extended_actions.FIELDS:
                     verb, fragment = extended_actions.fragment_sentence(_display_action(action, samples[lo]["world"], cam), info, lo, hi)
+                    if action['kind'] == 'head_tilt': projected_head_motion.add((phase_index, action['actor']))
                 elif len(pieces) > 1 and action['kind'] != 'hold' and verb not in {'停在', '保持', '焦点调整'}:
                     prefix = "开始" if part_index == 0 else "继续"
                     fragment = str(action["actor"]) + prefix + fragment[len(action["actor"]):]
@@ -1676,7 +1704,9 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
                         if gaze_text not in phases[i]['text']: phases[i]['text'] += gaze_text
                         head_text = f"{identity}头部保持不动。"
                         if ((i, identity) not in projected_head_motion
-                                and all(state["head_yaw"] == states[0]["head_yaw"] for state in states)
+                                and all(state["head_yaw"] == states[0]["head_yaw"] and
+                                        state['action_state'].get('head_pitch_degrees', 0) == states[0]['action_state'].get('head_pitch_degrees', 0)
+                                        for state in states)
                                 and head_text not in phases[i]['text']):
                             phases[i]["text"] += head_text
                         if not any(lo >= b or hi > b for lo, hi in windows):
