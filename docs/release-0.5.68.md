@@ -22,3 +22,12 @@ requirements remain unchanged. Existing artifacts and failures are retained;
 affected author decisions are recompiled and independently reviewed. An
 immutable 0.5.68 startup transfer reuses the existing signed backup, freeze,
 restore and explicit reopening implementation.
+
+A failed audit's signed full-repair authorization can be verified after an
+execution-software update. Source bytes, canonical, parser, schema, project
+anchors and target contract must still match exactly. The old runtime, cache,
+latest Ledger authority, report, traces, identities and single-use package are
+verified as historical evidence; no old audit becomes a current PASS. A current
+runtime certificate and full validation of the new candidate remain mandatory,
+and the new signed handoff returns to the original independent auditor. Patch
+repair, audit replay and cached PASS do not gain this compatibility path.

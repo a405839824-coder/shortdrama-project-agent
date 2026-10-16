@@ -14672,10 +14672,14 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         assessment_contract: str | None = QUALITY_CONTRACT,
         historical_quality_compatibility: bool = False,
         scope_artifact_id: str | None = None,
+        historical_fingerprints: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Build the deterministic, authoritative content of one audit event."""
 
         context = self._quality_assessment_context(storyboard) if assessment_contract == QUALITY_CONTRACT else None
+        if context is not None and historical_fingerprints is not None:
+            context = assessment_context(storyboard, rules=historical_fingerprints["rules"],
+                validator=historical_fingerprints["validator"], runtime=historical_fingerprints["runtime"])
         prior_keys: set[tuple[str, str, tuple[str, ...]]] = set()
         for prior_event in prior_events[-1:]:
             for prior_issue in prior_event.get("issues", []):
@@ -15729,6 +15733,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         allow_legacy_tail_as_reaudit_parent: bool = False,
         authority_manifest_out: list[dict[str, Any]] | None = None,
         project_lock_held: bool = False,
+        historical_full_repair: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Verify the complete signed chain and return its root and latest node."""
 
@@ -15957,6 +15962,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             ordered_routes=ordered_routes,
             audit_work_order=audit_work_order,
             fingerprints=fingerprints,
+            historical_full_repair=historical_full_repair,
             allow_legacy_tail_as_reaudit_parent=(
                 allow_legacy_tail_as_reaudit_parent
             ),
@@ -16193,6 +16199,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         artifact_record: dict[str, Any],
         report: dict[str, Any],
         require_latest_scope: bool = True,
+        historical_fingerprints: dict[str, str] | None = None,
     ) -> None:
         """Rebuild every deterministic event field before a recovery write."""
 
@@ -16252,6 +16259,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             # This path reconstructs an existing durable event from its bound
             # report. A new audit never selects compatibility by missing tags.
             historical_quality_compatibility="complete" not in (report.get("independent_evidence_matrix", {}).get("semantic_obligation_coverage") or {}),
+            historical_fingerprints=historical_fingerprints,
         )
         raw_expected_issues = copy.deepcopy(expected_content["issues"])
         expected_content["issues"] = [
@@ -17479,6 +17487,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         audit_work_order: dict[str, Any],
         fingerprints: dict[str, str],
         allow_legacy_tail_as_reaudit_parent: bool = False,
+        historical_full_repair: bool = False,
     ) -> list[dict[str, Any]]:
         """Revalidate every completed route's certificate and Ledger event."""
 
@@ -17502,7 +17511,9 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             source_fingerprint=source_fingerprint,
             boundary_hash=boundary_hash,
         )
-        if recomputed_fingerprints != fingerprints:
+        if historical_full_repair:
+            self._assert_repair_content_fingerprints(recomputed_fingerprints, fingerprints)
+        elif recomputed_fingerprints != fingerprints:
             raise ValueError(
                 "reaudit_lineage_invalid: current artifact fingerprints differ from the signed route"
             )
@@ -17641,7 +17652,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 )
             )
             cache_components = current_cache_components
-            if route_is_historical_parent:
+            if historical_full_repair:
+                cache_components = self._historical_full_repair_cache(
+                    namespace, project_id, certificate=certificate,
+                    current=current_cache_components, fingerprints=fingerprints)
+            elif route_is_historical_parent:
                 persisted_cache_components = certificate.get(
                     "cache_components"
                 )
@@ -17688,6 +17703,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 storyboard=storyboard,
                 artifact_record=artifact_record,
                 report=report,
+                historical_fingerprints=fingerprints if historical_full_repair else None,
                 require_latest_scope=(
                     completed_tail_is_scope_authority
                     and route_index == len(completed_routes) - 1
@@ -19627,6 +19643,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         certificate: dict[str, Any],
         base_artifact_id: str,
         current_fingerprints: dict[str, str],
+        historical_full_repair: bool = False,
     ) -> None:
         """Reject a repair route superseded by a later completed re-audit."""
 
@@ -19673,6 +19690,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             audit_work_order=audit_work_order,
             fingerprints=current_fingerprints,
             allow_pending=False,
+            historical_full_repair=historical_full_repair,
         )
         latest_certificate = self.store.get_project_record(
             namespace,
@@ -20377,6 +20395,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         base_artifact_id: str,
         base_canonical_hash: str,
         current_fingerprints: dict[str, str],
+        historical_full_repair: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Load and verify the server-issued authorization for one repair.
 
@@ -20520,6 +20539,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             certificate=certificate,
             base_artifact_id=base_artifact_id,
             current_fingerprints=current_fingerprints,
+            historical_full_repair=historical_full_repair,
         )
         return package, handoff
 
@@ -20576,6 +20596,42 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             if (work_order.get("window_access_contract") != WINDOW_NEUTRAL_ACCESS_CONTRACT
                     and repair_session and session and repair_session == session):
                 raise ValueError(f"repair_window_separation_required: repair reuses {label} session")
+
+    @staticmethod
+    def _assert_repair_content_fingerprints(current, historical):
+        # Only execution software may drift. Source, bytes, topology/schema,
+        # parser, anchors, target contract and canonical remain exact.
+        software = {"runtime", "rules", "validator", "scripts", "dependencies_environment"}
+        if (not isinstance(historical, dict) or set(current) != set(historical)
+                or any(historical[key] != value for key, value in current.items()
+                       if key not in software)):
+            raise ValueError("repair_package_binding_mismatch: immutable content or contract changed after audit")
+
+    def _historical_full_repair_cache(self, namespace, project_id, *, certificate,
+                                      current, fingerprints):
+        """Read negative audit authority; never turn an old PASS into current PASS."""
+        persisted = certificate.get("cache_components")
+        software = {"ruleset", "validator", "runtime", "scripts", "dependencies",
+                    "runtime_test_certificate_id"}
+        if (not self.store.project_record_is_signed(certificate)
+                or not self._valid_cache_identity(certificate, AUDIT_CLASS_INDEPENDENT)
+                or not isinstance(persisted, dict) or set(persisted) != set(current)
+                or any(persisted[key] != value for key, value in current.items()
+                       if key not in software and key != "semantic_audit_contract")):
+            raise ValueError("invalid_audit_certificate: historical repair cache content differs")
+        for key, fingerprint_key in (("runtime", "runtime"), ("scripts", "scripts"),
+                                     ("dependencies", "dependencies_environment")):
+            if persisted[key] != fingerprints[fingerprint_key]:
+                raise ValueError("invalid_audit_certificate: historical software binding differs")
+        runtime = self.store.get_project_record(namespace, project_id, kind="certificates",
+            record_id=str(persisted["runtime_test_certificate_id"]))
+        if (not self.store.project_record_is_signed(runtime)
+                or runtime.get("certificate_type") != "runtime_full_regression"
+                or runtime.get("result") != "pass"
+                or runtime.get("ruleset_version") != persisted["ruleset"]
+                or runtime.get("validator_version") != persisted["validator"]):
+            raise ValueError("invalid_audit_certificate: historical runtime certificate differs")
+        return copy.deepcopy(persisted)
 
     def _full_repair_authorization(
         self,
@@ -20700,10 +20756,11 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             source_fingerprint=source_fingerprint,
             boundary_hash=boundary_hash,
         )
-        if exact_package.get("fingerprints") != current_fingerprints:
-            raise ValueError(
-                "repair_package_binding_mismatch: original base fingerprints changed"
-            )
+        historical_full_repair = exact_package.get("fingerprints") != current_fingerprints
+        if historical_full_repair:
+            self._require_runtime_test_certificate(namespace, project_id)
+            self._assert_repair_content_fingerprints(current_fingerprints, exact_package.get("fingerprints"))
+            current_fingerprints = copy.deepcopy(exact_package["fingerprints"])
         certificate_raw = str(
             certificate.get("fingerprints", {}).get("artifact_raw")
             or certificate.get("cache_components", {}).get("artifact")
@@ -20753,6 +20810,10 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         current_cache_components["scope"] = str(
             certificate.get("cache_components", {}).get("scope") or ""
         )
+        if historical_full_repair:
+            current_cache_components = self._historical_full_repair_cache(
+                namespace, project_id, certificate=certificate,
+                current=current_cache_components, fingerprints=current_fingerprints)
         if certificate.get("cache_components") != current_cache_components:
             raise ValueError(
                 "invalid_audit_certificate: source, boundary, rules, or validator changed after audit"
@@ -20767,6 +20828,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             base_artifact_id=source_artifact_id,
             base_canonical_hash=base_canonical_hash,
             current_fingerprints=current_fingerprints,
+            historical_full_repair=historical_full_repair,
         )
         if package.get("repair_package_id") != repair_package_id:
             raise ValueError(
