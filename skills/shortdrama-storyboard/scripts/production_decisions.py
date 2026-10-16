@@ -1161,7 +1161,7 @@ def _spatial_description(world, row, camera, view, sources):
         relative = '画面' + ''.join(sides) + '侧' if sides else '近旁'
         reference_label = _reference(world, {'kind': 'point', 'id': anchor}, camera)
         label = name if name in world['actors'] else _reference(world, {'kind': 'prop', 'id': name}, camera)
-        visible_position = (_eye(world['actors'][name]) if name in world['actors'] and view['actors'][name]['head'] else position)
+        visible_position = (_eye(world['actors'][name]) if name in world['actors'] and view['actors'][name].get('head', False) else position)
         descriptions.append(f"{label}位于{_screen_place(visible_position, camera)}；相对{reference_label}，处于{relative}。")
     return ''.join(descriptions)
 
