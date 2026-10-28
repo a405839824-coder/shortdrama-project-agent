@@ -24,7 +24,7 @@
 先在测试环境完成下列步骤，再切换生产。正式生产必须使用同一个持久卷和原有签名密钥；不要清空历史项目或 Library 指针。
 
 1. 为你建立管理员 OAuth application，再为首位员工建立独立 application。Auth0 设置为第三方 Regular Web Application，token endpoint authentication 选 `client_secret_post`（或 `client_secret_basic`），grant types **只保留** `authorization_code` 和 `refresh_token`。授权码使用 PKCE S256。启用 Google connection，仅授权本插件 API 的 `storyboard:read`、`storyboard:write`，允许需要的 OIDC scopes / offline access。不要给它们 Management API 权限。
-2. 在成员自己的 ChatGPT 中启用 Developer mode，进入 Plugins 新建连接，URL 填目标环境的 `/mcp`，OAuth 使用预先配置的 Client ID 与 Client Secret。生产 URL 是 `https://energetic-success-production-0634.up.railway.app/mcp`。从该连接管理页面复制**实际显示的回调 URL**到对应 Auth0 application；不要猜 callback ID，也不要填通配符。如果该员工界面不提供开发者连接或 OAuth 凭据配置，先解决账号/工作区访问条件，不要改用大家共用管理员连接。
+2. 在成员自己的 ChatGPT 中启用 Developer mode，进入 Plugins 新建连接，URL 填目标环境的 `/mcp`，OAuth 使用预先配置的 Client ID 与 Client Secret。生产 URL 是 `https://storyboard.example.com/mcp`。从该连接管理页面复制**实际显示的回调 URL**到对应 Auth0 application；不要猜 callback ID，也不要填通配符。如果该员工界面不提供开发者连接或 OAuth 凭据配置，先解决账号/工作区访问条件，不要改用大家共用管理员连接。
 3. 从 Auth0 用户页面核对 Google 的真实 `user_id`，作为 `allowed_subjects`。使用共享 Google 的不同成员可以填同一个值，但 Client ID 必须各不相同。新 Google 未经绑定不能进入已有成员的项目空间。
 4. 按下面的 JSON 建立成员清单。不要把 Client Secret、密码或 Auth0 Management API token 写进去。
 5. 在目标服务环境中使用 `scripts/configure_member_connections.py` 安装清单。它先读取 Auth0 的实际客户端配置，检查 confidential、授权类型与回调地址，再原子写入持久卷根部 `member_connections.json`。需要短期 `AUTH0_MANAGEMENT_TOKEN`，权限只需 `read:clients`；通过受保护的环境变量传入，完成后移除。不要把 token 放在命令行、聊天或 Git 中。

@@ -70,17 +70,17 @@ Delta 只减少模型生成和传输的重复内容，不减少任何最终验�
 
 缺少生产或审计任一追踪，不得宣称走完 0.4.0 优化流程。插件追踪只测服务端时间；ChatGPT 阅读、推理和创作时间必须标为未测量。
 
-## 项目 `SBP-f96bd55b1ffe` 的迁移
+## 项目 `SBP-EXAMPLE` 的迁移
 
 现有 0.3.x canonical 可以作为只读基线迁移稳定 UID，但旧工单、生产预检、审计结论和修复包不能替代 0.4.0 新角色契约。升级连接后应在新聊天分别创建新的 production 与 independent-audit 工单；不要重复导入指纹未变化的原文、80 集方案或 canonical。
 
 ### 生产窗口模板
 
-> 使用短剧分镜项目管理与审计工具，继续项目 `SBP-f96bd55b1ffe`。本会话角色为 `production`，先调用 `get_agent_status`，再为第06–07集创建 `execute + explicit_execute` 的生产工单并保护第01–05集和第08–80集。复用指纹未变化的原文、80集方案和最新版canonical；禁止重复上传、重复解析。读取长内容使用自动 `bulk_ranges`，已有ETag时传 `if_none_match`。优先只生成受影响镜头的语义原子；符合安全边界时调用 `commit_storyboard_delta`，否则只重建完整受影响场景或分集并调用 `commit_storyboard`。提交后停在 `production_preflight`，禁止调用 `audit_storyboard`。最终返回 `project_id、work_order_id、artifact_id、canonical_sha256、handoff_artifact_id、handoff_id、trace_id、cache_hit及未命中原因`；缺少任一执行证据不得宣称完成。
+> 使用短剧分镜项目管理与审计工具，继续项目 `SBP-EXAMPLE`。本会话角色为 `production`，先调用 `get_agent_status`，再为第06–07集创建 `execute + explicit_execute` 的生产工单并保护第01–05集和第08–80集。复用指纹未变化的原文、80集方案和最新版canonical；禁止重复上传、重复解析。读取长内容使用自动 `bulk_ranges`，已有ETag时传 `if_none_match`。优先只生成受影响镜头的语义原子；符合安全边界时调用 `commit_storyboard_delta`，否则只重建完整受影响场景或分集并调用 `commit_storyboard`。提交后停在 `production_preflight`，禁止调用 `audit_storyboard`。最终返回 `project_id、work_order_id、artifact_id、canonical_sha256、handoff_artifact_id、handoff_id、trace_id、cache_hit及未命中原因`；缺少任一执行证据不得宣称完成。
 
 ### 独立审计窗口模板
 
-> 使用短剧分镜项目管理与审计工具，继续项目 `SBP-f96bd55b1ffe`。本会话角色为 `independent_audit`，先调用 `get_agent_status`，再创建 `storyboard_audit + audit_only + read_only` 工单。只审计 `artifact_id=___`、`handoff_artifact_id=___` 和生产返回的精确canonical；验证全部指纹后调用 `audit_storyboard(force_machine_recheck=false)`。安全缓存未命中时，必须完成八层语义复核并提交 `semantic_audit`；禁止重新上传、重新生成、优化剧情、修改Excel或重新导出。最终返回 `audit_certificate_id、production_trace_id、audit_trace_id、fast_path_evidence、cache_hit及未命中原因、问题数量、受影响镜头`。
+> 使用短剧分镜项目管理与审计工具，继续项目 `SBP-EXAMPLE`。本会话角色为 `independent_audit`，先调用 `get_agent_status`，再创建 `storyboard_audit + audit_only + read_only` 工单。只审计 `artifact_id=___`、`handoff_artifact_id=___` 和生产返回的精确canonical；验证全部指纹后调用 `audit_storyboard(force_machine_recheck=false)`。安全缓存未命中时，必须完成八层语义复核并提交 `semantic_audit`；禁止重新上传、重新生成、优化剧情、修改Excel或重新导出。最终返回 `audit_certificate_id、production_trace_id、audit_trace_id、fast_path_evidence、cache_hit及未命中原因、问题数量、受影响镜头`。
 
 ### 条件修复窗口模板
 

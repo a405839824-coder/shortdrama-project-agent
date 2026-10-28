@@ -4,7 +4,7 @@
 
 ## 逐条封存，不按错误类别放行
 
-`GAP-1bb91d83751b422f` 仍只接受以下精确有序清单：
+`GAP-EXAMPLE` 仍只接受以下精确有序清单：
 
 1. `HND-f6fd29730a074d2c`
 2. `HND-95e3b1c141a64783`
@@ -46,7 +46,7 @@
 
 当前 production 窗口须使用两张不同的 `rule_improvement + execute + explicit_execute` 工单。补签工单 targets 精确等于补签 gap、上述六条有序 handoff 和 `controlled_phase:preflight_evidence_backfill`；恢复工单 targets 精确等于恢复 gap、原 11 条有序 handoff 和 `controlled_phase:handoff_recovery`。
 
-补签先 `plan`，全部六条逐项画像通过后，再以完全相同的列表、`plan_sha256` 和 `REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE` 执行。补签全部存在后，`GAP-0e5d48969c4c494e` 的原 11 条仍按 [UPGRADE_0.5.11.md](UPGRADE_0.5.11.md) 所列精确顺序统一恢复：先 `plan`，再以同一列表、哈希和 `SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT` 执行。
+补签先 `plan`，全部六条逐项画像通过后，再以完全相同的列表、`plan_sha256` 和 `REVALIDATE_AND_APPEND_PRODUCTION_PREFLIGHT_EVIDENCE` 执行。补签全部存在后，`GAP-EXAMPLE` 的原 11 条仍按 [UPGRADE_0.5.11.md](UPGRADE_0.5.11.md) 所列精确顺序统一恢复：先 `plan`，再以同一列表、哈希和 `SUPERSEDE_AND_REISSUE_PRESERVE_AUDIT` 执行。
 
 每条事务保持原子性和幂等性。旧 handoff 只标记 `superseded`，不删除；每条只签发一个 `prepared + PENDING_AUDIT` 后继。不得修改分镜、对白、canonical、XLSX、旧生产证书、原 production trace 或历史审计记录；production 窗口不得执行或签发独立审计，后继必须由独立审计窗口按当前 validator 完整重审。
 

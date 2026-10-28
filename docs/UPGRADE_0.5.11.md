@@ -15,7 +15,7 @@
 
 ## 精确补签范围
 
-补签缺口固定为 `GAP-1bb91d83751b422f`，有序 handoff 清单只能是：
+补签缺口固定为 `GAP-EXAMPLE`，有序 handoff 清单只能是：
 
 1. `HND-f6fd29730a074d2c`
 2. `HND-95e3b1c141a64783`
@@ -30,7 +30,7 @@
 
 ## 统一恢复原 11 条
 
-补签成功后，恢复缺口固定为 `GAP-0e5d48969c4c494e`，有序 handoff 清单只能是：
+补签成功后，恢复缺口固定为 `GAP-EXAMPLE`，有序 handoff 清单只能是：
 
 1. `HND-5394638be5fe4a55`
 2. `HND-ea122cf3048e482a`

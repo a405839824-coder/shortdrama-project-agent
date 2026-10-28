@@ -272,6 +272,11 @@ def _validate_profile(
         args = entry.get("args", [])
         if not isinstance(args, list) or not all(isinstance(value, str) for value in args):
             raise PackagingError("source MCP manifest args must be a string list")
+        for value in [entry["command"], entry.get("cwd", "."), *args]:
+            if isinstance(value, str) and (value.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:[/\\]", value)):
+                raise PackagingError(
+                    "source MCP contains local absolute paths; run scripts/configure_local_mcp.py --portable before packaging"
+                )
         return
 
     if "mcpServers" in manifest:

@@ -7,8 +7,8 @@ replay, timeline, continuity snapshots, initial-frame projection and hearing
 events. It also supports the bounded finger/cloth gestures required by the same
 manuscript. The compact template and independent review requirements stay intact.
 
-Authorization: project SBP-5de5c074e0b6, work order WO-e9ae4347264b438a,
-capability gap GAP-8fb5bf15e3f44176. No project manuscript is stored in this repo.
+Authorization: project SBP-EXAMPLE, work order WO-EXAMPLE,
+capability gap GAP-EXAMPLE. No project manuscript is stored in this repo.
 The authorized R2 corrections, original dialogue, complete plot and ending must
 remain the basis of the separate production acceptance.
 

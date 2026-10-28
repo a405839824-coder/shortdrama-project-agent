@@ -7,5 +7,6 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 "${PYTHON_BIN}" -m venv "${PLUGIN_ROOT}/.venv"
 "${PLUGIN_ROOT}/.venv/bin/python" -m pip install --upgrade pip
 "${PLUGIN_ROOT}/.venv/bin/python" -m pip install -r "${PLUGIN_ROOT}/requirements.txt"
+"${PLUGIN_ROOT}/.venv/bin/python" "${PLUGIN_ROOT}/scripts/configure_local_mcp.py"
 
 echo "本地环境已建立：${PLUGIN_ROOT}/.venv"

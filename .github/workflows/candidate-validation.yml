@@ -2,7 +2,7 @@ name: Candidate validation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, open-source]
     paths:
       - 'server/**'
       - 'skills/**'
@@ -65,4 +65,5 @@ jobs:
           .venv/bin/python server/main.py --self-test
           .venv/bin/python tests/stdio_smoke.py
           .venv/bin/python tests/http_smoke.py
+          .venv/bin/python scripts/configure_local_mcp.py --portable
           .venv/bin/python scripts/package_plugin.py --profile source

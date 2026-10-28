@@ -10,3 +10,11 @@ dist/
 .env.cloud
 .railway.env
 .railway/
+.env
+.env.*
+!.env*.example
+*.log
+*.pem
+*.key
+credentials*.json
+secrets*.json
