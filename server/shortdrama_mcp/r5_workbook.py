@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter
 
 from .field_content import voice_parts, workbook_audit_scope
 from .picture_presentation import display_picture
+from .project_template import canonical_variant, MASTER_LIGHTING
 
 MASTER_NAME = "正式分镜母版"
 GUIDE_NAME = "使用与来源"
@@ -102,6 +103,8 @@ def reading_matrices(storyboard, formal_rows, *, _legacy_layout=False):
         _label_value("审计状态", "查看“00_范围与审计”页；生成或导出完成不表示独立审计通过。"),
         _label_value("原文来源", "逐镜核对“覆盖原文”“原文依据类型”“原文支撑句”；本页不补造缺失来源。"),
         _label_value("模板", "用户提供的第36—37集R5模板结构；原件及原文均不改写。" if _legacy_layout else
+                     "本项目已授权E列包含四项光影，K列保留同源光影；原A—J列顺序和审核标准不变。"
+                     if canonical_variant(storyboard) == MASTER_LIGHTING else
                      "R5模板按授权升级：原A—J列顺序保留，K列独立光影；E列不再拼接光影或显示可见主体标签。"),
     ]
     return sheets

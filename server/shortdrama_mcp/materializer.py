@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 from .written_payload import context_instruction_text, protect_visual_text_fragments
 from .picture_presentation import display_picture, timed_picture
+from .project_template import canonical_variant, MASTER_LIGHTING
 from .field_content import (assert_field_content, r5_keyframe_sections, LIGHTING_FIELDS as LIGHTING_FIELDS,
                             FORMAL_EXECUTION_FIELDS, project_lighting, music_directives, strip_negative_music)
 
@@ -1059,6 +1060,7 @@ def compile_formal_merged_field(
     *,
     assume_compact: bool = False,
     _legacy_layout: bool = False,
+    _include_lighting: bool = False,
 ) -> str:
     """Compile the compact execution cell without adding semantic content."""
 
@@ -1088,7 +1090,9 @@ def compile_formal_merged_field(
             f"{'可见主体：' if _legacy_layout else ''}{_text(compact.get('可见主体'))}"
         ),
     ]
-    for field in (LEGACY_FORMAL_MERGED_ATOMIC_FIELDS if _legacy_layout else FORMAL_MERGED_ATOMIC_FIELDS):
+    fields = (LEGACY_FORMAL_MERGED_ATOMIC_FIELDS
+              if _legacy_layout or _include_lighting else FORMAL_MERGED_ATOMIC_FIELDS)
+    for field in fields:
         value = display_picture(compact) if field == "画面内容" else _text(compact.get(field))
         paragraphs.append(f"音色：\n\n{value}" if field == "音色" else f"{field}：{value}")
     formal = "\n\n".join(paragraphs)
@@ -1105,7 +1109,7 @@ def compile_formal_merged_field(
             f"music directive is forbidden: {active_music!r}"
         )
     context_text = "\n".join(context_instruction_text(_text(compact.get(field)), field)
-                             for field in ("镜头类型", "可见主体", *FORMAL_MERGED_ATOMIC_FIELDS))
+                             for field in ("镜头类型", "可见主体", *fields))
     context_hits = _contract_hits(context_text, BLANK_CONTEXT_FORBIDDEN_TERMS)
     if context_hits:
         raise ValueError(
@@ -1821,6 +1825,7 @@ def formal_mother_template_rows(
                     shot,
                     assume_compact=True,
                     _legacy_layout=_legacy_layout,
+                    _include_lighting=canonical_variant(compact) == MASTER_LIGHTING,
                 ),
                 GPT_KEYFRAME_FIELD: compile_gpt_keyframe_instruction(
                     shot,
