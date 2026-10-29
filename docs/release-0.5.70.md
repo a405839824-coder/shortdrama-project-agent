@@ -3,8 +3,15 @@
 New production explicitly selects one library and variant before freezing its
 plan: animation (3d or 2d), or photorealistic (live_action_look). Missing, stale,
 cross-library and incompatible visual-reference declarations fail validation.
-Legacy artifacts remain readable without silently assigning a style. R2 keeps
-this unreleased version; library revision `2026-10-29.2` invalidates stale choices.
+Legacy artifacts remain readable without silently assigning a style. The R2
+library revision `2026-10-29.2` is retained in this integrated 0.5.70 release.
+
+The required selection is enforced at the shared current-production admission
+route, including direct canonical submissions. Existing signed historical
+repair and migration retain their unchanged source lock; they do not acquire a
+guessed style. If a selection exists, the shared write contract still requires
+the complete matching visual card. Provenance, repair authorization and audit
+checks remain in effect on those historical routes.
 
 `get_agent_status` accepts optional `prompt_library_id` and `prompt_variant`.
 Together they return only that selected profile and shared Seedance guidance in
@@ -41,20 +48,15 @@ The animation candidate was integrated onto `c3794c460470ece2d6d912e8830d14cd4c3
 (0.5.69 project-specific master lighting). That feature and its consumed transfer
 contract remain unchanged. This release uses fresh 0.5.70 transfer IDs.
 The restored Railway subscription and live 0.5.69 service supersede the earlier
-service-offline observation below; perform a fresh inventory before publication.
-
-
-This is a prepared candidate, not an online release. On 2026-10-29 Railway showed
-an expired trial, an outstanding invoice, service offline and no active deployment.
-The user chose to defer payment and finish release preparation. CLI login was
-restored; no deployment, main-branch publication or production-data mutation was
-performed for this candidate. Do not label the edge 404 fixed by this code.
+service-offline observation. This candidate is authorized for deployment after
+joint validation; perform a fresh inventory before publication. The earlier
+billing outage was not fixed by this code.
 
 Before resuming, verify the current main commit and deployment configuration,
 then inventory the existing persistent volume, signed Library pointers, roles,
-member connections and latest valid project snapshots. The old container is
-offline: the existence of a volume alone does not prove its former temporary
-runtime survived. Do not replay an old consumed upgrade snapshot or substitute
+member connections and latest valid project snapshots. The existence of a volume
+alone does not prove all temporary runtime data survived an earlier outage.
+Do not replay an old consumed upgrade snapshot or substitute
 older project bytes. If the runtime is absent, recover the latest verified Library
 snapshots through the normal authorized mount flow and account for any missing
 newer work before proceeding.
@@ -73,8 +75,9 @@ PYTHONPATH=server python scripts/upgrade_prompt_library_0570.py verify
 PYTHONPATH=server python scripts/upgrade_prompt_library_0570.py verify-and-reopen
 ```
 
-Copy only the reviewed adapter into the old image's `scripts/` directory when
-needed; its 0.5.66 helper modules already exist in 0.5.68. Freeze and publication
+Copy only the reviewed adapter to a temporary path in the old image when
+needed, with `/app/scripts` on `PYTHONPATH`; its helper modules already exist
+in the deployed image. Freeze and publication
 remain sequential, finite, signed and version-bound. Never run these commands
 against an empty or uninventoried runtime. Railway auto-deploys `main`, so keep
 the candidate off `main` until the data prerequisites are satisfied.
@@ -86,9 +89,9 @@ state and Library pointers against the pre-deploy inventory. Refresh a client's
 tool schema if it has not acquired the optional selection arguments. Local tests
 do not establish any of these online results.
 
-Current R2 software results and exact counts are recorded in the accompanying
-`verification-0.5.70-r2.json`, `regression.json` and transport reports; do not reuse
-the old R1 totals as R2 evidence. Windows cannot complete the native-symlink,
+Use the Candidate validation run for the final PR head as the combined release
+evidence; earlier R1/R2 and pre-integration totals do not cover this merge.
+Windows cannot complete the native-symlink,
 POSIX-backslash-filename or Linux procfs/directory-fsync restore exercises.
 Run the Linux restore exercise before deployment; local checks are not verified
 production-data recovery or a full repository regression. Actual assets and

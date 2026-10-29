@@ -42,6 +42,8 @@ def require_current_production(candidate, *, work_order, scope_kind, workbook_mi
         if (not isinstance(contract,dict) or contract.get('source_kind')!='novel'
             or not isinstance(intake,dict) or intake.get('mode')!='chapter_to_storyboard'):
             raise ValueError('chapter_source_scope_required: imported novel source requires a bound novel contract and chapter intake on every current production route')
+    from prompt_libraries import assert_prompt_library
+    assert_prompt_library(candidate, required=True)
     from production_derivation import inspect_derivation
     from episode_rules import CONTRACT
     binding=inspect_derivation(candidate)

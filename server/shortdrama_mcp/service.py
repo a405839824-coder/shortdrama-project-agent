@@ -872,7 +872,10 @@ def _assert_r10_spc1_output_contract(storyboard: dict[str, Any]) -> None:
             "r10_spc1_contract_required: " + "; ".join(mismatches)
         )
     from prompt_libraries import assert_prompt_library
-    assert_prompt_library(storyboard, required=True)
+    # This shared contract also checks signed historical repair/replay paths.
+    # New production requires a selection at production_route; existing selected
+    # projects must still supply a complete, valid card on every write.
+    assert_prompt_library(storyboard, required="prompt_library" in source_lock)
 
 
 def _export_compact_storyboard(

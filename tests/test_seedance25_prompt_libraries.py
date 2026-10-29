@@ -163,12 +163,23 @@ class PromptLibraryTests(unittest.TestCase):
             value = candidate(); value['shots'][0]['生成限制'] = '9:16竖屏；' + extra
             with self.assertRaises(PromptLibraryError): assert_prompt_library(value)
 
-    def test_legacy_read_only_is_not_silently_classified_and_write_requires_choice(self):
+    def test_legacy_repair_keeps_unselected_style_but_new_production_requires_choice(self):
+        from shortdrama_mcp.production_route import require_current_production
         value = candidate(); del value['source_lock']['prompt_library']; del value['source_lock']['visual_style']
         before = copy.deepcopy(value)
         assert_prompt_library(value)
+        _assert_r10_spc1_output_contract(value)
+        self.assertEqual(require_current_production(value,
+            work_order={'operation':'storyboard_repair'}, scope_kind='full'),
+            'existing_artifact_audit_or_repair')
         self.assertEqual(before, value)
-        with self.assertRaisesRegex(PromptLibraryError, 'no automatic'):
+        for operation in ('storyboard_create','storyboard_regenerate','storyboard_change','production_batch'):
+            with self.subTest(operation=operation), self.assertRaisesRegex(PromptLibraryError, 'no automatic'):
+                require_current_production(value, work_order={'operation':operation}, scope_kind='full')
+
+    def test_selected_historical_write_still_requires_complete_visual_card(self):
+        value = candidate(); del value['source_lock']['visual_style']
+        with self.assertRaises(PromptLibraryError):
             _assert_r10_spc1_output_contract(value)
 
     def test_real_compiler_and_both_projections_use_same_selected_style(self):
@@ -394,6 +405,45 @@ class PromptLibraryTests(unittest.TestCase):
         files = compiler_fingerprints()
         for name in ['prompt_library_animation.json', 'prompt_library_photorealistic.json', 'seedance25_guidance.json']:
             self.assertIn('references/' + name, files)
+
+
+class HistoricalStyleRepairTests(unittest.IsolatedAsyncioTestCase):
+    async def test_signed_legacy_repair_preserves_source_and_returns_original_auditor(self):
+        from unittest.mock import patch
+        import test_v040_full_repair as repair_support
+        import test_v0568_runtime_repair as runtime_support
+
+        original = repair_support.three_shot_storyboard
+
+        def historical_storyboard():
+            value = original()
+            fragment = style_fragment(value['source_lock'])
+            for shot in value['shots']:
+                shot['生成限制'] = shot['生成限制'].replace(fragment, '')
+            del value['source_lock']['prompt_library']
+            del value['source_lock']['visual_style']
+            return value
+
+        with patch.object(repair_support, 'three_shot_storyboard', historical_storyboard):
+            flow = repair_support.CompactMasterFullRepairTests()
+            await flow.asyncSetUp()
+            self.addAsyncCleanup(flow.asyncTearDown)
+            # Only creation of the historical fixture uses the existing test
+            # entry adapter. The repair executes the real production route.
+            del flow.service._require_current_production
+            before, _ = flow.service._storyboard_from_artifact(
+                flow.namespace, flow.project_id, flow.committed['artifact_id'])
+            helper = runtime_support.RuntimeRepairTests()
+            helper.flow = flow
+            await helper.test_new_runtime_requires_fresh_validation_and_original_auditor()
+            base, _ = flow.service.store.get_artifact(
+                flow.namespace, flow.project_id, flow.committed['artifact_id'])
+            repaired, _ = flow.service._storyboard_from_artifact(
+                flow.namespace, flow.project_id,
+                base['metadata']['repair_successor_artifact_id'])
+            self.assertEqual(repaired['source_lock'], before['source_lock'])
+            self.assertNotIn('prompt_library', repaired['source_lock'])
+            self.assertNotIn('visual_style', repaired['source_lock'])
 
 
 if __name__ == '__main__':
