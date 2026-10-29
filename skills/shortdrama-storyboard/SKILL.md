@@ -463,6 +463,13 @@ Keep evidence concrete: include shot ID, field, source sentence, computed durati
 Read `references/shot_design_contract.md` and the live `production_prevention_contract.shot_design_policy` before planning. Freeze each shot's design, real scene anchors, grounded performance and duration exception before rendering. Ordinary shots are at most four seconds; longer shots require the registered per-shot exception. A long line alone is not an exception. Preserve exact dialogue across camera changes. Close-class framing (medium_close/face) is an approximately 60% episode style target, never a forced quota.
 The master keeps A–J in place and adds K (`光影`) with all four labelled lighting values. E omits those lighting paragraphs and the literal `可见主体：` label but preserves names; F retains static lighting and identity. Copy E plus K for video execution. Never paste internal design reasoning into E/F. Old ten-column workbooks remain read-only compatibility inputs, not a current export choice.
 
+An explicit user-authorized administrator project setting may select
+`master-lighting-v1` through `begin_project_task` (see
+`../../docs/project-master-lighting.md`). Only that project includes the same four
+lighting paragraphs in E as well as K. Bind the selected variant in the canonical
+extension and effective delivery fingerprint; all source, voice, timing and audit
+requirements still apply. Do not edit an exported workbook to simulate this option.
+
 0.5.49新生产读取在线v3计划与shot_design v2：4秒目标不触发自动切镜，4—6秒完整短句有独立通道；cut_anchor与备选绑定实际台词/动作，镜数是参考，整批节奏必须独审。沿用同一计时、状态与十一列表格，不输出内部理由。6秒以上对白和未支持运镜/音频能力保持限制。本轮按用户要求未测试，不宣称内容验收或首稿98%。见docs/UPGRADE_0.5.49.md。
 
 0.5.50 已补入有源间接言语的生成前独立审查：具体来源、事实、说话人与措辞冻结后，复用 narrative 工具及签名记录进入编译。原文给定对白继续逐字保护，最新 fail/unknown 或版本变化会阻断旧批准；转译批准不替代完整分镜审计。协议见 references/source_dialogue_review.md，升级说明见 docs/UPGRADE_0.5.50.md。

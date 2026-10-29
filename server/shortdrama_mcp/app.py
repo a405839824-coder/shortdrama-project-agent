@@ -21,7 +21,7 @@ from .project_reads import ProjectReads, READ_CONTRACT
 from .external_storage import ExternalProjectStorage
 from .retention import RetentionWorker
 from .file_io import DEFAULT_BULK_RESPONSE_CHARS, preview_extracted_bulk
-from .formal_delivery import delivery_contract, inspect_formal_delivery
+from .formal_delivery import delivery_contract, project_delivery_contract, inspect_formal_delivery
 from .diagnostic_view import diagnostic_page
 from .models import (
     ArtifactReadRange,
@@ -323,7 +323,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
             EXECUTION_PROGRESS_POLICY
         )
         response.data["account_access"] = access_profile
-        response.data["formal_delivery_contract"] = delivery_contract()
+        response.data["formal_delivery_contract"] = (project_delivery_contract(service, namespace, project_id)
+            if project_id else delivery_contract())
         return finish(response)
 
     @server.tool(

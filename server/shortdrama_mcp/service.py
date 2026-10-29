@@ -44,7 +44,8 @@ from .audit_coverage_pages import process_coverage_page, assert_no_pending_cover
 from .field_content import model_field_contract
 from .production_plan import model_production_contract
 from .production_route import require_current_production
-from .formal_delivery import CONTRACT as FORMAL_DELIVERY_CONTRACT, delivery_contract, inspect_formal_delivery, verified_batch
+from .formal_delivery import CONTRACT as FORMAL_DELIVERY_CONTRACT, delivery_contract, project_delivery_contract, inspect_formal_delivery, verified_batch
+from .project_template import parse_request as parse_template_request, assert_project_template
 from .workflow_state import observed_workflow
 from .acceptance_service import controlled_acceptance_operation
 from .delta import (
@@ -5055,6 +5056,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "legacy_envelope": {"contract": "storyboard-task-options-v1", "borrow_permissions": []},
                 "same_authorization_and_validation": True,
                 "client_schema_refresh_verified": False,
+                "project_template_transport": "Admin only: rule_improvement/execute/explicit_execute; confirmation=project-template-v1:{\"contract\":\"project-template-v1\",\"variant\":\"master-lighting-v1\"}. Affects only this project; new canonicals must explicitly set canonical_extension.project_template_variant. standard-v1 restores the default. Existing files and receipts are not rewritten.",
                 "instructions": "If this chat cannot submit borrow_permissions, prefix the exact serialized envelope with task-options-v1: and pass that string in confirmation. The prefix preserves the string through MCP JSON preprocessing. Never pass both parameters. Explicit execute authorization, source hashes and server-issued grant IDs remain mandatory. Continuation confirmations are unchanged.",
             },
             "controlled_workbook_migration": {
@@ -6816,6 +6818,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     def _production_preflight_certificate_value(
         self,
         *,
+        namespace: str,
+        project_id: str,
         certificate_id: str,
         artifact_id: str,
         canonical_artifact_id: str,
@@ -6832,7 +6836,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
         value: dict[str, Any] = {
             "certificate_id": certificate_id,
             "certificate_type": AUDIT_CLASS_PRODUCTION_PREFLIGHT,
-            "formal_delivery_context": delivery_contract(),
+            "formal_delivery_context": project_delivery_contract(self, namespace, project_id),
             "work_order_id": work_order_id,
             "production_work_order_id": production_work_order_id,
             "artifact_id": artifact_id,
@@ -9820,6 +9824,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
         else:
             certificate = self._production_preflight_certificate_value(
+                namespace=namespace, project_id=project_id,
                 certificate_id=str(public["new_certificate_id"]),
                 artifact_id=str(public["artifact_id"]),
                 canonical_artifact_id=str(
@@ -10371,6 +10376,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             )
         else:
             certificate = self._production_preflight_certificate_value(
+                namespace=namespace, project_id=project_id,
                 certificate_id=str(public["new_certificate_id"]),
                 artifact_id=str(public["artifact_id"]),
                 canonical_artifact_id=str(
@@ -11773,6 +11779,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 production_binding = self._not_applied_production_binding(project_id,
                     f"{scope_kind}:{scope_id}", "existing_migration_or_repair_admission")
             self._assert_workbook_migration_atoms(workbook_migration, storyboard)
+            assert_project_template(storyboard, hub)
             candidate, _identity = _prepare_compact_storyboard_for_commit(storyboard)
             _assert_r10_spc1_output_contract(candidate)
             self._verify_storyboard_source_realizations(namespace, project_id, candidate)
@@ -13604,6 +13611,12 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
     ) -> ToolResponse:
         self._require_runtime()
         create_actions = {"create", "create_window_neutral"}
+        template_variant = parse_template_request(confirmation, operation=operation, mode=mode,
+            authorization=authorization, action=action)
+        if template_variant is not None:
+            if borrow_permissions is not None:
+                raise ValueError("project_template_separate_rule_work_order_required")
+            confirmation = None
         if action in create_actions and confirmation is not None:
             # A cached ChatGPT schema already has this string parameter. The
             # versioned envelope is transport compatibility, not new authority.
@@ -13799,7 +13812,14 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                         else "repair the recorded root cause before starting another production batch"
                     )
                 )
+            if template_variant is not None:
+                request["source_lock"]["project_template_variant"] = template_variant
             result = project_agent.create_work_order(hub, request)
+            if template_variant is not None:
+                if result["work_order_status"] != "approved":
+                    raise ValueError("project_template_approved_authority_required")
+                hub["project_template"] = {"variant": template_variant,
+                    "authorization_work_order_id": request["work_order_id"]}
             hub["project_state"]["current_stage"] = result["work_order_status"]
             prevention_profile = storyboard_agent.active_prevention_profile(ledger)
             prevention_profile["profile_sha256"] = sha256_bytes(
@@ -13830,6 +13850,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 ),
                 "active_prevention_profile": prevention_profile,
                 "borrow_permissions": request['source_lock'].get('borrow_permissions',[]),
+                "project_template": hub.get("project_template"),
             },
         )
 
@@ -15117,7 +15138,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             # ``result`` nor the generic final count key ``issue_count``.
             certificate.update(
                 {
-                    "formal_delivery_context": delivery_contract(),
+                    "formal_delivery_context": project_delivery_contract(self, namespace, project_id),
                     "preflight_status": (
                         PRODUCTION_PREFLIGHT_PASS
                         if clean
@@ -21556,6 +21577,7 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
             if storyboard.get('draft_preflight_id')!=draft_preflight_id:
                 raise ValueError('preflight_candidate_reference_commit_id')
             storyboard=unpack_preflight_candidate(self,namespace,project_id,work_order_id,storyboard)
+        assert_project_template(storyboard, hub_snapshot)
         workbook_migration = self._validated_workbook_migration(
             namespace, project_id, work_order_snapshot, request_session_id
         )
@@ -22321,8 +22343,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "draft_preflight_id": draft_preflight_id,
                 "draft_commit_request_sha256": commit_request_sha256,
                 "formal_delivery_contract": FORMAL_DELIVERY_CONTRACT,
-                "template_contract_sha256": delivery_contract()["template_contract_sha256"],
-                "rule_registry_sha256": delivery_contract()["rule_registry_sha256"],
+                "template_contract_sha256": project_delivery_contract(self, namespace, project_id)["template_contract_sha256"],
+                "rule_registry_sha256": project_delivery_contract(self, namespace, project_id)["rule_registry_sha256"],
                 "draft_commit_payload_sha256": draft_commit_payload_sha256,
                 "scene_coverage_manifest_sha256": (
                     bound_draft_preflight.get("scene_coverage_manifest_sha256")
@@ -22360,8 +22382,8 @@ class StoryboardService(NarrativeGuardMixin, WorkbookMigrationMixin):
                 "canonical_json_fingerprint": json_record["fingerprint"],
                 "canonical_sha256": canonical_hash,
                 "formal_delivery_contract": FORMAL_DELIVERY_CONTRACT,
-                "template_contract_sha256": delivery_contract()["template_contract_sha256"],
-                "rule_registry_sha256": delivery_contract()["rule_registry_sha256"],
+                "template_contract_sha256": project_delivery_contract(self, namespace, project_id)["template_contract_sha256"],
+                "rule_registry_sha256": project_delivery_contract(self, namespace, project_id)["rule_registry_sha256"],
                 "source_fingerprint": source_fingerprint,
                 "boundary_hash": boundary_hash,
                 "ruleset_version": self._ruleset_version,

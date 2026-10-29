@@ -177,6 +177,13 @@ def _source_units(storyboard: dict[str, Any], graph: dict[str, Any], shot_ids: l
     return units
 
 
+def _template_question(storyboard, rule, question):
+    from .project_template import canonical_variant, MASTER_LIGHTING
+    if rule == "standalone_execution" and canonical_variant(storyboard) == MASTER_LIGHTING:
+        return question.replace("E列不拼光影、", "本项目E列须包含与K列完全同源的四项光影，")
+    return question
+
+
 def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> dict[str, Any]:
     shots = [s for s in storyboard.get("shots", []) if isinstance(s, dict)]
     ids = [str(s.get("镜头编号") or s.get("shot_uid") or "").strip() for s in shots]
@@ -261,7 +268,7 @@ def build_obligations(storyboard: dict[str, Any], context: dict[str, str]) -> di
             dependencies = {ref: field_hashes[ref] for ref in refs}
             row = {
                 "obligation_id": f"{sid}/{rule}", "shot_id": sid, "rule_id": rule,
-                "layer": layer, "question": question,
+                "layer": layer, "question": _template_question(storyboard, rule, question),
                 "dependency_fields": dependencies,
                 "required_observation_refs": [f"field:{sid}.{field}" for field in observed],
                 "allowed_statuses": ["pass", "fail_current", "unknown"],
@@ -600,13 +607,13 @@ def verify_certificate_coverage(service: Any, storyboard: dict[str, Any], certif
     return receipt
 
 
-def _obligation_rule_definitions() -> dict[str, dict[str, Any]]:
+def _obligation_rule_definitions(storyboard=None) -> dict[str, dict[str, Any]]:
     """Shared read view; hashes and full validation remain server-owned."""
     definitions = {}
     for rule, layer, question, fields, observed, adjacent in RULES:
         fields, observed, neighbors, neighbor_observed = review_fields(rule, fields, observed, adjacent)
         definitions[rule] = {
-            "layer": layer, "question": question,
+            "layer": layer, "question": _template_question(storyboard or {}, rule, question),
             "dependency_fields": list(fields),
             "required_observation_fields": list(observed),
             "neighbor_dependency_fields": list(neighbors),
@@ -661,7 +668,7 @@ def read_audit_obligations(service: Any, namespace: str, project_id: str, artifa
         raise ValueError("audit_obligations_offset_invalid")
     limit = min(max(int(limit or 50), 1), 100)
     budget = min(max(int(max_chars or 24_000), 1), 64_000)
-    definitions = _obligation_rule_definitions()
+    definitions = _obligation_rule_definitions(storyboard)
     definition_hash = stable_json_hash(definitions)
     shot_ids = list(dict.fromkeys(row['shot_id'] for row in manifest['obligations']))
     neighbors = {
