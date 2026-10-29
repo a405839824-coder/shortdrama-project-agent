@@ -10,6 +10,17 @@ select exactly one library in `source_lock.prompt_library`: `animation` (2d or 3
 or `photorealistic` (live_action_look). Read the selected library only, plus the
 shared Seedance 2.5 guidance; do not merge style examples. Use the versioned
 selection from `production_prevention_contract.prompt_libraries.catalog`.
+Before freezing a new production plan, explicitly fill `source_lock.visual_style`
+with the chosen profile's `render_mode`, concrete character design, materials,
+palette and shading, plus style ID/revision. `get_agent_status` can prepare its
+fingerprint from `prompt_visual_style`; it does not freeze or change the project.
+Never fill missing choices with a guessed default or a placeholder. Freeze the
+selection, visual card and reference declarations together. Their later change
+requires a new frozen plan. Formal and keyframe outputs use the same card.
+Cross-library checks cover visual instruction fields while preserving recognized
+dialogue and written literals; never rewrite dialogue, voice or timing to pass.
+Reference hashes bind declarations only. Actual reference pixels and generated
+media must be reviewed separately; report untested media as `not_verified`.
 Legacy files without a selection remain readable but cannot enter a new write
 until their owner chooses a library. Never infer style from genre or dialogue.
 

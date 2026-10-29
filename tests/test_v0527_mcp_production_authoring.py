@@ -36,8 +36,14 @@ class McpProductionAuthoringTests(unittest.TestCase):
         self.responses = []
         self.decisions, graph_bytes, _ = complete_source_input()
         # New production now requires an explicit style choice before planning.
-        from prompt_libraries import make_selection
-        self.decisions['project']['source_lock']['prompt_library'] = make_selection('animation', '3d')
+        from prompt_libraries import make_selection, make_visual_style
+        selection = make_selection('animation', '3d')
+        self.decisions['project']['source_lock']['prompt_library'] = selection
+        self.decisions['project']['source_lock']['visual_style'] = make_visual_style(selection,
+            style_id='synthetic-production-look', revision='1', render_mode='stylized_realism',
+            character_design='成年角色七头身，椭圆脸型，五官比例保持一致',
+            materials='皮肤哑光，头发分束，衣料保持纤维层次',
+            palette='青灰与暖棕为主色，小面积朱红', shading='体块明暗清楚，柔和阴影')
         from production_plan_test_support import with_plan
         texts = {r['source_id']:r['source_text'] for r in self.decisions['project']['prevention_evidence']['source_ledger']}
         graph_bytes = with_plan(self.decisions, graph_bytes, texts)
@@ -198,8 +204,9 @@ class McpProductionAuthoringTests(unittest.TestCase):
     def test_legacy_canonical_cannot_bypass_current_production_plan(self):
         self.service.__dict__.pop('_require_current_production', None)
         legacy = valid_storyboard()
-        from prompt_libraries import make_selection, style_fragment
-        legacy['source_lock']['prompt_library'] = make_selection('animation', '3d')
+        from prompt_libraries import style_fragment
+        for key in ('prompt_library', 'visual_style'):
+            legacy['source_lock'][key] = copy.deepcopy(self.decisions['project']['source_lock'][key])
         for shot in legacy['shots']:
             shot['生成限制'] += '；' + style_fragment(legacy['source_lock'])
         with patch.object(author_storyboard, "record_attempt", wraps=author_storyboard.record_attempt) as compiler:

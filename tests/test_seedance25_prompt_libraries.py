@@ -12,7 +12,7 @@ sys.path[:0] = [str(ROOT / 'server'), str(ROOT / 'tests'),
                str(ROOT / 'skills/shortdrama-storyboard/scripts')]
 
 from prompt_libraries import (PromptLibraryError, make_selection, resolve_selection,
-    library_contract, selected_profile, style_fragment, assert_prompt_library, findings)
+    library_contract, selected_profile, style_fragment, assert_prompt_library, findings, make_visual_style)
 from production_plan import model_production_contract
 from production_decisions import lower_production_decisions
 from author_storyboard import _render_decisions
@@ -24,8 +24,15 @@ from validate_storyboard import validate_project
 
 
 def lock(library='animation', variant='3d'):
+    selection = make_selection(library, variant)
+    visual = make_visual_style(selection, style_id='synthetic-project-look', revision='1',
+        render_mode={'3d':'stylized_realism','2d':'line_art','live_action_look':'cinematic'}[variant],
+        character_design='成年角色七头身，椭圆脸型，五官比例保持一致',
+        materials='皮肤哑光，头发分束，棉布低光泽，金属保留局部反射',
+        palette='青灰与暖棕为主色，朱红作为小面积强调色',
+        shading='体块明暗清楚，阴影边缘柔和，轮廓清晰')
     return {'output_contract': 'R10-SPC-1', 'target_model': 'Seedance 2.5', 'aspect_ratio': '9:16',
-            'prompt_library': make_selection(library, variant)}
+            'prompt_library': selection, 'visual_style': visual}
 
 
 def candidate(library='animation', variant='3d'):
@@ -65,6 +72,26 @@ class PromptLibraryTests(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 with self.assertRaises(ToolError):
                     asyncio.run(fixture.server.call_tool('get_agent_status', arguments))
+
+    def test_public_mcp_prepares_complete_visual_card_without_changing_project(self):
+        from test_v055_quality_migration import V055QualityAndMigrationTests
+        fixture=V055QualityAndMigrationTests();fixture.setUp();self.addCleanup(fixture.tearDown)
+        project=fixture._project('视觉卡只读准备')
+        before=fixture.service.store.list_projects(fixture.namespace)
+        card=lock()['visual_style']
+        spec={k:card[k] for k in ('style_id','revision','render_mode','character_design','materials','palette','shading')}
+        arguments={'project_id':project,'prompt_library_id':'animation','prompt_variant':'3d','prompt_visual_style':spec}
+        result=asyncio.run(fixture.server.call_tool('get_agent_status',arguments))
+        self.assertFalse(result.is_error,result.content)
+        self.assertEqual(result.structured_content['data']['selected_prompt_library']['visual_style'],card)
+        self.assertEqual(fixture.service.store.list_projects(fixture.namespace),before)
+        self.assertEqual(fixture.service.store.list_artifacts(fixture.namespace,project),[])
+        for changes in [{'prompt_visual_style':{}},{'prompt_visual_style':{**spec,'render_mode':'cinematic'}},
+                {'prompt_visual_style':{**spec,'materials':'真人实拍质感'}},
+                {'prompt_visual_style':spec,'prompt_library_id':None},
+                {'prompt_visual_style':{**spec,'made_up':'unsupported'}}]:
+            with self.subTest(changes=changes),self.assertRaises(ToolError):
+                asyncio.run(fixture.server.call_tool('get_agent_status',{**arguments,**changes}))
 
     def test_exactly_two_libraries_and_three_independent_variants(self):
         catalog = model_production_contract()['prompt_libraries']['catalog']
@@ -137,7 +164,7 @@ class PromptLibraryTests(unittest.TestCase):
             with self.assertRaises(PromptLibraryError): assert_prompt_library(value)
 
     def test_legacy_read_only_is_not_silently_classified_and_write_requires_choice(self):
-        value = candidate(); del value['source_lock']['prompt_library']
+        value = candidate(); del value['source_lock']['prompt_library']; del value['source_lock']['visual_style']
         before = copy.deepcopy(value)
         assert_prompt_library(value)
         self.assertEqual(before, value)
@@ -145,6 +172,7 @@ class PromptLibraryTests(unittest.TestCase):
             _assert_r10_spc1_output_contract(value)
 
     def test_real_compiler_and_both_projections_use_same_selected_style(self):
+        baseline = None
         for library, variant in [('animation', '3d'), ('animation', '2d'), ('photorealistic', 'live_action_look')]:
             with self.subTest(library=library, variant=variant):
                 data = performance_fixture()
@@ -161,6 +189,148 @@ class PromptLibraryTests(unittest.TestCase):
                 self.assertEqual(row['正式分镜母版'].count(expected), 1)
                 self.assertEqual(row['GPT关键帧生成指令'].count(expected), 1)
                 self.assertFalse(findings(canonical))
+                protected = [{key:value for key,value in shot.items() if key != '生成限制'} for shot in canonical['shots']]
+                if baseline is None:
+                    baseline = protected
+                self.assertEqual(protected, baseline)  # Same dialogue, voice, timing, geometry and actions.
+
+    def test_actual_source_dialogue_voice_and_timing_do_not_change_between_libraries(self):
+        from test_v0527_production_decisions import production_fixture, action, voice_spec, compile_source, source_fixture
+        from timing_model import validate_timing
+        source=compile_source(*source_fixture())
+        baseline=None
+        for library,variant in [('animation','3d'),('animation','2d'),('photorealistic','live_action_look')]:
+            data=production_fixture()
+            data['shots'][0]['actions']=[action('speak',source_use_id='U1',voice=voice_spec())]
+            data['project']['source_lock'].update(lock(library,variant))
+            canonical=_render_decisions(lower_production_decisions(data,source_compilation=source)['typed_decisions'])
+            _assert_r10_spc1_output_contract(canonical)
+            row=canonical['shots'][0]
+            self.assertEqual(row['画面内容'].count('明日再议。'),1)
+            self.assertIn('基础声线',row['音色'])
+            self.assertEqual(validate_timing(canonical,canonical['shots'])['faults'],[])
+            protected={'shot':{k:v for k,v in row.items() if k!='生成限制'},
+                       'audio_workflow':canonical['prevention_evidence']['audio_workflow']}
+            if baseline is None: baseline=protected
+            with self.subTest(library=library,variant=variant): self.assertEqual(protected,baseline)
+
+    def test_review_regressions_are_blocked_in_visual_instruction_fields(self):
+        cases = [('生成限制','采用真人实拍质感。'), ('生成限制','日系二维动画。'),
+                 ('生成限制','禁止真人电影风格并采用仿真人风格。'),
+                 ('画面内容','全片采用真人电影风格，甲站在书房里。'),
+                 ('参考图锚定','图片1作为人物形象，采用真人电影风格。')]
+        for field, text in cases:
+            with self.subTest(field=field,text=text):
+                value = candidate()
+                value['shots'][0][field] = (value['shots'][0].get(field,'') if field=='生成限制' else '') + text
+                with self.assertRaisesRegex(PromptLibraryError, 'conflicting positive style'):
+                    _assert_r10_spc1_output_contract(value)
+
+    def test_alias_spacing_case_and_negative_scope_cannot_bypass(self):
+        for text in ['真人实拍质感','真 人 电 影 风 格','Ｌｉｖｅ－ａｃｔｉｏｎ look',
+                     'photorealistic','日系二维动画','2 D anime','禁止真人电影风格\n采用仿真人风格',
+                     '禁止真人电影风格；仍要仿真人风格','禁止真人电影风格，仿真人风格除外',
+                     '不能不采用真人电影风格','不是不使用仿真人风格',
+                     '禁止字幕真人电影风格','禁止真人电影风格并保留仿真人质感',
+                     '禁止2D动漫 and use photorealistic','禁止2D动漫；仿真人风格',
+                     '不要画面模糊采用仿真人风格','禁止非仿真人风格','禁止任何非仿真人风格',
+                     '非不采用真人电影风格']:
+            with self.subTest(text=text):
+                value=candidate(); value['shots'][0]['生成限制']+='；'+text
+                with self.assertRaises(PromptLibraryError): assert_prompt_library(value,required=True)
+        value=candidate('photorealistic','live_action_look');value['shots'][0]['生成限制']+='；3 D 动漫。'
+        with self.assertRaises(PromptLibraryError): assert_prompt_library(value,required=True)
+
+    def test_all_visual_instruction_fields_are_checked_and_error_location_is_specific(self):
+        from prompt_libraries import VISUAL_FIELDS
+        for field in VISUAL_FIELDS:
+            value=candidate();value['shots'][0][field]=value['shots'][0].get(field,'')+'；采用真人实拍质感。'
+            with self.subTest(field=field), self.assertRaisesRegex(PromptLibraryError, field):
+                assert_prompt_library(value,required=True)
+
+    def test_genuine_negations_dialogue_and_written_words_remain_exact(self):
+        value=candidate()
+        value['shots'][0]['生成限制']+='；禁止采用真人电影风格；不使用仿真人风格；禁止真人实拍质感和二维动画；禁止直接采用仿真人风格；no photorealistic；真实光影与丝绸材质。'
+        value['shots'][0]['画面内容']='甲说道：“我要采用真人实拍质感。”甲指向纸面。纸面当前全文只有：“日系二维动画”。'
+        original=copy.deepcopy(value)
+        assert_prompt_library(value,required=True)
+        self.assertEqual(value,original)
+        value['shots'][0]['画面内容']+='采用“真人电影风格”。'
+        with self.assertRaises(PromptLibraryError): assert_prompt_library(value,required=True)
+
+    def test_quoted_reference_or_style_instruction_is_not_a_literal_exemption(self):
+        for field,text in [('参考图锚定','【参考图锚点】采用“真人电影风格”'),
+                ('生成限制','视觉风格：“仿真人风格”'),
+                ('画面内容','纸面当前全文只有：“二维动画”。全片采用仿真人风格。')]:
+            value=candidate();value['shots'][0][field]=value['shots'][0].get(field,'')+'；'+text
+            with self.subTest(field=field),self.assertRaises(PromptLibraryError): assert_prompt_library(value,required=True)
+
+    def test_selected_style_block_cannot_be_negated_or_only_quoted(self):
+        for prefix,suffix in [('禁止',''),('不要',''),('范例：“','”'),('纸面当前全文只有：“','”')]:
+            value=candidate()
+            value['shots'][0]['生成限制']='9:16竖屏；'+prefix+style_fragment(value['source_lock'])+suffix
+            with self.subTest(prefix=prefix),self.assertRaisesRegex(PromptLibraryError,'positive complete'):
+                assert_prompt_library(value,required=True)
+
+    def test_render_technology_does_not_assign_animation_style_to_photorealism(self):
+        value=candidate('photorealistic','live_action_look')
+        value['shots'][0]['生成限制']+='；采用三维模型渲染，PBR材质，真实光影。'
+        assert_prompt_library(value,required=True)
+        value['shots'][0]['生成限制']+='采用三维模型赛璐璐渲染。'
+        with self.assertRaises(PromptLibraryError): assert_prompt_library(value,required=True)
+
+    def test_every_render_mode_projects_and_explicit_mode_switch_is_blocked(self):
+        for library,variant in [('animation','3d'),('animation','2d'),('photorealistic','live_action_look')]:
+            selected=make_selection(library,variant)
+            for mode in resolve_selection(selected)['profile']['render_modes']:
+                value=lock(library,variant)
+                spec=value['visual_style']
+                value['visual_style']=make_visual_style(selected,**{k:spec[k] for k in
+                    ('style_id','revision','character_design','materials','palette','shading')},render_mode=mode)
+                canonical={'source_lock':value,'shots':[{'生成限制':'9:16竖屏；'+style_fragment(value)}]}
+                with self.subTest(library=library,mode=mode): assert_prompt_library(canonical,required=True)
+        value=candidate();value['shots'][0]['光影']='全片采用三渲二。'
+        with self.assertRaisesRegex(PromptLibraryError,'光影'): assert_prompt_library(value,required=True)
+
+    def test_visual_style_requires_explicit_mode_complete_dimensions_and_valid_hash(self):
+        value=lock();del value['visual_style']
+        with self.assertRaisesRegex(PromptLibraryError,'explicit project visual style'): style_fragment(value)
+        for name,replacement in [('materials',''),('materials','待定'),('palette','另一套配色'),('render_mode','cinematic'),('library_id','photorealistic')]:
+            value=lock();value['visual_style'][name]=replacement
+            with self.subTest(name=name), self.assertRaises(PromptLibraryError): selected_profile(value,required=True)
+        value=lock();spec=value['visual_style'];spec['materials']='采用真人实拍质感'
+        with self.assertRaisesRegex(PromptLibraryError,'conflicting positive style'): selected_profile(value,required=True)
+
+    def test_visual_reference_binds_project_style_and_asset_identity_without_pixel_claim(self):
+        value=lock();value['prompt_references']=[{'id':'图1','role':'appearance','library_id':'animation','variant':'3d',
+            'asset_sha256':'a'*64,'visual_style_sha256':value['visual_style']['content_sha256']}]
+        self.assertIsNotNone(selected_profile(value,required=True))
+        for key in ['asset_sha256','visual_style_sha256']:
+            broken=copy.deepcopy(value);broken['prompt_references'][0][key]='invalid'
+            with self.subTest(key=key),self.assertRaises(PromptLibraryError): selected_profile(broken,required=True)
+        self.assertEqual(library_contract()['visual_style_contract']['actual_media_validation'],'not_verified')
+
+    def test_style_change_requires_refreezing_existing_source_plan(self):
+        from test_v0527_mcp_production_authoring import McpProductionAuthoringTests
+        fixture=McpProductionAuthoringTests();fixture.setUp();self.addCleanup(fixture.tearDown)
+        from production_plan import ProductionPlanGuard, ProductionPlanError
+        graph=json.loads(fixture.graph_bytes)
+        changed=copy.deepcopy(fixture.decisions)
+        changed['project']['source_lock'].update(lock('photorealistic','live_action_look'))
+        with self.assertRaisesRegex(ProductionPlanError,'decision differs from independently frozen plan'):
+            ProductionPlanGuard(changed,{'production_plan':graph['production_plan']})
+        changed=copy.deepcopy(fixture.decisions)
+        selected=changed['project']['source_lock']['prompt_library']
+        spec=changed['project']['source_lock']['visual_style']
+        changed['project']['source_lock']['visual_style']=make_visual_style(selected,**{
+            **{k:spec[k] for k in ('style_id','revision','render_mode','character_design','materials','palette','shading')},
+            'palette':'暗红主色，金色点缀'})
+        with self.assertRaisesRegex(ProductionPlanError,'decision differs from independently frozen plan'):
+            ProductionPlanGuard(changed,{'production_plan':graph['production_plan']})
+        changed=copy.deepcopy(fixture.decisions)
+        changed['project']['source_lock']['prompt_references']=[{'id':'video1','role':'motion','library_id':'neutral','variant':''}]
+        with self.assertRaises(ProductionPlanError):
+            ProductionPlanGuard(changed,{'production_plan':graph['production_plan']})
 
     def test_shared_validator_rejects_tampered_library_field(self):
         value = candidate(); value['source_lock']['prompt_library']['variant'] = 'live_action_look'
@@ -182,6 +352,32 @@ class PromptLibraryTests(unittest.TestCase):
             fixture.assert_no_publication()
         finally:
             fixture.tearDown()
+
+    def test_real_mcp_preflight_blocks_style_conflict_after_source_plan_freeze(self):
+        import hashlib
+        from production_plan_test_support import with_plan
+        from test_v0527_mcp_production_authoring import McpProductionAuthoringTests
+        fixture=McpProductionAuthoringTests();fixture.setUp();self.addCleanup(fixture.tearDown)
+        fixture.decisions['shots'][0]['editorial']['参考图锚定']='无外部图像锚点；全片采用真人实拍质感。'
+        texts={row['source_id']:row['source_text'] for row in fixture.decisions['project']['prevention_evidence']['source_ledger']}
+        frozen=with_plan(fixture.decisions,fixture.graph_bytes,texts)
+        plan_order=fixture.begin('storyboard_plan',planning=True)
+        saved=fixture.mcp('commit_project_artifact',{'project_id':fixture.project,'work_order_id':plan_order,
+            'artifact_type':'storyboard_plan','output_format':'json','file_name':'conflicting-style-plan.json',
+            'structured_data':json.loads(frozen)})
+        _,graph_path=fixture.service.store.get_artifact(fixture.namespace,fixture.project,saved['artifact_id'])
+        request=copy.deepcopy(fixture.request)
+        request.update(source_graph_artifact_id=saved['artifact_id'],
+                       source_graph_sha256=hashlib.sha256(graph_path.read_bytes()).hexdigest())
+        before=copy.deepcopy(request)
+        result=fixture.mcp('preflight_storyboard_draft',fixture.arguments(request))['data']
+        self.assertFalse(result['commit_ready'])
+        self.assertIn('prompt_library:',str(result['report']['issues']))
+        self.assertIn('参考图锚定',str(result['report']['issues']))
+        self.assertEqual(request,before)
+        artifacts=fixture.service.store.list_artifacts(fixture.namespace,fixture.project)
+        self.assertEqual({row['artifact_id'] for row in artifacts},{fixture.graph_id,saved['artifact_id']})
+        self.assertEqual(fixture.service.store.list_project_records(fixture.namespace,fixture.project,kind='handoffs'),[])
 
     def test_only_recorded_c010_migration_can_change_the_old_priority(self):
         import rule_registry

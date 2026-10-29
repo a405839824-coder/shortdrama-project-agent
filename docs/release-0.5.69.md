@@ -1,13 +1,18 @@
-# 0.5.69 — explicit Seedance 2.5 prompt libraries
+# 0.5.69 R2 — explicit Seedance 2.5 prompt libraries and visual-style locks
 
 New production explicitly selects one library and variant before freezing its
 plan: animation (3d or 2d), or photorealistic (live_action_look). Missing, stale,
 cross-library and incompatible visual-reference declarations fail validation.
-Legacy artifacts remain readable without silently assigning a style.
+Legacy artifacts remain readable without silently assigning a style. R2 keeps
+this unreleased version; library revision `2026-10-29.2` invalidates stale choices.
 
 `get_agent_status` accepts optional `prompt_library_id` and `prompt_variant`.
 Together they return only that selected profile and shared Seedance guidance in
 `selected_prompt_library`; reading it does not select or mutate a project.
+An optional `prompt_visual_style` with seven explicit values prepares a complete
+fingerprinted project card. No field has a guessed default. New production needs
+this card, and the existing plan freezes selection, card and reference declarations.
+Changing any of them requires a newly frozen plan, even with a recomputed hash.
 The production compiler, formal mother template and GPT keyframe projection use
 the same style field. The catalog carries fingerprints, not both libraries' prose.
 
@@ -16,6 +21,11 @@ with explicit selection and reference responsibility. The original 27 fields,
 11-column template, source dialogue, timing, voice, permissions and independent
 audit gates remain. Registered contradictory positive style phrases are blocked;
 this is not complete semantic detection or a claim about generated media quality.
+R2 checks all visual instruction fields, common aliases/full-width/spacing, bounded
+negative scope and registered 3D rendering-mode contradictions. Recognized dialogue
+and written literals are masked only during checks; original text is not rewritten.
+Appearance/style references need matching card and asset-hash declarations. The
+service does not open these external assets or certify their actual pixels.
 
 Official source summaries are versioned separately from project-authored style
 templates. See `references/seedance25_prompt_libraries.md` in the storyboard skill.
@@ -69,10 +79,11 @@ state and Library pointers against the pre-deploy inventory. Refresh a client's
 tool schema if it has not acquired the optional selection arguments. Local tests
 do not establish any of these online results.
 
-Local Windows verification ran 256 selected regression tests: 253 passed and
-three platform-specific cases were skipped (symlink privileges, POSIX backslash
-filenames, and the Linux procfs/directory-fsync restore exercise). HTTP and STDIO
-MCP smoke checks passed, including independent reads of all three variants and
-rejection of a cross-library request. The runtime self-test and registry check
-passed. Run the Linux restore exercise before deployment; it is not a verified
-production-data recovery. This is not a full repository regression or media test.
+Current R2 software results and exact counts are recorded in the accompanying
+`verification-0.5.69-r2.json`, `regression.json` and transport reports; do not reuse
+the old R1 totals as R2 evidence. Windows cannot complete the native-symlink,
+POSIX-backslash-filename or Linux procfs/directory-fsync restore exercises.
+Run the Linux restore exercise before deployment; local checks are not verified
+production-data recovery or a full repository regression. Actual assets and
+rendered media remain NOT_RUN, with explicit scope in
+`seedance25-media-acceptance.md`.

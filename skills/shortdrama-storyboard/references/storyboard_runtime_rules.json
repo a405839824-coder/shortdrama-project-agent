@@ -4744,6 +4744,16 @@
     "selection_location": "source_lock.prompt_library",
     "new_writes_require_explicit_selection": true,
     "legacy_read_only_has_no_implicit_library": true,
+    "visual_style_contract": "project-visual-style-v1",
+    "visual_style_location": "source_lock.visual_style",
+    "new_writes_require_explicit_visual_style": true,
+    "frozen_style_partitions": [
+      "/project/source_lock/prompt_library",
+      "/project/source_lock/visual_style",
+      "/project/source_lock/prompt_references"
+    ],
+    "conflict_check_scope": "visual instruction fields; bounded style vocabulary and negation scope; recognized dialogue and written literals preserved",
+    "actual_reference_pixels_and_generated_media": "not_verified_by_metadata_or_software_tests",
     "conflict_migration": {
       "contract": "seedance25-style-scope-migration-v1",
       "authorization": "explicit_user_request",
@@ -5693,5 +5703,5 @@
   ],
   "rule_registry_contract": "r10-rule-registry-v1",
   "rule_registry_revision": "0.5.69",
-  "rule_registry_sha256": "2718b22b0952d480ce32e99456abf7cf3e363e563f3c90e0381414d5b7a3995e"
+  "rule_registry_sha256": "b9685629bc7cc2090008729f059896d1d750eaa9db3d75dde79fa262bfb76910"
 }

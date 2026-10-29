@@ -1,5 +1,6 @@
 """Shared expectations for the two real MCP transport smoke tests."""
 import json
+import hashlib
 from pathlib import Path
 
 
@@ -52,8 +53,22 @@ async def inspect_session(session) -> dict:
                 set(chosen) == {'selection', 'common', 'library_id', 'label', 'profile'} and
                 chosen['library_id'] == library and chosen['selection']['variant'] == variant and
                 chosen['profile'] == expected['variants'][variant]})
+        spec = {'style_id':'transport-synthetic-look','revision':'1',
+            'render_mode':{'3d':'stylized_realism','2d':'line_art','live_action_look':'cinematic'}[variant],
+            'character_design':'成年人物自然比例，五官轮廓保持一致','materials':'皮肤哑光，衣料细节清楚',
+            'palette':'青灰主色，暖棕点缀','shading':'体块明暗清晰，阴影柔和'}
+        prepared = await session.call_tool('get_agent_status', {'full_self_test': False,
+            'prompt_library_id':library,'prompt_variant':variant,'prompt_visual_style':spec})
+        card = (prepared.structured_content or {}).get('data',{}).get('selected_prompt_library',{}).get('visual_style')
+        expected_card = {'contract':'project-visual-style-v1','library_id':library,'variant':variant,**spec}
+        expected_card['content_sha256'] = hashlib.sha256(json.dumps(
+            {'selection':chosen['selection'],'visual_style':expected_card},ensure_ascii=False,
+            sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        library_reads[-1]['explicit_visual_card_prepared'] = not prepared.is_error and card == expected_card
     mixed = await session.call_tool('get_agent_status', {
         'prompt_library_id': 'animation', 'prompt_variant': 'live_action_look'})
+    mixed_card = await session.call_tool('get_agent_status', {'prompt_library_id':'animation', 'prompt_variant':'3d',
+        'prompt_visual_style':{**spec,'render_mode':'stylized_realism','materials':'采用真人实拍质感'}})
     schema = next(tool.input_schema for tool in tools.tools if tool.name == 'get_agent_status')
     return {
         "server": init.server_info.model_dump(by_alias=True),
@@ -64,7 +79,8 @@ async def inspect_session(session) -> dict:
         "runtime_status": payload.get("data", {}).get("runtime_status"),
         "library_reads": library_reads,
         "mixed_library_request_rejected": bool(mixed.is_error),
-        "library_arguments_exposed": {'prompt_library_id', 'prompt_variant'} <= set(schema.get('properties', {})),
+        "mixed_visual_card_rejected": bool(mixed_card.is_error),
+        "library_arguments_exposed": {'prompt_library_id', 'prompt_variant', 'prompt_visual_style'} <= set(schema.get('properties', {})),
     }
 
 
@@ -79,6 +95,7 @@ def inspection_passed(inspection: dict) -> bool:
         and inspection["runtime_status"] == "pass"
         and inspection['library_arguments_exposed']
         and inspection['mixed_library_request_rejected']
+        and inspection['mixed_visual_card_rejected']
         and len(inspection['library_reads']) == 3
-        and all(row['only_selected_profile'] for row in inspection['library_reads'])
+        and all(row['only_selected_profile'] and row['explicit_visual_card_prepared'] for row in inspection['library_reads'])
     )

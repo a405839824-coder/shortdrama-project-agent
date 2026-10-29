@@ -117,7 +117,8 @@ def model_production_contract():
                 'shots': ['{shot_id,purpose_fact_ids,required_action_ids,audio_action_ids,source_use_ids,visible,design}'],
                 'shot_design': shot_policy()['design_shape'],
                 'narrative': p['scene_narrative_policy']['shape']},
-            'decision_partitions': ['each initial_world/scenes|actors|props|points entry',
+            'decision_partitions': ['each supplied project/source_lock prompt_library|visual_style|prompt_references value',
+                'each initial_world/scenes|actors|props|points entry',
                 'each shot camera|ticks|transition|editorial|shot_id|shot_uid|episode_id|scene_id|continuity_id|source_unit_ids',
                 'each shot action'],
             'knowledge_stances': p['knowledge_stances'],
@@ -165,6 +166,10 @@ def registry(rows, id_key, path):
 def decision_values(payload):
     """Complete, non-overlapping authored ownership partitions; never fill values."""
     result = {}
+    lock = payload.get('project', {}).get('source_lock') or {}
+    for name in ('prompt_library', 'visual_style', 'prompt_references'):
+        if name in lock:
+            result['/project/source_lock/' + name] = lock[name]
     evidence=payload.get('project',{}).get('prevention_evidence',{})
     for name in ('episode_contract','borrow_ledger'):
         if name in evidence: result['/project/prevention_evidence/'+name]=evidence[name]

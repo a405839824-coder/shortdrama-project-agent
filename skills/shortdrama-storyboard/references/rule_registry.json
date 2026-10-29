@@ -10163,6 +10163,16 @@
       "selection_location": "source_lock.prompt_library",
       "new_writes_require_explicit_selection": true,
       "legacy_read_only_has_no_implicit_library": true,
+      "visual_style_contract": "project-visual-style-v1",
+      "visual_style_location": "source_lock.visual_style",
+      "new_writes_require_explicit_visual_style": true,
+      "frozen_style_partitions": [
+        "/project/source_lock/prompt_library",
+        "/project/source_lock/visual_style",
+        "/project/source_lock/prompt_references"
+      ],
+      "conflict_check_scope": "visual instruction fields; bounded style vocabulary and negation scope; recognized dialogue and written literals preserved",
+      "actual_reference_pixels_and_generated_media": "not_verified_by_metadata_or_software_tests",
       "conflict_migration": {
         "contract": "seedance25-style-scope-migration-v1",
         "authorization": "explicit_user_request",
