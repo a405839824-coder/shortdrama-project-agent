@@ -870,6 +870,8 @@ def _assert_r10_spc1_output_contract(storyboard: dict[str, Any]) -> None:
         raise ValueError(
             "r10_spc1_contract_required: " + "; ".join(mismatches)
         )
+    from prompt_libraries import assert_prompt_library
+    assert_prompt_library(storyboard, required=True)
 
 
 def _export_compact_storyboard(

@@ -3584,6 +3584,8 @@ def validate_project(
 
     source_lock = obj.get("source_lock")
     source_lock_fields = ["上集终点", "本集起点", "本集计划终点", "下一集起点", "禁止重复", "禁止提前"]
+    from prompt_libraries import findings as prompt_library_findings
+    issues.extend(prompt_library_findings(obj))
     if not isinstance(source_lock, dict) or any(is_empty(source_lock.get(f)) for f in source_lock_fields):
         issues.append(_issue(catalog, "E-SOURCE-001", "source_lock", "Source Lock缺失或核心边界字段不完整。"))
     strict_contract = isinstance(source_lock, dict) and source_lock.get("output_contract") == STRICT_OUTPUT_CONTRACT

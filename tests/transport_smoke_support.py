@@ -40,6 +40,21 @@ async def inspect_session(session) -> dict:
     tools = await session.list_tools()
     status = await session.call_tool("get_agent_status", {"full_self_test": False})
     payload = status.structured_content or {}
+    library_reads = []
+    for library, variant in [('animation', '3d'), ('animation', '2d'), ('photorealistic', 'live_action_look')]:
+        result = await session.call_tool('get_agent_status', {
+            'full_self_test': False, 'prompt_library_id': library, 'prompt_variant': variant})
+        chosen = (result.structured_content or {}).get('data', {}).get('selected_prompt_library', {})
+        expected = json.loads((PLUGIN_ROOT / 'skills/shortdrama-storyboard/references' /
+                               f'prompt_library_{library}.json').read_text(encoding='utf-8'))
+        library_reads.append({'library_id': library, 'variant': variant,
+            'only_selected_profile': not result.is_error and
+                set(chosen) == {'selection', 'common', 'library_id', 'label', 'profile'} and
+                chosen['library_id'] == library and chosen['selection']['variant'] == variant and
+                chosen['profile'] == expected['variants'][variant]})
+    mixed = await session.call_tool('get_agent_status', {
+        'prompt_library_id': 'animation', 'prompt_variant': 'live_action_look'})
+    schema = next(tool.input_schema for tool in tools.tools if tool.name == 'get_agent_status')
     return {
         "server": init.server_info.model_dump(by_alias=True),
         "tool_count": len(tools.tools),
@@ -47,6 +62,9 @@ async def inspect_session(session) -> dict:
         "status_call_is_error": bool(status.is_error),
         "agent_status": payload.get("status"),
         "runtime_status": payload.get("data", {}).get("runtime_status"),
+        "library_reads": library_reads,
+        "mixed_library_request_rejected": bool(mixed.is_error),
+        "library_arguments_exposed": {'prompt_library_id', 'prompt_variant'} <= set(schema.get('properties', {})),
     }
 
 
@@ -59,4 +77,8 @@ def inspection_passed(inspection: dict) -> bool:
         and not inspection["status_call_is_error"]
         and inspection["agent_status"] == "pass"
         and inspection["runtime_status"] == "pass"
+        and inspection['library_arguments_exposed']
+        and inspection['mixed_library_request_rejected']
+        and len(inspection['library_reads']) == 3
+        and all(row['only_selected_profile'] for row in inspection['library_reads'])
     )

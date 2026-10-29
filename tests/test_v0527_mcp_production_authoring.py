@@ -35,6 +35,9 @@ class McpProductionAuthoringTests(unittest.TestCase):
         self.project = self.fixture._project("合成生成入口")
         self.responses = []
         self.decisions, graph_bytes, _ = complete_source_input()
+        # New production now requires an explicit style choice before planning.
+        from prompt_libraries import make_selection
+        self.decisions['project']['source_lock']['prompt_library'] = make_selection('animation', '3d')
         from production_plan_test_support import with_plan
         texts = {r['source_id']:r['source_text'] for r in self.decisions['project']['prevention_evidence']['source_ledger']}
         graph_bytes = with_plan(self.decisions, graph_bytes, texts)
@@ -194,8 +197,13 @@ class McpProductionAuthoringTests(unittest.TestCase):
 
     def test_legacy_canonical_cannot_bypass_current_production_plan(self):
         self.service.__dict__.pop('_require_current_production', None)
+        legacy = valid_storyboard()
+        from prompt_libraries import make_selection, style_fragment
+        legacy['source_lock']['prompt_library'] = make_selection('animation', '3d')
+        for shot in legacy['shots']:
+            shot['生成限制'] += '；' + style_fragment(legacy['source_lock'])
         with patch.object(author_storyboard, "record_attempt", wraps=author_storyboard.record_attempt) as compiler:
-            result = self.direct(valid_storyboard())
+            result = self.direct(legacy)
         compiler.assert_not_called()
         self.assertNotIn("authoring_attempt", result.data)
         self.assertNotIn("compiled_storyboard", result.data)

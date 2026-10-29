@@ -41,12 +41,14 @@ def runtime_context():
 
 def model_production_contract():
     p = policy()
+    from prompt_libraries import library_contract
     from episode_rules import policy as episode_policy
     import production_actions
     from production_decisions import ACTION_FIELDS
     from production_environment import SOUND_KINDS
     from source_decisions import MODES
     return {'contract': p['contract'], 'plan_contract': CONTRACT,
+            'prompt_libraries': library_contract(),
             'required_for': ['new_mcp_production_authoring', 'direct_canonical_new_production', 'official_production_cli'],
             'episode_contract': episode_policy(),
             'shot_design_policy': shot_policy(),
