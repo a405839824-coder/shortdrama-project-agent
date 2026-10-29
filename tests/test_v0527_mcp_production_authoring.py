@@ -204,11 +204,6 @@ class McpProductionAuthoringTests(unittest.TestCase):
     def test_legacy_canonical_cannot_bypass_current_production_plan(self):
         self.service.__dict__.pop('_require_current_production', None)
         legacy = valid_storyboard()
-        from prompt_libraries import style_fragment
-        for key in ('prompt_library', 'visual_style'):
-            legacy['source_lock'][key] = copy.deepcopy(self.decisions['project']['source_lock'][key])
-        for shot in legacy['shots']:
-            shot['生成限制'] += '；' + style_fragment(legacy['source_lock'])
         with patch.object(author_storyboard, "record_attempt", wraps=author_storyboard.record_attempt) as compiler:
             result = self.direct(legacy)
         compiler.assert_not_called()

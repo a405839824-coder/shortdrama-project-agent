@@ -77,7 +77,11 @@ class RuleClosureTests(unittest.TestCase):
             scope_kind='full',workbook_migration={'verified_record':'synthetic'}),'signed_historical_workbook_migration')
 
     def test_complete_plan_contract_is_bound_and_requires_actual_episode_scope(self):
-        f=plan_tests.ProductionPlanTests();f.setUp();result,canonical=f.record()
+        f=plan_tests.ProductionPlanTests();f.setUp()
+        selected = valid_storyboard()['source_lock']
+        for key in ('prompt_library', 'visual_style'):
+            f.data['project']['source_lock'][key] = copy.deepcopy(selected[key])
+        f.replan();result,canonical=f.record()
         self.assertTrue(inspect_derivation(canonical)['production_prevention_verified'])
         self.assertEqual(require_current_production(canonical,work_order={'operation':'storyboard_create'},scope_kind='scene'),'replayed_current_production')
         with self.assertRaisesRegex(ValueError,'episode_contract_required'):

@@ -31,6 +31,13 @@ class ProjectTemplateTests(unittest.TestCase):
         self.assertNotEqual(delivery_contract()["template_contract_sha256"],
                             delivery_contract(MASTER_LIGHTING)["template_contract_sha256"])
 
+    def test_3d_style_with_project_lighting_and_signed_delivery(self):
+        from test_seedance25_prompt_libraries import lock
+        data, graph = current.complete_episode()
+        data['project']['source_lock'].update(lock('animation', '3d'))
+        with patch.object(current, 'complete_episode', return_value=(data, graph)):
+            self.test_real_project_export_and_signed_receipt()
+
     def test_real_project_export_and_signed_receipt(self):
         flow = current.CurrentMcpContractTests()
         flow.setUp()
