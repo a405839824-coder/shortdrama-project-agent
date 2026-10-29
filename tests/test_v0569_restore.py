@@ -14,6 +14,7 @@ class MasterLightingRestoreTests(unittest.TestCase):
         f = existing.Upgrade0566BackupTests(methodName='runTest')
         f.setUp(); self.addCleanup(f.doCleanups)
         with ExitStack() as scope:
+            scope.enter_context(patch('shortdrama_mcp.__version__', restore.MASTER_LIGHTING_VERSION))
             for module in (existing.prepare, existing.arm):
                 for key in ('DIRECTORY', 'CONTRACT', 'TARGET_VERSION'):
                     name = 'VERSION' if key == 'TARGET_VERSION' else key

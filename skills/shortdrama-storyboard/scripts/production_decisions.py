@@ -1339,6 +1339,11 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
     world = _world(payload["initial_world"], sources)
     project = copy.deepcopy(payload["project"])
     _need(isinstance(project, dict) and isinstance(project.get("prevention_evidence"), dict), "project", "explicit project evidence required")
+    from prompt_libraries import style_fragment, PromptLibraryError
+    try:
+        selected_style = style_fragment(project.get("source_lock"))
+    except PromptLibraryError as exc:
+        raise ProductionDecisionError("project.source_lock.prompt_library", str(exc)) from exc
     evidence = project["prevention_evidence"]
     _need("scene_state_ledger" not in evidence, "project", "second endpoint-state copy forbidden")
     timing = evidence.get("audio_workflow", {}).get("timing")
@@ -1403,6 +1408,7 @@ def lower_production_decisions(payload: dict, *, source_compilation=None) -> dic
         first_view = _view(world, cam, row["scene_id"])
         try:
             fields, staging = _fields(world, row, cam, first_view, sources)
+            fields["生成限制"] += selected_style
             fields.update(_cut_fields(world, row, previous, sources, first_view))
         except ContractBlockError as exc:
             raise ProductionDecisionError(path + ".initial_contract_blocks", str(exc)) from exc

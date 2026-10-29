@@ -83,6 +83,16 @@ GESTURE_REPAIR_GATE_SQL = (
     "SELECT RAISE(ABORT, 'gesture_repair_upgrade_in_progress'); END"
 )
 GESTURE_REPAIR_MAX_EXPANDED_BYTES = 8 * 1024**3
+PROMPT_LIBRARY_DIRECTORY = ".upgrade-prompt-library-0570"
+PROMPT_LIBRARY_CONTRACT = "library-runtime-transfer-prompt-library-0570-v1"
+PROMPT_LIBRARY_VERSION = "0.5.70"
+PROMPT_LIBRARY_GATE = "prompt_library_upgrade_gate_0570"
+PROMPT_LIBRARY_GATE_SQL = (
+    f"CREATE TRIGGER {PROMPT_LIBRARY_GATE} BEFORE INSERT ON access_audit "
+    "WHEN NEW.outcome='started' BEGIN "
+    "SELECT RAISE(ABORT, 'prompt_library_upgrade_in_progress'); END"
+)
+PROMPT_LIBRARY_MAX_EXPANDED_BYTES = 8 * 1024**3
 MASTER_LIGHTING_DIRECTORY = ".upgrade-master-lighting-0569"
 MASTER_LIGHTING_CONTRACT = "library-runtime-transfer-master-lighting-0569-v1"
 MASTER_LIGHTING_VERSION = "0.5.69"
@@ -179,6 +189,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         (SURFACE_VOICE_DIRECTORY, SURFACE_VOICE_CONTRACT): SURFACE_VOICE_VERSION,
         (SCRIPT_SCOPE_DIRECTORY, SCRIPT_SCOPE_CONTRACT): SCRIPT_SCOPE_VERSION,
         (GESTURE_REPAIR_DIRECTORY, GESTURE_REPAIR_CONTRACT): GESTURE_REPAIR_VERSION,
+        (PROMPT_LIBRARY_DIRECTORY, PROMPT_LIBRARY_CONTRACT): PROMPT_LIBRARY_VERSION,
         (MASTER_LIGHTING_DIRECTORY, MASTER_LIGHTING_CONTRACT): MASTER_LIGHTING_VERSION,
     }.get((directory, contract))
     if target_version is None:
@@ -191,6 +202,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         (SURFACE_VOICE_DIRECTORY, SURFACE_VOICE_CONTRACT): SURFACE_VOICE_MAX_EXPANDED_BYTES,
         (SCRIPT_SCOPE_DIRECTORY, SCRIPT_SCOPE_CONTRACT): SCRIPT_SCOPE_MAX_EXPANDED_BYTES,
         (GESTURE_REPAIR_DIRECTORY, GESTURE_REPAIR_CONTRACT): GESTURE_REPAIR_MAX_EXPANDED_BYTES,
+        (PROMPT_LIBRARY_DIRECTORY, PROMPT_LIBRARY_CONTRACT): PROMPT_LIBRARY_MAX_EXPANDED_BYTES,
         (MASTER_LIGHTING_DIRECTORY, MASTER_LIGHTING_CONTRACT): 8 * 1024**3,
     }.get((directory, contract), MAX_EXPANDED_BYTES)
     transfer = data_dir / directory
@@ -223,6 +235,7 @@ def _restore(data_dir: Path, runtime_root: Path, *, version: str,
         SURFACE_VOICE_CONTRACT: (SURFACE_VOICE_GATE, SURFACE_VOICE_GATE_SQL),
         SCRIPT_SCOPE_CONTRACT: (SCRIPT_SCOPE_GATE, SCRIPT_SCOPE_GATE_SQL),
         GESTURE_REPAIR_CONTRACT: (GESTURE_REPAIR_GATE, GESTURE_REPAIR_GATE_SQL),
+        PROMPT_LIBRARY_CONTRACT: (PROMPT_LIBRARY_GATE, PROMPT_LIBRARY_GATE_SQL),
         MASTER_LIGHTING_CONTRACT: (MASTER_LIGHTING_GATE, MASTER_LIGHTING_GATE_SQL),
     }
     if contract in gate_contracts:
@@ -312,6 +325,7 @@ def restore_release_runtime_if_requested(settings) -> dict | None:
                                  (SURFACE_VOICE_DIRECTORY, SURFACE_VOICE_CONTRACT),
                                  (SCRIPT_SCOPE_DIRECTORY, SCRIPT_SCOPE_CONTRACT),
                                  (GESTURE_REPAIR_DIRECTORY, GESTURE_REPAIR_CONTRACT),
+                                 (PROMPT_LIBRARY_DIRECTORY, PROMPT_LIBRARY_CONTRACT),
                                  (MASTER_LIGHTING_DIRECTORY, MASTER_LIGHTING_CONTRACT))
                if (settings.data_dir / d / 'manifest.json').exists()]
     if not pending:

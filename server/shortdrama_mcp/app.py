@@ -211,6 +211,8 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         title="检查分镜 Agent 状态",
         description=(
             "在新聊天、继续旧项目或执行任务前调用；检查R10运行时、项目状态和跨窗口问题台账。"
+            "同时提供prompt_library_id和prompt_variant可单独读取所选提示词库；不修改项目选库。"
+            "可另传prompt_visual_style准备显式项目视觉卡及指纹；不冻结或改写项目。"
             "full_self_test=true会执行完整自检并签发、持久化运行时测试证书，因此本工具不是只读工具。"
         ),
         annotations=_annotations(read_only=False),
@@ -222,6 +224,9 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         project_id: str | None = None,
         full_self_test: bool = False,
         owner_id: str | None = None,
+        prompt_library_id: Literal["animation", "photorealistic"] | None = None,
+        prompt_variant: Literal["3d", "2d", "live_action_look"] | None = None,
+        prompt_visual_style: dict[str, str] | None = None,
     ) -> ToolResponse:
         reads = ProjectReads(server.access, service, external_storage)
         owner = reads.resolve(project_id, owner_id)
@@ -229,8 +234,16 @@ def create_mcp(settings: Settings) -> tuple[MCPServer, StoryboardService]:
         principal = reads.actor
         if full_self_test and namespace != principal.namespace:
             raise PermissionError("shared_project_read_only")
+        selected_library = None
+        if prompt_library_id is not None or prompt_variant is not None or prompt_visual_style is not None:
+            from prompt_libraries import make_selection, resolve_selection, make_visual_style
+            selected_library = resolve_selection(make_selection(prompt_library_id, prompt_variant))
+            if prompt_visual_style is not None:
+                selected_library["visual_style"] = make_visual_style(selected_library["selection"], **prompt_visual_style)
 
         def finish(response: ToolResponse) -> ToolResponse:
+            if selected_library is not None:
+                response.data["selected_prompt_library"] = selected_library
             response.data["project_read_contract"] = READ_CONTRACT
             response.data["project_write_scope"] = "authenticated_namespace"
             if principal.role == "admin" and principal.issuer != "local":

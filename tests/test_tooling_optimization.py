@@ -29,12 +29,21 @@ class ToolingOptimizationTests(unittest.TestCase):
             "tool_names": sorted(EXPECTED_TOOL_NAMES),
             "status_call_is_error": False,
             "agent_status": "pass", "runtime_status": "pass",
+            "library_arguments_exposed": True,
+            "mixed_library_request_rejected": True,
+            "mixed_visual_card_rejected": True,
+            "library_reads": [
+                {"only_selected_profile": True, "explicit_visual_card_prepared": True}
+                for _ in range(3)
+            ],
         }
         self.assertTrue(inspection_passed(inspection))
         for change in (
             {"agent_status": "fail"}, {"runtime_status": "fail"},
             {"status_call_is_error": True}, {"server": {"version": "stale"}},
             {"tool_names": [inspection["tool_names"][0]] * len(EXPECTED_TOOL_NAMES)},
+            {"library_arguments_exposed": False}, {"mixed_library_request_rejected": False},
+            {"mixed_visual_card_rejected": False}, {"library_reads": []},
         ):
             with self.subTest(change=change):
                 self.assertFalse(inspection_passed({**inspection, **change}))

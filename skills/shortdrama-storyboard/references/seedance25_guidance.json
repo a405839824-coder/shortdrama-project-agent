@@ -1,0 +1,110 @@
+{
+  "contract": "seedance25-prompt-library-v1",
+  "model": "Seedance 2.5",
+  "verified_at": "2026-10-29",
+  "sources": [
+    {
+      "id": "sd25-guide",
+      "title": "Doubao Seedance 2.5 提示词指南",
+      "url": "https://docs.volcengine.com/docs/ark/seedance-2-5-prompt-guide?lang=zh",
+      "section": "提示词写作建议、动作/表情描述、字幕约束不生效、白模参考/渲染"
+    },
+    {
+      "id": "sd25-model",
+      "title": "Doubao Seedance 2.5 模型文档",
+      "url": "https://docs.volcengine.com/docs/ark/seedance-2-5?lang=zh",
+      "section": "任务类型与限制、提示词技巧"
+    },
+    {
+      "id": "sd20-style",
+      "title": "Seedance 2.0 系列提示词指南",
+      "url": "https://docs.volcengine.com/docs/ark/seedance-2-0-prompt-guide?lang=zh&redirect=1",
+      "section": "风格漂移",
+      "applicability": "2.5指南明确引用2.0参考用法；本条保留2.0来源，不冒称2.5新增规定"
+    }
+  ],
+  "official_guidance": [
+    {
+      "id": "materials",
+      "source": "sd25-guide",
+      "summary": "写明素材编号与各自用途。"
+    },
+    {
+      "id": "sequence",
+      "source": "sd25-guide",
+      "summary": "按镜头顺序或时间轴组织事件；这不强制修改本插件已确认的可见时间码格式。"
+    },
+    {
+      "id": "actions",
+      "source": "sd25-guide",
+      "summary": "动作以概括为主，关键动作补细节，避免重复；表情用可见描述。"
+    },
+    {
+      "id": "reference_motion",
+      "source": "sd25-guide",
+      "summary": "明确沿用参考视频动作时，避免重复细写同一动作。"
+    },
+    {
+      "id": "white_model",
+      "source": "sd25-guide",
+      "summary": "白模视频可提供调度、运动和光照；另有外观参考时，需明确主体对应和各自职责。"
+    },
+    {
+      "id": "constraints",
+      "source": "sd25-guide",
+      "summary": "以正向描述为主；字幕、音频控制可用反向描述。"
+    },
+    {
+      "id": "dialogue",
+      "source": "sd25-guide",
+      "summary": "台词后反复复述词句可能诱发字幕；无字幕要求不保证零字幕。"
+    },
+    {
+      "id": "task_mode",
+      "source": "sd25-model",
+      "summary": "首尾帧、参考、编辑、延长按实际模式处理；参考素材不自动等于首帧。"
+    },
+    {
+      "id": "style_drift",
+      "source": "sd20-style",
+      "summary": "目标画风应明确；形象和风格参考宜先统一到目标画风。"
+    },
+    {
+      "id": "emotion_over_response",
+      "source": "sd25-guide",
+      "summary": "强烈情绪可能被模型转成眼睛发光；优先写可见表演。普通人物可明确自然眼睛，剧情已有超自然眼部效果不因此删除。"
+    },
+    {
+      "id": "model_aesthetic_change",
+      "source": "sd25-guide",
+      "summary": "2.0与2.5使用相同素材和提示词也可能产生不同美学风格。更换模型后要重新检查角色、材质和色彩，不直接沿用旧成片验收结论。"
+    },
+    {
+      "id": "reference_subtitles",
+      "source": "sd25-guide",
+      "summary": "参考视频自带字幕可能干扰无字幕指令；使用前核对实际素材，不承诺仅靠提示词消除字幕。"
+    }
+  ],
+  "implementation_policy": {
+    "basis": "用户要求动漫与仿真人分为两个库；以下隔离机制为插件实现要求，不是官方固定模板。",
+    "library_ids": [
+      "animation",
+      "photorealistic"
+    ],
+    "selection": "explicit_only_no_default_no_cross_library_fallback",
+    "shared_scope": [
+      "素材职责",
+      "事件顺序",
+      "对白保护",
+      "来源绑定",
+      "镜头连续性",
+      "声音要求"
+    ],
+    "legacy": "缺少选择的旧稿可只读检查；进入新写入必须明确选库，不推断为仿真人。",
+    "timing": "模型能力不覆盖项目已有单镜、单集及对白预算；不把时长上限当推荐镜长。",
+    "evidence_boundary": "软件仅检查选择、绑定、已登记冲突和文本投影；素材画风与成片效果仍需人工核验。",
+    "visual_style": "每个项目显式填写可校验指纹的视觉卡；选库、视觉卡和参考声明均进入既有冻结计划。",
+    "checks": "检查生成限制和其他视觉制作字段；仅屏蔽既有语法识别的对白与画内文字，原文与音色字段不改写。",
+    "actual_media_validation": "not_verified: asset fingerprints bind declarations, not pixel inspection or rendered-video approval"
+  }
+}

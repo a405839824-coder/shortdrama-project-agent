@@ -19,13 +19,23 @@ SKILL_ROOT = PLUGIN_ROOT / "skills" / "shortdrama-storyboard"
 import sys
 
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
-from test_public_scene_ecology import public_fixture  # noqa: E402
+from test_public_scene_ecology import public_fixture as historical_public_fixture  # noqa: E402
 from semantic_audit_helpers import inject_semantic_audit, semantic_audit_for_artifact
 from test_efficiency import valid_storyboard as compact_valid_storyboard
 
 
 def valid_storyboard() -> dict:
     return compact_valid_storyboard()
+
+
+def public_fixture() -> dict:
+    """Submit the ecology example with an explicit current production look."""
+    from prompt_libraries import style_fragment
+    value = historical_public_fixture()
+    value.setdefault("source_lock", {}).update(compact_valid_storyboard()["source_lock"])
+    for shot in value["shots"]:
+        shot["生成限制"] += style_fragment(value["source_lock"])
+    return value
 
 
 class LocalMcpTests(unittest.IsolatedAsyncioTestCase):

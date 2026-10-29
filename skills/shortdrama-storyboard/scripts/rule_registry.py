@@ -300,6 +300,20 @@ def _historical_migration_matches(registry, kind, identity, previous, current):
             and hashes.get('current_sha256') == registry_sha256(current))
 
 
+def _prompt_library_conflict_migration(registry, identity, previous, current):
+    """Permit only the explicitly recorded C-010 style-scope migration."""
+    migration = registry.get('runtime', {}).get('prompt_library_policy', {}).get('conflict_migration', {})
+    mutable = {'decision', 'higher_priority_rule'}
+    return (identity == 'C-010'
+            and migration.get('contract') == 'seedance25-style-scope-migration-v1'
+            and migration.get('authorization') == 'explicit_user_request'
+            and bool(migration.get('authorization_basis'))
+            and migration.get('baseline_sha256') == registry_sha256(previous)
+            and migration.get('current_sha256') == registry_sha256(current)
+            and {k: v for k, v in previous.items() if k not in mutable}
+                == {k: v for k, v in current.items() if k not in mutable})
+
+
 def check_registry_definition(registry, reference_root=None):
     """Validate ID sets, applicability, definitions, parameters and references."""
     failures = []
@@ -313,7 +327,8 @@ def check_registry_definition(registry, reference_root=None):
             failures.append('conflict baseline: missing or unexpected adjudication identity')
         for row in registry.get('conflicts', []):
             expected = definitions.get(row.get('conflict_id'), {})
-            if {key: row.get(key) for key in expected} != expected:
+            current_conflict = {key: row.get(key) for key in expected}
+            if current_conflict != expected and not _prompt_library_conflict_migration(registry, row['conflict_id'], expected, current_conflict):
                 failures.append('conflict baseline: unreviewed decision/priority/exception change: ' + row['conflict_id'])
         if registry.get('runtime', {}).get('global_priority') != baseline.get('global_priority'):
             failures.append('conflict priority: changed order, duplicate or cyclic priority requires reviewed migration')

@@ -10,7 +10,26 @@
       "禁止提前": "合成编号测试边界：禁止提前",
       "output_contract": "R10-SPC-1",
       "target_model": "Seedance 2.5",
-      "aspect_ratio": "9:16"
+      "aspect_ratio": "9:16",
+      "prompt_library": {
+        "contract": "seedance25-prompt-library-v1",
+        "library_id": "photorealistic",
+        "variant": "live_action_look",
+        "content_sha256": "58841cfc766f7093a97fce5104ece6a9b61242ee5bae391aefe1f01ffbbb1d1b"
+      },
+      "visual_style": {
+        "contract": "project-visual-style-v1",
+        "library_id": "photorealistic",
+        "variant": "live_action_look",
+        "style_id": "synthetic-project-look",
+        "revision": "1",
+        "render_mode": "cinematic",
+        "character_design": "成年角色七头身，椭圆脸型，五官比例保持一致",
+        "materials": "皮肤哑光，头发分束，棉布低光泽，金属保留局部反射",
+        "palette": "青灰与暖棕为主色，朱红作为小面积强调色",
+        "shading": "体块明暗清楚，阴影边缘柔和，轮廓清晰",
+        "content_sha256": "65db6208dbeba0173a5265326d46a3bfd4b421b1ad64eaf16f52403d307262ee"
+      }
     },
     "prevention_evidence": {
       "scope_lock": {
