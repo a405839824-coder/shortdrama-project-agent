@@ -65,6 +65,18 @@ def valid_storyboard() -> dict[str, Any]:
             "aspect_ratio": "9:16",
         }
     )
+    # This current-format synthetic fixture is submitted as new content. Keep
+    # legacy_storyboard() unchanged for explicit historical import coverage.
+    from prompt_libraries import make_selection, make_visual_style, style_fragment
+    selection = make_selection("photorealistic", "live_action_look")
+    value["source_lock"].update(
+        prompt_library=selection,
+        visual_style=make_visual_style(
+            selection, style_id="synthetic-protocol-look", revision="1",
+            render_mode="naturalistic", character_design="成年人物自然比例，五官轮廓保持一致",
+            materials="皮肤哑光，发丝清楚，衣料保留纤维层次",
+            palette="低饱和青灰与暖棕", shading="自然明暗层次，柔和阴影"),
+    )
     running = 0.0
     for index, shot in enumerate(value["shots"], 1):
         shot["镜头编号"] = f"EP01-{index:03d}"
@@ -107,6 +119,7 @@ def valid_storyboard() -> dict[str, Any]:
             "禁止字幕、水印、额外配乐、现代物件、人物看镜头、同步反应、复制脸、"
             "上下黑边、无来源光、重HDR、塑料皮肤与海报摆拍。"
         )
+        shot["生成限制"] += style_fragment(value["source_lock"])
         for field in LEGACY_REMOVED_SHOT_FIELDS | LEGACY_DERIVED_SHOT_FIELDS:
             shot.pop(field, None)
         internal = {

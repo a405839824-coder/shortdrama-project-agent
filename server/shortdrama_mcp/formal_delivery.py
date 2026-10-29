@@ -15,17 +15,24 @@ from .models import ToolResponse
 from .production_plan import model_production_contract
 from .audit_coverage import verify_certificate_coverage
 from .r5_workbook import workbook_audit_scope
+from .project_template import (DEFAULT, selected_variant, assert_project_template,
+                               template_digest, validate_variant)
 
 
 CONTRACT = "formal-storyboard-delivery-v1"
 
 
-def delivery_contract():
+def project_delivery_contract(service, namespace, project_id):
+    return delivery_contract(selected_variant(service.store.load_hub(namespace, project_id)))
+
+
+def delivery_contract(variant=DEFAULT):
     context = model_production_contract()["context"]
-    return {
+    validate_variant(variant)
+    result = {
         "contract": CONTRACT,
         "output_contract": "R10-SPC-1",
-        "template_contract_sha256": context["template_contract_sha256"],
+        "template_contract_sha256": template_digest(context["template_contract_sha256"], variant),
         "rule_registry_sha256": context["rule_registry_sha256"],
         "columns": list(MOTHER_TEMPLATE_COLUMNS),
         "canonical_field_count": 27,
@@ -46,12 +53,17 @@ def delivery_contract():
         "scope": "All authenticated accounts, including new ChatGPT and Codex installations.",
         "host_boundary": "The service cannot prevent other tools from writing local files; hosts must verify this receipt before formal delivery, completion counting, or automatic continuation.",
     }
+    if variant != DEFAULT:
+        result["project_template_variant"] = variant
+        result["base_template_contract_sha256"] = context["template_contract_sha256"]
+    return result
 
 
 def inspect_formal_delivery(service, namespace, project_id, artifact_id):
     # Resolve namespace and bytes before returning any artifact-specific data.
     record, path = service.store.get_artifact(namespace, project_id, artifact_id)
-    contract = delivery_contract()
+    hub = service.store.load_hub(namespace, project_id)
+    contract = delivery_contract(selected_variant(hub))
     receipt = {
         "contract": CONTRACT, "project_id": project_id, "artifact_id": artifact_id,
         "namespace_sha256": hashlib.sha256(namespace.encode()).hexdigest(),
@@ -75,6 +87,7 @@ def inspect_formal_delivery(service, namespace, project_id, artifact_id):
         storyboard, _ = service._storyboard_from_artifact(
             namespace, project_id, artifact_id,
             persist_recovered_canonical=False, require_bound_projection=True)
+        assert_project_template(storyboard, hub)
         canonical_hash = canonical_storyboard_sha256(storyboard)
         # Always reparse actual visible cells. A cached extraction or a linked
         # JSON is insufficient to attest the workbook being delivered.

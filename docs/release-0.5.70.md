@@ -1,4 +1,4 @@
-# 0.5.69 R2 — explicit Seedance 2.5 prompt libraries and visual-style locks
+# 0.5.70 R2 — explicit Seedance 2.5 prompt libraries and visual-style locks
 
 New production explicitly selects one library and variant before freezing its
 plan: animation (3d or 2d), or photorealistic (live_action_look). Missing, stale,
@@ -31,11 +31,18 @@ Official source summaries are versioned separately from project-authored style
 templates. See `references/seedance25_prompt_libraries.md` in the storyboard skill.
 
 The release adds an immutable signed transfer contract. Older contracts and
-consumed snapshots are unchanged. `scripts/upgrade_prompt_library_0569.py` reuses
+consumed snapshots are unchanged. `scripts/upgrade_prompt_library_0570.py` reuses
 the existing prepare/freeze/publish/verify implementation; it is a maintenance
 CLI, not an automatic recovery of data lost before this release.
 
 ## Deployment status and recovery prerequisites
+
+The animation candidate was integrated onto `c3794c460470ece2d6d912e8830d14cd4c3cd450`
+(0.5.69 project-specific master lighting). That feature and its consumed transfer
+contract remain unchanged. This release uses fresh 0.5.70 transfer IDs.
+The restored Railway subscription and live 0.5.69 service supersede the earlier
+service-offline observation below; perform a fresh inventory before publication.
+
 
 This is a prepared candidate, not an online release. On 2026-10-29 Railway showed
 an expired trial, an outstanding invoice, service offline and no active deployment.
@@ -56,14 +63,14 @@ Once a live, inventoried runtime exists, use the existing procedure in
 `deploy-production-grounding-0565.md` with this release's adapter:
 
 ```bash
-PYTHONPATH=server python scripts/upgrade_prompt_library_0569.py prepare
-PYTHONPATH=server python scripts/upgrade_prompt_library_0569.py freeze
+PYTHONPATH=server python scripts/upgrade_prompt_library_0570.py prepare
+PYTHONPATH=server python scripts/upgrade_prompt_library_0570.py freeze
 # Keep freeze running; in a second maintenance session:
-PYTHONPATH=server python scripts/upgrade_prompt_library_0569.py mark-publication
+PYTHONPATH=server python scripts/upgrade_prompt_library_0570.py mark-publication
 # Publish the reviewed commit only after the marker succeeds.
-# In the new verified 0.5.69 container:
-PYTHONPATH=server python scripts/upgrade_prompt_library_0569.py verify
-PYTHONPATH=server python scripts/upgrade_prompt_library_0569.py verify-and-reopen
+# In the new verified 0.5.70 container:
+PYTHONPATH=server python scripts/upgrade_prompt_library_0570.py verify
+PYTHONPATH=server python scripts/upgrade_prompt_library_0570.py verify-and-reopen
 ```
 
 Copy only the reviewed adapter into the old image's `scripts/` directory when
@@ -80,7 +87,7 @@ tool schema if it has not acquired the optional selection arguments. Local tests
 do not establish any of these online results.
 
 Current R2 software results and exact counts are recorded in the accompanying
-`verification-0.5.69-r2.json`, `regression.json` and transport reports; do not reuse
+`verification-0.5.70-r2.json`, `regression.json` and transport reports; do not reuse
 the old R1 totals as R2 evidence. Windows cannot complete the native-symlink,
 POSIX-backslash-filename or Linux procfs/directory-fsync restore exercises.
 Run the Linux restore exercise before deployment; local checks are not verified

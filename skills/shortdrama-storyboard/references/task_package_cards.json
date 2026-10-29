@@ -98,7 +98,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "分镜生成",
     "task_package_id": "TP-STORYBOARD-GEN",
     "trigger_user_phrases": [
@@ -207,7 +207,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "分镜审计",
     "task_package_id": "TP-STORYBOARD-AUDIT",
     "trigger_user_phrases": [
@@ -312,7 +312,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "分镜修复",
     "task_package_id": "TP-STORYBOARD-REPAIR",
     "trigger_user_phrases": [
@@ -404,7 +404,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "分镜局部插入",
     "task_package_id": "TP-SHOT-INSERT",
     "trigger_user_phrases": [
@@ -476,7 +476,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "分镜局部替换",
     "task_package_id": "TP-SHOT-REPLACE",
     "trigger_user_phrases": [
@@ -553,7 +553,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "分段修复",
     "task_package_id": "TP-SEGMENT-REPAIR",
     "trigger_user_phrases": [
@@ -654,7 +654,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "全表重切",
     "task_package_id": "TP-FULL-RECUT",
     "trigger_user_phrases": [
@@ -713,7 +713,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "台词专项检查",
     "task_package_id": "TP-DIALOGUE-CHECK",
     "trigger_user_phrases": [
@@ -768,7 +768,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "标点专项检查",
     "task_package_id": "TP-PUNCT-CHECK",
     "trigger_user_phrases": [
@@ -823,7 +823,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "心理音轨专项检查",
     "task_package_id": "TP-PSYCH-CHECK",
     "trigger_user_phrases": [
@@ -878,7 +878,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "书页特写/可见性检查",
     "task_package_id": "TP-VIS-CHECK",
     "trigger_user_phrases": [
@@ -934,7 +934,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "机位检查",
     "task_package_id": "TP-CAMERA-CHECK",
     "trigger_user_phrases": [
@@ -989,7 +989,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "运镜方式与功能检查",
     "task_package_id": "TP-MOTION-CHECK",
     "trigger_user_phrases": [
@@ -1043,7 +1043,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "景别光影连续检查",
     "task_package_id": "TP-LIGHT-CHECK",
     "trigger_user_phrases": [
@@ -1097,7 +1097,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "参考图锚定与污染检查",
     "task_package_id": "TP-REF-CHECK",
     "trigger_user_phrases": [
@@ -1169,7 +1169,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "单镜时间阶段整理（旧批次迁移）",
     "task_package_id": "TP-BATCH-SPLIT",
     "trigger_user_phrases": [
@@ -1238,7 +1238,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "单镜母版执行完整性审计",
     "task_package_id": "TP-BATCH-AUDIT",
     "trigger_user_phrases": [
@@ -1321,7 +1321,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "i2v单镜母版整理",
     "task_package_id": "TP-I2V-PROMPT",
     "trigger_user_phrases": [
@@ -1380,7 +1380,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "即梦精简提示词",
     "task_package_id": "TP-JIMENG-SHORT",
     "trigger_user_phrases": [
@@ -1448,7 +1448,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "表格转换",
     "task_package_id": "TP-TABLE-CONVERT",
     "trigger_user_phrases": [
@@ -1512,7 +1512,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "Excel导出",
     "task_package_id": "TP-EXCEL-EXPORT",
     "trigger_user_phrases": [
@@ -1589,7 +1589,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "JSON归档",
     "task_package_id": "TP-JSON-ARCHIVE",
     "trigger_user_phrases": [
@@ -1635,7 +1635,7 @@
       "0.5.12历史生产预检证明必须覆盖GAP-1bb91d83751b422f精确有序六条、逐handoff规则画像、冻结报告与原签名报告完全相等，以及每条真实当前FAIL的canonical SHA、完整current-report SHA、shot/error/warning计数、完整error histogram和当前validator composite/完整SHA精确封存；六条画像不得互换，任一画像、provenance、列表、顺序或双报告字段漂移均须零写入失败关闭；HISTCACHE不可复用，GAP-0e5d48969c4c494e精确有序11条恢复后仍强制当前独审",
       "0.5.15恢复后继再次签发必须覆盖普通与历史证明两类prepared successor在后续运行时指纹变化后的plan→execute→幂等重放；严格验证立即前序签名恢复日志、old/new/certificate/trace after-image、Hub投影、恢复工单authority、不可变内容指纹与当前验证画像；历史分支继续锁定HISTCACHE、冻结PASS/0、完整当前FAIL哈希/计数/直方图/validator及非复用标志，任一漂移零写入失败关闭",
       "0.5.16 Library项目快照回归必须覆盖bundle SHA与完整tree SHA双校验、持久卷零项目内容、临时挂载、导出、Library回读后单调代次提交、未同步变化禁止卸载，以及11条交接及其恢复记录在Library中原字节保留；存储动作复用migrate_project_state且公共工具仍精确19个",
-      "插件当前发布版本、清单与活跃发布报告统一标记0.5.69；0.5.22新增普通室内清透、门窗状态锁定、室内外氛围光分流、THG-17室内光影阻断及v8逐镜四光影字段独审证据；0.5.21文生图静态可见语义与场景有源光影决策继续生效；0.5.20新增叙述性会话场景全量分类、THG-16对白还原及独审逐source-unit证据；0.5.19原文直接对白/原文事实转化对白双轨继续生效，0.5.18正式母版音色固定子模板、THG-15及逐对白镜独审证据，0.5.17眼部表演与N-1相邻逐组证明、0.5.15恢复后继再次签发、0.5.14起用户窗口无角色限制及后台production/audit/repair authority分离、0.5.13及更早窗口接续兼容、0.5.12历史报告勘误、0.5.10历史投影复验、0.5.9受控phase推断、0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门与历史升级文档均保留其原始语义"
+      "插件当前发布版本、清单与活跃发布报告统一标记0.5.70；0.5.22新增普通室内清透、门窗状态锁定、室内外氛围光分流、THG-17室内光影阻断及v8逐镜四光影字段独审证据；0.5.21文生图静态可见语义与场景有源光影决策继续生效；0.5.20新增叙述性会话场景全量分类、THG-16对白还原及独审逐source-unit证据；0.5.19原文直接对白/原文事实转化对白双轨继续生效，0.5.18正式母版音色固定子模板、THG-15及逐对白镜独审证据，0.5.17眼部表演与N-1相邻逐组证明、0.5.15恢复后继再次签发、0.5.14起用户窗口无角色限制及后台production/audit/repair authority分离、0.5.13及更早窗口接续兼容、0.5.12历史报告勘误、0.5.10历史投影复验、0.5.9受控phase推断、0.5.8历史Hub严格投影兼容、0.5.7受控旧交接补签、0.5.6受控旧交接恢复、0.5.5质量门与历史升级文档均保留其原始语义"
     ],
     "minimum_input_required": [
       "用户任务范围",
@@ -1666,7 +1666,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "母版补丁吸收",
     "task_package_id": "TP-PATCH-ABSORB",
     "trigger_user_phrases": [
@@ -1759,7 +1759,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "母版完整度审计",
     "task_package_id": "TP-MOTHER-AUDIT",
     "trigger_user_phrases": [
@@ -1835,7 +1835,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "母版DOCX合并",
     "task_package_id": "TP-DOCX-MERGE",
     "trigger_user_phrases": [
@@ -1894,7 +1894,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "任意窗口继续项目",
     "task_package_id": "TP-NEW-WINDOW",
     "trigger_user_phrases": [
@@ -1952,7 +1952,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "规则冲突裁决",
     "task_package_id": "TP-CONFLICT",
     "trigger_user_phrases": [
@@ -2007,7 +2007,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "代码校验报告解读",
     "task_package_id": "TP-VALIDATOR-REPORT",
     "trigger_user_phrases": [
@@ -2072,7 +2072,7 @@
       "字段或统计不闭合",
       "规则版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "最终归档",
     "task_package_id": "TP-FINAL-ARCHIVE",
     "trigger_user_phrases": [
@@ -2156,7 +2156,7 @@
       "节拍或镜头结构变化",
       "规则或目标模型版本变化"
     ],
-    "rule_revision": "0.5.69",
+    "rule_revision": "0.5.70",
     "task_name": "小说章节到分镜",
     "task_package_id": "TP-NOVEL-TO-STORYBOARD",
     "trigger_user_phrases": [
